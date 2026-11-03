@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://marcomaiermm.github.io/DiffHarbor/review.schema.json",
+  "title": "DiffHarbor review.json",
+  "description": "Per-repo settings for DiffHarbor, in the repo root. All keys are optional; unknown keys are ignored.",
+  "type": "object",
+  "definitions": {
+    "severity": { "enum": ["minor", "major", "critical"] },
+    "model": {
+      "type": "string",
+      "pattern": "^\\w[\\w.-]*/[\\w.:/@-]+$",
+      "description": "provider/id[:level], e.g. anthropic/claude-sonnet-5-5:high"
+    },
+    "repoPath": {
+      "type": "string",
+      "description": "A path inside the repo, from its root.",
+      "pattern": "^[^?#\\\\]+$"
+    },
+    "pkg": {
+      "type": "object",
+      "properties": {
+        "min_severity": { "$ref": "#/definitions/severity" },
+        "tests": { "type": "boolean" }
+      }
+    }
+  },
+  "properties": {
+    "ignore": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Globs (*, **, ?); a path without one takes its folder."
+    },
+    "min_severity": { "$ref": "#/definitions/severity" },
+    "tests": { "type": "boolean", "description": "Run the tests of changed packages. Unset: only when no CI workflow does." },
+    "packages": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/pkg" },
+      "description": "Overrides per monorepo part; the longest glob wins."
+    },
+    "review_model": { "$ref": "#/definitions/model" },
+    "verify_model": { "$ref": "#/definitions/model" },
+    "large_pr": { "enum": ["ask", "all", "off"] },
+    "max_parts": { "type": "integer", "minimum": 1, "maximum": 8, "description": "Default 4." },
+    "report": { "enum": ["auto", "always", "off"] },
+    "syntax_theme": {
+      "type": "object",
+      "properties": {
+        "light": { "type": "string", "pattern": "^[a-z0-9-]{1,40}$" },
+        "dark": { "type": "string", "pattern": "^[a-z0-9-]{1,40}$" }
+      },
+      "description": "Shiki theme names for the report's code colors."
+    },
+    "rules": { "$ref": "#/definitions/repoPath" },
+    "skills": { "$ref": "#/definitions/repoPath" },
+    "checks": { "type": "array", "items": { "$ref": "#/definitions/repoPath" } },
+    "tickets": { "type": "array", "items": { "type": "string" }, "description": "itsaplan projects a PR may name; unset = any, [] = none." }
+  }
+}

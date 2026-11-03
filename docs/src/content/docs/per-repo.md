@@ -47,6 +47,8 @@ Everything lives under `.review/`; `review.json` can change the paths.
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part; the longest glob wins. |
 
+For editor validation and completion add `"$schema": "https://marcomaiermm.github.io/DiffHarbor/review.schema.json"` as the first key; the server ignores it.
+
 A broken `review.json` falls back to the defaults and says so in the review footer.
 
 
