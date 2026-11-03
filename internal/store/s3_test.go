@@ -41,6 +41,10 @@ func TestS3(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := fmt.Sprintf("test-%d", time.Now().UnixNano())
+	none, _ := NewS3(strings.Replace(u, s.bucket, "none-"+run, 1), os.Getenv("S3_TEST_KEY"), os.Getenv("S3_TEST_SECRET"), "us-east-1")
+	if err := none.DeleteAll("a"); err != nil {
+		t.Fatal("no bucket is nothing to delete:", err)
+	}
 	if _, err := s.Get(run + "/a.html"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("before any put:", err)
 	}

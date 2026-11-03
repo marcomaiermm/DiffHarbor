@@ -75,6 +75,9 @@ func (s *S3) DeleteAll(dir string) error {
 	}
 	for {
 		b, err := s.do(http.MethodGet, "", url.Values{"list-type": {"2"}, "prefix": {s.prefix + dir + "/"}}, nil)
+		if errors.Is(err, fs.ErrNotExist) { // no bucket yet: SeaweedFS makes it on the first put
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -112,8 +115,8 @@ func (s *S3) do(method, object string, q url.Values, body []byte) ([]byte, error
 	switch {
 	case err != nil:
 		return nil, err
-	case res.StatusCode == http.StatusNotFound && method == http.MethodGet && object != "":
-		return nil, &fs.PathError{Op: "get", Path: object, Err: fs.ErrNotExist}
+	case res.StatusCode == http.StatusNotFound && method == http.MethodGet: // no object, or no bucket
+		return nil, &fs.PathError{Op: "get", Path: s.bucket + "/" + object, Err: fs.ErrNotExist}
 	case res.StatusCode/100 != 2:
 		return nil, fmt.Errorf("s3 %s %s: %s: %.300s", method, object, res.Status, b)
 	}
