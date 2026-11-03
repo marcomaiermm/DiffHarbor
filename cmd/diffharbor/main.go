@@ -17,6 +17,7 @@ import (
 	"diffharbor/internal/report"
 	"diffharbor/internal/review"
 	"diffharbor/internal/server"
+	"diffharbor/internal/store"
 	"diffharbor/internal/ticket"
 	"encoding/json"
 	"fmt"
@@ -67,6 +68,14 @@ func configure() server.Config {
 	agent.FallbackModel, agent.FallbackVerifyModel = os.Getenv("FALLBACK_MODEL"), os.Getenv("FALLBACK_VERIFY_MODEL")
 	ticket.URL, ticket.APIKey = os.Getenv("ITSAPLAN_URL"), os.Getenv("ITSAPLAN_API_KEY")
 	job.ReportURL = strings.TrimSuffix(os.Getenv("REPORT_URL"), "/")
+	if u := os.Getenv("REPORT_S3_URL"); u != "" {
+		s, err := store.NewS3(u, os.Getenv("REPORT_S3_ACCESS_KEY"), os.Getenv("REPORT_S3_SECRET_KEY"),
+			cmp.Or(os.Getenv("REPORT_S3_REGION"), "us-east-1"))
+		if err != nil {
+			log.Fatal(err)
+		}
+		job.ReportS3 = s
+	}
 	return server.Config{
 		GitHub: github.Config{
 			AppID: os.Getenv("GITHUB_APP_ID"), KeyB64: os.Getenv("GITHUB_APP_PRIVATE_KEY_B64"), Secret: os.Getenv("GITHUB_WEBHOOK_SECRET"),

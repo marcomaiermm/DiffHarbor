@@ -255,11 +255,23 @@ func reportPath(e *forge.Event) string {
 	return cmp.Or(host, "github.com") + "/" + e.Repository.FullName + "/" + strconv.Itoa(e.PullRequest.Number)
 }
 
+// ReportS3 holds the reports instead of DATA_DIR when set (REPORT_S3_URL).
+var ReportS3 *store.S3
+
 // Reports holds the reports.
-func Reports() store.Store { return store.Disk(filepath.Join(proc.DataDir, "reports")) }
+func Reports() store.Store {
+	if ReportS3 != nil {
+		return ReportS3
+	}
+	return store.Disk(filepath.Join(proc.DataDir, "reports"))
+}
 
 // DeleteReports deletes a PR's reports: its code shouldn't outlive the PR.
-func DeleteReports(e *forge.Event) error { return Reports().DeleteAll(reportPath(e)) }
+func DeleteReports(e *forge.Event) {
+	if err := Reports().DeleteAll(reportPath(e)); err != nil {
+		log.Println(e.Key(), "report:", err)
+	}
+}
 
 // Versions is a PR's reports, newest first, by its reportPath; none when it has no readable list.
 func Versions(path string) []report.Version {

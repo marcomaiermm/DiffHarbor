@@ -51,8 +51,8 @@ func TestReportVersions(t *testing.T) {
 	if _, err := Reports().Get(reportPath(e) + "/" + sha(0) + ".html"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("kept a version past maxVersions:", err)
 	}
-	if err := DeleteReports(e); err != nil || len(Versions(reportPath(e))) != 0 {
-		t.Fatal("closed PR kept its reports:", err)
+	if DeleteReports(e); len(Versions(reportPath(e))) != 0 {
+		t.Fatal("closed PR kept its reports")
 	}
 	gl := &forge.Event{Forge: "gitlab"} // a project in a subgroup
 	gl.Repository.FullName, gl.PullRequest.Number, gl.PullRequest.HTMLURL = "g/s/p", 3, "https://gitlab.example.com/g/s/p/-/merge_requests/3"

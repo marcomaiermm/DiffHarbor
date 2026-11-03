@@ -173,9 +173,7 @@ func Serve(cfg Config) {
 			delete(latest.m, e.Key()) // queued reviews of this PR skip
 			_ = os.Remove(pendingFile(e.Key()))
 			latest.Unlock()
-			if err := job.DeleteReports(e); err != nil {
-				log.Println(e.Key(), "report:", err)
-			}
+			job.DeleteReports(e)
 			stop(e.Key(), false)
 			return
 		case e.Kind == "pull_request" && actions[e.Action] && !e.PullRequest.Draft:

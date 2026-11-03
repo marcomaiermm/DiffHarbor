@@ -38,3 +38,13 @@ func TestFiles(t *testing.T) {
 		t.Fatal("still there")
 	}
 }
+
+// A child gets PATH, HOME and what is passed, never the server's secrets.
+func TestCommandEnv(t *testing.T) {
+	t.Setenv("REPORT_S3_SECRET_KEY", "s3cret")
+	for _, e := range Command(t.Context(), "", []string{"X=1"}, "true").Env {
+		if strings.Contains(e, "s3cret") {
+			t.Fatal(e)
+		}
+	}
+}
