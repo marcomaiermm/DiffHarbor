@@ -3,6 +3,7 @@ package store
 
 import (
 	"crypto/rand"
+	"errors"
 	"io/fs"
 	"os"
 	"path"
@@ -86,15 +87,19 @@ func (d Disk) DeleteAll(dir string) error {
 }
 
 // MoveTo moves every key into s, each deleted here once s has it, then the folder; none is no error.
+// A key s has already stays as s has it: after a failed move, the server wrote newer ones there.
 // A put that crashed midway left a temp file, it goes with the folder.
 func (d Disk) MoveTo(s Store) error {
 	err := fs.WalkDir(os.DirFS(string(d)), ".", func(key string, e fs.DirEntry, err error) error {
 		if err != nil || e.IsDir() || strings.HasSuffix(key, ".tmp") {
 			return err
 		}
-		b, err := d.Get(key)
-		if err == nil {
-			err = s.Put(key, b)
+		_, err = s.Get(key)
+		if errors.Is(err, fs.ErrNotExist) {
+			var b []byte
+			if b, err = d.Get(key); err == nil {
+				err = s.Put(key, b)
+			}
 		}
 		if err == nil {
 			err = d.Delete(key)

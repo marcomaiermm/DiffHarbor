@@ -78,7 +78,8 @@ func TestPendingResume(t *testing.T) {
 	}
 }
 
-// A closed PR's reports go through the worker; its deletingFile stays until they did, for retryDrops.
+// A closed PR's reports go through the worker; its deletingFile stays until they did, for retryDrops, and without
+// it (reopened since) a close deletes nothing.
 func TestDrop(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "closed"}
@@ -93,14 +94,21 @@ func TestDrop(t *testing.T) {
 	if !closing(r) || r.Key() != e.Key() {
 		t.Fatalf("%+v", r)
 	}
-	if err := drop(r); err != nil {
-		t.Fatal(err)
-	}
+	q <- r
+	close(q)
+	work(q)
 	if vs, err := job.Versions("github.com/o/r/7"); err != nil || len(vs) != 0 {
 		t.Fatal("kept its reports:", vs, err)
 	}
 	if retryDrops(q); len(q) != 0 {
 		t.Fatal("retries a done delete")
+	}
+	job.Reports().Put("github.com/o/r/7/versions.json", []byte(`[{"sha":"a"}]`)) // reopened, reviewed again
+	if err := drop(r); err != nil {
+		t.Fatal(err)
+	}
+	if vs, _ := job.Versions("github.com/o/r/7"); len(vs) != 1 {
+		t.Fatal("a stale close deleted the reopened PR's report")
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -101,12 +102,17 @@ func closing(e *forge.Event) bool {
 	return e.Kind == "pull_request" && (e.Action == "closed" || e.Action == "converted_to_draft")
 }
 
-// drop deletes a closed PR's reports. Its deletingFile stays until that worked, for retryDrops.
+// drop deletes a closed PR's reports while its deletingFile is there: none means it was reopened or done since.
+// The file stays until the delete worked, for retryDrops.
 func drop(e *forge.Event) error {
+	f := deletingFile(e.Key())
+	if !proc.Exists(f) {
+		return nil
+	}
 	if err := job.DeleteReports(e); err != nil {
 		return fmt.Errorf("deleting reports: %w", err)
 	}
-	_ = os.Remove(deletingFile(e.Key())) // gone already when the PR was reopened since
+	_ = os.Remove(f)
 	return nil
 }
 
@@ -194,7 +200,7 @@ func Serve(cfg Config) {
 		case closing(e):
 			latest.Lock()
 			delete(latest.m, e.Key())             // queued reviews of this PR skip
-			_ = os.Remove(pendingFile(e.Key()))   //nolint:gosec // eventFile flattens the key: no / left to leave the dir
+			_ = os.Remove(pendingFile(e.Key()))   //nolint:gosec // eventFile escapes the key: no / left to leave the dir
 			err := save(deletingFile(e.Key()), e) // a full queue, a restart or a failed delete: retryDrops
 			latest.Unlock()
 			if err != nil {
@@ -206,7 +212,9 @@ func Serve(cfg Config) {
 		case e.Kind == "pull_request" && actions[e.Action] && !e.PullRequest.Draft:
 			latest.Lock()
 			latest.m[e.Key()] = e.PullRequest.Head.SHA
-			_ = os.Remove(deletingFile(e.Key())) //nolint:gosec // reopened: no retry deletes its next reports; eventFile flattens
+			if e.Action == "reopened" || e.Action == "ready_for_review" { // not a late push: its close still deletes
+				_ = os.Remove(deletingFile(e.Key())) //nolint:gosec // no retry deletes its next reports; eventFile escapes
+			}
 			err := save(pendingFile(e.Key()), e)
 			latest.Unlock()
 			if err != nil {
@@ -291,8 +299,13 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 			"style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src data:; font-src data: https://cdn.jsdelivr.net; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 		name := dir + "/" + cmp.Or(sha, vs[0].SHA) + ".html"
 		b, err := job.Reports().Get(name)
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			log.Println(name, "report:", err)
+			http.Error(w, "the report can't be read now", http.StatusBadGateway)
 			return
 		}
 		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(b))
@@ -321,7 +334,7 @@ func pendingFile(key string) string { return eventFile("pending", key) }
 func deletingFile(key string) string { return eventFile("deleting", key) }
 
 func eventFile(dir, key string) string {
-	return filepath.Join(proc.DataDir, dir, strings.NewReplacer("/", "__", "#", "_").Replace(key)+".json")
+	return filepath.Join(proc.DataDir, dir, url.PathEscape(key)+".json") // "/" too: one name per key
 }
 
 // save stores e in f, a pendingFile or deletingFile. Callers hold latest.
@@ -330,10 +343,14 @@ func save(f string, e *forge.Event) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil { //nolint:gosec // eventFile flattens the key
+	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil { //nolint:gosec // eventFile escapes the key
 		return err
 	}
-	return os.WriteFile(f, b, 0o600) //nolint:gosec // eventFile flattens the key: no / left to leave the dir
+	// Through a rename: resume and retryDrops never read half a file.
+	if err := os.WriteFile(f+".tmp", b, 0o600); err != nil { //nolint:gosec // eventFile escapes the key: no / left
+		return err
+	}
+	return os.Rename(f+".tmp", f) //nolint:gosec // as above
 }
 
 // done drops key's stored review once no newer push for it waits.
@@ -354,6 +371,9 @@ func resume(queue chan *forge.Event) {
 		if err != nil || json.Unmarshal(b, e) != nil {
 			_ = os.Remove(f)
 			continue
+		}
+		if f != pendingFile(e.Key()) { // named before eventFile escaped keys
+			_ = os.Rename(f, pendingFile(e.Key()))
 		}
 		if forges[e.Forge] == nil { // the forge is no longer set up
 			log.Println(e.Key(), "pending for", e.Forge, "which is off")

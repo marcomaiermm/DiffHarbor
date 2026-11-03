@@ -96,12 +96,20 @@ func TestDiskMoveTo(t *testing.T) {
 	}
 	from.Put("h/o/r/7/versions.json", []byte("[]"))
 	from.Put("h/o/r/7/abc.html", []byte("x"))
+	from.Put("h/o/r/8/versions.json", []byte("old"))
+	to.Put("h/o/r/8/versions.json", []byte("new"))                                  // written after a failed move
 	os.WriteFile(filepath.Join(string(from), "h/o/r/7/abc.html.X.tmp"), nil, 0o600) // a crashed put
 	if err := from.MoveTo(to); err != nil {
 		t.Fatal(err)
 	}
 	if b, err := to.Get("h/o/r/7/abc.html"); err != nil || string(b) != "x" {
 		t.Fatal(string(b), err)
+	}
+	if b, err := to.Get("h/o/r/7/versions.json"); err != nil || string(b) != "[]" {
+		t.Fatal("versions.json:", string(b), err)
+	}
+	if b, _ := to.Get("h/o/r/8/versions.json"); string(b) != "new" {
+		t.Fatal("an older disk copy replaced:", string(b))
 	}
 	if _, err := to.Get("h/o/r/7/abc.html.X.tmp"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("moved a temp file:", err)

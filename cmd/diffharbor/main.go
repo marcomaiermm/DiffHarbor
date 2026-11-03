@@ -24,6 +24,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 )
 
@@ -50,7 +51,8 @@ func dry() error {
 func login() error {
 	fmt.Println("In Pi: /login -> OpenAI (ChatGPT Plus/Pro) -> Device code login, then /quit.")
 	c := exec.Command("pi")
-	c.Env = append(os.Environ(), "PI_CODING_AGENT_DIR="+agent.AuthDir())
+	c.Env = slices.DeleteFunc(os.Environ(), func(e string) bool { return strings.HasPrefix(e, "REPORT_S3_") }) // the server's
+	c.Env = append(c.Env, "PI_CODING_AGENT_DIR="+agent.AuthDir())
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := c.Run(); err != nil {
 		return err

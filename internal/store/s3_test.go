@@ -1,12 +1,19 @@
 package store
 
 import (
+	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"maps"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -30,18 +37,68 @@ func TestSign(t *testing.T) {
 	}
 }
 
-// Against a real store: S3_TEST_URL=http://localhost:8333/bucket/prefix S3_TEST_KEY=… S3_TEST_SECRET=… go test.
+// fakeS3 is a bucket "b" in memory, like S3 where it counts: it checks every request's signature against what it
+// got, and lists 1000 keys at most.
+func fakeS3(t *testing.T) string {
+	signer := &S3{key: "k", secret: "s", region: "us-east-1"}
+	var mu sync.Mutex
+	objs := map[string][]byte{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		at, _ := time.Parse("20060102T150405Z", r.Header.Get("X-Amz-Date"))
+		want := r.Clone(context.Background())
+		want.URL.Host = r.Host
+		signer.sign(want, body, at)
+		if r.Header.Get("Authorization") != want.Header.Get("Authorization") {
+			http.Error(w, "SignatureDoesNotMatch", http.StatusForbidden)
+			return
+		}
+		bucket, key, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case bucket != "b":
+			http.Error(w, "NoSuchBucket", http.StatusNotFound)
+		case r.Method == http.MethodGet && key == "":
+			var l struct {
+				XMLName  xml.Name `xml:"ListBucketResult"`
+				Contents []struct{ Key string }
+			}
+			for _, k := range slices.Sorted(maps.Keys(objs)) {
+				if strings.HasPrefix(k, r.URL.Query().Get("prefix")) && len(l.Contents) < 1000 {
+					l.Contents = append(l.Contents, struct{ Key string }{k})
+				}
+			}
+			_ = xml.NewEncoder(w).Encode(l)
+		case r.Method == http.MethodGet:
+			if b, ok := objs[key]; ok {
+				w.Write(b)
+			} else {
+				http.Error(w, "NoSuchKey", http.StatusNotFound)
+			}
+		case r.Method == http.MethodPut:
+			objs[key] = body
+		case r.Method == http.MethodDelete:
+			delete(objs, key)
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL + "/b/pfx"
+}
+
+// Against fakeS3, or a real store: S3_TEST_URL=http://localhost:8333/bucket/prefix S3_TEST_KEY=… S3_TEST_SECRET=… go test.
 func TestS3(t *testing.T) {
-	u := os.Getenv("S3_TEST_URL")
+	u, key, secret := os.Getenv("S3_TEST_URL"), os.Getenv("S3_TEST_KEY"), os.Getenv("S3_TEST_SECRET")
 	if u == "" {
-		t.Skip("S3_TEST_URL unset")
+		u, key, secret = fakeS3(t), "k", "s"
 	}
-	s, err := NewS3(u, os.Getenv("S3_TEST_KEY"), os.Getenv("S3_TEST_SECRET"), "us-east-1")
+	s, err := NewS3(u, key, secret, "us-east-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	run := fmt.Sprintf("test-%d", time.Now().UnixNano())
-	none, _ := NewS3(strings.Replace(u, s.bucket, "none-"+run, 1), os.Getenv("S3_TEST_KEY"), os.Getenv("S3_TEST_SECRET"), "us-east-1")
+	none, _ := NewS3(s.endpoint+"/none-"+run, key, secret, "us-east-1")
 	if err := none.DeleteAll("a"); err != nil {
 		t.Fatal("no bucket is nothing to delete:", err)
 	}
@@ -54,7 +111,7 @@ func TestS3(t *testing.T) {
 	if b, err := s.Get(run + "/a.html"); err != nil || string(b) != "x" {
 		t.Fatal(string(b), err)
 	}
-	bad, _ := NewS3(u, os.Getenv("S3_TEST_KEY"), "wrong", "us-east-1")
+	bad, _ := NewS3(u, key, "wrong", "us-east-1")
 	if _, err := bad.Get(run + "/a.html"); err == nil || errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("a wrong secret got through:", err)
 	}
@@ -78,8 +135,10 @@ func TestS3(t *testing.T) {
 	if err := s.DeleteAll(run + "/7"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Get(run + "/7/1000.html"); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatal("kept under 7:", err)
+	for _, k := range []string{"/7/0000.html", "/7/1000.html"} { // the first list's and the second's
+		if _, err := s.Get(run + k); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatal("kept under 7:", k, err)
+		}
 	}
 	if b, err := s.Get(run + "/70/a.html"); err != nil || string(b) != "kept" {
 		t.Fatal("70 isn't under 7:", err)
