@@ -26,6 +26,20 @@ jobs:
     steps:
       - id: rp
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+      # @mentions in the notes make GitHub show the contributors' avatars under the release.
+      - if: steps.rp.outputs.release_created
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.rp.outputs.tag_name }}
+        run: |
+          prev=$(gh release list --exclude-pre-releases --limit 2 --json tagName --jq '.[1].tagName')
+          [ -n "$prev" ] || exit 0
+          # ponytail: compare lists at most 250 commits; page through it if a release ever gets bigger.
+          who=$(gh api "repos/$GH_REPO/compare/$prev...$TAG" --jq '[.commits[].author.login | select(. != null and (endswith("[bot]") | not))] | unique | map("@" + .) | join(", ")')
+          [ -n "$who" ] || exit 0
+          printf '%s\n\n### Contributors\n\n%s\n' "$(gh release view "$TAG" --json body --jq .body)" "$who" > notes.md
+          gh release edit "$TAG" --notes-file notes.md
 
   image:
     needs: release
