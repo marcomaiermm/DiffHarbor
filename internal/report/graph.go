@@ -303,7 +303,7 @@ func reach(steps []step, syms map[string][]Symbol) []affected {
 				if c.State != "" {
 					continue
 				}
-				why := map[bool]string{true: "signature changed"}[c.added && c.removed]
+				why := map[bool]string{true: "signature changed"}[c.sig]
 				for _, s := range syms[c.Name] {
 					if s.Path == f.Path && s.Exact && s.NOutside > 0 {
 						out = append(out, affected{c.Name, s.Kind, f.Path, c.ID, why, s.Outside, s.NOutside})

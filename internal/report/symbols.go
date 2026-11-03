@@ -259,6 +259,8 @@ func lineDecls(path string, src []byte, wanted map[string]bool, syms map[string]
 				end++
 			}
 			sig = strings.Join(ls[i:min(end+1, len(ls))], "\n")
+		} else if _, n := signature(ls[i:]); n > 1 { // parameters over several lines: all of them
+			sig = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(strings.Join(ls[i:i+n], "\n")), "{"))
 		}
 		var doc []string
 		for j := i - 1; j >= 0; j-- {
@@ -273,6 +275,99 @@ func lineDecls(path string, src []byte, wanted map[string]bool, syms map[string]
 			Doc: cut(strings.TrimSpace(strings.Join(doc, "\n")), maxDoc), Path: path, Line: i + 1,
 		})
 	}
+}
+
+// maxSigLines is the lines a signature reads at most.
+const maxSigLines = 25
+
+var (
+	// fnValue is a value that's a function, after a const's, let's or var's "=": "async (a) =>", "function (", "func(".
+	fnValue = regexp.MustCompile(`^(?:async\s+)?(?:(function|func)\b|\(|<|[A-Za-z_$][\w$]*\s*=>)`)
+	// sigGap is a separator a closing bracket follows, the lines of a signature on one: "a: number; }" -> "a: number }".
+	sigGap = regexp.MustCompile(`[,;](\s*[)\]}>])`)
+)
+
+// signature is what callers see of the declaration ls[0] starts, on one line, and n the lines of ls it takes: the
+// lines its brackets ( [ < keep open, up to its body (a function's "{" or Python's ":", kept; an arrow function's
+// "=>"). A const's, let's or var's ends at its "=", unless the value is a function: its value is its behaviour.
+func signature(ls []string) (sig string, n int) {
+	kind := ""
+	if m := decl.FindStringSubmatch(ls[0]); m != nil {
+		kind = m[1]
+	}
+	value := kind == "const" || kind == "let" || kind == "var"
+	body := kind == "func" || kind == "fn" || strings.HasPrefix(kind, "function") // its body opens with "{"
+	arrow := false
+	var b strings.Builder
+	depth, braces, done := 0, 0, false
+	for ; n < len(ls) && n < maxSigLines && !done; n++ {
+		t := strings.TrimSpace(ls[n])
+		end := len(t)
+	scan:
+		for j := 0; j < len(t); j++ {
+			c, next := t[j], byte(0)
+			if j+1 < len(t) {
+				next = t[j+1]
+			}
+			switch {
+			case c == '"' || c == '`' || c == '\'' && kind != "fn": // Rust's lifetimes aren't quotes
+				k := strings.IndexByte(t[j+1:], c)
+				if k < 0 {
+					break scan
+				}
+				j += k + 1
+			case c == '/' && next == '/', c == '#' && kind == "def":
+				end = j
+				break scan
+			case (c == '=' || c == '-') && next == '>': // an arrow, no bracket
+				if j++; arrow && depth == 0 && braces == 0 {
+					end, done = j+1, true
+					break scan
+				}
+			case (c == '<' || c == '>') && next == '=': // a comparison
+				j++
+			case c == '(' || c == '[' || c == '<':
+				depth++
+			case c == ')' || c == ']' || c == '>':
+				depth--
+			case c == '{':
+				before := strings.TrimRight(t[:j], " \t")
+				typ := strings.HasSuffix(before, "struct") || strings.HasSuffix(before, "interface") ||
+					before != "" && strings.ContainsRune(":|&,", rune(before[len(before)-1])) // a return type's "{"
+				if body && depth == 0 && braces == 0 && !typ {
+					end, done = j+1, true
+					break scan
+				}
+				braces++
+			case c == '}':
+				braces--
+			case c == ':' && kind == "def" && depth == 0:
+				end, done = j+1, true
+				break scan
+			case c == '=' && next != '=' && value && depth == 0 && braces == 0 && !strings.ContainsRune("=!<>+-*/%&|^?:", rune(t[max(j-1, 0)])):
+				rest := strings.TrimSpace(t[j+1:])
+				m := fnValue.FindStringSubmatch(rest)
+				if m == nil {
+					end, done = j, true
+					break scan
+				}
+				value, body, arrow = false, m[1] != "", m[1] == ""
+			}
+		}
+		piece := strings.TrimSpace(t[:end])
+		if b.Len() > 0 && piece != "" && !strings.ContainsRune("([<", rune(b.String()[b.Len()-1])) && !strings.ContainsRune(")]>,;", rune(piece[0])) {
+			b.WriteByte(' ')
+		}
+		b.WriteString(piece)
+		done = done || depth <= 0
+	}
+	return sigGap.ReplaceAllString(b.String(), "$1"), n
+}
+
+// same is whether two signatures are the same but for their spacing.
+func same(a, b string) bool {
+	strip := func(s string) string { return strings.Join(strings.Fields(s), "") }
+	return strip(a) == strip(b)
 }
 
 func cut(s string, n int) string {

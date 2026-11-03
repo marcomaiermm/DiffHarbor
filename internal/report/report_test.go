@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -312,10 +313,103 @@ func TestOrder(t *testing.T) {
 	}
 }
 
+func TestSignature(t *testing.T) {
+	for _, c := range []struct {
+		src, want string
+		n         int
+	}{
+		{"export async function resolveItemByName(input: {\n\tname: string;\n\texpansionId?: number;\n}) {\n\tconst n = 1;", "export async function resolveItemByName(input: { name: string; expansionId?: number }) {", 4},
+		{"export async function getItemsByInstance({\n\tinstanceId,\n\tminQuality,\n}: {\n\tinstanceId?: number;\n}): Promise<\n\tArray<Item & { id: number | null }>\n> {\n\treturn [];",
+			"export async function getItemsByInstance({ instanceId, minQuality }: { instanceId?: number }): Promise<Array<Item & { id: number | null }>> {", 8},
+		{"export const protectedProcedure = t.procedure\n\t.use(a)\n\t.use(b);", "export const protectedProcedure", 1},
+		{"export const getItemById = db\n\t.select()", "export const getItemById", 1},
+		{"const env: Env = createEnv({", "const env: Env", 1},
+		{"export const f = async (a: number, b = c >= d) => a + b;", "export const f = async (a: number, b = c >= d) =>", 1},
+		{"const g = function (a) { return a }", "const g = function (a) {", 1},
+		{"var h = func(a int) error {", "var h = func(a int) error {", 1},
+		{"func Old() { println(\"old\") }", "func Old() {", 1},
+		{"func set() map[string]struct{} {", "func set() map[string]struct{} {", 1},
+		{"function shape(): { a: number } {", "function shape(): { a: number } {", 1},
+		{"fn get<'a>(x: &'a str) -> Option<&'a str> {", "fn get<'a>(x: &'a str) -> Option<&'a str> {", 1},
+		{"def load(path,\n         mode=\"r\"):  # (todo\n    pass", "def load(path, mode=\"r\"):", 2},
+		{"function f(a, // the (first) one\n\tb) {", "function f(a, b) {", 2},
+		{"export type Row = Pick<\n\tItem,\n\t\"id\" | \"name\"\n>;", "export type Row = Pick<Item, \"id\" | \"name\">;", 4},
+		{"export interface Props {\n\ta: number;", "export interface Props {", 1},
+	} {
+		if got, n := signature(strings.Split(c.src, "\n")); got != c.want || n != c.n {
+			t.Errorf("%q:\n got %q, %d\nwant %q, %d", c.src, got, n, c.want, c.n)
+		}
+	}
+	if !same("f(a: { b: string })", "f(a: {b: string})") || same("f(a: number)", "f(a: string)") {
+		t.Error("same")
+	}
+}
+
+// what a signature is over several lines, of a declaration whose declaring line is context or a value
+func TestSignatures(t *testing.T) {
+	d := Data{Title: "t", Diff: `diff --git a/a.ts b/a.ts
+--- a/a.ts
++++ b/a.ts
+@@ -1,20 +1,17 @@
+-export async function resolveItemByName(input: {
+-	name: string;
+-	expansionId?: number;
+-}) {
++export async function resolveItemByName(input: { name: string }) {
+ 	const name = input.name.trim();
+ 	return name;
+ }
+
+ export function search(opts: {
+-	offset: number;
++	cursor?: string;
+ 	limit: number;
+ }) {
+ 	return opts;
+ }
+
+-export const protectedProcedure = t.procedure.use(auth);
++export const protectedProcedure = t.procedure
++	.use(mapper)
++	.use(auth);
+
+ export function reflowed(
+-	a: number, b: number) {
++	a: number,
++	b: number,
++) {
+ 	return a + b;
+ }
+`}
+	var got []string
+	for _, g := range prepare(d).Inventory {
+		for _, it := range g.Items {
+			got = append(got, fmt.Sprintf("%s %s: %s -> %s +%d -%d", g.Key, it.Name, it.OldHead, it.Head, it.NPlus, it.NMinus))
+		}
+	}
+	want := []string{
+		"signature resolveItemByName: export async function resolveItemByName(input: { name: string; expansionId?: number }) { -> export async function resolveItemByName(input: { name: string }) { +0 -0",
+		"signature search: export function search(opts: { offset: number; limit: number }) { -> export function search(opts: { cursor?: string; limit: number }) { +0 -0",
+		"body protectedProcedure:  ->  +3 -1",
+		"body reflowed:  ->  +3 -1",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("inventory\n%s", strings.Join(got, "\n"))
+	}
+	f := parse("a.ts", d.Diff, "")
+	sig := map[string]bool{}
+	for _, c := range changes(f, map[int]run{}) {
+		sig[c.Name] = c.sig
+	}
+	if want := map[string]bool{"resolveItemByName": true, "search": true, "protectedProcedure": false, "reflowed": false}; !maps.Equal(sig, want) {
+		t.Errorf("changes' signatures %v", sig)
+	}
+}
+
 func TestReach(t *testing.T) {
 	ref := Ref{Path: "cmd/main.go", Line: 3, Text: "x()"}
 	api := &file{Path: "api.go", Changes: []change{
-		{Name: "Body", ID: "b"}, {Name: "Sig", ID: "s", added: true, removed: true}, {Name: "Fresh", State: "new"}, {Name: "Guess"},
+		{Name: "Body", ID: "b"}, {Name: "Sig", ID: "s", added: true, removed: true, sig: true}, {Name: "Fresh", State: "new"}, {Name: "Guess"},
 	}}
 	syms := map[string][]Symbol{
 		"Body":  {{Path: "api.go", Exact: true, Outside: []Ref{ref}, NOutside: 9}},

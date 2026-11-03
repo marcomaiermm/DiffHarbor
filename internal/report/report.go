@@ -185,6 +185,7 @@ type file struct {
 type change struct {
 	Name, State, ID string
 	added, removed  bool // its declaring line
+	sig             bool // what callers see of it differs: see signature
 }
 
 type step struct {
@@ -481,6 +482,7 @@ func changes(f *file, runs map[int]run) []change {
 	}
 	var cs []change
 	at := map[string]int{}
+	heads := map[string]*[2]string{} // name -> its signature before and now, the first the diff shows of each
 	cur := ""
 	for i := range f.Lines {
 		l := &f.Lines[i]
@@ -496,6 +498,14 @@ func changes(f *file, runs map[int]run) []change {
 		head := false
 		if d := decl.FindStringSubmatch(l.Text); d != nil {
 			cur, head = d[2], true
+		}
+		if head && runs[l.Run].Where == "" {
+			before, now, changed := sigs(f, i)
+			if h := heads[cur]; h == nil && (changed || l.Class != "ctx") {
+				heads[cur] = &[2]string{before, now}
+			} else if h != nil {
+				h[0], h[1] = cmp.Or(h[0], before), cmp.Or(h[1], now)
+			}
 		}
 		if cur == "" || l.Class == "ctx" || runs[l.Run].Where != "" { // moved code is no change
 			continue
@@ -513,6 +523,9 @@ func changes(f *file, runs map[int]run) []change {
 	for i, c := range cs {
 		if c.added != c.removed {
 			cs[i].State = map[bool]string{true: "new", false: "gone"}[c.added]
+		}
+		if h := heads[c.Name]; h != nil {
+			cs[i].sig = h[0] != "" && h[1] != "" && !same(h[0], h[1])
 		}
 	}
 	return cs
