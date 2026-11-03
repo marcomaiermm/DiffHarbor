@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.1.0...v0.1.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **report:** read whole signatures, not their first line ([#12](https://github.com/marcomaiermm/DiffHarbor/issues/12)) ([dec1d28](https://github.com/marcomaiermm/DiffHarbor/commit/dec1d28be2086c54908a6ee47607c7aa6b25cc78))
+
+
+### Performance Improvements
+
+* **report:** compile the CSS at build time and shrink big PRs' pages ([#11](https://github.com/marcomaiermm/DiffHarbor/issues/11)) ([d7cc674](https://github.com/marcomaiermm/DiffHarbor/commit/d7cc6740618a75a2694086d439ebbd3c8350166d))
+
 ## 0.1.0 (2026-11-03)
 
 
