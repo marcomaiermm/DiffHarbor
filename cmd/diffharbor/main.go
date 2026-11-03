@@ -28,6 +28,9 @@ import (
 	"strings"
 )
 
+// version is set at build time: -ldflags "-X main.version=..."
+var version = "dev"
+
 func dry() error {
 	dir, err := proc.Workspace()
 	if err != nil {
@@ -91,6 +94,7 @@ func configure() server.Config {
 }
 
 func main() {
+	log.Printf("diffharbor %s", version)
 	cfg := configure()
 	if err := agent.Proxies(); err != nil {
 		log.Fatal(err)

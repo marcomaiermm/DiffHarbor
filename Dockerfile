@@ -1,7 +1,7 @@
 FROM golang:1.27-alpine AS build
-# Tool versions float with each image rebuild; pin one here if a release breaks the checks.
-RUN CGO_ENABLED=0 go install honnef.co/go/tools/cmd/staticcheck@latest && CGO_ENABLED=0 go install github.com/zricethezav/gitleaks/v8@latest \
-    && CGO_ENABLED=0 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest && CGO_ENABLED=0 go install golang.org/x/tools/cmd/deadcode@latest
+# Pinned so a release tag rebuilds the same checks.
+RUN CGO_ENABLED=0 go install honnef.co/go/tools/cmd/staticcheck@v0.8.2 && CGO_ENABLED=0 go install github.com/zricethezav/gitleaks/v8@v8.30.1 \
+    && CGO_ENABLED=0 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 && CGO_ENABLED=0 go install golang.org/x/tools/cmd/deadcode@v0.52.0
 # Tests run as a user: as root the code drops its children to uid 1000, which can't write root's temp dirs.
 RUN apk add --no-cache git && adduser -D -u 1000 node
 USER node
@@ -9,7 +9,8 @@ WORKDIR /home/node/src
 COPY --chown=node go.mod ./
 COPY --chown=node cmd cmd
 COPY --chown=node internal internal
-RUN go vet ./... && go test ./... && CGO_ENABLED=0 go build -trimpath -ldflags=-s -o /home/node/diffharbor ./cmd/diffharbor
+ARG VERSION=dev
+RUN go vet ./... && go test ./... && CGO_ENABLED=0 go build -trimpath -ldflags="-s -X main.version=$VERSION" -o /home/node/diffharbor ./cmd/diffharbor
 
 FROM node:24-alpine
 # fallow's musl binary needs a CPU with AVX2.

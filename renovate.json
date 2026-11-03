@@ -1,0 +1,21 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommits", "helpers:pinGitHubActionDigests"],
+  "ignoreDeps": ["ghcr.io/marcomaiermm/diffharbor"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "go install module[/cmd/x]@vX in the Dockerfile",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["go install (?<depName>[^@\\s]+?)(?:/cmd/[^@\\s]+)?@(?<currentValue>v[^\\s]+)"],
+      "datasourceTemplate": "go"
+    },
+    {
+      "customType": "regex",
+      "description": "npm install -g / pi install npm: pkg@X.Y.Z in the Dockerfile",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["(?<depName>@?[a-z0-9][a-z0-9._-]*(?:/[a-z0-9._-]+)?)@(?<currentValue>\\d+\\.\\d+\\.\\d+)\\b"],
+      "datasourceTemplate": "npm"
+    }
+  ]
+}

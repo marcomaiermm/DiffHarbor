@@ -1,8 +1,9 @@
-# cp compose.example.yml compose.yml, put the values in .env next to it, docker compose up -d --build.
+# cp compose.example.yml compose.yml, put the values in .env next to it, docker compose up -d.
 # Only POST /webhook/github and /webhook/gitlab need to be reachable from the forge; with REPORT_URL, put /r/ behind your SSO.
 services:
   diffharbor:
-    build: .
+    # Or build: . to build it yourself.
+    image: ghcr.io/marcomaiermm/diffharbor:0.0.0 # x-release-please-version
     init: true
     # Idle is the Go server (~10 MB); the cap is for installs and type checks of big repos during checks.
     mem_limit: 3g
