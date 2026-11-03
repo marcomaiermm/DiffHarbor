@@ -1,0 +1,71 @@
+# cp compose.example.yml compose.yml, put the values in .env next to it, docker compose up -d --build.
+# Only POST /webhook/github and /webhook/gitlab need to be reachable from the forge; with REPORT_URL, put /r/ behind your SSO.
+services:
+  diffharbor:
+    build: .
+    init: true
+    # Idle is the Go server (~10 MB); the cap is for installs and type checks of big repos during checks.
+    mem_limit: 3g
+    cpus: 2
+    restart: unless-stopped
+    ports: ["3000:3000"]
+    environment:
+      # GitHub App (README, GitHub). Leave empty for GitLab only.
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY_B64: ${GITHUB_APP_PRIVATE_KEY_B64:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      # GitLab (README, GitLab). Leave GITLAB_TOKEN empty for GitHub only.
+      GITLAB_URL: ${GITLAB_URL:-}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      GITLAB_READ_TOKEN: ${GITLAB_READ_TOKEN:-}
+      GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
+      # Models as provider/id[:level]; empty = a repo's review.json, else picked by the keys present.
+      REVIEW_MODEL: ${REVIEW_MODEL:-}
+      VERIFY_MODEL: ${VERIFY_MODEL:-}
+      FALLBACK_MODEL: ${FALLBACK_MODEL:-}
+      FALLBACK_VERIFY_MODEL: ${FALLBACK_VERIFY_MODEL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      # A proxy or gateway in front of a provider (LiteLLM, a company's AI gateway): its URL, the key is the proxy's.
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
+      # Claude on AWS Bedrock: region plus a Bedrock API key or IAM keys.
+      AWS_REGION: ${AWS_REGION:-}
+      AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      # GPT on Azure OpenAI: https://<resource>.openai.azure.com/openai/v1, deployments named like the models or mapped.
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_BASE_URL: ${AZURE_OPENAI_BASE_URL:-}
+      AZURE_OPENAI_DEPLOYMENT_NAME_MAP: ${AZURE_OPENAI_DEPLOYMENT_NAME_MAP:-}
+      # Optional: the itsaplan ticket a PR names goes into the review.
+      ITSAPLAN_URL: ${ITSAPLAN_URL:-}
+      ITSAPLAN_API_KEY: ${ITSAPLAN_API_KEY:-}
+      # Optional: PR reports under /r/. They hold the PR's code: serve them only behind your SSO. Empty = no reports.
+      REPORT_URL: ${REPORT_URL:-}
+      DOCKER_HOST: tcp://dind:2375 # testcontainers in the checks; drop with the dind service if you don't need them
+    # Root serves and holds the forge keys; git, checks and Pi run as node (uid 1000) and can't read root's environ.
+    volumes:
+      - diffharbor-data:/data # learnings, pending reviews, reports, Pi's ChatGPT login
+      - diffharbor-cache:/cache # package stores, Go modules, work dirs
+
+  # Docker for testcontainers (Postgres etc.) in the checks. The PR's code controls this daemon, so it holds no
+  # secrets. sysbox-runc (https://github.com/nestybox/sysbox, on the host) isolates it without --privileged.
+  dind:
+    image: docker:29-dind
+    runtime: sysbox-runc
+    command: [--tls=false]
+    environment:
+      DOCKER_TLS_CERTDIR: "" # plain tcp://dind:2375, only on this stack's network
+    mem_limit: 3g
+    cpus: 2
+    restart: unless-stopped
+    volumes:
+      - dind-data:/var/lib/docker
+
+volumes:
+  diffharbor-data:
+  diffharbor-cache:
+  dind-data:

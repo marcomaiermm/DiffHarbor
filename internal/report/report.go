@@ -1,0 +1,463 @@
+// Package report renders the page a person reads a large PR with: the reading order through the code with its
+// diff, what only a person can decide, the commits, the tests as a list of cases, the mechanical rest folded away.
+package report
+
+import (
+	"bytes"
+	"cmp"
+	"diffharbor/internal/diff"
+	"diffharbor/internal/review"
+	_ "embed" // the page template
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+)
+
+// Data is what a report shows.
+type Data struct {
+	Repo        string // owner/name
+	Number      int
+	Title, URL  string // URL: the PR's page
+	SHA         string
+	Summary     string
+	Diagram     string // mermaid
+	Effort      int
+	Decisions   []string
+	Story       review.Story
+	Flow        []review.Step
+	Walkthrough map[string]string // path -> one line
+	Commits     []review.Commit
+	Outline     diff.Outline
+	Findings    []review.Comment // open ones, Line 0 = not on a line of the diff
+	Diff        string           // the whole PR diff
+	Routine     []review.Routine // hunks the review calls routine: folded
+	Symbols     map[string][]Symbol
+	Themes      review.SyntaxTheme // Shiki's, by color mode; unset: Tokyo Night
+	Whys        map[string]string  // path NUL name -> what a declaration Asks named is for: review.Explain's
+	Others      []Other            // open PRs that change files this one does
+	Behind      []review.Commit    // the base's commits since the fork point (review.Behind)
+	Conflicts   bool               // the forge says the PR conflicts with its base
+	Forge       Forge
+	Prev        *Version // the version before: the report marks what changed since; nil for the first
+}
+
+// Forge is how the forge hosting the repository names and links what a report points to.
+type Forge struct {
+	Name     string // "GitHub": "Open on GitHub"
+	Ref      string // what goes before a PR's number: "#"; GitLab's merge requests take "!"
+	Blob     string // a file at the head: Blob + path + "#L" + line
+	Commit   string // a commit of the repository: Commit + SHA
+	PRCommit string // a commit in the PR's own view: PRCommit + SHA
+	Search   string // code search in the repository: Search + the escaped query; "" when the forge has none
+}
+
+// tab is a tab of the card over the overview: what needs a person, a kind each.
+type tab struct {
+	ID, Title string
+	N         int
+	Warn      bool // something in it a merge can't wait for
+	On        bool // the first one: shown
+}
+
+// maxLines is the diff lines a file shows; the rest is on the PR's page.
+const maxLines = 3000
+
+// wip matches commit subjects that tell nothing about the change.
+var wip = regexp.MustCompile(`(?i)^(wip\b|fixup!|squash!|amend!|typo|lint|fmt\b|format\b|oops|tmp\b|\.+$|fix(es)?$|changes?$|updates?$|address(ed)? (review|comments|feedback)|(pr |review )(comments|feedback))`)
+
+//go:embed report.html
+var page string
+
+var tmpl = template.Must(template.New("report").Funcs(template.FuncMap{
+	"short": func(s string) string { return s[:min(len(s), 7)] },
+	"inc":   func(i int) int { return i + 1 },
+	"add":   func(a, b int) int { return a + b },
+	"icon":  icon,
+	"has":   slices.Contains[[]string],
+	"seq":   func(n int) []int { return make([]int, n) },
+	"wip":   func(subject string) bool { return wip.MatchString(strings.TrimSpace(subject)) },
+	"dir":   func(p string) string { return p[:strings.LastIndex(p, "/")+1] }, // "a/b/" of a/b/c.go: muted, the name stands out
+	"base":  func(p string) string { return p[strings.LastIndex(p, "/")+1:] },
+	"tab": func(id, title string, n int, warn bool, first string) tab {
+		return tab{id, title, n, warn, id == first}
+	},
+	"finding": func(s string) string { // "a/b/c.go: title" of Version.Findings: "c.go: title"
+		p, t, _ := strings.Cut(s, ": ")
+		return p[strings.LastIndex(p, "/")+1:] + ": " + t
+	},
+	"json": func(v any) (string, error) {
+		b, err := json.Marshal(v)
+		return string(b), err
+	},
+	"percent": func(n, of int) string {
+		if of == 0 {
+			return "0%"
+		}
+		return strconv.Itoa(n*100/of) + "%"
+	},
+}).Parse(page))
+
+type line struct {
+	Class, No, Text string
+	ID              string // a jump target: where a declaration's change starts
+	Old             int    // the line in the old file: del and ctx lines
+	Run             int    // the folded run the line is in, 0 = shown
+	Findings        []review.Comment
+}
+
+type file struct {
+	Path, Kind, Note string
+	Short            string // Path without the directory all files share, for the side bar
+	ID               string // diff.PatchIDs: "viewed" holds until the file's change changes
+	Open             bool   // unfolded: code in the reading order
+	Add, Del         int
+	Lines            []line
+	Parts            []part           // Lines as shown: plain runs and folded ones
+	Moved            int              // added lines that only moved here
+	Cut              int              // lines left out past maxLines
+	Findings         []review.Comment // on the file but no line it shows
+	Changes          []change         // the declarations it changes
+	Long             bool             // lists Changes above its diff
+	Changed          bool             // its change differs from Prev's, or it's new to the PR
+}
+
+// change is a declaration a file's diff touches: State "new", "gone" or "" (changed), ID its first changed line.
+type change struct {
+	Name, State, ID string
+	added, removed  bool // its declaring line
+}
+
+type step struct {
+	Title, Why string
+	Files      []*file
+	Graph      *flow // how its changed declarations name each other, nil when they don't
+}
+
+type group struct {
+	What  string
+	Files []*file
+	Names []string // what has no diff to show (moves, lockfiles)
+}
+
+type view struct {
+	Data
+	Steps                []step
+	Tests, Other         []*file
+	Mechanical           []group
+	Loose                []review.Comment // findings outside the diff
+	Deleted              []*file          // what moved out of them folds, the rest is what the PR drops
+	Stepwise             bool             // the commits read one by one
+	Code, NTests, NOther int
+	Added, Moved         int // added lines, and those of them that only moved
+	Tree                 []*node
+	Inventory            []bucket        // what the PR did to its declarations
+	Deps                 *deps           // which changed directories use which
+	Affected             []affected      // changed code the rest of the repo uses
+	Graphs               bool            // a graph to draw: the page loads cytoscape
+	Risks                []risk          // what a merge doesn't finish
+	BaseMoved            []review.Commit // of Behind, those that change the PR's files
+	Since                *since          // what changed from Prev
+	now                  Version         // what the next version compares with
+}
+
+// node is a directory of the side bar's file tree, or a file when File is set.
+type node struct {
+	Name string
+	File *file
+	Kids []*node
+}
+
+// shared is the directory all paths share, with its slash; none for a single path.
+func shared(paths []string) string {
+	if len(paths) < 2 {
+		return ""
+	}
+	pre := paths[0][:strings.LastIndex(paths[0], "/")+1]
+	for _, p := range paths[1:] {
+		for !strings.HasPrefix(p, pre) {
+			pre = pre[:strings.LastIndex(strings.TrimSuffix(pre, "/"), "/")+1]
+		}
+	}
+	return pre
+}
+
+// Render returns the report page and the version it is, for the next one to compare with; the caller sets its time.
+func Render(d Data) ([]byte, Version, error) {
+	var b bytes.Buffer
+	v := prepare(d)
+	if err := tmpl.Execute(&b, v); err != nil {
+		return nil, Version{}, fmt.Errorf("report: %w", err)
+	}
+	return b.Bytes(), v.now, nil
+}
+
+// Asks is the declarations of the report's inventory that neither a doc comment nor a commit explains, new or with
+// a changed signature, for review.Explain: their keys for Data.Whys, and what the model reads of each.
+func Asks(d Data) (keys, texts []string) {
+	for _, g := range prepare(d).Inventory {
+		for _, it := range g.Items {
+			if it.ask != nil && it.Doc == "" && !it.Commit {
+				keys, texts = append(keys, it.key), append(texts, strings.Join(it.ask, "\n"))
+			}
+		}
+	}
+	return keys, texts
+}
+
+// prepare is the page's view of d.
+func prepare(d Data) view {
+	v := view{Data: d}
+	v.Themes.Light = cmp.Or(v.Themes.Light, "tokyo-night-day") // the page carries this one: Shiki has only the dark
+	v.Themes.Dark = cmp.Or(v.Themes.Dark, "tokyo-night")
+	files := map[string]*file{}
+	var order []string
+	ids := diff.PatchIDs(d.Diff)
+	diff.EachFile(d.Diff, func(p, f string) {
+		files[p] = parse(p, f, d.Walkthrough[p])
+		files[p].ID = ids[p]
+		order = append(order, p)
+	})
+	var gone []string
+	diff.EachDeleted(d.Diff, func(p, f string) {
+		files[p] = parse(p, f, d.Walkthrough[p])
+		files[p].ID = ids[p]
+		gone, v.Deleted = append(gone, p), append(v.Deleted, files[p])
+	})
+	skim := map[string]map[int]string{}
+	for _, r := range d.Routine {
+		if skim[r.Path] == nil {
+			skim[r.Path] = map[int]string{}
+		}
+		skim[r.Path][r.Line] = r.Why
+	}
+	runs := fold(slices.Concat(order, gone), files, skim)
+	for _, c := range d.Findings {
+		f := files[c.Path]
+		if f == nil {
+			v.Loose = append(v.Loose, c)
+			continue
+		}
+		at := slices.IndexFunc(f.Lines, func(l line) bool { return l.No == strconv.Itoa(c.Line) })
+		if c.Line == 0 || at < 0 {
+			f.Findings = append(f.Findings, c)
+		} else {
+			f.Lines[at].Findings = append(f.Lines[at].Findings, c)
+		}
+	}
+	var all []*file
+	for _, p := range slices.Concat(order, gone) {
+		all = append(all, files[p])
+	}
+	v.Risks, v.BaseMoved = risks(all), baseMoved(d.Behind, files) // before parts, like spans: risks marks the lines it jumps to
+	v.now = stamp(v, ids)
+	v.Since = compare(d.Prev, v.now, files)
+	var ss []*span
+	for _, p := range slices.Concat(order, gone) {
+		f := files[p]
+		f.Changes = changes(f, runs)
+		ss = append(ss, spans(f, runs)...) // before parts: it marks the lines it jumps to
+		f.Long = len(f.Lines) >= minChanges
+		f.Parts = parts(f.Lines, runs)
+		v.Added += f.Add
+		v.Moved += f.Moved
+	}
+	skip := d.Outline.Skippable()
+	used := map[string]bool{}
+	for _, g := range d.Outline.Mechanical {
+		mg := group{What: g.What}
+		for _, p := range g.Files {
+			if f := files[p]; f != nil && !used[p] {
+				mg.Files, used[p] = append(mg.Files, f), true
+			} else {
+				mg.Names = append(mg.Names, p)
+			}
+		}
+		v.Mechanical = append(v.Mechanical, mg)
+	}
+	for _, s := range d.Flow {
+		st := step{Title: s.Title, Why: s.Why}
+		for _, p := range s.Files {
+			if f := files[p]; f != nil && !used[p] && !skip[p] {
+				f.Open = f.Moved*5 < f.Add*4 // mostly moved: the folds would be all there is
+				st.Files, used[p] = append(st.Files, f), true
+			}
+		}
+		if len(st.Files) > 0 {
+			v.Steps = append(v.Steps, st)
+		}
+	}
+	var rest []*file // code the reading order left out, in the diff's order
+	for _, p := range order {
+		f := files[p]
+		switch {
+		case used[p]:
+		case f.Kind == "code":
+			f.Open = len(d.Flow) == 0 // with a reading order, only its files start open
+			rest = append(rest, f)
+		case f.Kind == "test":
+			v.Tests = append(v.Tests, f)
+		default:
+			v.Other = append(v.Other, f)
+		}
+	}
+	if len(rest) > 0 {
+		title := "The rest of the code"
+		if len(v.Steps) == 0 {
+			title = "Code"
+		}
+		v.Steps = append(v.Steps, step{Title: title, Files: rest})
+	}
+	for _, s := range v.Steps {
+		v.Code += len(s.Files)
+	}
+	v.NTests, v.NOther = len(v.Tests), len(v.Other)
+	pre := shared(order) // the side bar drops the directory all files share
+	for _, f := range files {
+		f.Short = strings.TrimPrefix(f.Path, pre)
+	}
+	v.Tree = tree(files)
+	for i := range v.Steps {
+		v.Steps[i].Graph = graph(v.Steps, i, d.Symbols)
+		v.Graphs = v.Graphs || v.Steps[i].Graph != nil
+	}
+	v.Inventory = inventory(ss, d.Symbols, d.Commits, d.Title, d.Whys)
+	v.Deps, v.Affected = matrix(v.Steps, d.Symbols), reach(v.Steps, d.Symbols)
+	messy := 0
+	for _, c := range d.Commits {
+		if wip.MatchString(strings.TrimSpace(c.Subject)) {
+			messy++
+		}
+	}
+	v.Stepwise = len(d.Commits) > 1 && messy*3 < len(d.Commits) // under a third wip
+	return v
+}
+
+// parse reads one file's diff into lines numbered as in the new file.
+func parse(p, f, note string) *file {
+	fl := &file{Path: p, Kind: diff.Kind(p), Note: note}
+	_, body, ok := strings.Cut(f, "\n@@")
+	if !ok {
+		return fl
+	}
+	n, o := 0, 0
+	for l := range strings.SplitSeq("@@"+body, "\n") {
+		var ln line
+		switch {
+		case strings.HasPrefix(l, "@@"):
+			if m := hunk.FindStringSubmatch(l); m != nil {
+				o, _ = strconv.Atoi(m[1])
+				n, _ = strconv.Atoi(m[2])
+			}
+			ln = line{Class: "hunk", Text: l}
+		case strings.HasPrefix(l, "+"):
+			ln = line{Class: "add", No: strconv.Itoa(n), Text: l[1:]}
+			fl.Add++
+			n++
+		case strings.HasPrefix(l, "-"):
+			ln = line{Class: "del", Old: o, Text: l[1:]}
+			fl.Del++
+			o++
+		case strings.HasPrefix(l, " "):
+			ln = line{Class: "ctx", No: strconv.Itoa(n), Old: o, Text: l[1:]}
+			n++
+			o++
+		default: // "\ No newline at end of file", the trailing ""
+			continue
+		}
+		if len(fl.Lines) < maxLines {
+			fl.Lines = append(fl.Lines, ln)
+		} else {
+			fl.Cut++
+		}
+	}
+	return fl
+}
+
+var hunk = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)`)
+
+// tree is the files by directory, a directory with nothing but one directory merged into it ("internal/report"),
+// directories before files.
+func tree(files map[string]*file) []*node {
+	root := &node{}
+	for _, f := range files {
+		n := root
+		parts := strings.Split(f.Short, "/")
+		for _, p := range parts[:len(parts)-1] {
+			i := slices.IndexFunc(n.Kids, func(k *node) bool { return k.File == nil && k.Name == p })
+			if i < 0 {
+				i, n.Kids = len(n.Kids), append(n.Kids, &node{Name: p})
+			}
+			n = n.Kids[i]
+		}
+		n.Kids = append(n.Kids, &node{Name: parts[len(parts)-1], File: f})
+	}
+	var tidy func(n *node)
+	tidy = func(n *node) {
+		for len(n.Kids) == 1 && n.Kids[0].File == nil && n.Name != "" {
+			n.Name, n.Kids = n.Name+"/"+n.Kids[0].Name, n.Kids[0].Kids
+		}
+		slices.SortFunc(n.Kids, func(a, b *node) int {
+			if (a.File == nil) != (b.File == nil) {
+				return map[bool]int{true: -1, false: 1}[a.File == nil]
+			}
+			return cmp.Compare(a.Name, b.Name)
+		})
+		for _, k := range n.Kids {
+			tidy(k)
+		}
+	}
+	tidy(root)
+	return root.Kids
+}
+
+// minChanges is the lines a file shows before it lists the declarations it changes.
+const minChanges = 60
+
+// changes lists the declarations whose lines the diff adds or removes, past folded runs: the one a hunk's header
+// names, then each one a line of the hunk declares.
+func changes(f *file, runs map[int]run) []change {
+	if f.Kind != "code" && f.Kind != "test" {
+		return nil
+	}
+	var cs []change
+	at := map[string]int{}
+	cur := ""
+	for i := range f.Lines {
+		l := &f.Lines[i]
+		if l.Class == "hunk" {
+			cur = ""
+			if m := hunk.FindStringSubmatch(l.Text); m != nil {
+				if d := decl.FindStringSubmatch(m[3]); d != nil {
+					cur = d[2]
+				}
+			}
+			continue
+		}
+		head := false
+		if d := decl.FindStringSubmatch(l.Text); d != nil {
+			cur, head = d[2], true
+		}
+		if cur == "" || l.Class == "ctx" || runs[l.Run].Where != "" { // moved code is no change
+			continue
+		}
+		k, ok := at[cur]
+		if !ok {
+			l.ID = fmt.Sprintf("%s~%d", f.Path, i)
+			k, at[cur] = len(cs), len(cs)
+			cs = append(cs, change{Name: cur, ID: l.ID})
+		}
+		if head {
+			cs[k].added, cs[k].removed = cs[k].added || l.Class == "add", cs[k].removed || l.Class == "del"
+		}
+	}
+	for i, c := range cs {
+		if c.added != c.removed {
+			cs[i].State = map[bool]string{true: "new", false: "gone"}[c.added]
+		}
+	}
+	return cs
+}

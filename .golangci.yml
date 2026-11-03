@@ -1,0 +1,56 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - revive
+    - gocritic
+    - gocognit
+    - gocyclo
+    - dupl
+    - errorlint
+    - bodyclose
+    - gosec
+    - exhaustive
+    - nolintlint
+    - depguard
+    # what the bot runs on Go PRs (internal/checks golangciConfig)
+    - forbidigo
+    - noctx
+  settings:
+    depguard:
+      rules:
+        main:
+          allow: [$gostd, diffharbor] # stdlib only
+    gocognit:
+      min-complexity: 50
+    gocyclo:
+      min-complexity: 50
+    errcheck:
+      exclude-functions: [fmt.Fprint, fmt.Fprintf, fmt.Fprintln, os.Remove, os.RemoveAll, (io.Closer).Close, (*os.File).Close]
+    gosec:
+      excludes:
+        - G104 # errcheck checks these
+        - G204 # proc.Command is the exec wrapper; args are ours
+        - G301 # root writes, node (Pi, checks) reads: 0755/0644 on purpose
+        - G302
+        - G306
+        - G706 # logs carry repo names and logins from signed webhooks; nothing parses the log
+    forbidigo:
+      forbid:
+        - pattern: ^http\.DefaultClient$
+          msg: has no timeout; use an http.Client with Timeout
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [errcheck, gocognit, gocyclo, gosec, noctx]
+      # The client has a timeout; the job's context would drop the "Review stopped" status a cancel posts.
+      - path: internal/forge/(github/github|gitlab/gitlab)\.go
+        linters: [noctx]
+      - path: cmd/
+        linters: [noctx]
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports

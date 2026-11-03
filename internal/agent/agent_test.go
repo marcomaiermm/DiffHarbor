@@ -1,0 +1,123 @@
+package agent
+
+import (
+	"context"
+	"diffharbor/internal/proc"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestReviewLevel(t *testing.T) {
+	const m = "openai/gpt-6-luna"
+	for _, lvl := range []string{"low", "medium", "high", "xhigh", "max"} {
+		if got := reviewLevel(m, lvl); got != lvl {
+			t.Errorf("reviewLevel(%q) = %q", lvl, got)
+		}
+	}
+	if got := reviewLevel(m+":high", "low"); got != "high" {
+		t.Fatalf("fixed level: %q", got)
+	}
+}
+
+func TestFallback(t *testing.T) {
+	bin := t.TempDir() // a fake pi: the subscription is at its usage limit, the fallback answers
+	os.WriteFile(filepath.Join(bin, "pi"), []byte(`#!/bin/sh
+echo "$*" >> "$(dirname "$0")/calls"
+case "$*" in
+auth*) echo token ;;
+*openai/*) echo "You have hit your ChatGPT usage limit (plus). Try again in 2h." >&2; exit 1 ;;
+*"--model deepseek/x:low"*) echo answer ;;
+*"--model deepseek/v:low"*) echo verified ;;
+*) exit 1 ;;
+esac
+`), 0o755)
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	t.Setenv("DEEPSEEK_API_KEY", "k")
+	defer func(pi bool) { FallbackModel, FallbackVerifyModel, proc.AsPi = "", "", pi; FallbackUntil.Store(0) }(proc.AsPi)
+	FallbackModel, FallbackVerifyModel, proc.AsPi = "deepseek/x", "deepseek/v:low", false // as root (image build) pi would run as node, outside the temp dir
+	dir := t.TempDir()
+	os.Mkdir(filepath.Join(dir, "repo"), 0o755)
+	for range 2 {
+		if out, err := runPi(context.Background(), dir, "t", "sys", "openai/sol:low", false, "hi"); err != nil || out != "answer\n" {
+			t.Fatal(out, err)
+		}
+	}
+	if out, err := runPi(context.Background(), dir, "verify", "sys", "openai/luna:high", false, "hi"); err != nil || out != "verified\n" {
+		t.Fatal(out, err)
+	}
+	calls, _ := os.ReadFile(filepath.Join(bin, "calls"))
+	if n := strings.Count(string(calls), "openai/sol"); n != 1 {
+		t.Fatalf("subscription tried %d times, want once, then 30 min on the fallback:\n%s", n, calls)
+	}
+}
+
+func TestKeyEnv(t *testing.T) {
+	for p, want := range map[string]string{"anthropic": "ANTHROPIC_API_KEY", "google": "GEMINI_API_KEY", "zai-coding-cn": "ZAI_CODING_CN_API_KEY"} {
+		if got := KeyEnv(p); got != want {
+			t.Errorf("KeyEnv(%q) = %q, want %q", p, got, want)
+		}
+	}
+}
+
+func TestMatrix(t *testing.T) {
+	defer func(d string) { AuthDir = d }(AuthDir)
+	AuthDir = t.TempDir() // no ChatGPT login
+	for _, k := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "AWS_REGION", "AZURE_OPENAI_API_KEY"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("ANTHROPIC_API_KEY", "k")
+	if d := Default(); d != "anthropic/claude-sonnet-5-5:high" || VerifyFor(d) != "anthropic/claude-haiku-5-5:low" || FallbackFor(d, "review") != "" {
+		t.Fatalf("anthropic only: %q %q %q", d, VerifyFor(d), FallbackFor(d, "review"))
+	}
+	t.Setenv("DEEPSEEK_API_KEY", "k")
+	if d := Default(); FallbackFor(d, "review") != "deepseek/deepseek-flash:high" || FallbackFor(d, "verify") != "deepseek/deepseek-flash:off" {
+		t.Fatalf("anthropic + deepseek: fallback %q %q", FallbackFor(d, "review"), FallbackFor(d, "verify"))
+	}
+	os.WriteFile(filepath.Join(AuthDir, "auth.json"), []byte(`{"openai":{"type":"oauth"}}`), 0o600)
+	if d := Default(); d != "openai/gpt-6.1-terra:high" || FallbackFor(d, "review") != "anthropic/claude-sonnet-5-5:high" {
+		t.Fatalf("ChatGPT login first: %q, fallback %q", d, FallbackFor(d, "review"))
+	}
+}
+
+// Bedrock and Azure need more than one key; a pass gets all of it, a half-configured provider none.
+func TestCloudProviders(t *testing.T) {
+	for _, k := range []string{"AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_BEARER_TOKEN_BEDROCK", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_BASE_URL"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("AWS_ACCESS_KEY_ID", "id")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+	if _, err := passEnv("amazon-bedrock"); err == nil || !strings.Contains(err.Error(), "AWS_REGION") {
+		t.Fatalf("bedrock without region: %v", err)
+	}
+	t.Setenv("AWS_REGION", "eu-central-1")
+	if env, err := passEnv("amazon-bedrock"); err != nil || strings.Join(env, " ") != "AWS_REGION=eu-central-1 AWS_ACCESS_KEY_ID=id AWS_SECRET_ACCESS_KEY=secret" {
+		t.Fatalf("bedrock: %v %v", env, err)
+	}
+	t.Setenv("AZURE_OPENAI_API_KEY", "k")
+	if Available("azure") {
+		t.Fatal("azure without endpoint")
+	}
+	t.Setenv("AZURE_OPENAI_BASE_URL", "https://x.openai.azure.com/openai/v1")
+	if env, err := passEnv("azure"); err != nil || len(env) != 2 || VerifyFor("azure/gpt-6.1-sol") != "azure/gpt-6-luna:low" {
+		t.Fatalf("azure: %v %v", env, err)
+	}
+}
+
+func TestProxies(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "models.json")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://llm.example.com/anthropic")
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("AZURE_BASE_URL", "https://ignored") // Azure's endpoint is AZURE_OPENAI_BASE_URL, passed per pass
+	if err := proxies(f); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(f); string(b) != `{"providers":{"anthropic":{"baseUrl":"https://llm.example.com/anthropic"}}}` {
+		t.Fatalf("models.json: %s", b)
+	}
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	if err := proxies(f); err != nil || proc.Exists(f) {
+		t.Fatalf("no proxy left, models.json stays: %v", err)
+	}
+}
