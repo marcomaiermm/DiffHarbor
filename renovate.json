@@ -1,7 +1,13 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", ":semanticCommits", "helpers:pinGitHubActionDigests"],
+  "extends": ["config:recommended", ":semanticCommits", "helpers:pinGitHubActionDigests", "group:allNonMajor"],
   "ignoreDeps": ["ghcr.io/marcomaiermm/diffharbor"],
+  "schedule": ["before 6am on monday"],
+  "minimumReleaseAge": "3 days",
+  "packageRules": [
+    { "matchUpdateTypes": ["major"], "dependencyDashboardApproval": true },
+    { "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"], "automerge": true }
+  ],
   "customManagers": [
     {
       "customType": "regex",
