@@ -2,6 +2,7 @@
 package server
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"diffharbor/internal/agent"
@@ -172,7 +173,9 @@ func Serve(cfg Config) {
 			delete(latest.m, e.Key()) // queued reviews of this PR skip
 			_ = os.Remove(pendingFile(e.Key()))
 			latest.Unlock()
-			_ = os.RemoveAll(job.ReportDir(e)) //nolint:gosec // its code shouldn't outlive the PR; the path is the signed webhook's host, repo and number
+			if err := job.DeleteReports(e); err != nil {
+				log.Println(e.Key(), "report:", err)
+			}
 			stop(e.Key(), false)
 			return
 		case e.Kind == "pull_request" && actions[e.Action] && !e.PullRequest.Draft:
@@ -245,8 +248,13 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 		// The page's own script, and fetch for its versions; Tailwind, Shiki, mermaid, cytoscape, styles and fonts from jsdelivr; PR text in it is escaped, this is the second fence.
 		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self'; "+
 			"style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src data:; font-src data: https://cdn.jsdelivr.net; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-		//nolint:gosec // os.DirFS refuses .. and absolute paths: nothing outside the reports folder
-		http.ServeFileFS(w, r, job.Reports(), dir+"/"+cmp.Or(sha, vs[0].SHA)+".html")
+		name := dir + "/" + cmp.Or(sha, vs[0].SHA) + ".html"
+		b, err := job.Reports().Get(name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(b))
 	}
 }
 

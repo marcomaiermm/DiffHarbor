@@ -4,6 +4,7 @@ import (
 	"context"
 	"diffharbor/internal/forge"
 	"diffharbor/internal/forge/github"
+	"diffharbor/internal/job"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/report"
 	"encoding/json"
@@ -11,7 +12,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -83,17 +83,13 @@ func TestServeReport(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	sha := func(i int) string { return fmt.Sprintf("%040x", i) }
 	put := func(dir string, shas ...string) {
-		d := filepath.Join(proc.DataDir, "reports", filepath.FromSlash(dir))
 		var vs []report.Version
 		for _, s := range shas {
 			vs = append(vs, report.Version{SHA: s})
-			if err := os.MkdirAll(d, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			os.WriteFile(filepath.Join(d, s+".html"), []byte(`<html data-sha="`+s+`">`), 0o600)
+			job.Reports().Put(dir+"/"+s+".html", []byte(`<html data-sha="`+s+`">`))
 		}
 		b, _ := json.Marshal(vs)
-		os.WriteFile(filepath.Join(d, "versions.json"), b, 0o600)
+		job.Reports().Put(dir+"/versions.json", b)
 	}
 	put("github.com/o/r/7", sha(5), sha(3))
 	put("gitlab.example.com/g/s/p/3", sha(1)) // a project in a subgroup

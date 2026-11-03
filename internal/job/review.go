@@ -12,11 +12,11 @@ import (
 	"diffharbor/internal/proc"
 	"diffharbor/internal/report"
 	"diffharbor/internal/review"
+	"diffharbor/internal/store"
 	"diffharbor/internal/text"
 	"diffharbor/internal/ticket"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -248,25 +248,23 @@ var ReportURL string
 // maxVersions is the reports a PR keeps, one per reviewed head: the newest.
 const maxVersions = 10
 
-// reportPath is a PR's reports under /r/ and the reports folder: its forge's host, the repository, the number.
+// reportPath is a PR's reports under /r/ and in Reports: its forge's host, the repository, the number.
 // A version is {sha}.html in it, versions.json lists them newest first.
 func reportPath(e *forge.Event) string {
 	host, _, _ := strings.Cut(strings.TrimPrefix(e.PullRequest.HTMLURL, "https://"), "/")
 	return cmp.Or(host, "github.com") + "/" + e.Repository.FullName + "/" + strconv.Itoa(e.PullRequest.Number)
 }
 
-// Reports holds the reports; DirFS refuses "..", so a path can't leave it.
-func Reports() fs.FS { return os.DirFS(filepath.Join(proc.DataDir, "reports")) }
+// Reports holds the reports.
+func Reports() store.Store { return store.Disk(filepath.Join(proc.DataDir, "reports")) }
 
-// ReportDir is where a PR's reports live.
-func ReportDir(e *forge.Event) string {
-	return filepath.Join(proc.DataDir, "reports", filepath.FromSlash(reportPath(e)))
-}
+// DeleteReports deletes a PR's reports: its code shouldn't outlive the PR.
+func DeleteReports(e *forge.Event) error { return Reports().DeleteAll(reportPath(e)) }
 
 // Versions is a PR's reports, newest first, by its reportPath; none when it has no readable list.
 func Versions(path string) []report.Version {
 	var vs []report.Version
-	if b, err := fs.ReadFile(Reports(), path+"/versions.json"); err == nil { // os.DirFS: nothing outside the reports folder
+	if b, err := Reports().Get(path + "/versions.json"); err == nil {
 		_ = json.Unmarshal(b, &vs)
 	}
 	return vs
@@ -277,8 +275,8 @@ func Versions(path string) []report.Version {
 // none, and the last full one's line numbers may be stale.
 // ponytail: two reviews of a PR finishing at once can drop one's entry from versions.json; a lock per PR if it shows.
 func writeReport(e *forge.Event, d report.Data) string {
-	dir := ReportDir(e)
-	vs := slices.DeleteFunc(Versions(reportPath(e)), func(v report.Version) bool { return v.SHA == d.SHA })
+	dir, s := reportPath(e), Reports()
+	vs := slices.DeleteFunc(Versions(dir), func(v report.Version) bool { return v.SHA == d.SHA })
 	if len(vs) > 0 {
 		d.Prev = &vs[0]
 	}
@@ -287,33 +285,22 @@ func writeReport(e *forge.Event, d report.Data) string {
 	vs = slices.Insert(vs, 0, now)
 	keep := vs[:min(len(vs), maxVersions)]
 	if err == nil {
-		err = os.MkdirAll(dir, 0o700)
-	}
-	if err == nil {
-		err = atomicWrite(filepath.Join(dir, d.SHA+".html"), b)
+		err = s.Put(dir+"/"+d.SHA+".html", b)
 	}
 	if err == nil { // after the page: a listed version always has one
 		b, err = json.Marshal(keep)
 	}
 	if err == nil {
-		err = atomicWrite(filepath.Join(dir, "versions.json"), b)
+		err = s.Put(dir+"/versions.json", b)
 	}
 	if err != nil {
 		log.Println(e.Key(), "report:", err)
 		return ""
 	}
 	for _, v := range vs[len(keep):] {
-		_ = os.Remove(filepath.Join(dir, v.SHA+".html"))
+		_ = s.Delete(dir + "/" + v.SHA + ".html")
 	}
-	return ReportURL + "/r/" + reportPath(e)
-}
-
-// atomicWrite writes f whole or not at all: a reader never gets half of it.
-func atomicWrite(f string, b []byte) error {
-	if err := os.WriteFile(f+".tmp", b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(f+".tmp", f)
+	return ReportURL + "/r/" + dir
 }
 
 // maxClash is the PRs others fetches the diff of, those sharing the most files first.
