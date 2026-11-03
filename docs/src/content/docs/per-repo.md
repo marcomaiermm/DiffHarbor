@@ -42,7 +42,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
 | `review_model`, `verify_model` | Apply where the server sets none; the provider's key must be on the server. |
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
-| `tickets` | The itsaplan projects a PR may name. |
+| `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part; the longest glob wins. |

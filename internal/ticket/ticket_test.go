@@ -1,6 +1,7 @@
 package ticket
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -39,5 +40,46 @@ func TestTicket(t *testing.T) {
 	}
 	if id, _ := Lookup(t.Context(), []string{}, "WID-60"); id != "" || len(asked) != 1 {
 		t.Fatalf("none allowed: %q %v", id, asked)
+	}
+}
+
+func TestLinear(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var q struct{ Variables struct{ ID string } }
+		_ = json.NewDecoder(r.Body).Decode(&q)
+		if r.Header.Get("Authorization") != "lin_k" || q.Variables.ID != "ENG-7" {
+			fmt.Fprint(w, `{"data":{"issue":null}}`)
+			return
+		}
+		fmt.Fprint(w, `{"data":{"issue":{"title":"Rate limit","description":"- [ ] 429 on burst"}}}`)
+	}))
+	defer srv.Close()
+	linearURL, LinearKey = srv.URL, "lin_k"
+	defer func() { LinearKey = "" }()
+	id, got := Lookup(t.Context(), nil, "fix UTF-8 names", "me/eng-7-limit")
+	want := "## Linked ticket ENG-7: Rate limit\n\n- [ ] 429 on burst\n\n\n"
+	if id != "ENG-7" || got != want {
+		t.Fatalf("got %q %q", id, got)
+	}
+}
+
+func TestActive(t *testing.T) {
+	defer func() { URL, APIKey, LinearKey, Provider = "", "", "", "" }()
+	for _, c := range []struct {
+		url, key, lin, prov, want string
+		fail                      bool
+	}{
+		{},
+		{key: "k", url: "u", want: "itsaplan"},
+		{lin: "l", want: "linear"},
+		{key: "k", url: "u", lin: "l", fail: true},
+		{key: "k", url: "u", lin: "l", prov: "linear", want: "linear"},
+		{key: "k", url: "u", prov: "linear", fail: true},
+		{lin: "l", prov: "jira", fail: true},
+	} {
+		URL, APIKey, LinearKey, Provider = c.url, c.key, c.lin, c.prov
+		if got, err := Active(); got != c.want || (err != nil) != c.fail {
+			t.Errorf("%+v: %q %v", c, got, err)
+		}
 	}
 }

@@ -53,6 +53,6 @@
     "rules": { "$ref": "#/definitions/repoPath" },
     "skills": { "$ref": "#/definitions/repoPath" },
     "checks": { "type": "array", "items": { "$ref": "#/definitions/repoPath" } },
-    "tickets": { "type": "array", "items": { "type": "string" }, "description": "itsaplan projects a PR may name; unset = any, [] = none." }
+    "tickets": { "type": "array", "items": { "type": "string" }, "description": "itsaplan or Linear projects (team keys) a PR may name; unset = any, [] = none." }
   }
 }

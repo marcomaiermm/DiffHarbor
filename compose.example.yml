@@ -40,9 +40,11 @@ services:
       AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
       AZURE_OPENAI_BASE_URL: ${AZURE_OPENAI_BASE_URL:-}
       AZURE_OPENAI_DEPLOYMENT_NAME_MAP: ${AZURE_OPENAI_DEPLOYMENT_NAME_MAP:-}
-      # Optional: the itsaplan ticket a PR names goes into the review.
+      # Optional: the itsaplan or Linear ticket a PR names goes into the review. With both configured, TICKET_PROVIDER picks one.
       ITSAPLAN_URL: ${ITSAPLAN_URL:-}
       ITSAPLAN_API_KEY: ${ITSAPLAN_API_KEY:-}
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+      TICKET_PROVIDER: ${TICKET_PROVIDER:-}
       # Optional: PR reports under /r/. They hold the PR's code: serve them only behind your SSO. Empty = no reports.
       REPORT_URL: ${REPORT_URL:-}
       # Optional: the reports in an S3 bucket instead of /data, https://host[:port]/bucket[/prefix] (README: Configuration).

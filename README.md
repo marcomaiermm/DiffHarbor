@@ -145,6 +145,8 @@ Bedrock in the EU: `amazon-bedrock/eu.anthropic.…`. Each pass gets only its ow
 | `REPORT_S3_URL`, `REPORT_S3_ACCESS_KEY`, `REPORT_S3_SECRET_KEY`, `REPORT_S3_REGION` | The reports in an S3 bucket instead of `DATA_DIR`: `https://host[:port]/bucket[/prefix]`, path-style, for SeaweedFS, MinIO, Garage, R2 or AWS. `/r/` still serves them, so the bucket stays private. The key needs `GetObject`, `PutObject` and `DeleteObject` on `bucket/prefix/*` and `ListBucket` on the bucket. Leave versioning off on it: there a delete only hides a report, its code stays. The region defaults to `us-east-1`. Only the server holds the key; checks and Pi never get it. On the first start with it, the reports on disk move into the bucket and their folder goes; a failed move retries on the next start. A delete that fails when a PR closes retries every 30 minutes. For your own S3, uncomment the `seaweedfs` service in `compose.example.yml` and set `REPORT_S3_URL=http://seaweedfs:8333/reports` with any key and secret: they become its admin, and the bucket comes with the first report. |
 | `TEMPLATE_DIR` | Your branding for the report, see [Branding the report](#branding-the-report). |
 | `ITSAPLAN_URL`, `ITSAPLAN_API_KEY` | The itsaplan ticket a PR names (`ABC-12` in title, branch or description) goes into the review as what the PR must do. Never for PRs from forks. |
+| `LINEAR_API_KEY` | The same for Linear: a personal API key (read-only is enough). The ticket (`ENG-12`) is fetched by its identifier. |
+| `TICKET_PROVIDER` | `itsaplan` or `linear`. Required when both are configured (the server doesn't start otherwise); with one configured it is that one. |
 | `DOCKER_HOST` | With the `dind` service: Docker for testcontainers in the checks, isolated with [Sysbox](https://github.com/nestybox/sysbox) (install it on the host). Drop both if your tests don't need Docker. |
 
 ### Branding the report
@@ -203,7 +205,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
 | `review_model`, `verify_model` | Apply where the server sets none; the provider's key must be on the server. |
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
-| `tickets` | The itsaplan projects a PR may name. |
+| `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part; the longest glob wins. |

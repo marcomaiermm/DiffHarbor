@@ -69,6 +69,7 @@ func configure() server.Config {
 	agent.Model, agent.VerifyModel = os.Getenv("REVIEW_MODEL"), os.Getenv("VERIFY_MODEL")
 	agent.FallbackModel, agent.FallbackVerifyModel = os.Getenv("FALLBACK_MODEL"), os.Getenv("FALLBACK_VERIFY_MODEL")
 	ticket.URL, ticket.APIKey = os.Getenv("ITSAPLAN_URL"), os.Getenv("ITSAPLAN_API_KEY")
+	ticket.LinearKey, ticket.Provider = os.Getenv("LINEAR_API_KEY"), os.Getenv("TICKET_PROVIDER")
 	job.ReportURL = strings.TrimSuffix(os.Getenv("REPORT_URL"), "/")
 	if u := os.Getenv("REPORT_S3_URL"); u != "" {
 		s, err := store.NewS3(u, os.Getenv("REPORT_S3_ACCESS_KEY"), os.Getenv("REPORT_S3_SECRET_KEY"),
@@ -92,6 +93,9 @@ func configure() server.Config {
 func main() {
 	cfg := configure()
 	if err := agent.Proxies(); err != nil {
+		log.Fatal(err)
+	}
+	if _, err := ticket.Active(); err != nil {
 		log.Fatal(err)
 	}
 	if err := report.Load(os.Getenv("TEMPLATE_DIR")); err != nil {

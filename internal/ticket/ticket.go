@@ -1,11 +1,13 @@
-// Package ticket finds the itsaplan issue a PR names and turns it into a prompt section.
+// Package ticket finds the itsaplan or Linear issue a PR names and turns it into a prompt section.
 package ticket
 
 import (
+	"bytes"
 	"context"
 	"diffharbor/internal/text"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"regexp"
@@ -14,18 +16,48 @@ import (
 	"time"
 )
 
-// An itsaplan issue the PR names ("WID-60" in title, branch or description) goes into the review as what the PR
-// must do. ITSAPLAN_URL (the API) and ITSAPLAN_API_KEY, an agent key with read access to the projects (x-api-key); unset = no ticket.
+// A ticket the PR names ("WID-60" in title, branch or description) goes into the review as what the PR must do.
+// itsaplan: ITSAPLAN_URL (the API) and ITSAPLAN_API_KEY, an agent key with read access to the projects (x-api-key).
+// Linear: LINEAR_API_KEY, a personal API key (read). With both configured TICKET_PROVIDER (itsaplan or linear) must
+// say which one; with one configured it is that one. Unset = no ticket.
 var (
 	client    = &http.Client{Timeout: time.Minute}
 	URL       string
 	APIKey    string
+	LinearKey string
+	Provider  string // TICKET_PROVIDER: itsaplan or linear
 	ticketKey = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{1,9})-([0-9]{1,6})\b`)
 )
 
+var linearURL = "https://api.linear.app/graphql"
+
+// Active returns the provider tickets come from ("" = none), or an error if the settings leave it open or name one
+// without its credentials.
+func Active() (string, error) {
+	var have []string
+	if APIKey != "" && URL != "" {
+		have = append(have, "itsaplan")
+	}
+	if LinearKey != "" {
+		have = append(have, "linear")
+	}
+	switch {
+	case Provider != "" && !slices.Contains(have, Provider):
+		return "", fmt.Errorf("TICKET_PROVIDER %q: want itsaplan or linear, with its credentials set", Provider)
+	case Provider != "":
+		return Provider, nil
+	case len(have) > 1:
+		return "", fmt.Errorf("itsaplan and linear are both configured: set TICKET_PROVIDER to one of them")
+	case len(have) == 1:
+		return have[0], nil
+	}
+	return "", nil
+}
+
 // Lookup returns the first issue of projects (nil = any) texts name, its id and a prompt section; "" if none resolves.
 func Lookup(ctx context.Context, projects []string, texts ...string) (id, section string) {
-	if APIKey == "" || URL == "" {
+	provider, err := Active()
+	if provider == "" || err != nil {
 		return "", ""
 	}
 	seen := map[string]bool{}
@@ -36,41 +68,85 @@ func Lookup(ctx context.Context, projects []string, texts ...string) (id, sectio
 				continue // at most 3 lookups: "UTF-8" matches the pattern too
 			}
 			seen[id] = true
-			var is struct {
-				Title, Description string
-				Checklists         []struct {
-					Title string
-					Items []struct {
-						Content string
-						Done    bool
-					}
-				}
+			var body string
+			if provider == "linear" {
+				body, err = linear(ctx, id)
+			} else {
+				body, err = itsaplan(ctx, strings.ToUpper(m[1]), m[2])
 			}
-			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/projects/%s/issues/%s", URL, strings.ToUpper(m[1]), m[2]), nil)
 			if err != nil {
+				log.Println("ticket:", err)
 				return "", ""
 			}
-			req.Header.Set("x-api-key", APIKey)
-			res, err := client.Do(req)
-			if err != nil {
-				log.Println("itsaplan:", err)
-				return "", ""
+			if body != "" {
+				return id, text.Truncate(fmt.Sprintf("## Linked ticket %s: %s", id, body), 8000) + "\n\n"
 			}
-			err = json.NewDecoder(res.Body).Decode(&is)
-			res.Body.Close()
-			if res.StatusCode != 200 || err != nil { // 404/403: no such ticket, or not ours
-				continue
-			}
-			var b strings.Builder
-			fmt.Fprintf(&b, "## Linked ticket %s: %s\n\n%s\n", id, is.Title, is.Description)
-			for _, c := range is.Checklists {
-				fmt.Fprintf(&b, "\n### %s\n\n", c.Title)
-				for _, i := range c.Items {
-					fmt.Fprintf(&b, "- [%s] %s\n", map[bool]string{true: "x", false: " "}[i.Done], i.Content)
-				}
-			}
-			return id, text.Truncate(b.String(), 8000) + "\n\n"
 		}
 	}
 	return "", ""
+}
+
+// itsaplan returns the issue as "title\n\ndescription..."; "" with a nil error if there is no such ticket, or not ours.
+func itsaplan(ctx context.Context, project, n string) (string, error) {
+	var is struct {
+		Title, Description string
+		Checklists         []struct {
+			Title string
+			Items []struct {
+				Content string
+				Done    bool
+			}
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/projects/%s/issues/%s", URL, project, n), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("x-api-key", APIKey)
+	res, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("itsaplan: %w", err)
+	}
+	defer res.Body.Close()
+	if err := json.NewDecoder(res.Body).Decode(&is); res.StatusCode != 200 || err != nil { // 404/403: no such ticket, or not ours
+		return "", nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n\n%s\n", is.Title, is.Description)
+	for _, c := range is.Checklists {
+		fmt.Fprintf(&b, "\n### %s\n\n", c.Title)
+		for _, i := range c.Items {
+			fmt.Fprintf(&b, "- [%s] %s\n", map[bool]string{true: "x", false: " "}[i.Done], i.Content)
+		}
+	}
+	return b.String(), nil
+}
+
+// linear returns the issue (Linear takes the "ENG-123" identifier as id) as "title\n\ndescription"; "" with a nil
+// error if there is no such issue, or not ours. Checklists are markdown in the description.
+func linear(ctx context.Context, id string) (string, error) {
+	q, _ := json.Marshal(map[string]any{
+		"query":     "query($id: String!) { issue(id: $id) { title description } }",
+		"variables": map[string]string{"id": id},
+	})
+	req, err := http.NewRequestWithContext(ctx, "POST", linearURL, bytes.NewReader(q))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", LinearKey) // a personal API key goes without "Bearer"
+	req.Header.Set("Content-Type", "application/json")
+	res, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("linear: %w", err)
+	}
+	defer res.Body.Close()
+	var out struct {
+		Data struct {
+			Issue *struct{ Title, Description string }
+		}
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&out); res.StatusCode != 200 || err != nil || out.Data.Issue == nil {
+		return "", nil
+	}
+	return out.Data.Issue.Title + "\n\n" + out.Data.Issue.Description + "\n", nil
 }
