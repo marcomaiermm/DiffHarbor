@@ -6,6 +6,7 @@ import (
 	"diffharbor/internal/forge/github"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/report"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -26,19 +27,6 @@ func TestMention(t *testing.T) {
 		}
 	}
 	if got := strings.TrimSpace(m.ReplaceAllString("@diffharbor review", "")); got != "review" {
-		t.Fatalf("%q", got)
-	}
-}
-
-func TestLearnings(t *testing.T) {
-	proc.DataDir = t.TempDir()
-	for i := range maxLearnings + 2 {
-		addLearning("o/r", fmt.Sprintf("- r%d", i))
-	}
-	addLearning("o", "- shared")
-	addLearning("x/y", "- other")
-	got := readLearnings("o", "o/r")
-	if !strings.HasPrefix(got, "- shared\n- r2\n") || strings.Contains(got, "- r1\n") || strings.Contains(got, "other") {
 		t.Fatalf("%q", got)
 	}
 }
@@ -90,31 +78,25 @@ func TestPendingResume(t *testing.T) {
 	}
 }
 
-// A file left out keeps its last reviewed patch ID, one never reviewed gets none: the next push reviews both if changed.
-func TestReviewedPatches(t *testing.T) {
-	got := reviewedPatches(map[string]string{"a": "1", "b": "1", "gone": "1"}, map[string]string{"a": "2", "b": "2", "c": "2", "d": "2"}, []string{"a", "c"})
-	if fmt.Sprint(got) != "map[a:2 b:1 c:2]" {
-		t.Fatal(got)
-	}
-}
-
-// A PR keeps its newest reports, one per head; /r/ serves the newest, a version by its SHA, and their list.
-func TestReportVersions(t *testing.T) {
+// /r/ serves a PR's newest report, a version by its SHA, and their list; nothing outside a PR's folder.
+func TestServeReport(t *testing.T) {
 	proc.DataDir = t.TempDir()
-	reports = os.DirFS(filepath.Join(proc.DataDir, "reports"))
-	e := &forge.Event{}
-	e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = "o/r", 7, "https://github.com/o/r/pull/7"
 	sha := func(i int) string { return fmt.Sprintf("%040x", i) }
-	for i := range maxVersions + 2 {
-		if u := writeReport(e, report.Data{Repo: "o/r", Number: 7, SHA: sha(i)}); u != reportURL+"/r/github.com/o/r/7" {
-			t.Fatal(u)
+	put := func(dir string, shas ...string) {
+		d := filepath.Join(proc.DataDir, "reports", filepath.FromSlash(dir))
+		var vs []report.Version
+		for _, s := range shas {
+			vs = append(vs, report.Version{SHA: s})
+			if err := os.MkdirAll(d, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			os.WriteFile(filepath.Join(d, s+".html"), []byte(`<html data-sha="`+s+`">`), 0o600)
 		}
+		b, _ := json.Marshal(vs)
+		os.WriteFile(filepath.Join(d, "versions.json"), b, 0o600)
 	}
-	writeReport(e, report.Data{Repo: "o/r", Number: 7, SHA: sha(5)}) // reviewed again: the newest
-	vs := versions(reportPath(e))
-	if len(vs) != maxVersions || vs[0].SHA != sha(5) || vs[1].SHA != sha(maxVersions+1) || vs[0].At.IsZero() {
-		t.Fatalf("%+v", vs)
-	}
+	put("github.com/o/r/7", sha(5), sha(3))
+	put("gitlab.example.com/g/s/p/3", sha(1)) // a project in a subgroup
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /r/{path...}", serveReport)
 	get := func(p string) *httptest.ResponseRecorder {
@@ -129,18 +111,13 @@ func TestReportVersions(t *testing.T) {
 	if w := get("/r/github.com/o/r/7/" + sha(3)); w.Code != 200 || !strings.Contains(w.Body.String(), `data-sha="`+sha(3)) {
 		t.Fatal("a version:", w.Code)
 	}
-	if w := get("/r/github.com/o/r/7/versions"); w.Code != 200 || strings.Count(w.Body.String(), `"sha"`) != maxVersions {
+	if w := get("/r/github.com/o/r/7/versions"); w.Code != 200 || strings.Count(w.Body.String(), `"sha"`) != 2 {
 		t.Fatal("list:", w.Code, w.Body)
 	}
 	for _, p := range []string{"/r/github.com/o/r/7/" + sha(0), "/r/o/r/7", "/r/github.com/o/r/8", "/r/github.com/o/r/0", "/r/github.com/o/r/7/" + sha(5) + "/x"} {
 		if w := get(p); w.Code != 404 {
 			t.Fatal(p, w.Code)
 		}
-	}
-	gl := &forge.Event{Forge: "gitlab"} // a project in a subgroup
-	gl.Repository.FullName, gl.PullRequest.Number, gl.PullRequest.HTMLURL = "g/s/p", 3, "https://gitlab.example.com/g/s/p/-/merge_requests/3"
-	if u := writeReport(gl, report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != reportURL+"/r/gitlab.example.com/g/s/p/3" {
-		t.Fatal(u)
 	}
 	if w := get("/r/gitlab.example.com/g/s/p/3/" + sha(1)); w.Code != 200 {
 		t.Fatal("gitlab:", w.Code)

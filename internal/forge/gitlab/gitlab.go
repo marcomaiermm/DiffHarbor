@@ -39,18 +39,20 @@ var (
 // Hub takes GitLab's webhooks.
 type Hub struct{ secret string }
 
-// Setup reads GITLAB_URL, GITLAB_TOKEN, GITLAB_READ_TOKEN and GITLAB_WEBHOOK_SECRET and learns the bot's
-// username. ok is false when no GITLAB_TOKEN is set.
-func Setup() (h *Hub, ok bool, err error) {
-	if token = os.Getenv("GITLAB_TOKEN"); token == "" {
+// Config is the bot user: GITLAB_URL, GITLAB_TOKEN, GITLAB_READ_TOKEN and GITLAB_WEBHOOK_SECRET.
+type Config struct{ URL, Token, ReadToken, Secret string }
+
+// Setup checks cfg and learns the bot's username. ok is false when no GITLAB_TOKEN is set.
+func Setup(cfg Config) (h *Hub, ok bool, err error) {
+	if token = cfg.Token; token == "" {
 		return nil, false, nil
 	}
-	APIURL = strings.TrimSuffix(cmp.Or(os.Getenv("GITLAB_URL"), "https://gitlab.com"), "/") + "/api/v4"
-	h = &Hub{os.Getenv("GITLAB_WEBHOOK_SECRET")}
+	APIURL = strings.TrimSuffix(cmp.Or(cfg.URL, "https://gitlab.com"), "/") + "/api/v4"
+	h = &Hub{cfg.Secret}
 	if h.secret == "" {
 		return nil, true, errors.New("GITLAB_WEBHOOK_SECRET is empty")
 	}
-	if readToken = os.Getenv("GITLAB_READ_TOKEN"); readToken == "" {
+	if readToken = cfg.ReadToken; readToken == "" {
 		log.Println("gitlab: no GITLAB_READ_TOKEN, git gets GITLAB_TOKEN next to the PR's code")
 	}
 	var u struct {
@@ -65,6 +67,9 @@ func Setup() (h *Hub, ok bool, err error) {
 
 // Bot is the token user's username.
 func (*Hub) Bot() string { return Bot }
+
+// Boxes is false: GitLab lets only a comment's author tick its boxes.
+func (*Hub) Boxes() bool { return false }
 
 type apiError struct {
 	status int

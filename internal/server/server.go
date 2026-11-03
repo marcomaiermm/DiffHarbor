@@ -8,6 +8,7 @@ import (
 	"diffharbor/internal/forge"
 	"diffharbor/internal/forge/github"
 	"diffharbor/internal/forge/gitlab"
+	"diffharbor/internal/job"
 	"diffharbor/internal/proc"
 	"encoding/json"
 	"errors"
@@ -22,10 +23,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-)
-
-const (
-	maxLearnings = 30
 )
 
 var (
@@ -48,6 +45,25 @@ var (
 	}{cancel: func() {}}
 )
 
+// review runs a queued push's review unless a newer push of the PR is queued.
+func review(ctx context.Context, f forge.Forge, e *forge.Event) error {
+	key, queued := e.Key(), e.PullRequest.Head.SHA
+	latest.Lock()
+	current := latest.m[key] == queued
+	latest.Unlock()
+	if !current {
+		return nil
+	}
+	defer func() {
+		latest.Lock()
+		if latest.m[key] == queued {
+			delete(latest.m, key)
+		}
+		latest.Unlock()
+	}()
+	return job.Review(ctx, f, e)
+}
+
 // stop cancels the running job on key; reviewOnly spares a chat answer.
 func stop(key string, reviewOnly bool) {
 	running.Lock()
@@ -58,9 +74,15 @@ func stop(key string, reviewOnly bool) {
 	}
 }
 
+// Config is the forges the server takes webhooks from; one without credentials stays off.
+type Config struct {
+	GitHub github.Config
+	GitLab gitlab.Config
+}
+
 // Serve listens on :3000 until the process dies.
-func Serve() {
-	gh, on, err := github.Setup()
+func Serve(cfg Config) {
+	gh, on, err := github.Setup(cfg.GitHub)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -74,7 +96,7 @@ func Serve() {
 			}
 		}()
 	}
-	gl, on, err := gitlab.Setup()
+	gl, on, err := gitlab.Setup(cfg.GitLab)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -97,16 +119,17 @@ func Serve() {
 	queue := make(chan *forge.Event, 100)
 	go func() { // one job at a time
 		for e := range queue {
-			job := reviewPR
+			f := forges[e.Forge]
+			run := func(ctx context.Context) error { return review(ctx, f, e) }
 			if e.Kind != "pull_request" {
-				job = chat
+				run = func(ctx context.Context) error { return job.Chat(ctx, f, mentions[e.Forge], e) }
 			}
 			proc.KillOrphans() // what an earlier job's PR code left running, e.g. listening for this job's token
 			ctx, cancel := context.WithCancel(context.Background())
 			running.Lock()
 			running.key, running.review, running.cancel = e.Key(), e.Kind == "pull_request", cancel
 			running.Unlock()
-			if err := job(ctx, e); err != nil {
+			if err := run(ctx); err != nil {
 				log.Println(e.Key(), err)
 			}
 			cancel()
@@ -149,7 +172,7 @@ func Serve() {
 			delete(latest.m, e.Key()) // queued reviews of this PR skip
 			_ = os.Remove(pendingFile(e.Key()))
 			latest.Unlock()
-			_ = os.RemoveAll(reportDir(e)) // its code shouldn't outlive the PR
+			_ = os.RemoveAll(job.ReportDir(e)) //nolint:gosec // its code shouldn't outlive the PR; the path is the signed webhook's host, repo and number
 			stop(e.Key(), false)
 			return
 		case e.Kind == "pull_request" && actions[e.Action] && !e.PullRequest.Draft:
@@ -176,14 +199,14 @@ func Serve() {
 		case queue <- e:
 			w.WriteHeader(http.StatusAccepted)
 			if e.Kind != "pull_request" {
-				go seen(e)
+				go job.Seen(f, e)
 			}
 		default:
 			log.Println(e.Key(), "queue full") // GitHub: Redeliver resends it
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 	})
-	if reportURL != "" {
+	if job.ReportURL != "" {
 		http.HandleFunc("GET /r/{path...}", serveReport)
 	}
 	resume(queue)
@@ -196,13 +219,10 @@ func Serve() {
 	log.Fatal((&http.Server{Addr: ":3000", ReadHeaderTimeout: 10 * time.Second}).ListenAndServe())
 }
 
-// reports holds the reports; DirFS refuses "..", so a path can't leave it.
-var reports = os.DirFS(filepath.Join(proc.DataDir, "reports"))
-
 // serveReport serves a PR's report. Only the proxy's SSO stands in front of it: a report holds the PR's code.
 func serveReport(w http.ResponseWriter, r *http.Request) {
 	dir, sha, ok := reportRoute(r.PathValue("path"))
-	vs := versions(dir)
+	vs := job.Versions(dir)
 	h := w.Header()
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
@@ -226,7 +246,7 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self'; "+
 			"style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src data:; font-src data: https://cdn.jsdelivr.net; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 		//nolint:gosec // os.DirFS refuses .. and absolute paths: nothing outside the reports folder
-		http.ServeFileFS(w, r, reports, dir+"/"+cmp.Or(sha, vs[0].SHA)+".html")
+		http.ServeFileFS(w, r, job.Reports(), dir+"/"+cmp.Or(sha, vs[0].SHA)+".html")
 	}
 }
 

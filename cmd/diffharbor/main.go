@@ -3,22 +3,26 @@
 //	diffharbor       serve on :3000
 //	diffharbor login log in to a model subscription (ChatGPT/Codex) in Pi, stored in $DATA_DIR/pi
 //	diffharbor dry   review `git diff HEAD` of cwd, print JSON
-//	diffharbor bench [-n 3] [-j 4] [case...]   score reviews of known PRs (internal/bench)
 //	go test         self-check
 package main
 
 import (
+	"cmp"
 	"context"
 	"diffharbor/internal/agent"
-	"diffharbor/internal/bench"
+	"diffharbor/internal/forge/github"
+	"diffharbor/internal/forge/gitlab"
+	"diffharbor/internal/job"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/review"
 	"diffharbor/internal/server"
+	"diffharbor/internal/ticket"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 func dry() error {
@@ -44,7 +48,7 @@ func dry() error {
 func login() error {
 	fmt.Println("In Pi: /login -> OpenAI (ChatGPT Plus/Pro) -> Device code login, then /quit.")
 	c := exec.Command("pi")
-	c.Env = append(os.Environ(), "PI_CODING_AGENT_DIR="+agent.AuthDir)
+	c.Env = append(os.Environ(), "PI_CODING_AGENT_DIR="+agent.AuthDir())
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := c.Run(); err != nil {
 		return err
@@ -53,7 +57,28 @@ func login() error {
 	return err
 }
 
+// configure reads the server's settings from the env, the one place that does. Model keys and
+// <PROVIDER>_BASE_URL stay in the env: Pi's passes take them by name (agent.Matrix, agent.Proxies).
+func configure() server.Config {
+	proc.DataDir = cmp.Or(os.Getenv("DATA_DIR"), proc.DataDir)
+	proc.CacheDir = cmp.Or(os.Getenv("CACHE_DIR"), proc.CacheDir)
+	agent.Model, agent.VerifyModel = os.Getenv("REVIEW_MODEL"), os.Getenv("VERIFY_MODEL")
+	agent.FallbackModel, agent.FallbackVerifyModel = os.Getenv("FALLBACK_MODEL"), os.Getenv("FALLBACK_VERIFY_MODEL")
+	ticket.URL, ticket.APIKey = os.Getenv("ITSAPLAN_URL"), os.Getenv("ITSAPLAN_API_KEY")
+	job.ReportURL = strings.TrimSuffix(os.Getenv("REPORT_URL"), "/")
+	return server.Config{
+		GitHub: github.Config{
+			AppID: os.Getenv("GITHUB_APP_ID"), KeyB64: os.Getenv("GITHUB_APP_PRIVATE_KEY_B64"), Secret: os.Getenv("GITHUB_WEBHOOK_SECRET"),
+		},
+		GitLab: gitlab.Config{
+			URL: os.Getenv("GITLAB_URL"), Token: os.Getenv("GITLAB_TOKEN"), ReadToken: os.Getenv("GITLAB_READ_TOKEN"),
+			Secret: os.Getenv("GITLAB_WEBHOOK_SECRET"),
+		},
+	}
+}
+
 func main() {
+	cfg := configure()
 	if err := agent.Proxies(); err != nil {
 		log.Fatal(err)
 	}
@@ -63,16 +88,12 @@ func main() {
 		}
 		return
 	}
-	if len(os.Args) > 1 && (os.Args[1] == "dry" || os.Args[1] == "bench") {
-		agent.NoFallback = true // benches run on the configured model only: a usage limit stops them
-		f := dry
-		if os.Args[1] == "bench" {
-			f = func() error { return bench.Run(os.Args[2:]) }
-		}
-		if err := f(); err != nil {
+	if len(os.Args) > 1 && os.Args[1] == "dry" {
+		agent.NoFallback = true // the configured model only: a usage limit stops it
+		if err := dry(); err != nil {
 			log.Fatal(err)
 		}
 		return
 	}
-	server.Serve()
+	server.Serve(cfg)
 }

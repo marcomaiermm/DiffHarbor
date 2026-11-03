@@ -1,6 +1,6 @@
-// The review job: incremental diff, walkthrough comment, review with inline findings, resolving fixed threads.
-
-package server
+// Package job runs what a webhook asks for on one PR: a review (incremental diff, walkthrough comment, inline
+// findings, resolving fixed threads, the report) or an answer in a thread. It joins the review engine to a forge.
+package job
 
 import (
 	"cmp"
@@ -26,24 +26,11 @@ import (
 	"time"
 )
 
+// Review reviews the event's PR on f.
+//
 //nolint:gocognit,gocyclo // one job step by step, each step a few lines
-func reviewPR(ctx context.Context, e *forge.Event) (err error) {
-	key, queued := e.Key(), e.PullRequest.Head.SHA
-	f := forges[e.Forge]
-	latest.Lock()
-	current := latest.m[key] == queued
-	latest.Unlock()
-	if !current {
-		return nil // a newer push is queued
-	}
-	defer func() {
-		latest.Lock()
-		if latest.m[key] == queued {
-			delete(latest.m, key)
-		}
-		latest.Unlock()
-	}()
-
+func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
+	key := e.Key()
 	p, err := f.Open(e)
 	if err != nil {
 		return err
@@ -120,7 +107,7 @@ func reviewPR(ctx context.Context, e *forge.Event) (err error) {
 	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
 	outline := diff.Analyze(raw)
 	s.Outline = &outline
-	guide := reportURL != "" && cfg.Reports(len(prFiles)) // a large PR: a reading order and a report
+	guide := ReportURL != "" && cfg.Reports(len(prFiles)) // a large PR: a reading order and a report
 	// A diff past diff.Max: in parts once someone asked for them on this PR, else code first up to diff.Max.
 	s.State.Large = s.State.Large || e.Action == "large"
 	parts, omitted := diff.Filter(raw, only, cfg.IgnoreRe, cfg.Parts(s.State.Large))
@@ -198,7 +185,7 @@ func reviewPR(ctx context.Context, e *forge.Event) (err error) {
 		inline := len(diff.Paths(d))
 		kind += fmt.Sprintf(" · ⚠️ inline %d of %d files", inline, inline+omitted)
 		if all, _ := diff.Filter(raw, only, cfg.IgnoreRe, cfg.Parts(true)); cfg.Asks() && len(all) > len(parts) {
-			s.Ask = forge.AskLarge(len(diff.Paths(strings.Join(all, ""))), inline+omitted, len(all), e.Forge == "github", f.Bot())
+			s.Ask = forge.AskLarge(len(diff.Paths(strings.Join(all, ""))), inline+omitted, len(all), f.Boxes(), f.Bot())
 		}
 	}
 	if tid != "" {
@@ -255,8 +242,8 @@ func reviewPR(ctx context.Context, e *forge.Event) (err error) {
 	return nil
 }
 
-// reportURL is where the server serves reports (REPORT_URL, behind SSO); "" = no reports.
-var reportURL = strings.TrimSuffix(os.Getenv("REPORT_URL"), "/")
+// ReportURL is where the server serves reports (REPORT_URL, behind SSO); "" = no reports.
+var ReportURL string
 
 // maxVersions is the reports a PR keeps, one per reviewed head: the newest.
 const maxVersions = 10
@@ -268,15 +255,18 @@ func reportPath(e *forge.Event) string {
 	return cmp.Or(host, "github.com") + "/" + e.Repository.FullName + "/" + strconv.Itoa(e.PullRequest.Number)
 }
 
-// reportDir is where a PR's reports live.
-func reportDir(e *forge.Event) string {
+// Reports holds the reports; DirFS refuses "..", so a path can't leave it.
+func Reports() fs.FS { return os.DirFS(filepath.Join(proc.DataDir, "reports")) }
+
+// ReportDir is where a PR's reports live.
+func ReportDir(e *forge.Event) string {
 	return filepath.Join(proc.DataDir, "reports", filepath.FromSlash(reportPath(e)))
 }
 
-// versions is a PR's reports, newest first, by its reportPath; none when it has no readable list.
-func versions(path string) []report.Version {
+// Versions is a PR's reports, newest first, by its reportPath; none when it has no readable list.
+func Versions(path string) []report.Version {
 	var vs []report.Version
-	if b, err := fs.ReadFile(reports, path+"/versions.json"); err == nil { // os.DirFS: nothing outside the reports folder
+	if b, err := fs.ReadFile(Reports(), path+"/versions.json"); err == nil { // os.DirFS: nothing outside the reports folder
 		_ = json.Unmarshal(b, &vs)
 	}
 	return vs
@@ -287,8 +277,8 @@ func versions(path string) []report.Version {
 // none, and the last full one's line numbers may be stale.
 // ponytail: two reviews of a PR finishing at once can drop one's entry from versions.json; a lock per PR if it shows.
 func writeReport(e *forge.Event, d report.Data) string {
-	dir := reportDir(e)
-	vs := slices.DeleteFunc(versions(reportPath(e)), func(v report.Version) bool { return v.SHA == d.SHA })
+	dir := ReportDir(e)
+	vs := slices.DeleteFunc(Versions(reportPath(e)), func(v report.Version) bool { return v.SHA == d.SHA })
 	if len(vs) > 0 {
 		d.Prev = &vs[0]
 	}
@@ -315,7 +305,7 @@ func writeReport(e *forge.Event, d report.Data) string {
 	for _, v := range vs[len(keep):] {
 		_ = os.Remove(filepath.Join(dir, v.SHA+".html"))
 	}
-	return reportURL + "/r/" + reportPath(e)
+	return ReportURL + "/r/" + reportPath(e)
 }
 
 // atomicWrite writes f whole or not at all: a reader never gets half of it.

@@ -190,22 +190,6 @@ func EachNewLine(diff string, fn func(at, l string)) {
 	}
 }
 
-// Sub keeps the files of diff under dir, their header paths relative to it.
-func Sub(diff, dir string) string {
-	var b strings.Builder
-	EachFile(diff, func(p, f string) {
-		if !strings.HasPrefix(p, dir+"/") {
-			return
-		}
-		head, body, _ := strings.Cut(f, "\n@@")
-		for _, side := range []string{"a/", "b/"} {
-			head = strings.ReplaceAll(head, side+dir+"/", side)
-		}
-		b.WriteString(head + "\n@@" + body)
-	})
-	return b.String()
-}
-
 var oldRange = regexp.MustCompile(`(?m)^@@ -(\d+)(?:,(\d+))?`)
 
 // OldRanges is the lines of the old file a file's diff (or a patch of hunks) covers, context included: [from, to).

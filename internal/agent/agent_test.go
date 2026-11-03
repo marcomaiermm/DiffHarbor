@@ -62,8 +62,8 @@ func TestKeyEnv(t *testing.T) {
 }
 
 func TestMatrix(t *testing.T) {
-	defer func(d string) { AuthDir = d }(AuthDir)
-	AuthDir = t.TempDir() // no ChatGPT login
+	defer func(d string) { proc.DataDir = d }(proc.DataDir)
+	proc.DataDir = t.TempDir() // no ChatGPT login
 	for _, k := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "AWS_REGION", "AZURE_OPENAI_API_KEY"} {
 		t.Setenv(k, "")
 	}
@@ -75,7 +75,8 @@ func TestMatrix(t *testing.T) {
 	if d := Default(); FallbackFor(d, "review") != "deepseek/deepseek-flash:high" || FallbackFor(d, "verify") != "deepseek/deepseek-flash:off" {
 		t.Fatalf("anthropic + deepseek: fallback %q %q", FallbackFor(d, "review"), FallbackFor(d, "verify"))
 	}
-	os.WriteFile(filepath.Join(AuthDir, "auth.json"), []byte(`{"openai":{"type":"oauth"}}`), 0o600)
+	os.MkdirAll(AuthDir(), 0o700)
+	os.WriteFile(filepath.Join(AuthDir(), "auth.json"), []byte(`{"openai":{"type":"oauth"}}`), 0o600)
 	if d := Default(); d != "openai/gpt-6.1-terra:high" || FallbackFor(d, "review") != "anthropic/claude-sonnet-5-5:high" {
 		t.Fatalf("ChatGPT login first: %q, fallback %q", d, FallbackFor(d, "review"))
 	}

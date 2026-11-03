@@ -1,6 +1,6 @@
 // Chat: maintainers reply to our review threads or mention the app on the PR; Pi answers in the checkout.
 
-package server
+package job
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -44,6 +45,8 @@ func readLearnings(owner, repo string) string {
 	return learningsOf(owner) + learningsOf(repo)
 }
 
+const maxLearnings = 30
+
 // addLearning appends one rule to a repo or owner; the next reviews get the last maxLearnings of each in their system prompt.
 func addLearning(key, entry string) error {
 	f := learningsFile(key)
@@ -57,9 +60,9 @@ func addLearning(key, entry string) error {
 	return os.WriteFile(f, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
 }
 
-// seen puts 👀 on a maintainer's comment as soon as it is queued, before the worker gets to it.
-func seen(e *forge.Event) {
-	p, err := forges[e.Forge].Open(e)
+// Seen puts 👀 on a maintainer's comment as soon as it is queued, before the worker gets to it.
+func Seen(f forge.Forge, e *forge.Event) {
+	p, err := f.Open(e)
 	if err != nil {
 		log.Println(e.Key(), "reaction:", err)
 		return
@@ -67,16 +70,18 @@ func seen(e *forge.Event) {
 	p.React()
 }
 
+// Chat answers the event's comment on f, or reviews the PR when it asks for one; mention matches @bot.
+//
 //nolint:gocognit // one job step by step, each step a few lines
-func chat(ctx context.Context, e *forge.Event) error {
-	p, err := forges[e.Forge].Open(e)
+func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.Event) error {
+	p, err := f.Open(e)
 	if err != nil {
 		return err
 	}
 	if err := p.Refresh(); err != nil { // an issue_comment payload has no PR
 		return err
 	}
-	c, mention := e.Comment, mentions[e.Forge]
+	c := e.Comment
 	var about, convo strings.Builder
 	ours := false // a review thread we started: chat may resolve it
 
@@ -95,14 +100,11 @@ func chat(ctx context.Context, e *forge.Event) error {
 			}
 		}
 		if large := ticked || cmd == "review all"; large || cmd == "review" || cmd == "full review" {
-			latest.Lock()
-			latest.m[e.Key()] = e.PullRequest.Head.SHA
-			latest.Unlock()
 			e.Action = "manual" // anything but synchronize: full review
 			if large {
 				e.Action = "large"
 			}
-			return reviewPR(ctx, e)
+			return Review(ctx, f, e)
 		}
 		ns, err := p.Notes()
 		if err != nil {

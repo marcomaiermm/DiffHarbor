@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"diffharbor/internal/agent"
+	"diffharbor/internal/text"
 	"fmt"
 	"log"
 	"strconv"
@@ -37,8 +38,12 @@ func Explain(ctx context.Context, a Agent, dir, model, title string, decls []str
 	defer cancel()
 	reply, err := a.Continue(ctx, dir, "explain", explainSystem, b.String(), agent.PassModel(model, "low"))
 	var got map[string]string
-	if err != nil || !agent.Object(reply, &got) {
+	if err != nil {
 		log.Println("explain:", err)
+		return out
+	}
+	if !agent.Object(reply, &got) {
+		log.Printf("explain: no JSON, ends with %q", text.Tail(reply))
 		return out
 	}
 	for i := range out {

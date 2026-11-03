@@ -1,8 +1,26 @@
 package report
 
 import (
+	_ "embed" // the favicons and the logo
+	"encoding/base64"
 	"html"
 	"html/template"
+)
+
+var (
+	//go:embed favicon.svg
+	faviconSVG []byte
+	//go:embed favicon-32x32.png
+	faviconPNG []byte
+	//go:embed logo.png
+	logoPNG []byte
+	// logo is the header's logo (64 px, shown at 28), a data: URL like the favicons.
+	logo = template.HTML(`<img src="data:image/png;base64,` + base64.StdEncoding.EncodeToString(logoPNG) + //nolint:gosec // our own file, base64
+		`" alt="DiffHarbor" title="DiffHarbor" width="28" height="28" class="size-7 shrink-0">`)
+	// favicons are the page's icons as data: URLs, the only images its CSP allows; the PNG for browsers without SVG icons.
+	favicons = template.HTML(`<link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,` + //nolint:gosec // our own files, base64
+		base64.StdEncoding.EncodeToString(faviconPNG) + `">` + "\n" +
+		`<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,` + base64.StdEncoding.EncodeToString(faviconSVG) + `">`)
 )
 
 // icons are Lucide's (lucide.dev, ISC license, lucide-static 0.577.0): what goes inside each 24×24 svg.

@@ -34,7 +34,7 @@ func TestAppJWT(t *testing.T) {
 	if AppKey, err = LoadKey(base64.StdEncoding.EncodeToString(p)); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GITHUB_APP_ID", "42")
+	AppID = "42"
 	j, err := AppJWT()
 	if err != nil {
 		t.Fatal(err)

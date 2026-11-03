@@ -2,7 +2,6 @@ package checks
 
 import (
 	"context"
-	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
 	"os"
 	"os/exec"
@@ -138,10 +137,6 @@ func TestMonorepoChecks(t *testing.T) {
 	}
 	if strings.Contains(out, "timeout=4m ./.") { // svc/b.go has tests off
 		t.Errorf("tested a package with tests off:\n%s", out)
-	}
-	if got := diff.Sub("diff --git a/svc/b.go b/svc/b.go\n--- a/svc/b.go\n+++ b/svc/b.go\n@@ -1 +1 @@\n-a/svc/x\n+y\n"+
-		"diff --git a/o.go b/o.go\n+++ b/o.go\n@@ -1 +1 @@\n+z\n", "svc"); got != "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-a/svc/x\n+y\n" {
-		t.Errorf("subPatch: %q", got)
 	}
 }
 

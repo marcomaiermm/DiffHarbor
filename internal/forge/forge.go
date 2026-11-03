@@ -29,6 +29,8 @@ type Forge interface {
 	Parse(h http.Header, body []byte) (*Event, error)
 	// Open gets the access the jobs need for the event's PR.
 	Open(e *Event) (PR, error)
+	// Boxes reports whether a maintainer can tick a box in our comment (AskLarge); GitLab lets only its author.
+	Boxes() bool
 }
 
 // PR is one pull or merge request, opened for a job.

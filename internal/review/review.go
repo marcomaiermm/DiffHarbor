@@ -221,8 +221,8 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	head := fmt.Sprintf("# %s\n\n%s\n\n%s%s", in.Title, text.Truncate(in.Body, 2000), in.Ticket, hints.String())
 	vm := cmp.Or(verify, agent.PassModel(rm, cmp.Or(map[string]string{"high": "high"}[lvl], "medium")))
 	if len(in.Parts) == 1 {
-		// One pass over the whole diff. Bench 2026-10-24, gpt-6.1-sol on 12 real PRs over 25k: split into parts
-		// found 11/22, one pass 10/22 with a third fewer tokens and at most 205 s, so only a diff past diff.Max splits.
+		// One pass over the whole diff: about the findings of parts at a third fewer tokens, so only a diff past
+		// diff.Max splits.
 		block := fmt.Sprintf("## Diff\n\n```diff\n%s\n```\n", in.Parts[0])
 		p := runPart(ctx, in, "", head+block, block, m, vm)
 		return merge([]part{p}, m, vm, ci)

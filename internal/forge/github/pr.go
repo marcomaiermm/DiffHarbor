@@ -13,23 +13,25 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 )
 
 // Hub takes the App's webhooks.
 type Hub struct{ secret string }
 
+// Config is the App: GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY_B64 and GITHUB_WEBHOOK_SECRET.
+type Config struct{ AppID, KeyB64, Secret string }
+
 // Setup loads the App's key, checks the webhook secret and learns the App's slug. ok is false when no App is set.
-func Setup() (h *Hub, ok bool, err error) {
-	key := os.Getenv("GITHUB_APP_PRIVATE_KEY_B64")
-	if key == "" {
+func Setup(cfg Config) (h *Hub, ok bool, err error) {
+	if cfg.KeyB64 == "" {
 		return nil, false, nil
 	}
-	if AppKey, err = LoadKey(key); err != nil {
+	if AppKey, err = LoadKey(cfg.KeyB64); err != nil {
 		return nil, true, fmt.Errorf("GITHUB_APP_PRIVATE_KEY_B64: %w", err)
 	}
-	h = &Hub{os.Getenv("GITHUB_WEBHOOK_SECRET")}
+	AppID = cfg.AppID
+	h = &Hub{cfg.Secret}
 	if h.secret == "" {
 		return nil, true, errors.New("GITHUB_WEBHOOK_SECRET is empty")
 	}
@@ -49,6 +51,9 @@ func Setup() (h *Hub, ok bool, err error) {
 
 // Bot is the App's slug.
 func (*Hub) Bot() string { return Slug }
+
+// Boxes is true: ticking a box edits our comment, which GitHub allows users with write access.
+func (*Hub) Boxes() bool { return true }
 
 func verify(secret string, body []byte, sig string) bool {
 	m := hmac.New(sha256.New, []byte(secret))

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Repo}}{{.Forge.Ref}}{{.Number}} · {{.Title}}</title>
+{{favicons}}
 <!-- shadcn-html's components sit in @layer components: before Tailwind's base, or its preflight would win -->
 <style>@layer theme, base, components, utilities;</style>
 <!-- shadcn-html: the theme and the components the page uses, one request; the tokens below retune it -->
@@ -466,7 +467,8 @@ html { scroll-padding-top: 5rem; }
 
 <header class="sticky top-0 z-40 h-14 border-b bg-background/80 backdrop-blur-md">
   <div class="flex h-full items-center gap-2 px-3 lg:px-4">
-    <button type="button" class="sidebar-trigger -ml-1" id="nav-trigger" aria-label="Toggle the side bar" title="Toggle the side bar (⌘B)">{{icon "panel-left" ""}}</button>
+    {{logo}}
+    <button type="button" class="sidebar-trigger" id="nav-trigger" aria-label="Toggle the side bar" title="Toggle the side bar (⌘B)">{{icon "panel-left" ""}}</button>
     <div class="separator mx-1 h-4" data-orientation="vertical" role="none"></div>
     <nav class="breadcrumb min-w-0" aria-label="Pull request"><ol class="breadcrumb-list flex-nowrap text-[13px]">
       <li class="breadcrumb-item min-w-0">{{icon "git-pull-request" "size-4 shrink-0"}}<a href="{{.URL}}" class="breadcrumb-link truncate font-medium text-foreground">{{.Repo}}</a></li>

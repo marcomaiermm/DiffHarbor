@@ -22,6 +22,36 @@ linters:
       rules:
         main:
           allow: [$gostd, diffharbor] # stdlib only
+        # The package boundaries: the core knows no forge and no job, the forges no job, and job no server.
+        core:
+          files: ["**/internal/review/**", "**/internal/checks/**", "**/internal/agent/**", "**/internal/report/**",
+            "**/internal/diff/**", "**/internal/text/**", "**/internal/proc/**", "**/internal/ticket/**"]
+          deny:
+            - pkg: diffharbor/internal/forge
+              desc: the core knows no forge; job joins them
+            - pkg: diffharbor/internal/job
+              desc: job runs the core, not the other way round
+            - pkg: diffharbor/internal/server
+              desc: server is HTTP and the queue only
+        forge:
+          files: ["**/internal/forge/**"]
+          deny:
+            - pkg: diffharbor/internal/job
+              desc: a forge is a port and its adapters, it runs no job
+            - pkg: diffharbor/internal/server
+              desc: server is HTTP and the queue only
+        job:
+          files: ["**/internal/job/**"]
+          deny:
+            - pkg: diffharbor/internal/server
+              desc: server calls job
+            - pkg: diffharbor/internal/forge/
+              desc: jobs see a forge through the port (forge.Forge, forge.PR) only
+        leaf:
+          files: ["**/internal/diff/**", "**/internal/text/**"]
+          deny:
+            - pkg: diffharbor/internal
+              desc: diff and text are leaves
     gocognit:
       min-complexity: 50
     gocyclo:

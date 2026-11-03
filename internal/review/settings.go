@@ -224,7 +224,7 @@ func (cfg Settings) Keep(c Comment) bool {
 	return m == "" || rank[c.Severity] >= rank[m]
 }
 
-// RunsTests reports whether the RunsTests of path's package run.
+// RunsTests reports whether the tests of path's package run.
 func (cfg Settings) RunsTests(path string) bool {
 	_, t := cfg.At(path)
 	return t

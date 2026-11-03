@@ -73,15 +73,17 @@ var wip = regexp.MustCompile(`(?i)^(wip\b|fixup!|squash!|amend!|typo|lint|fmt\b|
 var page string
 
 var tmpl = template.Must(template.New("report").Funcs(template.FuncMap{
-	"short": func(s string) string { return s[:min(len(s), 7)] },
-	"inc":   func(i int) int { return i + 1 },
-	"add":   func(a, b int) int { return a + b },
-	"icon":  icon,
-	"has":   slices.Contains[[]string],
-	"seq":   func(n int) []int { return make([]int, n) },
-	"wip":   func(subject string) bool { return wip.MatchString(strings.TrimSpace(subject)) },
-	"dir":   func(p string) string { return p[:strings.LastIndex(p, "/")+1] }, // "a/b/" of a/b/c.go: muted, the name stands out
-	"base":  func(p string) string { return p[strings.LastIndex(p, "/")+1:] },
+	"short":    func(s string) string { return s[:min(len(s), 7)] },
+	"inc":      func(i int) int { return i + 1 },
+	"add":      func(a, b int) int { return a + b },
+	"icon":     icon,
+	"favicons": func() template.HTML { return favicons },
+	"logo":     func() template.HTML { return logo },
+	"has":      slices.Contains[[]string],
+	"seq":      func(n int) []int { return make([]int, n) },
+	"wip":      func(subject string) bool { return wip.MatchString(strings.TrimSpace(subject)) },
+	"dir":      func(p string) string { return p[:strings.LastIndex(p, "/")+1] }, // "a/b/" of a/b/c.go: muted, the name stands out
+	"base":     func(p string) string { return p[strings.LastIndex(p, "/")+1:] },
 	"tab": func(id, title string, n int, warn bool, first string) tab {
 		return tab{id, title, n, warn, id == first}
 	},

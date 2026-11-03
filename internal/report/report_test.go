@@ -76,7 +76,8 @@ func TestRender(t *testing.T) {
 		`id="tests"`, "api/handler_test.go: TestHandle", `id="api/handler_test.go"`, `id="other"`, `id="README.md"`,
 		`id="deleted"`, `id="gone.go"`, `id="commits"`, "Work in progress", "/merge_requests/7/diffs?commit_id=aaaaaaaaaa",
 	}
-	for _, w := range []string{"acme/shop!7 · Save", ">GitLab <svg"} { // the forge's own names
+	for _, w := range []string{"acme/shop!7 · Save", ">GitLab <svg", // the forge's own names
+		`<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2Zy`, `sizes="32x32" href="data:image/png;base64,iVBORw0KGgo`, `<img src="data:image/png;base64,iVBORw0KGgo`} { // the favicons, unescaped
 		if !strings.Contains(s, w) {
 			t.Errorf("%q missing", w)
 		}

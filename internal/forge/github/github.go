@@ -33,6 +33,8 @@ import (
 var (
 	// AppKey signs the App's JWTs (LoadKey).
 	AppKey *rsa.PrivateKey
+	// AppID is the App's ID, the JWTs' issuer.
+	AppID string
 	// Slug is the App's login, set at startup from GET /app: @Slug in a PR comment talks to the bot.
 	Slug   string
 	client = &http.Client{Timeout: time.Minute}
@@ -266,7 +268,7 @@ func AppJWT() (string, error) {
 	b64 := func(v any) string { b, _ := json.Marshal(v); return base64.RawURLEncoding.EncodeToString(b) }
 	now := time.Now().Unix()
 	data := b64(map[string]string{"alg": "RS256", "typ": "JWT"}) + "." +
-		b64(map[string]any{"iat": now - 60, "exp": now + 540, "iss": os.Getenv("GITHUB_APP_ID")})
+		b64(map[string]any{"iat": now - 60, "exp": now + 540, "iss": AppID})
 	sum := sha256.Sum256([]byte(data))
 	sig, err := rsa.SignPKCS1v15(nil, AppKey, crypto.SHA256, sum[:])
 	if err != nil {

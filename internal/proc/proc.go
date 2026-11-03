@@ -3,7 +3,6 @@ package proc
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"diffharbor/internal/text"
 	"errors"
@@ -20,10 +19,10 @@ import (
 var (
 	// AsPi runs git, checks and Pi as node: the server runs as root so they can't read its environ, i.e. the App key.
 	AsPi = os.Getuid() == 0
-	// DataDir is the data volume: logins, learnings, pending jobs.
-	DataDir = cmp.Or(os.Getenv("DATA_DIR"), filepath.Join(os.TempDir(), "diffharbor"))
-	// CacheDir is the cache: pnpm store, work dirs.
-	CacheDir = cmp.Or(os.Getenv("CACHE_DIR"), os.TempDir())
+	// DataDir is the data volume (DATA_DIR): logins, learnings, pending jobs.
+	DataDir = filepath.Join(os.TempDir(), "diffharbor")
+	// CacheDir is the cache (CACHE_DIR): pnpm store, work dirs.
+	CacheDir = os.TempDir()
 	// WorkDir is where Workspace makes its dirs; "" = the system temp dir.
 	WorkDir = ""
 )
@@ -146,7 +145,7 @@ func Remove(p string) error {
 
 // KillOrphans kills what PR code left running as node (a daemon from an install script that could read the next
 // job's git token or keys): node processes whose chain of node parents ends at init, i.e. outlived the process
-// that started them. A bench in another docker exec keeps its processes: their chain ends at a root process.
+// that started them. A dry run in another docker exec keeps its processes: their chain ends at a root process.
 func KillOrphans() {
 	if !AsPi {
 		return

@@ -21,10 +21,8 @@ import (
 	"time"
 )
 
-// MaxTools is the tool calls a pass gets (review-guard.js): gpt-6.1-sol needs at most 19 for a whole review,
-// deepseek-flash explored up to 90 (cost grows with calls). Bench 2026-10-24, deepseek-flash: 15 instead of 25
-// cost 12% less at the same recall. bench -tools tries others.
-var MaxTools = 15
+// maxTools is the tool calls a pass gets (review-guard.js): every call re-reads the context, so calls are most of the cost.
+const maxTools = 15
 
 // Matrix is the default review and verify model per provider, in order of preference, and what its passes
 // authenticate with. Without REVIEW_MODEL or review.json the first provider with credentials reviews and the next
@@ -33,7 +31,7 @@ var MaxTools = 15
 var Matrix = []Provider{
 	{Name: "openai", Review: "openai/gpt-6.1-terra:high", Verify: "openai/gpt-6-luna:low", Login: true, Proxy: true},
 	{Name: "anthropic", Review: "anthropic/claude-sonnet-5-5:high", Verify: "anthropic/claude-haiku-5-5:low", Proxy: true},
-	{Name: "deepseek", Review: "deepseek/deepseek-flash:high", Verify: "deepseek/deepseek-flash:off", Proxy: true}, // off: low's recall, 12% cheaper (bench 2026-10-24)
+	{Name: "deepseek", Review: "deepseek/deepseek-flash:high", Verify: "deepseek/deepseek-flash:off", Proxy: true}, // off: low's recall, cheaper
 	// Claude and GPT hosted by a cloud. global.: any region serves; eu./us. (REVIEW_MODEL) keep data in one.
 	// Bedrock signs with AWS credentials or a Bedrock API key.
 	{
@@ -77,23 +75,19 @@ func (p Provider) keyed() bool {
 }
 
 var (
-	// NoFallback stops passes from moving to a fallback: bench and dry run measure the configured model.
+	// NoFallback stops passes from moving to a fallback: a dry run uses the configured model only.
 	NoFallback bool
 	// Model is REVIEW_MODEL: set, it wins over review.json's review_model. Without ":level" the level is routed per PR.
-	Model = os.Getenv("REVIEW_MODEL")
-	// VerifyModel is VERIFY_MODEL (or review.json's verify_model) verifies the findings.
-	// Bench 2026-10-24: gpt-6-luna as verifier kept all real bugs (sol dropped some) at a 20th of the price;
-	// as reviewer it found half as many, so reviews stay on REVIEW_MODEL.
-	VerifyModel = os.Getenv("VERIFY_MODEL")
+	Model string
+	// VerifyModel is VERIFY_MODEL (or review.json's verify_model) verifies the findings: a small model does,
+	// reviews stay on REVIEW_MODEL.
+	VerifyModel string
 	// FallbackModel is FALLBACK_MODEL (provider/id[:level], key in KeyEnv; unset = the next provider in Matrix) takes over passes
 	// the primary can't serve: usage limit, outage, lost ChatGPT login. Pi already retried transient errors by then.
-	// Bench 2026-10-24, deepseek-flash: high review + low verify found
-	// 22/24 at $0.03 a case, high + high 10/12 at $0.05, low + low 19/24, max + max 42/48 at $0.07 and twice the time.
-	// On real PRs verify off (no thinking) cost 12% less than low at the same recall, high 15% more. deepseek-flash
-	// has no medium: Pi rounds it up to high.
-	FallbackModel = os.Getenv("FALLBACK_MODEL")
+	// deepseek-flash has no medium: Pi rounds it up to high.
+	FallbackModel string
 	// FallbackVerifyModel is FALLBACK_VERIFY_MODEL, the fallback for the verify pass.
-	FallbackVerifyModel = os.Getenv("FALLBACK_VERIFY_MODEL")
+	FallbackVerifyModel string
 	secretVar           = regexp.MustCompile(`KEY|SECRET|TOKEN`)
 	unavailable         = regexp.MustCompile(`(?i)usage limit|quota|rate.?limit|too many requests|\b(429|5\d\d)\b|overloaded|unavailable|capacity|ChatGPT login`)
 	// FallbackUntil is unix ms: until then passes go straight to the fallback.
@@ -112,8 +106,11 @@ func KeyEnv(provider string) string {
 	if k, ok := keyEnvs[provider]; ok {
 		return k
 	}
-	return strings.ToUpper(strings.ReplaceAll(provider, "-", "_")) + "_API_KEY"
+	return envName(provider) + "_API_KEY"
 }
+
+// envName is provider as an env var prefix: amazon-bedrock -> AMAZON_BEDROCK.
+func envName(provider string) string { return strings.ToUpper(strings.ReplaceAll(provider, "-", "_")) }
 
 func providerOf(model string) string {
 	p, _, _ := strings.Cut(model, "/")
@@ -127,7 +124,7 @@ func Available(provider string) bool {
 		return true
 	}
 	var logins map[string]json.RawMessage
-	b, err := os.ReadFile(filepath.Join(AuthDir, "auth.json")) //nolint:gosec // root-only data volume
+	b, err := os.ReadFile(filepath.Join(AuthDir(), "auth.json"))
 	return p.Login && err == nil && json.Unmarshal(b, &logins) == nil && logins[provider] != nil
 }
 
@@ -179,7 +176,7 @@ func Proxies() error {
 func proxies(f string) error {
 	providers := map[string]any{}
 	for _, r := range Matrix {
-		if u := os.Getenv(strings.ToUpper(strings.ReplaceAll(r.Name, "-", "_")) + "_BASE_URL"); u != "" && r.Proxy {
+		if u := os.Getenv(envName(r.Name) + "_BASE_URL"); u != "" && r.Proxy {
 			providers[r.Name] = map[string]string{"baseUrl": u}
 		}
 	}
@@ -239,8 +236,8 @@ func splitModel(m string) (base, lvl string, fixed bool) {
 
 // reviewLevel resolves the pass level against REVIEW_MODEL's fixed ":level".
 func reviewLevel(m, lvl string) string {
-	if _, fixed, ok := splitModel(m); ok {
-		return fixed
+	if _, own, fixed := splitModel(m); fixed {
+		return own
 	}
 	return lvl
 }
@@ -325,7 +322,7 @@ func runPiOn(ctx context.Context, dir, name, system, m string, tools bool, promp
 		}
 	}
 	args = append(args, promptArgs...)
-	env := append(append(proc.ToolEnv(), creds...), "PI_FFF_MODE=override", deadline, fmt.Sprintf("DIFFHARBOR_MAX_TOOLS=%d", MaxTools))
+	env := append(append(proc.ToolEnv(), creds...), "PI_FFF_MODE=override", deadline, fmt.Sprintf("DIFFHARBOR_MAX_TOOLS=%d", maxTools))
 	// stdin is /dev/null: pi -p waits for piped stdin otherwise.
 	out, err := proc.Run(proc.Command(ctx, filepath.Join(dir, "repo"), env, "pi", args...))
 	if err != nil {
@@ -340,7 +337,7 @@ func runPiOn(ctx context.Context, dir, name, system, m string, tools bool, promp
 }
 
 // AuthDir holds Pi's logins, written by `diffharbor login`.
-var AuthDir = filepath.Join(proc.DataDir, "pi")
+func AuthDir() string { return filepath.Join(proc.DataDir, "pi") }
 
 // Check reports a review model nobody can log in to: no key, or a ChatGPT login that doesn't work.
 func Check() error {
@@ -362,7 +359,7 @@ func OpenAIToken() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	c := exec.CommandContext(ctx, "pi", "auth", "print-bearer-token", "--provider", "openai", "--min-expiry", "20m")
-	c.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "PI_CODING_AGENT_DIR=" + AuthDir}
+	c.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "PI_CODING_AGENT_DIR=" + AuthDir()}
 	out, err := proc.Run(c)
 	token := strings.TrimSpace(string(out))
 	if err == nil && token == "" {

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -19,8 +18,8 @@ import (
 // must do. ITSAPLAN_URL (the API) and ITSAPLAN_API_KEY, an agent key with read access to the projects (x-api-key); unset = no ticket.
 var (
 	client    = &http.Client{Timeout: time.Minute}
-	URL       = os.Getenv("ITSAPLAN_URL")
-	APIKey    = os.Getenv("ITSAPLAN_API_KEY")
+	URL       string
+	APIKey    string
 	ticketKey = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{1,9})-([0-9]{1,6})\b`)
 )
 
