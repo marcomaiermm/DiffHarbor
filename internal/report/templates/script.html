@@ -12,7 +12,10 @@
   const wide = matchMedia("(min-width: 768px)");
   const rail = on => { bar.dataset.state = on ? "collapsed" : "expanded"; set("diffharbor:rail", on); };
   rail(!!get("diffharbor:rail"));
-  const toggleBar = () => wide.matches ? rail(bar.dataset.state === "expanded") : mobile.open ? mobile.close() : mobile.showModal();
+  // one copy of the side bar: the sheet borrows it while open, a big PR's is hundreds of KB
+  const lend = on => (on ? mobile : bar).append(...(on ? bar : mobile).querySelectorAll(":scope > :not(.sidebar-mobile-close)"));
+  mobile.addEventListener("close", () => lend(false));
+  const toggleBar = () => wide.matches ? rail(bar.dataset.state === "expanded") : mobile.open ? mobile.close() : (lend(true), mobile.showModal());
   document.getElementById("nav-trigger").addEventListener("click", toggleBar);
   addEventListener("keydown", e => {
     if (e.key.toLowerCase() === "b" && (e.metaKey || e.ctrlKey) && !e.altKey) { e.preventDefault(); toggleBar(); }

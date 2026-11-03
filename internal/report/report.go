@@ -5,9 +5,11 @@ package report
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"diffharbor/internal/assets"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
+	"diffharbor/internal/text"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -15,11 +17,15 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Data is what a report shows.
@@ -68,8 +74,12 @@ type tab struct {
 	On        bool // the first one: shown
 }
 
-// maxLines is the diff lines a file shows; the rest is on the PR's page.
-const maxLines = 3000
+// maxLines and maxBytes are the diff lines and their text a file shows; the rest is on the PR's page. Bytes too:
+// a generated file's lines (minified JSON, seed SQL) can be megabytes each.
+const maxLines, maxBytes = 3000, 100_000
+
+// maxGone is the lines a deleted file shows, and the code that moved out of it: what the PR drops is rarely read.
+const maxGone = 500
 
 // wip matches commit subjects that tell nothing about the change.
 var wip = regexp.MustCompile(`(?i)^(wip\b|fixup!|squash!|amend!|typo|lint|fmt\b|format\b|oops|tmp\b|\.+$|fix(es)?$|changes?$|updates?$|address(ed)? (review|comments|feedback)|(pr |review )(comments|feedback))`)
@@ -79,6 +89,51 @@ var wip = regexp.MustCompile(`(?i)^(wip\b|fixup!|squash!|amend!|typo|lint|fmt\b|
 //go:embed templates/*.html
 var templates embed.FS
 
+// css is styles.css with the Tailwind classes the templates use, compiled at build time: Tailwind's browser build
+// rescanned the whole page on each change, a tenth of a second on a big PR. tailwindcss is Tailwind's standalone
+// CLI, 4.3.4 like the Dockerfile's: the npm one resolves @import "tailwindcss" from whatever node_modules is nearby.
+//
+//go:generate tailwindcss -i styles.css -o styles.gen.css --minify
+//go:embed styles.gen.css
+var css string
+
+//go:embed styles.css
+var styles string
+
+// compile is styles.css compiled with the classes of ours and dir's templates. Without the CLI (the image has it),
+// ours: a class only dir's templates use does nothing.
+func compile(dir string) (string, error) {
+	if _, err := exec.LookPath("tailwindcss"); err != nil {
+		log.Println("report: no tailwindcss, the classes only", dir, "uses do nothing")
+		return css, nil
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	tmp, err := os.MkdirTemp("", "diffharbor-css-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp)
+	src := styles + "@source " + strconv.Quote(filepath.Join(abs, "*.html")) + ";\n"
+	if err := os.CopyFS(tmp, templates); err != nil { // tmp/templates/*.html, where styles.css looks
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "styles.css"), []byte(src), 0o600); err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	var out, stderr bytes.Buffer
+	c := exec.CommandContext(ctx, "tailwindcss", "-i", filepath.Join(tmp, "styles.css"), "--minify")
+	c.Env, c.Stdout, c.Stderr = []string{"PATH=" + os.Getenv("PATH")}, &out, &stderr // none of our keys
+	if err := c.Run(); err != nil {
+		return "", fmt.Errorf("tailwindcss: %w: %s", err, text.Truncate(stderr.String(), 300))
+	}
+	return out.String(), nil
+}
+
 var tmpl = template.Must(parseTemplates(nil))
 
 var funcs = template.FuncMap{
@@ -86,6 +141,7 @@ var funcs = template.FuncMap{
 	"inc":      func(i int) int { return i + 1 },
 	"add":      func(a, b int) int { return a + b },
 	"icon":     icon,
+	"css":      func() template.CSS { return template.CSS(css) }, //nolint:gosec // ours, compiled by Tailwind
 	"favicons": func() template.HTML { return favicons },
 	"logo":     func() template.HTML { return logo },
 	"has":      slices.Contains[[]string],
@@ -152,7 +208,13 @@ func Load(dir string) error {
 	if err := t.ExecuteTemplate(io.Discard, "report.html", prepare(Data{})); err != nil {
 		return fmt.Errorf("report: templates in %s: %w", dir, err)
 	}
-	tmpl = t
+	c := css
+	if m, _ := fs.Glob(d, "*.html"); len(m) > 0 {
+		if c, err = compile(dir); err != nil {
+			return fmt.Errorf("report: the CSS for %s: %w", dir, err)
+		}
+	}
+	tmpl, css = t, c
 	logo, favicons = images(img["logo.png"], img["favicon.svg"], img["favicon-32x32.png"])
 	return nil
 }
@@ -291,6 +353,9 @@ func prepare(d Data) view {
 		skim[r.Path][r.Line] = r.Why
 	}
 	runs := fold(slices.Concat(order, gone), files, skim)
+	for _, p := range gone { // after fold: the moves it finds are in the whole file
+		trim(files[p], runs)
+	}
 	for _, c := range d.Findings {
 		f := files[c.Path]
 		if f == nil {
@@ -392,6 +457,21 @@ func prepare(d Data) view {
 	return v
 }
 
+// trim cuts a deleted file to its first maxGone lines and what moved out of it, which the other side links to.
+func trim(f *file, runs map[int]run) {
+	if len(f.Lines) <= maxGone {
+		return
+	}
+	ls := f.Lines[:maxGone]
+	for _, l := range f.Lines[maxGone:] {
+		if runs[l.Run].Where != "" {
+			ls = append(ls, l)
+		}
+	}
+	f.Cut += len(f.Lines) - len(ls)
+	f.Lines = ls
+}
+
 // parse reads one file's diff into lines numbered as in the new file.
 func parse(p, f, note string) *file {
 	fl := &file{Path: p, Kind: diff.Kind(p), Note: note}
@@ -399,7 +479,7 @@ func parse(p, f, note string) *file {
 	if !ok {
 		return fl
 	}
-	n, o := 0, 0
+	n, o, size := 0, 0, 0
 	for l := range strings.SplitSeq("@@"+body, "\n") {
 		var ln line
 		switch {
@@ -424,7 +504,7 @@ func parse(p, f, note string) *file {
 		default: // "\ No newline at end of file", the trailing ""
 			continue
 		}
-		if len(fl.Lines) < maxLines {
+		if size += len(ln.Text); fl.Cut == 0 && len(fl.Lines) < maxLines && size <= maxBytes {
 			fl.Lines = append(fl.Lines, ln)
 		} else {
 			fl.Cut++

@@ -48,8 +48,11 @@ func TestReportVersions(t *testing.T) {
 	if err != nil || len(vs) != maxVersions || vs[0].SHA != sha(5) || vs[1].SHA != sha(maxVersions+1) || vs[0].At.IsZero() {
 		t.Fatalf("%+v", vs)
 	}
-	if _, err := Reports().Get(reportPath(e) + "/" + sha(0) + ".html"); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := Reports().Get(reportPath(e) + "/" + sha(0) + ".html.gz"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("kept a version past maxVersions:", err)
+	}
+	if _, err := Reports().Get(reportPath(e) + "/" + sha(5) + ".html.gz"); err != nil {
+		t.Fatal("the newest page:", err)
 	}
 	if err := DeleteReports(e); err != nil {
 		t.Fatal(err)

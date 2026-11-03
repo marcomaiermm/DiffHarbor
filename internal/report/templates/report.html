@@ -13,7 +13,6 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@5/index.css">
 {{template "theme" .}}
 <script>if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");</script>
-<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 <script src="https://cdn.jsdelivr.net/gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/tabs/tabs.js" defer></script>
 {{template "styles" .}}
 {{block "head" .}}{{end}}
@@ -27,7 +26,6 @@
 <aside class="app-sidebar" id="sidebar" data-state="expanded" aria-label="Report">{{template "nav" .}}</aside>
 <dialog class="sidebar-mobile" id="sidebar-mobile" aria-label="Report">
   <button type="button" class="sidebar-mobile-close" aria-label="Close">{{icon "x" ""}}</button>
-  {{template "nav" .}}
 </dialog>
 
 <main class="mx-auto w-full max-w-[1180px] min-w-0 flex-1 px-4 py-10 lg:px-10">

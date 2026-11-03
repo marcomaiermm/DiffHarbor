@@ -9,6 +9,8 @@ go test ./...
 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...
 ```
 
+The report's CSS is compiled: after changing `internal/report/styles.css` or a class in a template, run `go generate ./internal/report`. It needs [Tailwind's standalone CLI](https://github.com/tailwindlabs/tailwindcss/releases/tag/v4.3.4) 4.3.4 as `tailwindcss` on the `PATH`; the npm package resolves `tailwindcss` from whatever `node_modules` is nearby. The Docker build fails while `styles.gen.css` is stale.
+
 `diffharbor dry` in a checkout reviews `git diff HEAD` and prints the findings as JSON.
 
 ## Contributing

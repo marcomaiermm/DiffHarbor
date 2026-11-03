@@ -1,0 +1,421 @@
+/* The page's own CSS, on top of shadcn-html's components; Tailwind compiles it with the classes the templates use:
+   go generate ./internal/report writes styles.gen.css, the page carries that; with TEMPLATE_DIR, start compiles it again. */
+@import "tailwindcss" source(none);
+@source "./templates/*.html";
+@source inline("size-7 shrink-0"); /* icon.go's logo */
+@custom-variant dark (&:where(.dark, .dark *));
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-primary: var(--primary);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-diff-add: var(--diff-add);
+  --color-diff-del: var(--diff-del);
+}
+@layer base {
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground antialiased; font-feature-settings: "liga", "calt"; }
+  a { @apply underline-offset-4; }
+  a:where(:not([class])):hover { @apply underline; }
+  ::selection { background: color-mix(in oklab, var(--ring) 30%, transparent); }
+}
+/* the side bar: shadcn's, under the header, a rail at ⌘B; Linear's list, a ring per step that fills as its files get viewed */
+@property --p { syntax: "<number>"; inherits: false; initial-value: 0; }
+.app-sidebar { top: 3.5rem; height: calc(100dvh - 3.5rem); align-self: flex-start; }
+.sidebar-layout { min-height: calc(100dvh - 3.5rem); }
+.sidebar-header { @apply h-12 justify-between px-3 py-0; }
+.sidebar-content { @apply gap-0 px-2 py-3; }
+.sidebar-link { @apply h-7 min-w-0 gap-2 px-2 py-0 text-[13px] text-muted-foreground; }
+.sidebar-link:hover, .sidebar-link[aria-current] { @apply text-foreground; background: var(--sidebar-accent); }
+.sidebar-link > svg { @apply size-3.5; }
+.sidebar-badge { @apply bg-transparent px-0 font-mono font-normal tabular-nums text-muted-foreground/70; }
+.sidebar-group { @apply mt-4; }
+.sidebar-group > summary { @apply h-7 px-2 py-0 text-xs font-medium tracking-normal normal-case text-muted-foreground/70; }
+.sidebar-group > .sidebar-nav { padding: 0.125rem 0 0; }
+.app-sidebar .toggle-group .toggle, header .toggle-group .toggle { @apply h-7 min-w-7 gap-1.5 px-2 text-xs font-normal; }
+.app-sidebar[data-state="collapsed"] :is(.sidebar-header, .sidebar-files, .sidebar-group > summary, [data-view="tree"]) { display: none; }
+.app-sidebar[data-state="collapsed"] .sidebar-group { @apply mt-2; }
+.app-sidebar[data-state="collapsed"] .sidebar-link { @apply h-8; }
+/* flat by the reading order, or the tree of all files */
+html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-view="flow"] { display: none; }
+.nav-file { @apply relative flex h-6 min-w-0 items-center overflow-hidden rounded-md px-2 font-mono text-xs text-muted-foreground; }
+.nav-file:hover { @apply text-foreground; background: var(--sidebar-accent); }
+.nav-file[aria-current] { @apply text-foreground; }
+.sidebar-files .nav-file[aria-current]::before { content: ""; @apply absolute top-1 bottom-1 -left-[9px] w-px bg-foreground; }
+.nav-file.done { @apply opacity-45; }
+.tree { @apply text-[13px]; }
+.tree-group { padding-left: 0.875rem; }
+.tree-branch-trigger { @apply h-6 gap-1.5 px-1.5 py-0 font-mono text-xs text-muted-foreground; }
+.tree-branch-trigger:hover { background: var(--sidebar-accent); }
+.tree-branch-trigger > span { @apply truncate; }
+.tree-leaf.nav-file { @apply gap-1.5 pr-1.5 pl-[1.375rem]; }
+.tree-leaf.nav-file[aria-current] { background: var(--sidebar-accent); }
+.tree-leaf > svg { @apply size-3.5; }
+.tree-stat { @apply ml-auto shrink-0 pl-2 text-[10.5px] tabular-nums opacity-70; }
+.ring-p { @apply size-3.5 shrink-0 rounded-full border-[1.5px] p-[2px]; border-color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+  background: conic-gradient(var(--muted-foreground) calc(var(--p) * 1turn), transparent 0) content-box; }
+[aria-current] > .ring-p { border-color: var(--foreground); background-image: conic-gradient(var(--foreground) calc(var(--p) * 1turn), transparent 0); }
+[data-status="complete"] .ring-p { @apply relative border-ring bg-ring bg-clip-border; background-image: none; }
+[data-status="complete"] .ring-p::after { content: ""; @apply absolute inset-0 bg-background; /* Lucide's check */
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / 9px no-repeat; }
+/* a file: GitHub's sticky header, Geist's restraint */
+.collapsible.file { overflow: clip; }
+.file > summary { @apply sticky top-14 z-10 bg-background; }
+.file[open] > summary { @apply border-b; }
+.file .collapsible-chevron { transform: rotate(-90deg); }
+.file[open] > summary > .collapsible-chevron { transform: none; }
+.collapsible.file > .collapsible-content { padding: 0; color: inherit; font-size: inherit; }
+/* shadcn's badge, at the height of a line of the page */
+.badge { @apply h-5 shrink-0 gap-1 px-2 leading-none; }
+.viewed { @apply flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-xs font-normal whitespace-nowrap text-muted-foreground; }
+.viewed:hover { @apply text-foreground; }
+.viewed:has(:checked) { @apply bg-accent text-foreground; }
+.viewed .checkbox { @apply size-3.5; }
+.collapsible.seen > summary { @apply opacity-60; }
+/* shadcn's Trace: a row is an icon, a one-line title, a muted description, a chevron after it when it opens */
+.trace { @apply flex min-w-0 flex-col gap-2; }
+.trace-line { @apply flex w-fit max-w-full min-w-0 items-center gap-2 text-sm text-muted-foreground transition-colors; }
+:is(a, summary, button):hover > .trace-line, :is(a, button).trace-line:hover { @apply text-foreground; }
+.trace-line[data-status="pending"] { @apply opacity-60; }
+.trace-icon { @apply flex size-4 shrink-0 items-center justify-center; }
+.trace-icon svg { @apply pointer-events-none size-4; }
+.trace-title ~ .trace-icon { @apply -ml-1; }
+.trace-title { @apply min-w-0 truncate; }
+.trace-description { @apply shrink-0 tabular-nums text-muted-foreground/70; }
+.trace-collapsible > summary { @apply flex w-fit max-w-full min-w-0 cursor-pointer list-none rounded-md; }
+.trace-collapsible > summary::-webkit-details-marker { display: none; }
+.trace-collapsible[open] > summary .trace-chevron, .fold.open .trace-chevron { @apply rotate-90; }
+.trace-content { @apply mt-2 mb-1 ml-[7px] min-w-0 border-l pl-4 text-muted-foreground; }
+/* the diff in the syntax theme (review.json's syntax_theme), light or dark with the page */
+.diff { background: var(--diff-bg); color: var(--diff-fg); }
+.diff tr.add, .sl.add { background: var(--diff-add-bg); }
+.diff tr.del { background: var(--diff-del-bg); }
+.diff tr.hunk, .split-bar { background: var(--diff-hunk); color: var(--diff-muted); }
+/* a line's cells take no classes: Tailwind's browser build rescans every classed element on each change */
+.diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(1) { @apply w-px px-3 text-right whitespace-nowrap select-none; color: var(--diff-dim); }
+.diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(2) { @apply w-px pr-2 select-none; }
+.diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(3) { @apply pr-4 whitespace-pre; }
+.sl > .no { color: var(--diff-dim); }
+.diff tr.add > td:nth-child(2) { color: var(--diff-add); }
+.diff tr.del > td:nth-child(2) { color: var(--diff-del); }
+.diff .chg { border-radius: 2px; }
+.diff tr.add .chg, .sl.add .chg { background: rgb(158 206 106 / 0.38); }
+.diff tr.del .chg { background: rgb(247 118 142 / 0.36); }
+/* folded runs: moved code, imports, comments, whitespace */
+.diff tr.fold-head td, .split-fold { background: var(--diff-hunk); }
+.diff .trace-line { color: var(--diff-muted); font-size: 12px; }
+.diff .trace-line:hover, .diff a.trace-icon:hover { color: var(--diff-fg); }
+.diff .trace-description { color: var(--diff-dim); }
+.diff a.trace-icon { color: var(--diff-link); }
+.diff tbody.fold:not(.open) > tr:not(.fold-head) { display: none; }
+/* a hunk read: its lines go, its header stays to bring them back */
+.diff tr.gone { display: none; }
+.hunk-seen { @apply -ml-2 flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 font-sans text-[11px]; color: var(--diff-muted); }
+.hunk-seen:hover { color: var(--diff-fg); background: var(--diff-hover); }
+.hunk-seen > svg { @apply opacity-40; }
+.hunk-seen[aria-pressed="true"] { color: var(--diff-add); }
+.hunk-seen[aria-pressed="true"] > svg, .hunk-seen:hover > svg { @apply opacity-100; }
+/* JetBrains' side by side: old left, new right, a ribbon from what went to what came; blue changed, green added,
+   gray removed. Lines keep one height, so a ribbon is drawn from line numbers. */
+.diff > .split { display: none; }
+@media (min-width: 1024px) {
+  html[data-diff="split"] .diff > .split { display: block; }
+  html[data-diff="split"] .diff:has(> .split) > table { display: none; }
+}
+@media (max-width: 1023px) { .view-toggle { display: none; } }
+.split { @apply font-mono text-[12.5px]; }
+.split-bar { @apply flex h-7 items-center gap-2 px-4 text-xs; }
+.split-fold { @apply flex h-7 w-full cursor-pointer items-center gap-2 px-3 font-sans text-xs; color: var(--diff-muted); }
+.split-fold:hover { color: var(--diff-fg); }
+.split-fold.open .trace-chevron { rotate: 90deg; }
+.split-seg { display: grid; grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr); }
+.split-pane { @apply overflow-x-auto; scrollbar-width: none; }
+.split-gutter { display: block; background: var(--diff-hunk); }
+.sl { @apply flex h-5 w-max min-w-full leading-5 whitespace-pre; }
+.sl > .no { @apply w-12 shrink-0 pr-3 text-right select-none; }
+.sl > .code { @apply pr-4; }
+.sl.mod { background: var(--diff-mod); }
+.sl.mod .chg { background: var(--diff-mod-chg); }
+.sl.del { background: color-mix(in oklab, var(--diff-fg) 9%, transparent); }
+.sl.del > .code { @apply opacity-75; }
+.ribbon.mod { fill: var(--diff-mod); stroke: color-mix(in oklab, #7aa2f7 55%, transparent); }
+.ribbon.add { fill: rgb(158 206 106 / 0.16); stroke: rgb(158 206 106 / 0.55); }
+.ribbon.del { fill: color-mix(in oklab, var(--diff-fg) 10%, transparent); stroke: color-mix(in oklab, var(--diff-fg) 30%, transparent); }
+.split-note { @apply bg-background px-3 font-sans; }
+/* a step's changed declarations and which name which */
+.graph { @apply relative mt-2 flex flex-col overflow-hidden rounded-lg border bg-background; }
+.graph > .cy { height: 10rem; }
+.graph:fullscreen { @apply rounded-none border-0; }
+.graph:fullscreen > .cy { flex: 1; height: auto !important; }
+.graph-tools { @apply absolute top-2 right-2 z-10 shadow-xs; }
+.graph-tools > .btn { @apply size-7 bg-background text-muted-foreground hover:text-foreground; }
+.graph-tools svg { @apply size-3.5; }
+.graph-bar { @apply flex min-h-8 flex-wrap items-center gap-x-4 gap-y-1 border-t bg-muted/40 px-3 py-1.5 text-[11.5px] text-muted-foreground; }
+.graph-status { @apply min-w-0 flex-1 truncate; }
+.graph-status b { @apply font-mono font-medium text-foreground; }
+.graph-legend { @apply flex flex-wrap items-center gap-x-3 gap-y-1; }
+.graph-legend > span { @apply flex items-center gap-1.5 whitespace-nowrap; }
+.graph-legend i { @apply inline-block h-3 w-4 rounded-[3px] border; }
+.graph-legend i.line { @apply h-0.5 rounded-none border-0; }
+.graph:not([data-drawn]) > :not(.cy) { visibility: hidden; }
+/* the PR's directories and which use which: a row uses a column; darker the more declarations */
+.deps-wrap { @apply w-fit max-w-full rounded-lg border; }
+.deps { @apply border-separate border-spacing-0 font-mono text-xs; --use: #3b82f6; }
+.deps th, .deps td { @apply h-7 border-b border-r border-border/60 p-0 text-center tabular-nums; }
+.deps thead th { @apply sticky top-0 min-w-7 bg-muted/60 font-normal text-muted-foreground; }
+.deps thead th:first-child, .deps tbody th { @apply sticky left-0 z-[1] bg-background; }
+.deps tbody th { @apply max-w-72 px-0 text-left font-normal; }
+.deps tbody th a { @apply flex h-7 items-center gap-2 truncate pr-3 text-foreground hover:underline; }
+.deps tbody { counter-reset: row; }
+.deps-no { @apply w-7 shrink-0 text-center text-muted-foreground tabular-nums; }
+.deps-no::before { counter-increment: row; content: counter(row); }
+.deps td.d-use { background: color-mix(in oklab, var(--use) min(75%, calc(12% + var(--n) * 9%)), transparent); @apply font-medium text-foreground; }
+.deps td.d-back { @apply bg-destructive/25 font-semibold text-destructive; }
+.deps td.d-self { @apply bg-muted/70 text-muted-foreground; }
+.deps td[data-n] { @apply cursor-default; }
+.deps :is(td, th).hl { box-shadow: inset 0 0 0 999px color-mix(in oklab, currentColor 7%, transparent); }
+.deps td.at { @apply outline-2 -outline-offset-2 outline-foreground; }
+.deps-card > summary { @apply cursor-pointer list-none; }
+.deps-card > summary::-webkit-details-marker { display: none; }
+.deps-card > summary .card-title { @apply flex items-center gap-1.5; }
+.deps-card[open] > summary .trace-chevron { @apply rotate-90; }
+.deps-say { @apply mt-2 min-h-5 text-xs text-muted-foreground; }
+.deps-say b { @apply font-mono font-medium text-foreground; }
+/* shadcn's contains the wheel (a sideways one kept it from the page) and draws the thumb in --border, which vanishes
+   on the code's background: a thumb mixed from the text it scrolls */
+.scroll-area { overscroll-behavior: auto; scrollbar-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent) transparent; }
+.inv-lines, .sym-sig { scrollbar-color: color-mix(in oklab, var(--diff-fg) 35%, transparent) transparent; }
+/* what the PR did to its declarations, a tab per kind */
+.inv-tabs { @apply flex w-max min-w-full; }
+.inv-tabs .tab-trigger { @apply gap-2 px-3 text-[13px]; }
+.inv-count { @apply h-4 px-1.5 text-muted-foreground tabular-nums; }
+.inv-hint { @apply mb-1 text-xs text-muted-foreground; }
+.inv-item { @apply border-t py-2.5 first:border-t-0; }
+.inv-row { @apply flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm; }
+.inv-name { @apply font-mono font-semibold hover:underline; }
+.inv-path { @apply min-w-0 truncate font-mono text-xs text-muted-foreground; }
+.inv-n { @apply ml-auto flex shrink-0 gap-1.5 font-mono text-xs tabular-nums; }
+.inv-n ins { @apply text-diff-add no-underline; }
+.inv-n del { @apply text-diff-del no-underline; }
+.inv-sub { @apply mt-0.5 flex max-w-[80ch] min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground; }
+.inv-sub > span { @apply truncate; }
+.inv-sub svg { @apply size-3.5 shrink-0; }
+/* scrolls in itself; the edge with more past it fades out */
+.inv-scroll {
+  @apply -mr-2 max-h-[30rem] overflow-y-auto pr-2;
+  --above: 0px; --below: 0px;
+  mask-image: linear-gradient(transparent, #000 var(--above), #000 calc(100% - var(--below)), transparent);
+}
+.inv-scroll[data-above="true"] { --above: 2.5rem; }
+.inv-scroll[data-below="true"] { --below: 4rem; }
+/* shadcn's scroll button: while more is below, a page further down */
+.inv-down { @apply invisible absolute bottom-3 left-1/2 size-8 -translate-x-1/2 rounded-full bg-background opacity-0 shadow-md; }
+.inv-down svg { @apply size-4; }
+.inv-scroll[data-below="true"] + .inv-down { @apply visible opacity-100; }
+.inv-move { @apply mt-1 flex min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground; }
+.inv-move svg { @apply size-3.5 shrink-0; }
+.inv-move a { @apply flex min-w-0 items-baseline gap-1.5 truncate rounded-sm font-mono text-xs text-foreground underline decoration-border underline-offset-4 hover:decoration-current; }
+.inv-move del { @apply text-diff-del decoration-diff-del/50; }
+.inv-move del + span { @apply text-muted-foreground; }
+.inv-lines { @apply mt-1.5 grid max-w-full rounded-md border font-mono text-xs; background: var(--diff-bg); color: var(--diff-fg); }
+.inv-lines code { @apply px-2 py-0.5 whitespace-pre; }
+.inv-lines .add { background: var(--diff-add-bg); }
+.inv-lines .add::before { content: "+ "; color: var(--diff-add); }
+.inv-lines .del { background: var(--diff-del-bg); }
+.inv-lines .del::before { content: "− "; color: var(--diff-del); }
+/* changed code that the rest of the repo uses */
+.reach-item > summary { @apply justify-start gap-2 py-2 text-sm font-normal hover:no-underline; }
+.reach-item > summary a { @apply font-mono font-semibold hover:underline; }
+.reach-path { @apply min-w-0 truncate font-mono text-xs text-muted-foreground; }
+.reach-n { @apply ml-auto shrink-0 text-xs text-muted-foreground tabular-nums; }
+.reach-item ul { @apply mb-3 space-y-1 text-xs; }
+.reach-item li { @apply flex min-w-0 items-baseline gap-2; }
+.reach-item li > a { @apply shrink-0 font-mono text-muted-foreground hover:text-foreground hover:underline; }
+.reach-item li > code { @apply min-w-0 truncate rounded px-1.5 py-0.5 font-mono; background: var(--diff-bg); color: var(--diff-fg); }
+/* before you merge: a kind per row, its label left; what it found as chips that jump to the diff */
+.merge-row { @apply grid items-baseline gap-x-6 gap-y-1.5 border-t py-3 first:border-t-0 first:pt-0 last:pb-0 sm:grid-cols-[10rem_1fr]; }
+.merge-row > h3 { @apply flex items-center gap-1.5 text-sm font-medium; }
+.merge-row > h3 svg { @apply size-3.5 shrink-0 text-muted-foreground; }
+.merge-row[data-warn] > h3, .merge-row[data-warn] > h3 svg { @apply text-destructive; }
+.merge-hint { @apply max-w-[72ch] text-[13px] text-muted-foreground; }
+.merge-items { @apply mt-2 flex flex-wrap gap-1.5; }
+.merge-items a { @apply inline-flex max-w-full min-w-0 items-baseline gap-1.5 rounded-md border px-2 py-0.5 text-xs hover:bg-muted; }
+.merge-items code { @apply min-w-0 truncate font-mono text-foreground; }
+.merge-items span { @apply shrink-0 text-muted-foreground; }
+.merge-items [data-warn] { @apply border-destructive/40; }
+.merge-items [data-warn] span { @apply text-destructive; }
+.merge-commits { @apply mt-2 space-y-1 text-xs; }
+.merge-commits li { @apply flex min-w-0 items-baseline gap-2; }
+.merge-commits li > a { @apply shrink-0 font-mono text-muted-foreground hover:text-foreground hover:underline; }
+.merge-commits li > span { @apply min-w-0 truncate; }
+.merge-commits li > code { @apply ml-auto shrink-0 font-mono text-muted-foreground max-sm:hidden; }
+.other { @apply border-t py-2.5 first:border-t-0 first:pt-0 last:pb-0; }
+.other-row { @apply flex min-w-0 items-baseline gap-2 text-sm; }
+.other-row > a { @apply shrink-0 font-mono text-muted-foreground hover:text-foreground hover:underline; }
+.other-row > span:first-of-type { @apply min-w-0 truncate font-medium; }
+.other-row .badge { @apply shrink-0; }
+.other-row .badge[data-variant="destructive"] { @apply border-destructive/30 bg-destructive/10 text-destructive; }
+.other-by { @apply ml-auto shrink-0 text-xs text-muted-foreground; }
+.other-files { @apply mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-xs text-muted-foreground; }
+.other-files a { @apply hover:text-foreground hover:underline; }
+.other-files a[data-clash] { @apply text-destructive; }
+/* versions: the header's picker, a newer one's banner; since the last one the changed files carry a blue mark */
+.version-pick { @apply h-7 max-w-44 rounded-md border bg-background pr-1 pl-2 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50; }
+.merge-row > * { @apply min-w-0; }
+/* what needs a person before reading the diff: a tab per kind, the first one with something open */
+.attend { @apply gap-0 pt-1 pb-0; }
+.attend > .scroll-area { @apply px-3; scrollbar-width: none; }
+.attend > .scroll-area::-webkit-scrollbar { display: none; }
+.attend .card-content { @apply px-6 py-5; }
+.inv-count[data-warn] { @apply bg-destructive/10 text-destructive; }
+.tab-hint { @apply mb-4 max-w-[80ch] text-[13px] text-muted-foreground; }
+.tab-hint code { @apply font-mono text-foreground; }
+.since-head .tab-hint { @apply mb-0; }
+/* since the last version: one line per kind, gone or fixed struck through as in a diff */
+.since-head { @apply mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2; }
+.since-rows { @apply grid grid-cols-[5.5rem_1fr] items-baseline gap-x-4 gap-y-2 text-xs; }
+.since-rows dt { @apply text-muted-foreground; }
+.since-rows dt[data-warn] { @apply text-destructive; }
+.since-rows dd { @apply min-w-0; }
+.since-rows li { @apply truncate; }
+.since-rows li + li { @apply mt-1; }
+.since-list { @apply flex flex-wrap gap-x-3 gap-y-1 font-mono; }
+.since-list a { @apply hover:underline; }
+.since-list small { @apply ml-1 font-sans text-[11px]; color: var(--ring); }
+.since-rows s { @apply text-muted-foreground decoration-muted-foreground/60; }
+.since-same { @apply text-[13px] text-muted-foreground; }
+.badge.changed { color: var(--ring); border-color: color-mix(in oklab, var(--ring) 35%, transparent); }
+.nav-file[data-changed]::after { content: ""; @apply ml-auto size-1.5 shrink-0 rounded-full; background: var(--ring); }
+.tree-leaf.nav-file[data-changed]::after { @apply ml-1.5; }
+html[data-since] details.file:not([data-changed]), html[data-since] [id^="step-"]:not(:has(details.file[data-changed])),
+html[data-since] .sidebar-files li:not(:has([data-changed])) { display: none; }
+.reach-item li > .btn { @apply h-auto p-0; }
+/* a graph's right-click menu, shadcn's dropdown */
+.gmenu { position: fixed; inset: auto; @apply min-w-56; box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.25); }
+.gmenu > p { @apply max-w-80 truncate px-2 pt-1 pb-1.5 font-mono text-xs text-muted-foreground; }
+.gmenu > button:focus { @apply bg-accent; }
+.gmenu > button > svg { @apply size-3.5 shrink-0 text-muted-foreground; }
+.gmenu > button > kbd { @apply ml-auto; }
+/* the declarations a long file changes, each a jump to its first changed line */
+.change { @apply font-mono hover:bg-accent hover:text-foreground; }
+.change[data-state="new"]::before { content: "+"; @apply text-diff-add; }
+.change[data-state="gone"] { @apply line-through decoration-diff-del/60; }
+/* a name in the diff the repo declares: hover for what it is, click for every place that names it */
+.diff .sym { cursor: pointer; text-decoration: underline dotted color-mix(in oklab, currentColor 40%, transparent); text-underline-offset: 3px; }
+.diff .sym:hover { text-decoration-color: currentColor; }
+/* the hover card: kind, name, where; the signature in the code's colors; the doc; a footer that says what a click does */
+.sym-pop { margin: 0; @apply max-h-[min(30rem,70vh)] w-[min(32rem,calc(100vw-2rem))] overflow-y-auto p-0 text-[13px];
+  box-shadow: 0 1px 1px rgb(0 0 0 / 0.04), 0 8px 16px -4px rgb(0 0 0 / 0.1), 0 24px 48px -12px rgb(0 0 0 / 0.18); }
+.dark .sym-pop { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.03), 0 24px 48px -12px rgb(0 0 0 / 0.7); }
+@media (prefers-reduced-motion: no-preference) {
+  .sym-pop:popover-open { transition: opacity 140ms ease, translate 140ms cubic-bezier(.2, .7, .2, 1); }
+  @starting-style { .sym-pop:popover-open { opacity: 0; translate: 0 4px; } }
+}
+/* a renamed or re-signed declaration: the old line on top, its differing part red; below it the same line gets that
+   part changed as in nvim: the cursor on it, viw selects it, s deletes it, the new one is typed, Esc; then the new
+   part takes its diff tint. It plays each time the card opens. */
+.sym-morph .m-was, .sym-morph .m-now { @apply block; }
+.sym-morph .m-was { opacity: 0.6; }
+.sym-morph .m-was del { @apply rounded-xs no-underline; background: color-mix(in oklab, var(--diff-del) 28%, transparent); }
+.sym-morph .m-now del { font-size: 0; }
+.sym-morph .m-now ins { @apply rounded-xs no-underline; background: color-mix(in oklab, var(--diff-add) 28%, transparent); }
+/* nvim's cursors, taking no room: a block that inverts the letter under it, a bar while inserting */
+.sym-morph .m-cur { @apply invisible relative inline-block w-0 align-top; height: 1lh; } /* not opacity: that would isolate the blend */
+.sym-morph .m-cur::after { @apply absolute inset-y-0 left-0 w-[1ch] content-['']; background: #fff; mix-blend-mode: difference; }
+.sym-morph .m-cur.bar::after { @apply w-[0.25ch]; background: var(--diff-fg); mix-blend-mode: normal; } /* nvim's ver25 in the theme's text color */
+.sym-morph .m-cur.esc::after { left: -1ch; }
+@media (prefers-reduced-motion: no-preference) {
+  .sym-morph .m-now del { animation: m-sel 750ms backwards; }
+  .sym-morph .m-now ins { animation: m-plain var(--t) backwards; }
+  .sym-morph .m-now ins > span { animation: m-hold var(--d); }
+  .sym-morph .m-cur { animation: m-cur var(--for) var(--on); }
+}
+@keyframes m-sel { from, to { font-size: 1em; } from, 39% { background: transparent; }
+  40%, to { background: color-mix(in oklab, var(--diff-fg) 25%, transparent); } }
+@keyframes m-plain { from, to { background: transparent; } }
+@keyframes m-hold { from, to { font-size: 0; } }
+@keyframes m-cur { from, to { visibility: visible; } }
+.sym-card > .inv-move { @apply mt-0; }
+.sym-card + .sym-card { @apply border-t border-dashed; }
+.sym-card { @apply space-y-2.5 p-3.5; }
+.sym-head { @apply flex min-w-0 items-center gap-2; }
+.sym-name { @apply truncate font-mono text-[13px] font-semibold tracking-tight; }
+.sym-pkg { @apply font-normal text-muted-foreground; }
+.sym-at { @apply ml-auto flex min-w-0 shrink items-center gap-1 font-mono text-[11px] text-muted-foreground hover:text-foreground; }
+.sym-at > span { @apply truncate; }
+.sym-at > svg { @apply size-3 shrink-0; }
+.kind { @apply h-[18px] px-1.5 font-mono text-[10.5px]; }
+.kind::before { content: ""; @apply size-1.5 rounded-full; background: var(--k, var(--muted-foreground)); }
+.kind[data-k="func"], .kind[data-k="method"], .kind[data-k="function"], .kind[data-k="fn"], .kind[data-k="def"] { --k: #3b82f6; }
+.kind[data-k="type"], .kind[data-k="interface"], .kind[data-k="class"], .kind[data-k="struct"], .kind[data-k="trait"], .kind[data-k="enum"] { --k: #a855f7; }
+.kind[data-k="const"], .kind[data-k="var"], .kind[data-k="let"] { --k: #f59e0b; }
+.kind[data-k^="field"], .kind[data-k^="method of"] { --k: #14b8a6; }
+.sym-sig { @apply rounded-lg px-3 py-2.5 font-mono text-xs leading-5 whitespace-pre; background: var(--diff-bg); color: var(--diff-fg);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--diff-fg) 8%, transparent); }
+.sym-doc { @apply line-clamp-4 text-[13px] leading-relaxed text-pretty text-muted-foreground; }
+.sym-foot { @apply flex items-center gap-3 border-t bg-muted/50 px-3.5 py-2 text-xs text-muted-foreground; }
+.sym-foot strong { @apply font-medium text-foreground tabular-nums; }
+.sym-all { @apply -my-1 ml-auto; }
+kbd { @apply inline-flex h-[18px] min-w-[18px] items-center justify-center gap-0.5 rounded border bg-background px-1 font-sans text-[10.5px] text-muted-foreground; box-shadow: 0 1px 0 var(--border); }
+kbd > svg { @apply size-2.5; }
+/* Find usages: shadcn's sheet, the places a name is named, by file, each line in the code's colors */
+dialog.sheet { width: min(44rem, 100vw); overflow-y: auto; overscroll-behavior: contain; }
+dialog.sheet > .sheet-content { min-height: 100%; }
+.sheet-kicker { @apply mb-2 flex items-center gap-2; }
+.sheet-title { @apply font-mono tracking-tight; }
+.uses-file { @apply mt-5 overflow-hidden rounded-lg border; }
+.uses-file > h3 { @apply flex min-w-0 items-center gap-2 border-b bg-muted/50 px-3 py-1.5 font-mono text-xs font-normal text-muted-foreground; }
+.uses-file > h3 > span { @apply truncate; }
+.sidebar-mobile .sidebar-header { padding-right: 3rem; }
+.uses-file > h3 > svg, #uses a > svg { @apply size-3.5 shrink-0; }
+.uses-file > h3 > b { @apply ml-auto font-normal tabular-nums; }
+.uses-file > ol { background: var(--diff-bg); color: var(--diff-fg); }
+.use { @apply flex min-w-0 items-baseline gap-3 px-3 font-mono text-xs leading-6; }
+.use:hover { background: var(--diff-hover); }
+.use > .no { @apply w-8 shrink-0 text-right tabular-nums select-none; color: var(--diff-dim); }
+.use > code { @apply min-w-0 flex-1 truncate whitespace-pre; }
+.use > code mark { @apply rounded-sm bg-transparent; color: inherit; box-shadow: inset 0 -2px 0 color-mix(in oklab, #f59e0b 70%, transparent); }
+.use > .in { @apply shrink-0 font-sans text-[11px]; color: var(--diff-muted); }
+/* shadcn's statistic, sized for a row of eight */
+.stats .statistic-title { @apply text-xs; }
+.stats .statistic-value { @apply text-xl font-semibold; }
+.stat-unit { @apply ml-1 text-sm font-normal tracking-normal text-muted-foreground; }
+/* the commits: shadcn's timeline, a dot filled for a step, hollow for work in progress */
+.commits .timeline-item { @apply pb-3; }
+.commits .timeline-title { @apply hover:underline; }
+/* one case told twice, as a diff tells it: what happened before, what happens now */
+.lead { @apply mt-3 max-w-[60ch] text-[17px] leading-snug font-medium tracking-[-0.01em] text-pretty; }
+.summary { @apply mt-3 max-w-[68ch] text-[15px] text-pretty text-muted-foreground; }
+.summary[data-under] { @apply mt-2 text-sm; }
+.story { @apply grid overflow-hidden rounded-lg border text-[13.5px] leading-relaxed @2xl:grid-cols-2; }
+.story > div { --c: var(--diff-del); @apply px-3.5 py-2.5; background: var(--diff-del-bg); }
+.story > div + div { @apply border-t border-dashed @2xl:border-t-0 @2xl:border-l; }
+.story > [data-side="after"] { --c: var(--diff-add); background: var(--diff-add-bg); }
+.story b { @apply mb-1 flex items-center gap-1.5 font-mono text-[11px] font-medium tracking-[0.08em] uppercase; color: color-mix(in oklab, var(--c) 85%, var(--foreground)); }
+.story b > span { @apply text-[13px] tracking-normal; color: var(--c); }
+.story p { @apply text-pretty text-muted-foreground; }
+.story [data-side="after"] p { @apply text-foreground; }
+/* motion only where it tells where you are: the page settling in, folds opening, rings filling, the jump target lighting up */
+:root { interpolate-size: allow-keywords; }
+html { scroll-padding-top: 5rem; }
+@media (prefers-reduced-motion: no-preference) {
+  html, .inv-scroll { scroll-behavior: smooth; }
+  .inv-down { transition: opacity 150ms ease, visibility 150ms; }
+  .rise > * { animation: rise 500ms cubic-bezier(.2, .7, .2, 1) both; }
+  .rise > :nth-child(2) { animation-delay: 60ms; } .rise > :nth-child(3) { animation-delay: 120ms; }
+  .rise > :nth-child(4) { animation-delay: 180ms; } .rise > :nth-child(n+5) { animation-delay: 240ms; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+  .ring-p { transition: --p 400ms ease, border-color 200ms ease, background-color 200ms ease; }
+  #progress { transition: width 400ms ease; }
+  .trace-chevron { transition: rotate 150ms ease; }
+  .diff tbody.fold > tr { transition: opacity 200ms ease, display 200ms allow-discrete; }
+  @starting-style { .diff tbody.fold.open > tr { opacity: 0; } }
+  .flash > tr, tr.flash, .sl.flash, .flash.collapsible { animation: flash 1.6s ease-out; }
+  @keyframes flash { from { background-color: rgb(82 168 255 / 0.3); } }
+}
