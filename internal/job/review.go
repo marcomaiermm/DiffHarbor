@@ -3,7 +3,9 @@
 package job
 
 import (
+	"bytes"
 	"cmp"
+	"compress/gzip"
 	"context"
 	"diffharbor/internal/agent"
 	"diffharbor/internal/checks"
@@ -322,8 +324,13 @@ func writeReport(e *forge.Event, d report.Data) string {
 	now.At = time.Now()
 	vs = slices.Insert(vs, 0, now)
 	keep := vs[:min(len(vs), maxVersions)]
-	if err == nil {
-		err = s.Put(dir+"/"+d.SHA+".html", b)
+	if err == nil { // compressed once at its best: /r/ sends it as it is
+		var z bytes.Buffer
+		zw, _ := gzip.NewWriterLevel(&z, gzip.BestCompression)
+		_, _ = zw.Write(b)
+		if err = zw.Close(); err == nil {
+			err = s.Put(dir+"/"+d.SHA+".html.gz", z.Bytes())
+		}
 	}
 	if err == nil { // after the page: a listed version always has one
 		b, err = json.Marshal(keep)
@@ -336,7 +343,7 @@ func writeReport(e *forge.Event, d report.Data) string {
 		return ""
 	}
 	for _, v := range vs[len(keep):] {
-		_ = s.Delete(dir + "/" + v.SHA + ".html")
+		_ = s.Delete(dir + "/" + v.SHA + ".html.gz")
 	}
 	return ReportURL + "/r/" + dir
 }

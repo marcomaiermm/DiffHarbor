@@ -298,7 +298,11 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self'; "+
 			"style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src data:; font-src data: https://cdn.jsdelivr.net; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 		name := dir + "/" + cmp.Or(sha, vs[0].SHA) + ".html"
-		f, err := job.Reports().Open(name)
+		f, err := job.Reports().Open(name + ".gz")
+		plain := errors.Is(err, fs.ErrNotExist)
+		if plain { // ponytail: a report from before .html.gz; drop once those PRs closed
+			f, err = job.Reports().Open(name)
+		}
 		if errors.Is(err, fs.ErrNotExist) {
 			http.NotFound(w, r)
 			return
@@ -311,14 +315,26 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 		defer f.Close()
 		h.Set("Content-Type", "text/html; charset=utf-8")
 		h.Set("Vary", "Accept-Encoding")
+		var in io.Reader = f
 		var out io.Writer = w
-		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") { // a big PR's page is megabytes of markup
+		switch gz := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip"); {
+		case gz:
 			h.Set("Content-Encoding", "gzip")
-			gz := gzip.NewWriter(w)           // level 6: a fifth smaller than BestSpeed, ~120ms for 8 MB
-			defer func() { _ = gz.Close() }() // its last write failing is the client gone, as io.Copy's below
-			out = gz
+			if plain {
+				zw := gzip.NewWriter(w)
+				defer func() { _ = zw.Close() }() // its last write failing is the client gone, as io.Copy's below
+				out = zw
+			}
+		case !plain: // a client without gzip, curl
+			zr, err := gzip.NewReader(f)
+			if err != nil {
+				log.Println(name, "report:", err)
+				http.Error(w, "the report can't be read now", http.StatusBadGateway)
+				return
+			}
+			in = zr
 		}
-		if _, err := io.Copy(out, f); err != nil {
+		if _, err := io.Copy(out, in); err != nil {
 			log.Println(name, "report:", err) // the headers are out: the page ends short
 		}
 	}

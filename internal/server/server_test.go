@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"diffharbor/internal/forge"
@@ -122,13 +123,18 @@ func TestServeReport(t *testing.T) {
 		var vs []report.Version
 		for _, s := range shas {
 			vs = append(vs, report.Version{SHA: s})
-			job.Reports().Put(dir+"/"+s+".html", []byte(`<html data-sha="`+s+`">`))
+			var z bytes.Buffer
+			zw := gzip.NewWriter(&z)
+			zw.Write([]byte(`<html data-sha="` + s + `">`))
+			zw.Close()
+			job.Reports().Put(dir+"/"+s+".html.gz", z.Bytes())
 		}
 		b, _ := json.Marshal(vs)
 		job.Reports().Put(dir+"/versions.json", b)
 	}
 	put("github.com/o/r/7", sha(5), sha(3))
-	put("gitlab.example.com/g/s/p/3", sha(1)) // a project in a subgroup
+	job.Reports().Put("gitlab.example.com/g/s/p/3/"+sha(1)+".html", []byte(`<html data-sha="`+sha(1)+`">`)) // from before .html.gz
+	job.Reports().Put("gitlab.example.com/g/s/p/3/versions.json", []byte(`[{"sha":"`+sha(1)+`"}]`))         // a project in a subgroup
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /r/{path...}", serveReport)
 	get := func(p string) *httptest.ResponseRecorder {
@@ -143,15 +149,20 @@ func TestServeReport(t *testing.T) {
 	if w := get("/r/github.com/o/r/7/" + sha(3)); w.Code != 200 || !strings.Contains(w.Body.String(), `data-sha="`+sha(3)) {
 		t.Fatal("a version:", w.Code)
 	}
-	gz := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r/github.com/o/r/7", nil)
-	req.Header.Set("Accept-Encoding", "gzip, br")
-	mux.ServeHTTP(gz, req)
-	if zr, err := gzip.NewReader(gz.Body); err != nil || gz.Header().Get("Content-Encoding") != "gzip" {
-		t.Fatal("gzip:", err, gz.Header())
-	} else if b, _ := io.ReadAll(zr); !strings.Contains(string(b), `data-sha="`+sha(5)) {
-		t.Fatal("gzip:", string(b))
+	gzipped := func(p, want string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, p, nil)
+		req.Header.Set("Accept-Encoding", "gzip, br")
+		mux.ServeHTTP(w, req)
+		if zr, err := gzip.NewReader(w.Body); err != nil || w.Header().Get("Content-Encoding") != "gzip" {
+			t.Fatal("gzip:", p, err, w.Header())
+		} else if b, _ := io.ReadAll(zr); !strings.Contains(string(b), `data-sha="`+want) {
+			t.Fatal("gzip:", p, string(b))
+		}
 	}
+	gzipped("/r/github.com/o/r/7", sha(5))           // as stored
+	gzipped("/r/gitlab.example.com/g/s/p/3", sha(1)) // compressed on the way
 	if w := get("/r/github.com/o/r/7/versions"); w.Code != 200 || strings.Count(w.Body.String(), `"sha"`) != 2 {
 		t.Fatal("list:", w.Code, w.Body)
 	}
@@ -160,7 +171,7 @@ func TestServeReport(t *testing.T) {
 			t.Fatal(p, w.Code)
 		}
 	}
-	if w := get("/r/gitlab.example.com/g/s/p/3/" + sha(1)); w.Code != 200 {
+	if w := get("/r/gitlab.example.com/g/s/p/3/" + sha(1)); w.Code != 200 || !strings.Contains(w.Body.String(), `data-sha="`+sha(1)) {
 		t.Fatal("gitlab:", w.Code)
 	}
 	job.Reports().Put("github.com/o/r/9/versions.json", []byte("{")) // unreadable is no "none"
