@@ -4,6 +4,7 @@ import (
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -166,7 +167,13 @@ diff --git a/new.go b/new.go
 }
 
 func TestIcons(t *testing.T) {
-	for _, m := range regexp.MustCompile(`\{\{icon "([^"]+)"`).FindAllStringSubmatch(page, -1) {
+	var page []byte
+	files, _ := fs.Glob(templates, "templates/*.html")
+	for _, f := range files {
+		b, _ := fs.ReadFile(templates, f)
+		page = append(page, b...)
+	}
+	for _, m := range regexp.MustCompile(`\{\{icon "([^"]+)"`).FindAllStringSubmatch(string(page), -1) {
 		if icons[m[1]] == "" {
 			t.Errorf("icon %q is not in icons", m[1])
 		}

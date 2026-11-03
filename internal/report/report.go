@@ -7,7 +7,7 @@ import (
 	"cmp"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
-	_ "embed" // the page template
+	"embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -69,10 +69,14 @@ const maxLines = 3000
 // wip matches commit subjects that tell nothing about the change.
 var wip = regexp.MustCompile(`(?i)^(wip\b|fixup!|squash!|amend!|typo|lint|fmt\b|format\b|oops|tmp\b|\.+$|fix(es)?$|changes?$|updates?$|address(ed)? (review|comments|feedback)|(pr |review )(comments|feedback))`)
 
-//go:embed report.html
-var page string
+// templates is the page: report.html and the templates it calls, a file per part.
+//
+//go:embed templates/*.html
+var templates embed.FS
 
-var tmpl = template.Must(template.New("report").Funcs(template.FuncMap{
+var tmpl = template.Must(template.New("").Funcs(funcs).ParseFS(templates, "templates/*.html"))
+
+var funcs = template.FuncMap{
 	"short":    func(s string) string { return s[:min(len(s), 7)] },
 	"inc":      func(i int) int { return i + 1 },
 	"add":      func(a, b int) int { return a + b },
@@ -101,7 +105,7 @@ var tmpl = template.Must(template.New("report").Funcs(template.FuncMap{
 		}
 		return strconv.Itoa(n*100/of) + "%"
 	},
-}).Parse(page))
+}
 
 type line struct {
 	Class, No, Text string
@@ -191,7 +195,7 @@ func shared(paths []string) string {
 func Render(d Data) ([]byte, Version, error) {
 	var b bytes.Buffer
 	v := prepare(d)
-	if err := tmpl.Execute(&b, v); err != nil {
+	if err := tmpl.ExecuteTemplate(&b, "report.html", v); err != nil {
 		return nil, Version{}, fmt.Errorf("report: %w", err)
 	}
 	return b.Bytes(), v.now, nil

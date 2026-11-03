@@ -1,0 +1,173 @@
+{{/* The page: the side bar, the views, read progress, the symbol popover. */}}
+{{define "script"}}
+<script>
+(() => {
+  const prefix = {{printf "diffharbor:%s#%d:" .Repo .Number}};
+  const get = k => { try { return localStorage.getItem(k); } catch { return null; } };
+  const set = (k, on) => { try { on ? localStorage.setItem(k, on === true ? "1" : on) : localStorage.removeItem(k); } catch {} };
+
+  // the side bar: a rail at ⌘B or the header's button, on a phone a sheet over the page. These and the views
+  // below hold across PRs.
+  const bar = document.getElementById("sidebar"), mobile = document.getElementById("sidebar-mobile");
+  const wide = matchMedia("(min-width: 768px)");
+  const rail = on => { bar.dataset.state = on ? "collapsed" : "expanded"; set("diffharbor:rail", on); };
+  rail(!!get("diffharbor:rail"));
+  const toggleBar = () => wide.matches ? rail(bar.dataset.state === "expanded") : mobile.open ? mobile.close() : mobile.showModal();
+  document.getElementById("nav-trigger").addEventListener("click", toggleBar);
+  addEventListener("keydown", e => {
+    if (e.key.toLowerCase() === "b" && (e.metaKey || e.ctrlKey) && !e.altKey) { e.preventDefault(); toggleBar(); }
+  });
+  mobile.addEventListener("click", e => { if (e.target === mobile || e.target.closest(".sidebar-mobile-close, a[href^='#']")) mobile.close(); });
+  // a toggle group sets <html data-files> (flow or tree) or <html data-diff> (unified or split); the CSS does the rest
+  const choose = (what, v) => {
+    document.documentElement.dataset[what] = v;
+    for (const b of document.querySelectorAll(`.toggle[data-${what}]`)) b.setAttribute("aria-pressed", b.dataset[what] === v);
+    set("diffharbor:" + what, v);
+  };
+  choose("files", get("diffharbor:files") || "flow");
+  choose("diff", get("diffharbor:diff") || "unified");
+  document.addEventListener("click", e => {
+    const t = e.target.closest(".toggle[data-files], .toggle[data-diff]");
+    if (t) choose(t.dataset.files ? "files" : "diff", t.dataset.files || t.dataset.diff);
+  });
+  const boxes = [...document.querySelectorAll("input[data-key]")];
+  const viewed = new Set();
+  const navFiles = [...document.querySelectorAll(".sidebar-content a[data-path]")];
+  const steps = [...document.querySelectorAll("[data-step]")];
+  // the bar under the header, the side bar's files, and a ring per step that fills as its files get viewed
+  const sync = () => {
+    viewed.clear();
+    for (const b of boxes) {
+      if (b.checked) viewed.add(b.dataset.path);
+      b.closest("details").classList.toggle("seen", b.checked);
+    }
+    const n = boxes.filter(b => b.checked).length;
+    document.getElementById("progress").style.width = (boxes.length ? 100 * n / boxes.length : 0) + "%";
+    document.getElementById("progress-text").textContent = n + "/" + boxes.length + " viewed";
+    for (const a of navFiles) a.classList.toggle("done", viewed.has(a.dataset.path));
+    for (const s of steps) {
+      const files = [...s.querySelectorAll("a[data-path]")];
+      const k = files.filter(a => viewed.has(a.dataset.path)).length;
+      s.querySelector(".ring-p").style.setProperty("--p", files.length ? k / files.length : 0);
+      s.querySelector(".nav-count").textContent = k + "/" + files.length;
+      if (files.length && k === files.length) s.dataset.status = "complete";
+      else delete s.dataset.status;
+    }
+  };
+  for (const b of boxes) {
+    b.checked = !!get(prefix + b.dataset.key);
+    if (b.checked) b.closest("details").open = false; // read already: a jump to it opens it again
+    b.closest("label").addEventListener("click", e => e.stopPropagation());
+    b.addEventListener("change", () => {
+      set(prefix + b.dataset.key, b.checked);
+      const d = b.closest("details");
+      if (b.checked && d.open) {
+        d.open = false;
+        if (d.getBoundingClientRect().top < 0) d.scrollIntoView(); // the next file starts where this one did
+      }
+      sync();
+    });
+  }
+  sync();
+
+  // versions: "Only what changed" leaves the files whose change differs from the last version's; the picker and a
+  // newer version's banner come from the PR's list of versions, next to this page's URL (none: a page alone)
+  const only = document.getElementById("since-only");
+  only?.addEventListener("click", () => {
+    const on = only.getAttribute("aria-pressed") !== "true";
+    only.setAttribute("aria-pressed", on);
+    document.documentElement.toggleAttribute("data-since", on);
+  });
+  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto", style: "short" });
+  const ago = at => {
+    const s = (new Date(at) - Date.now()) / 1000;
+    for (const [u, n] of [["year", 31536000], ["month", 2592000], ["week", 604800], ["day", 86400], ["hour", 3600], ["minute", 60]])
+      if (Math.abs(s) >= n) return rtf.format(Math.round(s / n), u);
+    return "just now";
+  };
+  for (const t of document.querySelectorAll("time.since-time")) t.textContent = ago(t.dateTime);
+  const pick = document.getElementById("versions");
+  const base = location.pathname.replace(/\/+$/, "").replace(/\/[0-9a-f]{40}(?:[0-9a-f]{24})?$/, "");
+  const at = (v, i) => (i ? base + "/" + v.sha : base) + location.hash;
+  fetch(base + "/versions").then(r => r.ok ? r.json() : []).then(vs => {
+    if (!Array.isArray(vs) || vs.length < 2 || !vs.some(v => v.sha === pick.dataset.sha)) return;
+    pick.replaceChildren(...vs.map((v, i) => new Option(v.sha.slice(0, 7) + " · " + ago(v.at) + (i ? "" : " · newest"), i, false, v.sha === pick.dataset.sha)));
+    pick.addEventListener("change", () => location.assign(at(vs[pick.value], +pick.value)));
+    pick.hidden = false;
+    document.getElementById("version").remove();
+    if (vs[0].sha !== pick.dataset.sha) {
+      const newer = document.getElementById("newer");
+      newer.querySelector("a").href = at(vs[0], 0);
+      newer.hidden = false;
+    }
+  }).catch(() => {});
+
+  // a hunk marked seen hides its lines; all of a file's hunks seen is the file viewed
+  const hunkOf = row => { // the hunk's header row
+    const rows = [...row.closest("table").rows];
+    return rows.slice(0, rows.indexOf(row) + 1).findLast(r => r.matches("tr.hunk"));
+  };
+  const hunkKey = h => {
+    const t = h.closest("table");
+    return prefix + t.closest("details").querySelector("input[data-key]").dataset.key + "#" + [...t.querySelectorAll("tr.hunk")].indexOf(h);
+  };
+  const seeHunk = (h, on) => {
+    h.querySelector(".hunk-seen").setAttribute("aria-pressed", on);
+    const rows = [...h.closest("table").rows];
+    for (let i = rows.indexOf(h) + 1; i < rows.length && !rows[i].matches("tr.hunk"); i++) rows[i].classList.toggle("gone", on);
+    set(hunkKey(h), on);
+  };
+  for (const h of document.querySelectorAll("tr.hunk")) if (get(hunkKey(h))) seeHunk(h, true);
+  document.addEventListener("click", e => {
+    const b = e.target.closest(".hunk-seen");
+    if (!b) return;
+    const h = b.closest("tr");
+    seeHunk(h, b.getAttribute("aria-pressed") !== "true");
+    const t = h.closest("table"), box = t.closest("details").querySelector("input[data-key]");
+    if (![...t.querySelectorAll(".hunk-seen")].some(x => x.getAttribute("aria-pressed") !== "true") && !box.checked) {
+      box.checked = true;
+      box.dispatchEvent(new Event("change"));
+    } else if (h.getBoundingClientRect().top < 80) h.scrollIntoView({ block: "start" });
+  });
+
+  // folds open on click; a jump opens what hides its target and lights it up
+  document.addEventListener("click", e => {
+    const t = e.target.closest(".fold-toggle");
+    if (t) t.setAttribute("aria-expanded", t.closest("tbody").classList.toggle("open"));
+  });
+  const reveal = () => {
+    const el = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (!el) return;
+    const tab = el.closest("[role=tabpanel][hidden]");
+    if (tab) document.getElementById(tab.getAttribute("aria-labelledby")).click();
+    for (let d = el.closest("details"); d; d = d.parentElement.closest("details")) d.open = true;
+    const fold = el.closest("tbody.fold");
+    if (fold) { fold.classList.add("open"); fold.querySelector(".fold-toggle").setAttribute("aria-expanded", true); }
+    if (el.matches("tr.gone")) seeHunk(hunkOf(el), false);
+    const at = window.inSplit?.(el) || el; // the side by side view's line, when it shows
+    at.classList.remove("flash");
+    void at.offsetWidth; // restart the animation
+    at.classList.add("flash");
+    at.scrollIntoView({ block: el.matches("tbody, tr") ? "center" : "start" });
+  };
+  addEventListener("hashchange", reveal);
+  reveal();
+
+  // what is in view is current in the side bar: the file, its step, its section
+  const links = [...document.querySelectorAll(".sidebar-content a[href^='#']")];
+  const current = el => {
+    const ids = new Set([el.id, el.closest("[id^='step-']")?.id, el.closest("section")?.id].map(id => "#" + id));
+    for (const a of links) {
+      if (ids.has(decodeURIComponent(a.getAttribute("href")))) a.setAttribute("aria-current", "true");
+      else a.removeAttribute("aria-current");
+    }
+  };
+  const spy = new IntersectionObserver(es => {
+    const hit = es.filter(e => e.isIntersecting).map(e => e.target);
+    const el = hit.find(t => t.matches("details")) || hit[0];
+    if (el) current(el);
+  }, { rootMargin: "-15% 0px -75% 0px" });
+  document.querySelectorAll("main section[id], main [id^='step-'], details.file").forEach(el => spy.observe(el));
+})();
+</script>
+{{end}}

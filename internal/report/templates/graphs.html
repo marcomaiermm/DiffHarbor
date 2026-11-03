@@ -1,0 +1,204 @@
+{{/* The call graphs. */}}
+{{define "graphs"}}
+<script type="module">
+// The graphs of changed code: cytoscape draws, ELK lays out in layers with the files as boxes. Hovering a box
+// lights what it uses and what uses it, a click goes to the code, a right-click opens the rest; boxes drag.
+// Drawn when it scrolls into view.
+import cytoscape from "https://cdn.jsdelivr.net/npm/cytoscape@3/dist/cytoscape.esm.min.mjs";
+import elk from "https://cdn.jsdelivr.net/npm/cytoscape-elk@2/+esm";
+cytoscape.use(elk);
+// a canvas takes no CSS variables: Geist's grays and the page's accents
+const c = document.documentElement.classList.contains("dark")
+  ? { bg: "#0a0a0a", fg: "#ededed", muted: "#8f8f8f", box: "#3a3a3a", file: "#262626", line: "#525252", out: "#3b82f6", in: "#f59e0b", add: "#16a34a", del: "#e5484d" }
+  : { bg: "#ffffff", fg: "#171717", muted: "#6b6b6b", box: "#d4d4d4", file: "#e5e5e5", line: "#a3a3a3", out: "#2563eb", in: "#d97706", add: "#16a34a", del: "#e5484d" };
+const mono = "Geist Mono Variable, ui-monospace, monospace";
+const style = [
+  { selector: "node", style: { label: "data(label)", "font-family": mono, "font-size": 12, color: c.fg, shape: "round-rectangle",
+    width: "data(w)", height: 26, "text-valign": "center", "background-color": c.bg, "border-width": 1, "border-color": c.box } },
+  { selector: ":parent", style: { "text-valign": "top", "text-halign": "center", "text-margin-y": -4, "font-size": 11, color: c.muted,
+    "background-opacity": 0, "border-color": c.file, "corner-radius": 8, padding: 12 } },
+  { selector: "node[state = 'new']", style: { "border-color": c.add } },
+  { selector: "node[state = 'gone']", style: { "border-color": c.del, "border-style": "dashed", color: c.muted } },
+  { selector: "node[state = 'ext']", style: { "border-style": "dashed", color: c.muted } },
+  { selector: "edge", style: { width: 1.25, "line-color": c.line, "target-arrow-color": c.line, "target-arrow-shape": "triangle",
+    "arrow-scale": 0.8, "curve-style": "bezier" } },
+  { selector: ".faded", style: { opacity: 0.15 } },
+  { selector: "node.focus", style: { "border-width": 2, "border-color": c.fg } },
+  { selector: ".out", style: { "border-color": c.out, "line-color": c.out, "target-arrow-color": c.out, "z-index": 9 } },
+  { selector: ".in", style: { "border-color": c.in, "line-color": c.in, "target-arrow-color": c.in, "z-index": 9 } },
+  { selector: "edge.out, edge.in", style: { width: 2 } },
+];
+await document.fonts.ready;
+const measure = document.createElement("canvas").getContext("2d");
+measure.font = `12px ${mono}`;
+const touch = matchMedia("(pointer: coarse)").matches; // a finger on the graph scrolls the page
+
+const jump = to => {
+  if (location.hash === to) dispatchEvent(new HashChangeEvent("hashchange"));
+  else location.hash = to;
+};
+const h = (tag, cls, ...kids) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  e.append(...kids);
+  return e;
+};
+const ic = name => document.getElementById("i-" + name).content.firstElementChild.cloneNode(true);
+const blob = document.getElementById("sym").dataset.blob;
+let symbols = null; // the popover's, read on the first right-click
+const decl = (name, path) => (symbols ??= JSON.parse(document.getElementById("symbols").textContent) || {})[name]?.find(s => s.path === path);
+// a few labels and how many more
+const names = ns => ns.length ? ns.map(n => n.data("label")).slice(0, 3).join(", ") + (ns.length > 3 ? ` +${ns.length - 3}` : "") : "nothing shown";
+
+// the right-click menu, one for the page: items {icon, label, key, run}, null a line between, false left out
+const menu = h("div", "context-menu gmenu");
+menu.popover = "auto";
+menu.setAttribute("role", "menu");
+document.body.append(menu);
+const showMenu = (x, y, title, items) => {
+  menu.replaceChildren(h("p", "", title), ...items.filter(i => i !== false).map(i => {
+    if (!i) return Object.assign(h("div", "context-menu-separator"), { role: "separator" });
+    const b = h("button", "context-menu-item", ic(i.icon), i.label, ...(i.key ? [h("kbd", "", i.key)] : []));
+    b.type = "button";
+    b.setAttribute("role", "menuitem");
+    b.addEventListener("click", () => { menu.hidePopover(); i.run(); });
+    return b;
+  }));
+  menu.showPopover();
+  menu.style.left = Math.max(8, Math.min(x, document.documentElement.clientWidth - menu.offsetWidth - 8)) + "px";
+  menu.style.top = (y + menu.offsetHeight + 8 > innerHeight ? Math.max(8, y - menu.offsetHeight) : y) + "px";
+  menu.querySelector("button").focus();
+};
+menu.addEventListener("keydown", e => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  e.preventDefault();
+  const bs = [...menu.querySelectorAll("button")], i = bs.indexOf(document.activeElement);
+  bs[(i + (e.key === "ArrowDown" ? 1 : bs.length - 1)) % bs.length].focus();
+});
+
+function draw(box) {
+  const g = JSON.parse(box.dataset.graph), el = box.querySelector(".cy"), status = box.querySelector(".graph-status");
+  const elements = () => [
+    ...g.nodes.map(n => ({ data: { ...n, w: measure.measureText(n.label).width + 22 } })),
+    ...g.edges.map(e => ({ data: e })),
+  ];
+
+  const idle = touch ? [h("b", "", "Tap"), " a box to go to it"]
+    : [h("b", "", "Hover"), " what it uses and what uses it · ", h("b", "", "Click"), " go there · ",
+      h("b", "", "Right-click"), " more · ", h("b", "", "Drag"), " move · ", h("b", "", "Ctrl+scroll"), " zoom"];
+  const say = (...parts) => status.replaceChildren(...parts);
+  say(...idle);
+  const states = new Set(g.nodes.map(n => n.state)), chip = (look, text) => {
+    const i = h("i", look.line ? "line" : "");
+    Object.assign(i.style, look.line ? { background: look.line } : look);
+    return h("span", "", i, text);
+  };
+  box.querySelector(".graph-legend").replaceChildren(
+    chip({ line: c.out }, "uses"), chip({ line: c.in }, "used by"),
+    ...states.has("new") ? [chip({ borderColor: c.add }, "new")] : [],
+    ...states.has("gone") ? [chip({ borderColor: c.del, borderStyle: "dashed" }, "removed")] : [],
+    ...states.has("ext") ? [chip({ borderColor: c.muted, borderStyle: "dashed" }, "another step")] : []);
+
+  const cy = cytoscape({
+    container: el, style, autounselectify: true, boxSelectionEnabled: false, minZoom: 0.2, maxZoom: 2,
+    userPanningEnabled: !touch, userZoomingEnabled: !touch, autoungrabify: touch,
+  });
+  const full = () => document.fullscreenElement === box;
+  // the box as high as the graph at most 1:1, then all of it in view
+  const fit = () => {
+    if (!full()) {
+      const bb = cy.elements().boundingBox(), pad = 24, z = Math.min(1, (el.clientWidth - 2 * pad) / bb.w);
+      el.style.height = Math.round(Math.min(Math.max(bb.h * z + 2 * pad, 120), innerHeight * 0.7)) + "px";
+    }
+    cy.resize();
+    cy.fit(cy.elements(":visible"), 24);
+  };
+  const render = () => {
+    cy.elements().remove();
+    cy.add(elements());
+    const layout = cy.layout({ name: "elk", fit: false, nodeDimensionsIncludeLabels: true, elk: { algorithm: "layered", "elk.direction": "RIGHT",
+      "elk.hierarchyHandling": "INCLUDE_CHILDREN", "elk.layered.spacing.nodeNodeBetweenLayers": 40, "elk.spacing.nodeNode": 24,
+      "elk.padding": "[top=34,left=14,bottom=14,right=14]" } });
+    layout.one("layoutstop", () => { fit(); box.dataset.drawn = ""; });
+    layout.run();
+  };
+  render();
+  const view = eles => cy.animate({ fit: { eles, padding: 24 }, duration: 200 });
+  const showAll = () => { cy.elements().removeStyle("display"); view(cy.elements()); say(...idle); };
+  const only = n => {
+    const core = n.union(n.descendants()), near = core.union(core.neighborhood()), keep = near.union(near.nodes().ancestors());
+    cy.elements().not(keep).style("display", "none");
+    keep.removeStyle("display");
+    view(keep);
+  };
+  const fullscreen = () => full() ? document.exitFullscreen() : box.requestFullscreen?.();
+
+  // on the core, not the nodes: an event on a file's declaration also reaches the file
+  cy.on("mouseover", e => {
+    const t = e.target;
+    if (t === cy) return;
+    if (t.isEdge()) return say(h("b", "", t.source().data("label")), " uses ", h("b", "", t.target().data("label")), t.data("n") > 1 ? ` · ${t.data("n")} names` : "");
+    el.style.cursor = "pointer";
+    if (t.isParent()) return say(h("b", "", t.data("label")), " · click to go to the file · right-click for more");
+    const out = t.outgoers(), inc = t.incomers();
+    cy.elements().addClass("faded");
+    t.union(out).union(inc).union(t.union(out.nodes()).union(inc.nodes()).ancestors()).removeClass("faded");
+    t.addClass("focus"); out.addClass("out"); inc.addClass("in");
+    say(h("b", "", t.data("name") || t.data("label")), " uses ", names(out.nodes()), " · used by ", names(inc.nodes()));
+  });
+  cy.on("mouseout", e => {
+    if (e.target === cy) return;
+    el.style.cursor = "";
+    cy.elements().removeClass("faded focus out in");
+    say(...idle);
+  });
+  cy.on("tap", e => {
+    const t = e.target;
+    if (t === cy || !t.isNode()) return;
+    jump(t.data("href"));
+  });
+  const more = e => {
+    const t = e.target, r = el.getBoundingClientRect(), x = r.left + e.renderedPosition.x, y = r.top + e.renderedPosition.y;
+    const hidden = cy.elements(":hidden").length > 0;
+    if (t === cy) {
+      return showMenu(x, y, "This graph", [
+        { icon: "maximize", label: "Fit to view", run: fit },
+        { icon: "rotate-ccw", label: "Arrange again", run: render },
+        hidden && { icon: "eye", label: "Show everything", run: showAll },
+        null,
+        { icon: "expand", label: full() ? "Leave full screen" : "Full screen", run: fullscreen },
+      ]);
+    }
+    if (!t.isNode()) return;
+    const d = t.data(), s = d.name && decl(d.name, d.path);
+    showMenu(x, y, d.name ? `${d.name} · ${d.path}` : d.path, [
+      { icon: "enter", label: d.name ? "Go to the change" : "Go to the file", key: "click", run: () => jump(d.href) },
+      !!s && { icon: "search", label: "Every use", run: () => document.dispatchEvent(new CustomEvent("sym:uses", { detail: { name: d.name, path: d.path } })) },
+      null,
+      { icon: "focus", label: "Only this and what it links to", run: () => only(t) },
+      { icon: "eye-off", label: "Hide", run: () => t.union(t.descendants()).style("display", "none") },
+      hidden && { icon: "eye", label: "Show everything", run: showAll },
+      null,
+      { icon: "arrow-up-right", label: "Open on " + pop.dataset.forge, run: () => tab(blob + d.path + (s ? "#L" + s.line : "")) },
+      { icon: "copy", label: d.name ? "Copy the name" : "Copy the path", run: () => navigator.clipboard?.writeText(d.name || d.path) },
+    ]);
+  };
+  cy.on("cxttap", more);
+  if (touch) cy.on("taphold", more);
+  el.addEventListener("contextmenu", e => e.preventDefault());
+  box.querySelector("[data-act=fit]").addEventListener("click", fit);
+  box.querySelector("[data-act=layout]").addEventListener("click", render);
+  box.querySelector("[data-act=full]").addEventListener("click", fullscreen);
+  box.addEventListener("fullscreenchange", () => setTimeout(fit, 100)); // after the browser resized the box
+  // the wheel scrolls the page; with Ctrl or ⌘ (a trackpad's pinch too), or in full screen, it zooms the graph
+  box.addEventListener("wheel", e => { if (!e.ctrlKey && !e.metaKey && !full()) e.stopPropagation(); }, { capture: true });
+  new ResizeObserver(() => cy.resize()).observe(el);
+}
+const tab = url => window.open(url, "_blank", "noopener");
+
+const io = new IntersectionObserver(es => {
+  for (const e of es) if (e.isIntersecting) { io.unobserve(e.target); draw(e.target); }
+}, { rootMargin: "400px" });
+document.querySelectorAll(".graph").forEach(g => io.observe(g));
+</script>
+{{end}}

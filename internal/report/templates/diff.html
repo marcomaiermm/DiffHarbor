@@ -1,0 +1,41 @@
+{{/* A file and its diff, a line of it, a finding on it; a call graph. */}}
+{{define "file"}}<details class="collapsible file" id="{{.Path}}"{{if .Open}} open{{end}}{{if .Changed}} data-changed{{end}}>
+  <summary class="collapsible-trigger flex-wrap justify-start gap-x-3 gap-y-1 py-2.5 pr-3 pl-3">
+    {{icon "chevron-down" "collapsible-chevron"}}
+    <span class="min-w-0 font-mono text-[13px] break-all"><span class="font-normal text-muted-foreground">{{dir .Path}}</span>{{base .Path}}</span>
+    <span class="font-mono text-xs tabular-nums"><span class="text-diff-add">+{{.Add}}</span> <span class="text-diff-del">−{{.Del}}</span></span>
+    {{with .Moved}}<span class="badge font-mono" data-variant="outline">{{.}} moved</span>{{end}}
+    {{if .Changed}}<span class="badge changed" data-variant="outline">changed</span>{{end}}
+    {{with .Note}}<span class="min-w-48 flex-1 text-[13px] font-normal text-muted-foreground">{{.}}</span>{{end}}
+    <label class="viewed ml-auto"><input type="checkbox" class="checkbox" data-key="{{.Path}}@{{.ID}}" data-path="{{.Path}}"> Viewed</label>
+  </summary>
+  <div class="collapsible-content">
+  {{with .Findings}}<div class="px-3">{{range .}}{{template "finding" .}}{{end}}</div>{{end}}
+  {{if .Long}}{{with .Changes}}<nav class="flex flex-wrap items-center gap-1 border-b px-3 py-2" aria-label="Declarations it changes"><span class="mr-1 text-xs text-muted-foreground">Changes</span>{{range .}}<a href="#{{.ID}}" class="badge change" data-variant="outline" data-state="{{.State}}">{{.Name}}</a>{{end}}</nav>{{end}}{{end}}
+  <div class="diff overflow-x-auto"><table class="w-full border-collapse font-mono text-[12.5px] leading-5" data-path="{{.Path}}">
+  {{range .Parts}}{{if .ID}}<tbody class="fold{{if .Open}} open{{end}}" id="fold-{{.ID}}">
+  <tr class="fold-head"><td colspan="3" class="px-3 py-1 font-sans"><span class="flex min-w-0 items-center gap-2"><button type="button" class="fold-toggle trace-line cursor-pointer" aria-expanded="{{.Open}}"><span class="trace-icon">{{if .Where}}{{icon "arrow-right-left" ""}}{{else}}{{icon "chevrons-down-up" ""}}{{end}}</span><span class="trace-title">{{len .Lines}} lines {{.What}}</span>{{with .Note}}<span class="trace-description">{{.}}</span>{{end}}{{with .Where}}<span class="trace-description font-mono">{{.}}</span>{{end}}<span class="trace-icon trace-chevron">{{icon "chevron-right" ""}}</span></button>{{if .Where}}<a href="#fold-{{.Link}}" class="trace-icon" title="Go to {{.Where}}" aria-label="Go to {{.Where}}">{{icon "arrow-up-right" ""}}</a>{{end}}</span></td></tr>
+  {{range .Lines}}{{template "line" .}}{{end}}</tbody>
+  {{else}}<tbody>{{range .Lines}}{{template "line" .}}{{end}}</tbody>{{end}}{{end}}
+  </table></div>
+  {{if .Cut}}<div class="border-t px-4 py-2 text-sm text-muted-foreground">{{.Cut}} more lines on the pull request's page.</div>{{end}}
+  </div>
+</details>{{end}}
+
+{{define "line"}}{{if eq .Class "hunk"}}<tr class="hunk"><td colspan="3" class="py-0.5 pr-2 pl-4 text-xs"><span class="flex items-center gap-2"><button type="button" class="hunk-seen" aria-pressed="false" title="Hide this hunk once read">{{icon "check" "size-3"}}<span>Seen</span></button><span class="min-w-0 truncate">{{.Text}}</span></span></td></tr>{{else}}<tr class="{{.Class}}"{{with .ID}} id="{{.}}"{{end}}{{with .Old}} data-old="{{.}}"{{end}}><td class="no w-px px-3 text-right select-none whitespace-nowrap">{{.No}}</td><td class="sign w-px pr-2 select-none">{{if eq .Class "add"}}+{{else if eq .Class "del"}}−{{end}}</td><td class="code pr-4 whitespace-pre">{{.Text}}</td></tr>{{end}}
+{{range .Findings}}<tr><td colspan="3" class="bg-background px-3">{{template "finding" .}}</td></tr>{{end}}{{end}}
+
+{{define "finding"}}<div class="alert my-2 font-sans whitespace-normal"{{if eq .Severity "critical"}} data-variant="destructive"{{end}} role="note">
+  <div class="alert-content">
+    {{if .Title}}<h5 class="alert-title">{{.Severity}} · {{.Title}}</h5>{{end}}
+    <p class="alert-description whitespace-pre-wrap">{{.Body}}</p>
+  </div>
+</div>{{end}}
+
+{{define "graph"}}<div class="graph" data-graph="{{json .}}"><div class="cy"></div>
+  <div class="graph-tools btn-group" role="group" aria-label="Graph">
+    <button type="button" class="btn" data-variant="outline" data-size="icon-sm" data-act="fit" title="Fit to view" aria-label="Fit to view">{{icon "maximize" ""}}</button>
+    <button type="button" class="btn" data-variant="outline" data-size="icon-sm" data-act="layout" title="Arrange again" aria-label="Arrange again">{{icon "rotate-ccw" ""}}</button>
+    <button type="button" class="btn" data-variant="outline" data-size="icon-sm" data-act="full" title="Full screen" aria-label="Full screen">{{icon "expand" ""}}</button>
+  </div>
+  <div class="graph-bar"><span class="graph-status"></span><span class="graph-legend"></span></div></div>{{end}}

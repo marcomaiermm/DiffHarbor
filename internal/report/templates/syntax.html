@@ -1,0 +1,496 @@
+{{/* Syntax colors. */}}
+{{define "syntax"}}
+<script type="module">
+// Syntax colors in review.json's syntax_theme, light or dark with the page, a file at a time once it scrolls into
+// view, and in a changed line the part that changed. Without the CDN the lines stay plain, the changed parts show.
+const themes = {{.Themes}};
+const dark = document.documentElement.classList.contains("dark");
+let theme = dark ? themes.dark : themes.light;
+// Tokyo Night Day, Tokyo Night's light one: Shiki ships only the dark
+const day = { name: "tokyo-night-day", type: "light", colors: { "editor.background": "#e1e2e7", "editor.foreground": "#3760bf" },
+  tokenColors: [
+    { scope: ["comment", "punctuation.definition.comment", "string.comment"], settings: { foreground: "#848cb5", fontStyle: "italic" } },
+    { scope: ["keyword", "storage", "storage.type", "storage.modifier", "keyword.control", "keyword.other", "keyword.function"], settings: { foreground: "#9854f1" } },
+    { scope: ["punctuation", "meta.brace", "punctuation.separator", "punctuation.terminator"], settings: { foreground: "#6172b0" } },
+    { scope: ["keyword.operator", "punctuation.accessor", "constant.character.escape", "string.regexp"], settings: { foreground: "#006a83" } },
+    { scope: ["string", "string.quoted", "string.template", "punctuation.definition.string"], settings: { foreground: "#587539" } },
+    { scope: ["constant", "constant.numeric", "constant.language", "support.constant", "variable.other.constant"], settings: { foreground: "#b15c00" } },
+    { scope: ["entity.name.function", "support.function", "variable.function", "meta.function-call.generic"], settings: { foreground: "#2e7de9" } },
+    { scope: ["entity.name.type", "entity.name.class", "support.type", "support.class", "entity.other.inherited-class", "entity.name.namespace", "entity.name.package", "storage.type.numeric.go", "storage.type.string.go", "storage.type.boolean.go", "storage.type.byte.go", "storage.type.error.go"], settings: { foreground: "#188092" } },
+    { scope: ["variable.parameter", "meta.parameter"], settings: { foreground: "#8c6c3e" } },
+    { scope: ["variable.other.property", "variable.other.object.property", "support.variable.property", "meta.property-name", "support.type.property-name", "variable.other.member"], settings: { foreground: "#387068" } },
+    { scope: ["entity.name.tag"], settings: { foreground: "#f52a65" } },
+    { scope: ["entity.other.attribute-name"], settings: { foreground: "#7847bd" } },
+    { scope: ["markup.heading"], settings: { foreground: "#2e7de9", fontStyle: "bold" } },
+    { scope: ["markup.inserted"], settings: { foreground: "#587539" } },
+    { scope: ["markup.deleted", "invalid"], settings: { foreground: "#c64343" } },
+  ] };
+const langs = { go: "go", ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "javascript", cjs: "javascript",
+  json: "json", yml: "yaml", yaml: "yaml", md: "markdown", mdx: "mdx", sql: "sql", sh: "shellscript", bash: "shellscript",
+  tf: "hcl", hcl: "hcl", lua: "lua", py: "python", rs: "rust", css: "css", scss: "scss", html: "html", vue: "vue",
+  svelte: "svelte", toml: "toml", java: "java", kt: "kotlin", swift: "swift", rb: "ruby", php: "php", c: "c", h: "c",
+  cpp: "cpp", cs: "csharp", proto: "proto", graphql: "graphql", xml: "xml", dockerfile: "dockerfile" };
+const lang = path => {
+  const name = path.split("/").pop().toLowerCase();
+  return langs[name === "dockerfile" ? "dockerfile" : name.split(".").pop()];
+};
+let hl = null;
+try {
+  const { createHighlighter } = await import("https://cdn.jsdelivr.net/npm/shiki@3/+esm");
+  // the JavaScript engine: Shiki's default is WebAssembly, which the page's CSP blocks
+  const { createJavaScriptRegexEngine } = await import("https://cdn.jsdelivr.net/npm/shiki@3/dist/engine-javascript.mjs/+esm");
+  hl = await createHighlighter({ themes: [], langs: [], engine: createJavaScriptRegexEngine() });
+  try {
+    await hl.loadTheme(theme === day.name ? day : theme);
+  } catch { // a name Shiki doesn't know: the default
+    theme = dark ? "tokyo-night" : day.name;
+    await hl.loadTheme(dark ? theme : day);
+  }
+  const t = hl.getTheme(theme); // the code's background and text: everything around the code mixes from them
+  document.documentElement.style.setProperty("--diff-bg", t.bg);
+  document.documentElement.style.setProperty("--diff-fg", t.fg);
+} catch { hl = null; }
+
+// changed: the differing middle of two lines, widened to whole words; null when they share too little
+const word = /\w/;
+const changed = (a, b) => {
+  let p = 0, s = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  if (p + s < 0.4 * Math.min(a.length, b.length)) return null;
+  while (p > 0 && word.test(a[p - 1]) && word.test(a[p])) p--;
+  let ea = a.length - s, eb = b.length - s;
+  while (ea < a.length && word.test(a[ea - 1] || "") && word.test(a[ea])) { ea++; eb++; }
+  return [[p, ea], [p, eb]];
+};
+// pair each run of removed lines with the added run after it, line by line
+const marks = rows => {
+  const m = new Map();
+  let del = [], add = [];
+  const flush = () => {
+    for (let i = 0; i < Math.min(del.length, add.length); i++) {
+      const r = changed(del[i].cells[2].textContent, add[i].cells[2].textContent);
+      if (r) { m.set(del[i], r[0]); m.set(add[i], r[1]); }
+    }
+    del = []; add = [];
+  };
+  for (const r of rows) {
+    if (r.classList.contains("del")) { if (add.length) flush(); del.push(r); }
+    else if (r.classList.contains("add")) add.push(r);
+    else flush();
+  }
+  flush();
+  return m;
+};
+const paint = async table => {
+  const rows = [...table.querySelectorAll("tr.del, tr.add, tr.ctx, tr.hunk")];
+  const code = rows.filter(r => !r.classList.contains("hunk"));
+  const tokens = new Map(code.map(r => [r, [{ content: r.cells[2].textContent }]]));
+  const l = lang(table.dataset.path);
+  if (hl && l) {
+    // each hunk on its own and each side on its own: a string or comment that one hunk or the removed side
+    // leaves open must not color the rest
+    const side = rs => {
+      const ts = hl.codeToTokens(rs.map(r => r.cells[2].textContent).join("\n"), { lang: l, theme }).tokens;
+      rs.forEach((r, i) => tokens.set(r, ts[i]));
+    };
+    try {
+      await hl.loadLanguage(l);
+      let hunk = [];
+      const flush = () => {
+        side(hunk.filter(r => !r.classList.contains("add")));
+        side(hunk.filter(r => !r.classList.contains("del"))); // context lines take the new side's colors
+        hunk = [];
+      };
+      for (const r of rows) r.classList.contains("hunk") ? flush() : hunk.push(r);
+      flush();
+    } catch {}
+  }
+  const m = marks(rows);
+  code.forEach(r => {
+    const [from, to] = m.get(r) || [0, 0];
+    let at = 0;
+    const spans = [];
+    for (const t of tokens.get(r) || []) {
+      // cut a token where the changed part starts and ends
+      for (const [a, b] of [[at, Math.min(from, at + t.content.length)], [Math.max(at, from), Math.min(to, at + t.content.length)], [Math.max(at, to), at + t.content.length]]) {
+        if (b <= a) continue;
+        const s = document.createElement("span");
+        s.textContent = t.content.slice(a - at, b - at);
+        if (t.color) s.style.color = t.color;
+        if (a >= from && b <= to && to > from) s.className = "chg";
+        if (Object.hasOwn(syms, t.content)) { s.classList.add("sym"); s.dataset.sym = t.content; }
+        spans.push(s);
+      }
+      at += t.content.length;
+    }
+    if (spans.length) r.cells[2].replaceChildren(...spans);
+  });
+  if (splitOn()) split(table);
+};
+
+// A name the repo declares: on hover a card with its declaration and doc, on click a sheet with every place
+// that names it. Built with textContent, never markup: the repo's text is the PR author's.
+const syms = JSON.parse(document.getElementById("symbols").textContent) || {};
+const pop = document.getElementById("sym"), sheet = document.getElementById("uses");
+// the inventory's lists: which edge has more past it, for the fade
+for (const sc of document.querySelectorAll(".inv-scroll")) {
+  const edges = () => Object.assign(sc.dataset, { above: sc.scrollTop > 1, below: sc.scrollTop + sc.clientHeight < sc.scrollHeight - 1 });
+  sc.addEventListener("scroll", edges, { passive: true });
+  new ResizeObserver(edges).observe(sc); // a hidden tab's list measures once it shows
+  sc.nextElementSibling.addEventListener("click", () => sc.scrollBy({ top: sc.clientHeight * 0.8 }));
+}
+// the inventory's names show the same card; a click still goes to the diff
+for (const a of document.querySelectorAll(".inv-name")) if (Object.hasOwn(syms, a.textContent)) { a.classList.add("sym"); a.dataset.sym = a.textContent; }
+const el = (tag, cls, ...kids) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  e.append(...kids);
+  return e;
+};
+const ic = name => document.getElementById("i-" + name).content.firstElementChild.cloneNode(true);
+const kind = k => { const s = el("span", "badge kind", k); s.dataset.variant = "outline"; s.dataset.k = k; return s; };
+const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
+// go to a line of the diff when the page shows it; false when it doesn't
+const jump = (path, line) => {
+  const t = [...document.querySelectorAll("table[data-path]")].find(t => t.dataset.path === path);
+  const row = t && [...t.querySelectorAll("tr.ctx, tr.add")].find(r => r.cells[0].textContent === String(line));
+  if (!row) return false;
+  row.id ||= path + "~L" + line;
+  go(row.id);
+  return true;
+};
+const go = id => {
+  if (location.hash === "#" + id) dispatchEvent(new HashChangeEvent("hashchange"));
+  else location.hash = id;
+};
+// a link to a line: the line in the page when it shows, else on the forge
+const link = (path, line, cls, ...kids) => {
+  const a = el("a", cls, ...kids);
+  a.title = path + ":" + line;
+  a.href = pop.dataset.blob + path + "#L" + line;
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.addEventListener("click", e => {
+    if (!jump(path, line)) return;
+    e.preventDefault();
+    hide();
+    if (sheet.open) sheet.close();
+  });
+  return a;
+};
+const short = path => path.split("/").slice(-2).join("/");
+const at = (path, line) => link(path, line, "sym-at", ic("file"), el("span", "", short(path) + ":" + line));
+// tokens of one line or a block in the code's colors, plain without Shiki
+const colored = async (text, path) => {
+  const l = lang(path);
+  if (hl && l) {
+    try {
+      await hl.loadLanguage(l);
+      return hl.codeToTokens(text, { lang: l, theme }).tokens;
+    } catch {}
+  }
+  return text.split("\n").map(content => [{ content }]);
+};
+const code = async (sig, path) => el("pre", "sym-sig scroll-area", ...(await colored(sig, path)).flatMap((ts, i) => [
+  ...(i ? ["\n"] : []),
+  ...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; }),
+]));
+// code lines outside the diff, the inventory's and the reach list's, colored like it
+for (const c of document.querySelectorAll(".inv-lines code, .reach-item li > code")) {
+  const path = c.closest("[data-path]")?.dataset.path;
+  if (path && lang(path)) colored(c.textContent, path).then(([ts = []]) =>
+    c.replaceChildren(...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; })));
+}
+// the colored tokens of ts between two offsets of their text, split where those fall
+const cut = (ts, a, b) => {
+  const out = [];
+  let at = 0;
+  for (const t of ts) {
+    const x = Math.max(a, at), y = Math.min(b, at + t.content.length);
+    if (x < y) { const s = el("span", "", t.content.slice(x - at, y - at)); if (t.color) s.style.color = t.color; out.push(s); }
+    at += t.content.length;
+  }
+  return out;
+};
+// a declaring line as it was, and below it the same line getting the part that differs changed as in nvim (viw, s,
+// the new part typed, Esc); lines too unlike, all of it
+const morph = async (before, after, path) => {
+  [before, after] = [before, after].map(l => l.replace(/\s*\{$/, ""));
+  const [[o = []], [n = []]] = await Promise.all([colored(before, path), colored(after, path)]);
+  const [[p, ea], [, eb]] = changed(before, after) ?? [[0, before.length], [0, after.length]];
+  const cur = (cls, on, off) => {
+    const c = el("span", "m-cur " + cls);
+    c.style.setProperty("--on", on + "ms");
+    c.style.setProperty("--for", off - on + "ms");
+    return c;
+  };
+  const step = Math.min(55, 900 / Math.max(1, eb - p)), typed = 750 + (eb - p) * step, ins = el("ins", "");
+  for (let at = p; at < eb; at++) for (const k of cut(n, at, at + 1)) { k.style.setProperty("--d", 750 + (at - p) * step + "ms"); ins.append(k); }
+  const gone = el("del", "", cur("", 0, 300), ...cut(o, p, ea - 1), cur("", 300, 750), ...cut(o, Math.max(p, ea - 1), ea));
+  const now = el("span", "m-now", ...cut(n, 0, p), gone, ins, cur("bar", 750, typed + 150), cur("esc", typed + 150, typed + 750), ...cut(n, eb, after.length));
+  gone.ariaHidden = "true";
+  const pre = el("pre", "sym-sig sym-morph scroll-area",
+    el("span", "m-was", ...cut(o, 0, p), el("del", "", ...cut(o, p, ea)), ...cut(o, ea, before.length)), now);
+  pre.style.setProperty("--t", typed + 150 + "ms");
+  return pre;
+};
+// the new file's line a name of the diff is on; null on a removed one
+const newLine = span => {
+  const tr = span.closest("tr");
+  if (tr) return tr.matches(".add, .ctx") ? tr.cells[0].textContent : null;
+  const sl = span.closest(".sl"), pane = sl?.parentElement;
+  return sl && pane === pane.parentElement.lastElementChild ? sl.firstChild.textContent : null;
+};
+// which declarations a name means: the one codegraph resolved this line to, or declared on it; else, by name,
+// pkg.Name's package, a member after a dot, then the file's own directory
+const pick = (span, list) => {
+  const path = span.closest("[data-path]").dataset.path, no = newLine(span);
+  if (no) {
+    const here = list.filter(s => s.here?.includes(path + ":" + no) || s.path === path && String(s.line) === no);
+    if (here.length) return here;
+    const guessed = list.filter(s => !s.exact); // resolved ones the index doesn't see here aren't meant
+    if (guessed.length) list = guessed;
+  }
+  const prev = span.previousSibling?.textContent === "." ? span.previousSibling.previousSibling?.textContent : null;
+  let c = list;
+  if (prev) {
+    const pkg = c.filter(s => s.pkg === prev);
+    const member = c.filter(s => /^(method|field)/.test(s.kind));
+    c = pkg.length ? pkg : member.length ? member : c;
+  }
+  const dir = path.replace(/[^/]*$/, "");
+  const near = c.filter(s => s.path.startsWith(dir) && !s.path.slice(dir.length).includes("/"));
+  return (near.length ? near : c).slice(0, 3);
+};
+const head = (s, name) => el("div", "sym-head", kind(s.kind),
+  el("span", "sym-name", ...(s.pkg ? [el("span", "sym-pkg", s.pkg + ".")] : []), name), at(s.path, s.line));
+const doc = s => s.doc.replace(/(?<!\n)\n(?!\n)/g, " "); // source line breaks go, paragraphs stay
+let anchor = null, timer = 0;
+const hide = () => { clearTimeout(timer); anchor = null; if (pop.matches(":popover-open")) pop.hidePopover(); };
+const show = async span => {
+  clearTimeout(timer);
+  if (anchor === span) return;
+  anchor = span;
+  const name = span.dataset.sym, list = pick(span, syms[name]);
+  const item = span.closest(".inv-item"), turn = item?.dataset.oldHead; // an inventory row's: what it was
+  const cards = await Promise.all(list.map(async (s, i) => {
+    const card = el("div", "sym-card", head(s, name), i || !turn ? await code(s.sig, s.path) : await morph(turn, item.dataset.head, s.path));
+    if (!i && item?.querySelector(".inv-move")) card.append(item.querySelector(".inv-move").cloneNode(true));
+    if (s.doc) card.append(el("p", "sym-doc", doc(s)));
+    return card;
+  }));
+  if (anchor !== span) return; // the pointer moved on while the signature was colored
+  const s = list[0];
+  const foot = el("div", "sym-foot",
+    s.uses ? el("span", "", el("strong", "", String(s.uses)), ` ${s.uses === 1 ? "use" : "uses"} in `, el("strong", "", String(s.files)), ` ${s.files === 1 ? "file" : "files"}`) : el("span", "", "Named nowhere else"),
+    el("button", "btn sym-all", "Every use", el("kbd", "", ic("enter"))));
+  foot.lastChild.type = "button";
+  Object.assign(foot.lastChild.dataset, { variant: "ghost", size: "sm" });
+  foot.lastChild.addEventListener("click", () => open(span));
+  pop.replaceChildren(...cards, foot);
+  pop.scrollTop = 0;
+  if (!pop.matches(":popover-open")) pop.showPopover();
+  const r = span.getBoundingClientRect(), h = pop.offsetHeight;
+  pop.style.left = Math.max(8, Math.min(r.left, document.documentElement.clientWidth - pop.offsetWidth - 8)) + "px";
+  pop.style.top = (r.bottom + 6 + h > innerHeight && r.top - 6 - h > 0 ? r.top - 6 - h : r.bottom + 6) + "px";
+};
+// a line that names it, the name marked
+const use = async (r, name) => {
+  const c = el("code", "");
+  for (const t of (await colored(r.text, r.path))[0] || []) {
+    const parts = t.content.split(new RegExp(`(?<![\\w$])(${name.replace(/\$/g, "\\$")})(?![\\w$])`));
+    for (const [i, p] of parts.entries()) {
+      if (!p) continue;
+      const s = el(i % 2 ? "mark" : "span", "", p);
+      if (t.color) s.style.color = t.color;
+      c.append(s);
+    }
+  }
+  return link(r.path, r.line, "use", el("span", "no", String(r.line)), c, r.in ? el("span", "in", r.in) : "");
+};
+// Find usages: the declarations, then the places that name it by file
+const open = async span => uses(span.dataset.sym, pick(span, syms[span.dataset.sym]));
+const uses = async (name, list) => {
+  hide();
+  const s = list[0];
+  const body = sheet.querySelector(".sheet-body");
+  sheet.querySelector(".sheet-kicker").replaceChildren(kind(s.kind), ...(s.pkg ? [el("span", "font-mono text-xs text-muted-foreground", "package " + s.pkg)] : []));
+  sheet.querySelector(".sheet-title").textContent = name;
+  const refs = s.refs || [];
+  sheet.querySelector(".sheet-description").textContent = s.uses
+    ? `Named in ${plural(s.uses, "place")} across ${plural(s.files, "file")}${s.uses > refs.length ? `, the first ${refs.length} below` : ""}.${s.exact ? "" : " Found by name: lines that say it, not resolved."}`
+    : "Named nowhere but where it is declared.";
+  const decls = await Promise.all(list.map(async d => {
+    const box = el("div", "sym-card rounded-lg border", head(d, name), await code(d.sig, d.path));
+    if (d.doc) box.append(el("p", "sym-doc line-clamp-none", doc(d)));
+    return box;
+  }));
+  const files = Map.groupBy(refs, r => r.path);
+  const groups = await Promise.all([...files].map(async ([path, rs]) => el("section", "uses-file",
+    el("h3", "", ic("file"), el("span", "", short(path)), el("b", "", String(rs.length))),
+    el("ol", "py-1", ...await Promise.all(rs.map(async r => el("li", "", await use(r, name))))))));
+  const more = [];
+  if (s.uses > refs.length && pop.dataset.search) { // a forge without code search: none
+    const a = el("a", "mt-5 flex h-9 items-center justify-center gap-2 rounded-md border text-[13px] hover:bg-accent", ic("search"), `All ${s.uses} on ${pop.dataset.forge}`);
+    a.href = pop.dataset.search + encodeURIComponent(name);
+    a.target = "_blank";
+    a.rel = "noopener";
+    more.push(a);
+  }
+  body.replaceChildren(el("div", "space-y-3", ...decls), ...groups, ...more);
+  if (!sheet.open) sheet.showModal();
+  sheet.scrollTop = 0;
+};
+// a graph's "Every use" and the reach list's: its declaration by name and file
+document.addEventListener("sym:uses", e => {
+  const list = syms[e.detail.name] || [], own = list.filter(s => s.path === e.detail.path);
+  if (list.length) uses(e.detail.name, own.length ? own : list);
+});
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-uses]");
+  if (b) document.dispatchEvent(new CustomEvent("sym:uses", { detail: { name: b.dataset.uses, path: b.dataset.path } }));
+});
+// the matrix: a cell lights its row and column and says who uses whom with which names
+for (const t of document.querySelectorAll(".deps")) {
+  const say = t.closest(".card-content").querySelector(".deps-say"), rows = [...t.rows], label = i => rows[i].cells[0].textContent.replace(/^\d+/, "");
+  const idle = "Hover a number for the names, click a directory to go to its first file.";
+  say.textContent = idle;
+  t.addEventListener("mouseover", e => {
+    const td = e.target.closest("td");
+    for (const x of t.querySelectorAll(".hl, .at")) x.classList.remove("hl", "at");
+    if (!td) return void (say.textContent = idle);
+    const r = td.parentElement.rowIndex, c = td.cellIndex;
+    for (const row of rows) row.cells[c].classList.add("hl");
+    for (const x of rows[r].cells) x.classList.add("hl");
+    if (!td.dataset.n) return void (say.textContent = idle);
+    td.classList.add("at");
+    const from = label(r), to = label(c);
+    say.replaceChildren(el("b", "", from), from === to ? " within itself: " : td.classList.contains("d-back") ? " uses, in a cycle, " : " uses ",
+      ...(from === to ? [] : [el("b", "", to), ": "]), td.dataset.names);
+  });
+  t.addEventListener("mouseleave", () => { for (const x of t.querySelectorAll(".hl, .at")) x.classList.remove("hl", "at"); say.textContent = idle; });
+}
+sheet.addEventListener("click", e => { if (e.target === sheet || e.target.closest("[data-sheet-close]")) sheet.close(); });
+document.addEventListener("mouseover", e => {
+  const s = e.target.closest?.(".sym");
+  clearTimeout(timer);
+  if (s) timer = setTimeout(() => show(s), 300);
+  else if (anchor && !pop.contains(e.target)) timer = setTimeout(hide, 300);
+});
+document.addEventListener("click", e => {
+  const s = e.target.closest(".sym");
+  if (s && !s.closest("a")) open(s);
+  else if (!pop.contains(e.target)) hide();
+});
+addEventListener("keydown", e => {
+  if (e.key === "Escape") hide();
+  else if (e.key === "Enter" && anchor && pop.matches(":popover-open") && !e.target.closest?.("a, button, input, textarea")) {
+    e.preventDefault();
+    open(anchor);
+  }
+});
+addEventListener("scroll", e => { if (anchor && !pop.contains(e.target)) hide(); }, { passive: true, capture: true }); // the inventory's list scrolls too
+
+// JetBrains' side by side: old left, new right, between them a ribbon from the lines that went to those that came.
+// Lines keep one height, so a ribbon is drawn from line counts; a fold, a finding or a hunk's header spans both
+// sides and starts the next segment.
+const LH = 20, GW = 40, NS = "http://www.w3.org/2000/svg";
+const splitOn = () => document.documentElement.dataset.diff === "split";
+const lineOf = new WeakMap(); // a row of the table -> what shows it side by side
+const clone = node => [...node.childNodes].map(n => n.cloneNode(true));
+const split = table => {
+  const box = el("div", "split");
+  box.dataset.path = table.dataset.path;
+  let l = [], r = [], blocks = [], cur = null;
+  const close = () => { if (cur) { blocks.push({ ...cur, l1: l.length, r1: r.length }); cur = null; } };
+  const flush = () => {
+    close();
+    if (!l.length && !r.length) return;
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("class", "split-gutter");
+    svg.setAttribute("width", GW);
+    svg.setAttribute("height", Math.max(l.length, r.length) * LH);
+    for (const b of blocks) {
+      const k = b.l1 > b.l0 && b.r1 > b.r0 ? "mod" : b.r1 > b.r0 ? "add" : "del";
+      for (let i = b.l0; i < b.l1; i++) l[i].classList.add(k === "mod" ? "mod" : "del");
+      for (let i = b.r0; i < b.r1; i++) r[i].classList.add(k === "mod" ? "mod" : "add");
+      const [y0, y1, z0, z1, m] = [b.l0 * LH, b.l1 * LH, b.r0 * LH, b.r1 * LH, GW / 2];
+      const p = document.createElementNS(NS, "path");
+      p.setAttribute("class", "ribbon " + k);
+      p.setAttribute("d", `M0 ${y0}C${m} ${y0} ${m} ${z0} ${GW} ${z0}L${GW} ${z1}C${m} ${z1} ${m} ${y1} 0 ${y1}Z`);
+      svg.append(p);
+    }
+    box.append(el("div", "split-seg", el("div", "split-pane", ...l), svg, el("div", "split-pane", ...r)));
+    l = []; r = []; blocks = [];
+  };
+  const line = (row, no) => el("div", "sl", el("span", "no", no || ""), el("span", "code", ...clone(row.cells[2])));
+  for (const row of table.rows) {
+    const fold = row.closest("tbody.fold");
+    if (row.matches("tr.fold-head")) {
+      flush();
+      const b = el("button", "split-fold" + (fold.classList.contains("open") ? " open" : ""), ...clone(row.querySelector(".fold-toggle")));
+      b.type = "button";
+      b.addEventListener("click", () => { row.querySelector(".fold-toggle").click(); split(table); });
+      box.append(b);
+      lineOf.set(row, b);
+    } else if (row.matches("tr.gone") || fold && !fold.classList.contains("open")) {
+      continue;
+    } else if (row.matches("tr.hunk")) {
+      flush();
+      const orig = row.querySelector(".hunk-seen"), b = el("button", "hunk-seen", ...clone(orig));
+      b.type = "button";
+      b.title = orig.title;
+      b.setAttribute("aria-pressed", orig.getAttribute("aria-pressed"));
+      b.addEventListener("click", e => { e.stopPropagation(); orig.click(); split(table); });
+      const bar = el("div", "split-bar", b, el("span", "min-w-0 truncate", row.querySelector(".truncate").textContent));
+      box.append(bar);
+      lineOf.set(row, bar);
+    } else if (row.matches("tr.ctx")) {
+      close();
+      const n = line(row, row.cells[0].textContent);
+      l.push(line(row, row.dataset.old));
+      r.push(n);
+      lineOf.set(row, n);
+    } else if (row.matches("tr.del")) {
+      if (cur && r.length > cur.r0) close(); // removed after added: the next change
+      cur ||= { l0: l.length, r0: r.length };
+      const n = line(row, row.dataset.old);
+      l.push(n);
+      lineOf.set(row, n);
+    } else if (row.matches("tr.add")) {
+      cur ||= { l0: l.length, r0: r.length };
+      const n = line(row, row.cells[0].textContent);
+      r.push(n);
+      lineOf.set(row, n);
+    } else { // a finding
+      flush();
+      const n = el("div", "split-note", ...clone(row.cells[0]));
+      box.append(n);
+      lineOf.set(row, n);
+    }
+  }
+  flush();
+  table.parentElement.querySelector(":scope > .split")?.remove();
+  table.after(box);
+};
+const tables = [...document.querySelectorAll("table[data-path]")];
+const wideEnough = matchMedia("(min-width: 1024px)");
+window.inSplit = el => {
+  const t = el.closest?.("table[data-path]");
+  if (!t || !splitOn() || !wideEnough.matches) return null;
+  split(t); // what reveal opened shows
+  return lineOf.get(el.matches("tbody") ? el.rows[0] : el) || null;
+};
+document.addEventListener("click", e => { if (e.target.closest(".toggle[data-diff]") && splitOn()) tables.forEach(split); });
+if (splitOn()) {
+  tables.forEach(split);
+  if (location.hash) dispatchEvent(new HashChangeEvent("hashchange")); // the jump on load hit the hidden table
+}
+
+const seen = new IntersectionObserver(es => {
+  for (const e of es) if (e.isIntersecting) { seen.unobserve(e.target); paint(e.target.querySelector("table")); }
+}, { rootMargin: "800px" });
+document.querySelectorAll(".diff").forEach(d => seen.observe(d));
+</script>
+{{end}}

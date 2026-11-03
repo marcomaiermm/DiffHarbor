@@ -1,0 +1,27 @@
+{{/* The sticky bar over the page. */}}
+{{define "header"}}
+<header class="sticky top-0 z-40 h-14 border-b bg-background/80 backdrop-blur-md">
+  <div class="flex h-full items-center gap-2 px-3 lg:px-4">
+    {{logo}}
+    <button type="button" class="sidebar-trigger" id="nav-trigger" aria-label="Toggle the side bar" title="Toggle the side bar (⌘B)">{{icon "panel-left" ""}}</button>
+    <div class="separator mx-1 h-4" data-orientation="vertical" role="none"></div>
+    <nav class="breadcrumb min-w-0" aria-label="Pull request"><ol class="breadcrumb-list flex-nowrap text-[13px]">
+      <li class="breadcrumb-item min-w-0">{{icon "git-pull-request" "size-4 shrink-0"}}<a href="{{.URL}}" class="breadcrumb-link truncate font-medium text-foreground">{{.Repo}}</a></li>
+      <li class="breadcrumb-separator" aria-hidden="true">{{icon "slash" "size-4"}}</li>
+      <li class="breadcrumb-item"><span class="breadcrumb-page font-mono font-normal text-muted-foreground"{{if not .Title}} aria-current="page"{{end}}>{{.Forge.Ref}}{{.Number}}</span></li>
+      <li class="breadcrumb-item hidden min-w-0 md:flex"><span class="breadcrumb-page truncate font-normal text-muted-foreground" aria-current="page">{{.Title}}</span></li>
+    </ol></nav>
+    <div class="ml-auto flex shrink-0 items-center gap-3">
+      <span id="progress-text" class="hidden font-mono text-xs tabular-nums text-muted-foreground sm:block"></span>
+      <div class="toggle-group view-toggle" data-variant="outline" role="group" aria-label="Diff layout">
+        <button type="button" class="toggle" data-diff="unified" aria-pressed="true" title="One column">{{icon "rows-2" ""}}Unified</button>
+        <button type="button" class="toggle" data-diff="split" aria-pressed="false" title="Side by side, the changes joined">{{icon "columns-2" ""}}Split</button>
+      </div>
+      <span class="badge hidden font-mono sm:inline-flex" data-variant="outline" id="version">{{short .SHA}}</span>
+      <select id="versions" class="version-pick max-sm:hidden" aria-label="Report version" data-sha="{{.SHA}}" hidden></select>
+      <a href="{{.URL}}" class="btn" data-variant="outline" data-size="sm">{{.Forge.Name}} {{icon "arrow-up-right" "size-3.5"}}</a>
+    </div>
+  </div>
+  <div class="absolute inset-x-0 -bottom-px h-px"><div id="progress" class="h-full bg-foreground" style="width:0"></div></div>
+</header>
+{{end}}

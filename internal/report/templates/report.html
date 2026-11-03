@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Repo}}{{.Forge.Ref}}{{.Number}} · {{.Title}}</title>
+{{favicons}}
+<!-- shadcn-html's components sit in @layer components: before Tailwind's base, or its preflight would win -->
+<style>@layer theme, base, components, utilities;</style>
+<!-- shadcn-html: the theme and the components the page uses, one request; the tokens below retune it -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/combine/gh/codylindley/shadcn-html@0.7.13-alpha/dist/theme/default-semantic-tokens.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/card/card.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/alert/alert.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/badge/badge.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/checkbox/checkbox.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/collapsible/collapsible.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/toggle/toggle.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/toggle-group/toggle-group.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/sidebar/sidebar.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/sheet/sheet.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/tree-view/tree-view.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/statistic/statistic.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/scroll-area/scroll-area.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/tabs/tabs.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/button/button.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/button-group/button-group.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/separator/separator.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/progress/progress.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/timeline/timeline.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/context-menu/context-menu.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/popover/popover.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/accordion/accordion.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/breadcrumb/breadcrumb.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@5/index.css">
+{{template "theme" .}}
+<script>if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<script src="https://cdn.jsdelivr.net/gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/tabs/tabs.js" defer></script>
+{{template "styles" .}}
+</head>
+<body class="text-[14px] leading-relaxed">
+
+{{template "header" .}}
+
+<div class="sidebar-layout">
+
+<aside class="app-sidebar" id="sidebar" data-state="expanded" aria-label="Report">{{template "nav" .}}</aside>
+<dialog class="sidebar-mobile" id="sidebar-mobile" aria-label="Report">
+  <button type="button" class="sidebar-mobile-close" aria-label="Close">{{icon "x" ""}}</button>
+  {{template "nav" .}}
+</dialog>
+
+<main class="mx-auto w-full max-w-[1180px] min-w-0 flex-1 px-4 py-10 lg:px-10">
+
+<div id="newer" class="alert mb-8" role="status" hidden>
+  {{icon "rotate-ccw" "alert-icon"}}
+  <div class="alert-content"><h2 class="alert-title">A newer review exists</h2>
+    <p class="alert-description">This is the report of <code class="font-mono">{{short .SHA}}</code>. <a class="font-medium text-foreground underline underline-offset-4" href="">Open the newest</a></p></div>
+</div>
+
+{{template "overview" .}}
+
+{{template "flow" .}}
+{{template "tests" .}}
+{{template "other" .}}
+{{template "mechanical" .}}
+{{template "deleted" .}}
+{{template "commits" .}}
+
+</main>
+</div>
+<div id="sym" popover="manual" class="popover sym-pop" data-blob="{{.Forge.Blob}}" data-forge="{{.Forge.Name}}" data-search="{{.Forge.Search}}"></div>
+<dialog id="uses" class="sheet" data-side="right" aria-labelledby="uses-title">
+  <div class="sheet-content">
+    <button type="button" class="sheet-close-x" data-sheet-close aria-label="Close">{{icon "x" "size-4"}}</button>
+    <div class="sheet-header">
+      <div class="sheet-kicker"></div>
+      <h2 class="sheet-title" id="uses-title"></h2>
+      <p class="sheet-description"></p>
+    </div>
+    <div class="sheet-body"></div>
+  </div>
+</dialog>
+<script type="application/json" id="symbols">{{.Symbols}}</script>
+{{template "script" .}}
+
+<template id="i-file">{{icon "file" ""}}</template>
+<template id="i-search">{{icon "search" ""}}</template>
+<template id="i-enter">{{icon "corner-down-left" ""}}</template>
+{{if .Graphs}}<template id="i-arrow-up-right">{{icon "arrow-up-right" ""}}</template>
+<template id="i-focus">{{icon "focus" ""}}</template>
+<template id="i-eye-off">{{icon "eye-off" ""}}</template>
+<template id="i-eye">{{icon "eye" ""}}</template>
+<template id="i-copy">{{icon "copy" ""}}</template>
+<template id="i-rotate-ccw">{{icon "rotate-ccw" ""}}</template>
+<template id="i-expand">{{icon "expand" ""}}</template>
+<template id="i-maximize">{{icon "maximize" ""}}</template>
+{{end}}
+{{template "syntax" .}}
+{{if .Diagram}}{{template "diagram" .}}{{end}}
+{{if .Graphs}}{{template "graphs" .}}{{end}}
+</body>
+</html>

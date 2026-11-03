@@ -1,0 +1,39 @@
+{{/* The side bar: the files by reading order and as a tree; "tab" is a tab of the overview card. */}}
+{{define "nav"}}<div class="sidebar-header">
+    <span class="text-xs font-medium text-muted-foreground/70">Files</span>
+    <div class="toggle-group" data-variant="outline" role="group" aria-label="Files as">
+      <button type="button" class="toggle" data-files="flow" aria-pressed="true" title="By the reading order">{{icon "list" ""}}Flow</button>
+      <button type="button" class="toggle" data-files="tree" aria-pressed="false" title="All files by directory">{{icon "folder" ""}}Tree</button>
+    </div>
+  </div>
+  <div class="sidebar-content">
+    <nav class="sidebar-nav"><a href="#overview" class="sidebar-link" title="Overview">{{icon "layout-grid" ""}}<span>Overview</span></a></nav>
+    {{if .Steps}}<details class="sidebar-group" data-view="flow" open>
+      <summary><span>Reading order</span>{{icon "chevron-right" ""}}</summary>
+      <ol class="sidebar-nav">{{range $i, $s := .Steps}}
+        <li data-step="step-{{inc $i}}">
+          <a href="#step-{{inc $i}}" class="sidebar-link font-medium text-foreground" title="{{$s.Title}}"><i class="ring-p" aria-hidden="true"></i><span class="truncate">{{$s.Title}}</span><span class="sidebar-badge nav-count"></span></a>
+          <ul class="sidebar-files my-0.5 ml-[15px] space-y-px border-l pl-2">{{range $s.Files}}
+            <li><a href="#{{.Path}}" data-path="{{.Path}}" title="{{.Path}}" class="nav-file"{{if .Changed}} data-changed{{end}}><span class="shrink-0">{{base .Short}}</span><span class="ml-2 min-w-0 truncate text-[11px] opacity-50">{{dir .Short}}</span></a></li>{{end}}
+          </ul>
+        </li>{{end}}
+      </ol>
+    </details>{{end}}
+    <ul class="tree mt-3" data-view="tree" role="tree">{{template "tree" .Tree}}</ul>
+    <details class="sidebar-group" open>
+      <summary><span>More</span>{{icon "chevron-right" ""}}</summary>
+      <nav class="sidebar-nav">
+        {{if or .Tests .Outline.Added .Outline.Weakened}}<a href="#tests" class="sidebar-link" title="Tests">{{icon "flask-conical" ""}}<span>Tests</span><span class="sidebar-badge">{{.NTests}}</span></a>{{end}}
+        {{if .Other}}<a href="#other" class="sidebar-link" title="Data and docs">{{icon "file-text" ""}}<span>Data and docs</span><span class="sidebar-badge">{{.NOther}}</span></a>{{end}}
+        {{if .Mechanical}}<a href="#mechanical" class="sidebar-link" title="Mechanical">{{icon "files" ""}}<span>Mechanical</span><span class="sidebar-badge">{{len .Mechanical}}</span></a>{{end}}
+        {{if .Deleted}}<a href="#deleted" class="sidebar-link" title="Deleted">{{icon "trash-2" ""}}<span>Deleted</span><span class="sidebar-badge">{{len .Deleted}}</span></a>{{end}}
+        {{if .Commits}}<a href="#commits" class="sidebar-link" title="Commits">{{icon "git-commit-horizontal" ""}}<span>Commits</span><span class="sidebar-badge">{{len .Commits}}</span></a>{{end}}
+      </nav>
+    </details>
+  </div>{{end}}
+
+{{define "tree"}}{{range .}}{{if .File}}<li class="tree-item" role="treeitem"><a href="#{{.File.Path}}" data-path="{{.File.Path}}" title="{{.File.Path}}" class="tree-leaf nav-file"{{if .File.Changed}} data-changed{{end}}>{{icon "file" ""}}<span class="truncate">{{.Name}}</span><span class="tree-stat"><span class="text-diff-add">+{{.File.Add}}</span> <span class="text-diff-del">−{{.File.Del}}</span></span></a></li>
+{{else}}<li class="tree-item" role="treeitem"><details class="tree-branch" open><summary class="tree-branch-trigger">{{icon "chevron-right" ""}}<span>{{.Name}}</span></summary><ul class="tree-group" role="group">{{template "tree" .Kids}}</ul></details></li>
+{{end}}{{end}}{{end}}
+
+{{define "tab"}}<button type="button" class="tab-trigger" role="tab" id="tab-{{.ID}}" aria-controls="{{.ID}}" aria-selected="{{.On}}"{{if not .On}} tabindex="-1"{{end}}>{{.Title}}<span class="badge inv-count" data-variant="secondary"{{if .Warn}} data-warn{{end}}>{{.N}}</span></button>{{end}}
