@@ -22,7 +22,7 @@
   </div>
 </details>{{end}}
 
-{{define "line"}}{{if eq .Class "hunk"}}<tr class="hunk"><td colspan="3" class="py-0.5 pr-2 pl-4 text-xs"><span class="flex items-center gap-2"><button type="button" class="hunk-seen" aria-pressed="false" title="Hide this hunk once read">{{icon "check" "size-3"}}<span>Seen</span></button><span class="min-w-0 truncate">{{.Text}}</span></span></td></tr>{{else}}<tr class="{{.Class}}"{{with .ID}} id="{{.}}"{{end}}{{with .Old}} data-old="{{.}}"{{end}}><td class="no w-px px-3 text-right select-none whitespace-nowrap">{{.No}}</td><td class="sign w-px pr-2 select-none">{{if eq .Class "add"}}+{{else if eq .Class "del"}}−{{end}}</td><td class="code pr-4 whitespace-pre">{{.Text}}</td></tr>{{end}}
+{{define "line"}}{{if eq .Class "hunk"}}<tr class="hunk"><td colspan="3" class="py-0.5 pr-2 pl-4 text-xs"><span class="flex items-center gap-2"><button type="button" class="hunk-seen" aria-pressed="false" title="Hide this hunk once read">{{icon "check" "size-3"}}<span>Seen</span></button><span class="min-w-0 truncate">{{.Text}}</span></span></td></tr>{{else}}<tr class="{{.Class}}"{{with .ID}} id="{{.}}"{{end}}{{with .Old}} data-old="{{.}}"{{end}}><td>{{.No}}</td><td>{{if eq .Class "add"}}+{{else if eq .Class "del"}}−{{end}}</td><td>{{.Text}}</td></tr>{{end}}
 {{range .Findings}}<tr><td colspan="3" class="bg-background px-3">{{template "finding" .}}</td></tr>{{end}}{{end}}
 
 {{define "finding"}}<div class="alert my-2 font-sans whitespace-normal"{{if eq .Severity "critical"}} data-variant="destructive"{{end}} role="note">

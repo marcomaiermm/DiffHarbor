@@ -162,7 +162,7 @@ The report page is the templates in [`internal/report/templates/`](internal/repo
 {{define "footer"}}<footer class="py-6 text-center text-xs text-muted-foreground">Acme Engineering</footer>{{end}}
 ```
 
-Blocks meant for this: `theme` (the color tokens, see `theme.html`), `logo`, `head` (more in `<head>`), `header`, `footer`. The others work too but follow the page's data, which can change between versions. DiffHarbor checks the templates at start and doesn't start with a broken one. Reports already rendered keep their look.
+Blocks meant for this: `theme` (the color tokens, see `theme.html`), `logo`, `head` (more in `<head>`), `header`, `footer`. The others work too but follow the page's data, which can change between versions. The page's CSS is compiled with the classes its templates use; with your templates, DiffHarbor compiles it again at start with theirs (Tailwind's CLI is in the image). DiffHarbor checks the templates at start and doesn't start with a broken one. Reports already rendered keep their look.
 
 ## Per-repo settings
 

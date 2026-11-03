@@ -182,9 +182,9 @@ func TestIcons(t *testing.T) {
 }
 
 func TestLoad(t *testing.T) {
-	defer func(t0 *template.Template, l, f template.HTML) { tmpl, logo, favicons = t0, l, f }(tmpl, logo, favicons)
+	defer func(t0 *template.Template, l, f template.HTML, c string) { tmpl, logo, favicons, css = t0, l, f, c }(tmpl, logo, favicons, css)
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "brand.html"), []byte(`{{define "theme"}}<style>:root{--primary:#c00}</style>{{end}}{{define "footer"}}<footer>Acme</footer>{{end}}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "brand.html"), []byte(`{{define "theme"}}<style>:root{--primary:#c00}</style>{{end}}{{define "footer"}}<footer class="py-6">Acme</footer>{{end}}`), 0o644)
 	os.WriteFile(filepath.Join(dir, "logo.png"), []byte("acme"), 0o644)
 	if err := Load(dir); err != nil {
 		t.Fatal(err)
@@ -194,7 +194,10 @@ func TestLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	for _, w := range []string{"--primary:#c00", "<footer>Acme</footer>", "base64,YWNtZQ==", `id="overview"`} {
+	if _, err := exec.LookPath("tailwindcss"); err == nil && !strings.Contains(s, ".py-6{") { // the image has it
+		t.Error("the footer's class isn't compiled")
+	}
+	for _, w := range []string{"--primary:#c00", `<footer class="py-6">Acme</footer>`, "base64,YWNtZQ==", `id="overview"`} {
 		if !strings.Contains(s, w) {
 			t.Errorf("%q missing", w)
 		}
@@ -239,6 +242,24 @@ func TestSaid(t *testing.T) {
 	runs := fold([]string{"a.go"}, files, map[string]map[int]string{"a.go": {2: "a rename"}})
 	if r := runs[files["a.go"].Lines[1].Run]; r.What != "routine" || r.Note != "a rename" {
 		t.Errorf("run %+v", r)
+	}
+}
+
+// a generated file's one huge line cuts the file there: what follows it is cut too, not shown out of order
+// A deleted file keeps its first maxGone lines and what moved out of it: the other side links there.
+func TestTrim(t *testing.T) {
+	f := &file{Lines: make([]line, maxGone+10)}
+	f.Lines[maxGone+5].Run = 1
+	trim(f, map[int]run{1: {Where: "a.go:1"}})
+	if len(f.Lines) != maxGone+1 || f.Cut != 9 || f.Lines[maxGone].Run != 1 {
+		t.Errorf("%d lines, %d cut", len(f.Lines), f.Cut)
+	}
+}
+
+func TestCut(t *testing.T) {
+	f := parse("a.json", "--- a/a.json\n+++ b/a.json\n@@ -0,0 +1,3 @@\n+{\n+"+strings.Repeat("x", maxBytes)+"\n+}\n", "")
+	if len(f.Lines) != 2 || f.Cut != 2 {
+		t.Errorf("%d lines, %d cut", len(f.Lines), f.Cut)
 	}
 }
 

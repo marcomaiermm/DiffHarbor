@@ -1,6 +1,7 @@
 package server
 
 import (
+	"compress/gzip"
 	"context"
 	"diffharbor/internal/forge"
 	"diffharbor/internal/forge/github"
@@ -9,6 +10,7 @@ import (
 	"diffharbor/internal/report"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -140,6 +142,15 @@ func TestServeReport(t *testing.T) {
 	}
 	if w := get("/r/github.com/o/r/7/" + sha(3)); w.Code != 200 || !strings.Contains(w.Body.String(), `data-sha="`+sha(3)) {
 		t.Fatal("a version:", w.Code)
+	}
+	gz := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/r/github.com/o/r/7", nil)
+	req.Header.Set("Accept-Encoding", "gzip, br")
+	mux.ServeHTTP(gz, req)
+	if zr, err := gzip.NewReader(gz.Body); err != nil || gz.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatal("gzip:", err, gz.Header())
+	} else if b, _ := io.ReadAll(zr); !strings.Contains(string(b), `data-sha="`+sha(5)) {
+		t.Fatal("gzip:", string(b))
 	}
 	if w := get("/r/github.com/o/r/7/versions"); w.Code != 200 || strings.Count(w.Body.String(), `"sha"`) != 2 {
 		t.Fatal("list:", w.Code, w.Body)

@@ -4,6 +4,7 @@ package server
 
 import (
 	"cmp"
+	"compress/gzip"
 	"context"
 	"diffharbor/internal/agent"
 	"diffharbor/internal/forge"
@@ -293,7 +294,7 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 		h.Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(es)
 	default:
-		// The page's own script, and fetch for its versions; Tailwind, Shiki, mermaid, cytoscape, styles and fonts from jsdelivr; PR text in it is escaped, this is the second fence.
+		// The page's own script, and fetch for its versions; Shiki, mermaid, cytoscape, styles and fonts from jsdelivr; PR text in it is escaped, this is the second fence.
 		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self'; "+
 			"style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src data:; font-src data: https://cdn.jsdelivr.net; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 		name := dir + "/" + cmp.Or(sha, vs[0].SHA) + ".html"
@@ -309,7 +310,15 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 		}
 		defer f.Close()
 		h.Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := io.Copy(w, f); err != nil {
+		h.Set("Vary", "Accept-Encoding")
+		var out io.Writer = w
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") { // a big PR's page is megabytes of markup
+			h.Set("Content-Encoding", "gzip")
+			gz := gzip.NewWriter(w)           // level 6: a fifth smaller than BestSpeed, ~120ms for 8 MB
+			defer func() { _ = gz.Close() }() // its last write failing is the client gone, as io.Copy's below
+			out = gz
+		}
+		if _, err := io.Copy(out, f); err != nil {
 			log.Println(name, "report:", err) // the headers are out: the page ends short
 		}
 	}
