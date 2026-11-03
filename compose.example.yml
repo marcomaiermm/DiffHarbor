@@ -45,11 +45,14 @@ services:
       ITSAPLAN_API_KEY: ${ITSAPLAN_API_KEY:-}
       # Optional: PR reports under /r/. They hold the PR's code: serve them only behind your SSO. Empty = no reports.
       REPORT_URL: ${REPORT_URL:-}
+      # Optional: your logo, colors and templates for the report (README: Branding the report), with the volume below.
+      # TEMPLATE_DIR: /branding
       DOCKER_HOST: tcp://dind:2375 # testcontainers in the checks; drop with the dind service if you don't need them
     # Root serves and holds the forge keys; git, checks and Pi run as node (uid 1000) and can't read root's environ.
     volumes:
       - diffharbor-data:/data # learnings, pending reviews, reports, Pi's ChatGPT login
       - diffharbor-cache:/cache # package stores, Go modules, work dirs
+      # - ./branding:/branding:ro
 
   # Docker for testcontainers (Postgres etc.) in the checks. The PR's code controls this daemon, so it holds no
   # secrets. sysbox-runc (https://github.com/nestybox/sysbox, on the host) isolates it without --privileged.

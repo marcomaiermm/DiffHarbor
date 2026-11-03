@@ -142,8 +142,24 @@ Bedrock in the EU: `amazon-bedrock/eu.anthropic.…`. Each pass gets only its ow
 | Variable | |
 |---|---|
 | `REPORT_URL` | An HTML report per PR under `/r/<host>/<repo>/<n>`: reading order, diffs with findings, call graphs, what the change reaches outside the PR, and before you merge, base commits the PR is behind on, conflicts, and open PRs changing the same files or lines. Each reviewed head keeps a version, the newest 10 stay; closing the PR deletes them. **The report contains the PR's code: serve `/r/` only behind your SSO.** |
+| `TEMPLATE_DIR` | Your branding for the report, see [Branding the report](#branding-the-report). |
 | `ITSAPLAN_URL`, `ITSAPLAN_API_KEY` | The itsaplan ticket a PR names (`ABC-12` in title, branch or description) goes into the review as what the PR must do. Never for PRs from forks. |
 | `DOCKER_HOST` | With the `dind` service: Docker for testcontainers in the checks, isolated with [Sysbox](https://github.com/nestybox/sysbox) (install it on the host). Drop both if your tests don't need Docker. |
+
+### Branding the report
+
+The report page is the templates in [`internal/report/templates/`](internal/report/templates/). Files in `TEMPLATE_DIR` override them, like Django's template dirs:
+
+- `logo.png` (64 px), `favicon.svg`, `favicon-32x32.png` replace the images.
+- A `*.html` file that defines a template again replaces ours. A file with the name of one of ours (`header.html`) replaces all of that file. Files are read in name order, the last definition wins.
+
+```html
+<!-- $TEMPLATE_DIR/brand.html -->
+{{define "theme"}}<style>:root { --primary: #0b5fff; --ring: #0b5fff; }</style>{{end}}
+{{define "footer"}}<footer class="py-6 text-center text-xs text-muted-foreground">Acme Engineering</footer>{{end}}
+```
+
+Blocks meant for this: `theme` (the color tokens, see `theme.html`), `logo`, `head` (more in `<head>`), `header`, `footer`. The others work too but follow the page's data, which can change between versions. DiffHarbor checks the templates at start and doesn't start with a broken one. Reports already rendered keep their look.
 
 ## Per-repo settings
 

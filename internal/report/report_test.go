@@ -4,6 +4,7 @@ import (
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
 	"fmt"
+	"html/template"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -177,6 +178,33 @@ func TestIcons(t *testing.T) {
 		if icons[m[1]] == "" {
 			t.Errorf("icon %q is not in icons", m[1])
 		}
+	}
+}
+
+func TestLoad(t *testing.T) {
+	defer func(t0 *template.Template, l, f template.HTML) { tmpl, logo, favicons = t0, l, f }(tmpl, logo, favicons)
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "brand.html"), []byte(`{{define "theme"}}<style>:root{--primary:#c00}</style>{{end}}{{define "footer"}}<footer>Acme</footer>{{end}}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "logo.png"), []byte("acme"), 0o644)
+	if err := Load(dir); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := Render(Data{Repo: "a/b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, w := range []string{"--primary:#c00", "<footer>Acme</footer>", "base64,YWNtZQ==", `id="overview"`} {
+		if !strings.Contains(s, w) {
+			t.Errorf("%q missing", w)
+		}
+	}
+	if strings.Contains(s, "Geist's grays") {
+		t.Error("our theme is still there")
+	}
+	os.WriteFile(filepath.Join(dir, "zz.html"), []byte(`{{define "footer"}}{{.Nope}}{{end}}`), 0o644)
+	if Load(dir) == nil {
+		t.Error("a template naming a missing field loads")
 	}
 }
 

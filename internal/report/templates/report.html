@@ -16,6 +16,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 <script src="https://cdn.jsdelivr.net/gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/tabs/tabs.js" defer></script>
 {{template "styles" .}}
+{{block "head" .}}{{end}}
 </head>
 <body class="text-[14px] leading-relaxed">
 
@@ -78,5 +79,6 @@
 {{template "syntax" .}}
 {{if .Diagram}}{{template "diagram" .}}{{end}}
 {{if .Graphs}}{{template "graphs" .}}{{end}}
+{{block "footer" .}}{{end}}
 </body>
 </html>

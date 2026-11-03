@@ -1,8 +1,8 @@
-{{/* The sticky bar over the page. */}}
+{{/* The sticky bar over the page; "logo" is the image at its left. */}}
 {{define "header"}}
 <header class="sticky top-0 z-40 h-14 border-b bg-background/80 backdrop-blur-md">
   <div class="flex h-full items-center gap-2 px-3 lg:px-4">
-    {{logo}}
+    {{block "logo" .}}{{logo}}{{end}}
     <button type="button" class="sidebar-trigger" id="nav-trigger" aria-label="Toggle the side bar" title="Toggle the side bar (⌘B)">{{icon "panel-left" ""}}</button>
     <div class="separator mx-1 h-4" data-orientation="vertical" role="none"></div>
     <nav class="breadcrumb min-w-0" aria-label="Pull request"><ol class="breadcrumb-list flex-nowrap text-[13px]">

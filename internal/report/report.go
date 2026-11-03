@@ -5,12 +5,17 @@ package report
 import (
 	"bytes"
 	"cmp"
+	"diffharbor/internal/assets"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
+	"io"
+	"io/fs"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -69,12 +74,12 @@ const maxLines = 3000
 // wip matches commit subjects that tell nothing about the change.
 var wip = regexp.MustCompile(`(?i)^(wip\b|fixup!|squash!|amend!|typo|lint|fmt\b|format\b|oops|tmp\b|\.+$|fix(es)?$|changes?$|updates?$|address(ed)? (review|comments|feedback)|(pr |review )(comments|feedback))`)
 
-// templates is the page: report.html and the templates it calls, a file per part.
+// templates is the page: report.html and the templates it calls, a file per part (see Load).
 //
 //go:embed templates/*.html
 var templates embed.FS
 
-var tmpl = template.Must(template.New("").Funcs(funcs).ParseFS(templates, "templates/*.html"))
+var tmpl = template.Must(parseTemplates(nil))
 
 var funcs = template.FuncMap{
 	"short":    func(s string) string { return s[:min(len(s), 7)] },
@@ -105,6 +110,51 @@ var funcs = template.FuncMap{
 		}
 		return strconv.Itoa(n*100/of) + "%"
 	},
+}
+
+// parseTemplates is the embedded templates, then over's *.html: what over defines again replaces ours.
+func parseTemplates(over fs.FS) (*template.Template, error) {
+	t, err := template.New("").Funcs(funcs).ParseFS(templates, "templates/*.html")
+	if err != nil || over == nil {
+		return t, err
+	}
+	if m, _ := fs.Glob(over, "*.html"); len(m) > 0 {
+		return t.ParseFS(over, "*.html")
+	}
+	return t, nil
+}
+
+// Load takes an operator's branding from dir, like Django's template dirs: a *.html file there defines a template
+// again ({{define "theme"}}…{{end}}) or replaces a whole file of templates/ by its name; the files go in name order,
+// the last definition wins. logo.png (64 px), favicon.svg and favicon-32x32.png replace the images. Reports rendered
+// before keep theirs. "" keeps ours.
+func Load(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	d := os.DirFS(dir)
+	t, err := parseTemplates(d)
+	if err != nil {
+		return fmt.Errorf("report: templates in %s: %w", dir, err)
+	}
+	img := map[string][]byte{"logo.png": assets.Logo, "favicon.svg": assets.FaviconSVG, "favicon-32x32.png": assets.FaviconPNG}
+	for name := range img {
+		b, err := fs.ReadFile(d, name)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("report: %w", err)
+		}
+		img[name] = b
+	}
+	// a template naming a field the page has none of fails here, not at the first review
+	if err := t.ExecuteTemplate(io.Discard, "report.html", prepare(Data{})); err != nil {
+		return fmt.Errorf("report: templates in %s: %w", dir, err)
+	}
+	tmpl = t
+	logo, favicons = images(img["logo.png"], img["favicon.svg"], img["favicon-32x32.png"])
+	return nil
 }
 
 type line struct {

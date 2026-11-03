@@ -14,6 +14,7 @@ import (
 	"diffharbor/internal/forge/gitlab"
 	"diffharbor/internal/job"
 	"diffharbor/internal/proc"
+	"diffharbor/internal/report"
 	"diffharbor/internal/review"
 	"diffharbor/internal/server"
 	"diffharbor/internal/ticket"
@@ -80,6 +81,9 @@ func configure() server.Config {
 func main() {
 	cfg := configure()
 	if err := agent.Proxies(); err != nil {
+		log.Fatal(err)
+	}
+	if err := report.Load(os.Getenv("TEMPLATE_DIR")); err != nil {
 		log.Fatal(err)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "login" {

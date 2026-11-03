@@ -7,15 +7,17 @@ import (
 	"html/template"
 )
 
-var (
-	// logo is the header's logo (64 px, shown at 28), a data: URL like the favicons.
-	logo = template.HTML(`<img src="data:image/png;base64,` + base64.StdEncoding.EncodeToString(assets.Logo) + //nolint:gosec // our own file, base64
-		`" alt="DiffHarbor" title="DiffHarbor" width="28" height="28" class="size-7 shrink-0">`)
-	// favicons are the page's icons as data: URLs, the only images its CSP allows; the PNG for browsers without SVG icons.
-	favicons = template.HTML(`<link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,` + //nolint:gosec // our own files, base64
-		base64.StdEncoding.EncodeToString(assets.FaviconPNG) + `">` + "\n" +
-		`<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,` + base64.StdEncoding.EncodeToString(assets.FaviconSVG) + `">`)
-)
+// logo and favicons are the header's logo and the page's icons, as data: URLs: the only images its CSP allows.
+var logo, favicons = images(assets.Logo, assets.FaviconSVG, assets.FaviconPNG)
+
+// images is the logo (64 px, shown at 28) and the favicons; the PNG for browsers without SVG icons.
+func images(logo, svg, png []byte) (img, links template.HTML) {
+	b64 := base64.StdEncoding.EncodeToString
+	//nolint:gosec // base64 of our files or the operator's
+	return template.HTML(`<img src="data:image/png;base64,` + b64(logo) + `" alt="DiffHarbor" title="DiffHarbor" width="28" height="28" class="size-7 shrink-0">`),
+		template.HTML(`<link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,` + b64(png) + `">` + "\n" + //nolint:gosec // as above
+			`<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,` + b64(svg) + `">`)
+}
 
 // icons are Lucide's (lucide.dev, ISC license, lucide-static 0.577.0): what goes inside each 24×24 svg.
 var icons = map[string]string{
