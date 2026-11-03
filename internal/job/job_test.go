@@ -4,9 +4,9 @@ import (
 	"diffharbor/internal/forge"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/report"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
+	"io/fs"
 	"strings"
 	"testing"
 )
@@ -44,12 +44,22 @@ func TestReportVersions(t *testing.T) {
 		}
 	}
 	writeReport(e, report.Data{Repo: "o/r", Number: 7, SHA: sha(5)}) // reviewed again: the newest
-	vs := Versions(reportPath(e))
-	if len(vs) != maxVersions || vs[0].SHA != sha(5) || vs[1].SHA != sha(maxVersions+1) || vs[0].At.IsZero() {
+	vs, err := Versions(reportPath(e))
+	if err != nil || len(vs) != maxVersions || vs[0].SHA != sha(5) || vs[1].SHA != sha(maxVersions+1) || vs[0].At.IsZero() {
 		t.Fatalf("%+v", vs)
 	}
-	if _, err := os.Stat(filepath.Join(ReportDir(e), sha(0)+".html")); !os.IsNotExist(err) {
+	if _, err := Reports().Get(reportPath(e) + "/" + sha(0) + ".html"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("kept a version past maxVersions:", err)
+	}
+	if err := DeleteReports(e); err != nil {
+		t.Fatal(err)
+	}
+	if vs, err := Versions(reportPath(e)); err != nil || len(vs) != 0 {
+		t.Fatal("closed PR kept its reports:", vs, err)
+	}
+	Reports().Put(reportPath(e)+"/versions.json", []byte("{")) // unreadable: a report would drop the list
+	if u := writeReport(e, report.Data{Repo: "o/r", Number: 7, SHA: sha(1)}); u != "" {
+		t.Fatal("wrote over an unreadable list:", u)
 	}
 	gl := &forge.Event{Forge: "gitlab"} // a project in a subgroup
 	gl.Repository.FullName, gl.PullRequest.Number, gl.PullRequest.HTMLURL = "g/s/p", 3, "https://gitlab.example.com/g/s/p/-/merge_requests/3"

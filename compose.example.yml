@@ -45,6 +45,12 @@ services:
       ITSAPLAN_API_KEY: ${ITSAPLAN_API_KEY:-}
       # Optional: PR reports under /r/. They hold the PR's code: serve them only behind your SSO. Empty = no reports.
       REPORT_URL: ${REPORT_URL:-}
+      # Optional: the reports in an S3 bucket instead of /data, https://host[:port]/bucket[/prefix] (README: Configuration).
+      # With the seaweedfs service below: http://seaweedfs:8333/reports, and any key and secret you pick.
+      REPORT_S3_URL: ${REPORT_S3_URL:-}
+      REPORT_S3_ACCESS_KEY: ${REPORT_S3_ACCESS_KEY:-}
+      REPORT_S3_SECRET_KEY: ${REPORT_S3_SECRET_KEY:-}
+      REPORT_S3_REGION: ${REPORT_S3_REGION:-}
       # Optional: your logo, colors and templates for the report (README: Branding the report), with the volume below.
       # TEMPLATE_DIR: /branding
       DOCKER_HOST: tcp://dind:2375 # testcontainers in the checks; drop with the dind service if you don't need them
@@ -53,6 +59,7 @@ services:
       - diffharbor-data:/data # learnings, pending reviews, reports, Pi's ChatGPT login
       - diffharbor-cache:/cache # package stores, Go modules, work dirs
       # - ./branding:/branding:ro
+    # depends_on: [seaweedfs] # with the seaweedfs service: S3 is up when the server moves the reports on start
 
   # Docker for testcontainers (Postgres etc.) in the checks. The PR's code controls this daemon, so it holds no
   # secrets. sysbox-runc (https://github.com/nestybox/sysbox, on the host) isolates it without --privileged.
@@ -68,7 +75,21 @@ services:
     volumes:
       - dind-data:/var/lib/docker
 
+  # Optional: S3 for the reports (REPORT_S3_*). The key is its admin; the bucket comes with the first report. Only S3
+  # listens on the network, and it wants the key: master, volume and filer stay on localhost, as PR code in the
+  # checks shares this network. No port leaves the stack.
+  # seaweedfs:
+  #   image: chrislusf/seaweedfs:4.48
+  #   command: [server, -ip=127.0.0.1, -ip.bind=127.0.0.1, -s3, -s3.ip.bind=0.0.0.0]
+  #   environment:
+  #     AWS_ACCESS_KEY_ID: ${REPORT_S3_ACCESS_KEY:?}
+  #     AWS_SECRET_ACCESS_KEY: ${REPORT_S3_SECRET_KEY:?}
+  #   restart: unless-stopped
+  #   volumes:
+  #     - seaweedfs-data:/data
+
 volumes:
   diffharbor-data:
   diffharbor-cache:
   dind-data:
+  # seaweedfs-data:

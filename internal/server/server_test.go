@@ -4,6 +4,7 @@ import (
 	"context"
 	"diffharbor/internal/forge"
 	"diffharbor/internal/forge/github"
+	"diffharbor/internal/job"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/report"
 	"encoding/json"
@@ -11,7 +12,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -55,8 +55,8 @@ func TestPendingResume(t *testing.T) {
 	gl := &forge.Event{Forge: "gitlab", Action: "opened"} // its forge is off: stays on disk
 	gl.Repository.FullName, gl.PullRequest.Number = "g/s/p", 1
 	latest.Lock()
-	keep(gh)
-	keep(gl)
+	save(pendingFile(gh.Key()), gh)
+	save(pendingFile(gl.Key()), gl)
 	latest.Unlock()
 	q := make(chan *forge.Event, 2)
 	resume(q)
@@ -78,22 +78,52 @@ func TestPendingResume(t *testing.T) {
 	}
 }
 
+// A closed PR's reports go through the worker; its deletingFile stays until they did, for retryDrops, and without
+// it (reopened since) a close deletes nothing.
+func TestDrop(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "closed"}
+	e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = "o/r", 7, "https://github.com/o/r/pull/7"
+	job.Reports().Put("github.com/o/r/7/versions.json", []byte("[]"))
+	latest.Lock()
+	save(deletingFile(e.Key()), e)
+	latest.Unlock()
+	q := make(chan *forge.Event, 1)
+	retryDrops(q) // after a restart
+	r := <-q
+	if !closing(r) || r.Key() != e.Key() {
+		t.Fatalf("%+v", r)
+	}
+	q <- r
+	close(q)
+	work(q)
+	if vs, err := job.Versions("github.com/o/r/7"); err != nil || len(vs) != 0 {
+		t.Fatal("kept its reports:", vs, err)
+	}
+	if retryDrops(q); len(q) != 0 {
+		t.Fatal("retries a done delete")
+	}
+	job.Reports().Put("github.com/o/r/7/versions.json", []byte(`[{"sha":"a"}]`)) // reopened, reviewed again
+	if err := drop(r); err != nil {
+		t.Fatal(err)
+	}
+	if vs, _ := job.Versions("github.com/o/r/7"); len(vs) != 1 {
+		t.Fatal("a stale close deleted the reopened PR's report")
+	}
+}
+
 // /r/ serves a PR's newest report, a version by its SHA, and their list; nothing outside a PR's folder.
 func TestServeReport(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	sha := func(i int) string { return fmt.Sprintf("%040x", i) }
 	put := func(dir string, shas ...string) {
-		d := filepath.Join(proc.DataDir, "reports", filepath.FromSlash(dir))
 		var vs []report.Version
 		for _, s := range shas {
 			vs = append(vs, report.Version{SHA: s})
-			if err := os.MkdirAll(d, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			os.WriteFile(filepath.Join(d, s+".html"), []byte(`<html data-sha="`+s+`">`), 0o600)
+			job.Reports().Put(dir+"/"+s+".html", []byte(`<html data-sha="`+s+`">`))
 		}
 		b, _ := json.Marshal(vs)
-		os.WriteFile(filepath.Join(d, "versions.json"), b, 0o600)
+		job.Reports().Put(dir+"/versions.json", b)
 	}
 	put("github.com/o/r/7", sha(5), sha(3))
 	put("gitlab.example.com/g/s/p/3", sha(1)) // a project in a subgroup
@@ -121,5 +151,9 @@ func TestServeReport(t *testing.T) {
 	}
 	if w := get("/r/gitlab.example.com/g/s/p/3/" + sha(1)); w.Code != 200 {
 		t.Fatal("gitlab:", w.Code)
+	}
+	job.Reports().Put("github.com/o/r/9/versions.json", []byte("{")) // unreadable is no "none"
+	if w := get("/r/github.com/o/r/9"); w.Code != http.StatusBadGateway {
+		t.Fatal("unreadable list:", w.Code)
 	}
 }
