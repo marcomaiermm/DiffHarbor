@@ -25,7 +25,8 @@ linters:
         # The package boundaries: the core knows no forge and no job, the forges no job, and job no server.
         core:
           files: ["**/internal/review/**", "**/internal/checks/**", "**/internal/agent/**", "**/internal/report/**",
-            "**/internal/diff/**", "**/internal/text/**", "**/internal/proc/**", "**/internal/ticket/**"]
+            "**/internal/diff/**", "**/internal/text/**", "**/internal/proc/**", "**/internal/ticket/**",
+            "**/internal/assets/**"]
           deny:
             - pkg: diffharbor/internal/forge
               desc: the core knows no forge; job joins them
@@ -48,10 +49,10 @@ linters:
             - pkg: diffharbor/internal/forge/
               desc: jobs see a forge through the port (forge.Forge, forge.PR) only
         leaf:
-          files: ["**/internal/diff/**", "**/internal/text/**"]
+          files: ["**/internal/diff/**", "**/internal/text/**", "**/internal/assets/**"]
           deny:
             - pkg: diffharbor/internal
-              desc: diff and text are leaves
+              desc: diff, text and assets are leaves
     gocognit:
       min-complexity: 50
     gocyclo:
