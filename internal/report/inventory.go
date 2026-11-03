@@ -17,7 +17,8 @@ const maxItems, maxShown, maxAsk = 60, 3, 12
 type span struct {
 	f             *file
 	name          string
-	head, oldHead string   // its declaring line, added and removed, trimmed
+	head, oldHead string   // its signature, added and removed: see signature
+	text, oldText string   // its declaring line, added and removed, trimmed: as a commit has it
 	add, del      []string // its other added and removed lines of code, trimmed
 	id, oldID     string   // its first added line, its first removed one
 	oldLine       int      // the old file's line of oldID
@@ -27,6 +28,31 @@ type span struct {
 // noCode is a line that changes no behaviour: blank, a closing bracket, a comment. It also keeps a new
 // declaration's doc comment and the brace git aligns before it from counting as a change of the one above.
 var noCode = regexp.MustCompile(`^([\])};,]*|(//|/\*|\*|#|--).*)$`)
+
+// sigs is the signatures the declaring line f.Lines[i] starts, from its hunk's lines: before (context and removed
+// lines) unless the line is added, now (context and added ones) unless it's removed; changed, whether either takes
+// an added or removed line.
+func sigs(f *file, i int) (before, now string, changed bool) {
+	side := func(skip string) string {
+		var ls []string
+		var classes []string
+		for j := i; j < len(f.Lines) && f.Lines[j].Class != "hunk" && len(ls) < maxSigLines; j++ {
+			if c := f.Lines[j].Class; c != skip {
+				ls, classes = append(ls, f.Lines[j].Text), append(classes, c)
+			}
+		}
+		s, n := signature(ls)
+		changed = changed || slices.ContainsFunc(classes[:n], func(c string) bool { return c != "ctx" })
+		return s
+	}
+	if c := f.Lines[i].Class; c != "add" {
+		before = side("add")
+	}
+	if c := f.Lines[i].Class; c != "del" {
+		now = side("del")
+	}
+	return before, now, changed
+}
 
 // spans is a code file's changed declarations, by the same lines as changes, moved code included.
 func spans(f *file, runs map[int]run) []*span {
@@ -52,14 +78,26 @@ func spans(f *file, runs map[int]run) []*span {
 			cur, head = d[2], true
 		}
 		t := strings.TrimSpace(l.Text)
+		get := func() *span {
+			s := at[cur]
+			if s == nil {
+				s = &span{f: f, name: cur}
+				at[cur], ss = s, append(ss, s)
+			}
+			return s
+		}
+		if head && l.Class == "ctx" { // an unchanged declaring line, its parameters below it changed
+			if before, now, changed := sigs(f, i); changed && !same(before, now) {
+				if s := get(); s.head == "" && s.oldHead == "" {
+					s.head, s.oldHead, s.text, s.oldText = now, before, t, t
+				}
+			}
+			continue
+		}
 		if cur == "" || l.Class == "ctx" || !head && noCode.MatchString(t) {
 			continue
 		}
-		s := at[cur]
-		if s == nil {
-			s = &span{f: f, name: cur}
-			at[cur], ss = s, append(ss, s)
-		}
+		s := get()
 		if l.ID == "" {
 			l.ID = fmt.Sprintf("%s~%d", f.Path, i)
 		}
@@ -72,9 +110,11 @@ func spans(f *file, runs map[int]run) []*span {
 		}
 		switch {
 		case head && add && s.head == "":
-			s.head = t
+			_, s.head, _ = sigs(f, i)
+			s.text = t
 		case head && !add && s.oldHead == "":
-			s.oldHead = t
+			s.oldHead, _, _ = sigs(f, i)
+			s.oldText = t
 		case add:
 			s.add = append(s.add, t)
 		default:
@@ -157,13 +197,13 @@ func inventory(ss []*span, syms map[string][]Symbol, commits []review.Commit, ti
 	var news, gone []*span
 	for _, s := range ss {
 		switch {
-		case s.head != "" && s.oldHead != "" && s.head != s.oldHead:
-			it := row(s, "+"+s.head)
+		case s.head != "" && s.oldHead != "" && !same(s.head, s.oldHead):
+			it := row(s, "+"+s.text)
 			it.Head, it.OldHead = s.head, s.oldHead
 			it.ask = ask(s)
 			put(1, it)
 		case s.head != "" && s.oldHead != "" && s.moved == s.n: // moved within its file
-			it := row(s, "+"+s.head)
+			it := row(s, "+"+s.text)
 			it.OldID, it.OldLine = s.oldID, s.oldLine
 			put(4, it)
 		case s.head != "" && s.oldHead == "":
@@ -173,6 +213,9 @@ func inventory(ss []*span, syms map[string][]Symbol, commits []review.Commit, ti
 		default:
 			it := row(s, "+"+strings.Join(s.add[:min(len(s.add), 1)], ""))
 			it.NPlus, it.NMinus = len(s.add), len(s.del)
+			if s.head != "" { // its declaring line changed, not what callers see of it: a value, a reflow
+				it.NPlus, it.NMinus = it.NPlus+1, it.NMinus+1
+			}
 			put(2, it)
 		}
 	}
@@ -180,15 +223,15 @@ func inventory(ss []*span, syms map[string][]Symbol, commits []review.Commit, ti
 	for _, s := range news {
 		g := paired[s]
 		if g == nil {
-			it := row(s, "+"+s.head)
+			it := row(s, "+"+s.text)
 			it.NPlus = len(s.add) + 1
 			it.ask = ask(s)
 			put(0, it)
 			continue
 		}
-		it := row(s, "+"+s.head)
+		it := row(s, "+"+s.text)
 		it.OldID, it.OldLine = g.oldID, g.oldLine
-		if s.head != g.oldHead { // renamed or its signature changed: the card shows the one turn into the other
+		if !same(s.head, g.oldHead) { // renamed or its signature changed: the card shows the one turn into the other
 			it.Head, it.OldHead = s.head, g.oldHead
 		}
 		if g.name != s.name {
@@ -198,7 +241,7 @@ func inventory(ss []*span, syms map[string][]Symbol, commits []review.Commit, ti
 			it.From = g.f.Short
 		}
 		plus, minus := differ(s.add, g.del)
-		if k := strings.ToLower; k(strings.Replace(s.head, s.name, "", 1)) != k(strings.Replace(g.oldHead, g.name, "", 1)) {
+		if k := strings.ToLower; !same(k(strings.Replace(s.head, s.name, "", 1)), k(strings.Replace(g.oldHead, g.name, "", 1))) {
 			plus, minus = append([]string{s.head}, plus...), append([]string{g.oldHead}, minus...)
 		}
 		if len(plus)+len(minus) == 0 {
@@ -215,7 +258,7 @@ func inventory(ss []*span, syms map[string][]Symbol, commits []review.Commit, ti
 	}
 	for _, s := range gone {
 		if !matched[s] {
-			it := row(s, "-"+s.oldHead)
+			it := row(s, "-"+s.oldText)
 			it.NMinus = len(s.del) + 1
 			put(5, it)
 		}
