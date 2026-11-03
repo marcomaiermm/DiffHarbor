@@ -16,7 +16,9 @@ import (
 	"diffharbor/internal/text"
 	"diffharbor/internal/ticket"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -263,23 +265,42 @@ func Reports() store.Store {
 	if ReportS3 != nil {
 		return ReportS3
 	}
-	return store.Disk(filepath.Join(proc.DataDir, "reports"))
+	return disk()
 }
 
-// DeleteReports deletes a PR's reports: its code shouldn't outlive the PR.
-func DeleteReports(e *forge.Event) {
-	if err := Reports().DeleteAll(reportPath(e)); err != nil {
-		log.Println(e.Key(), "report:", err)
+func disk() store.Disk { return store.Disk(filepath.Join(proc.DataDir, "reports")) }
+
+// MoveReports moves the reports DATA_DIR still holds into ReportS3, after a switch to it.
+// ponytail: one object at a time before the server listens; a worker pool if a big folder makes starts slow.
+func MoveReports() error {
+	if ReportS3 == nil {
+		return nil
 	}
+	return disk().MoveTo(ReportS3)
 }
 
-// Versions is a PR's reports, newest first, by its reportPath; none when it has no readable list.
-func Versions(path string) []report.Version {
+// DeleteReports deletes a PR's reports: its code shouldn't outlive the PR. With S3, those a failed MoveReports
+// left on disk too.
+func DeleteReports(e *forge.Event) error {
+	err := Reports().DeleteAll(reportPath(e))
+	if ReportS3 != nil {
+		err = errors.Join(err, disk().DeleteAll(reportPath(e)))
+	}
+	return err
+}
+
+// Versions is a PR's reports, newest first, by its reportPath; none when it has no list. Any other error is one:
+// taken as none, the next report would drop the list.
+func Versions(path string) ([]report.Version, error) {
+	b, err := Reports().Get(path + "/versions.json")
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	var vs []report.Version
-	if b, err := Reports().Get(path + "/versions.json"); err == nil {
-		_ = json.Unmarshal(b, &vs)
-	}
-	return vs
+	return vs, json.Unmarshal(b, &vs)
 }
 
 // writeReport renders the PR's report as the version of its head, against the newest of another head, and returns
@@ -288,7 +309,12 @@ func Versions(path string) []report.Version {
 // ponytail: two reviews of a PR finishing at once can drop one's entry from versions.json; a lock per PR if it shows.
 func writeReport(e *forge.Event, d report.Data) string {
 	dir, s := reportPath(e), Reports()
-	vs := slices.DeleteFunc(Versions(dir), func(v report.Version) bool { return v.SHA == d.SHA })
+	vs, err := Versions(dir)
+	if err != nil {
+		log.Println(e.Key(), "report:", err)
+		return ""
+	}
+	vs = slices.DeleteFunc(vs, func(v report.Version) bool { return v.SHA == d.SHA })
 	if len(vs) > 0 {
 		d.Prev = &vs[0]
 	}

@@ -2,9 +2,11 @@
 package store
 
 import (
+	"crypto/rand"
 	"io/fs"
 	"os"
 	"path"
+	"strings"
 )
 
 // Store is where the reports live: a folder now, an S3 bucket next to it.
@@ -35,7 +37,7 @@ func (d Disk) Get(key string) ([]byte, error) {
 	return r.ReadFile(key)
 }
 
-// Put writes key through a temp file and a rename, making its folders.
+// Put writes key through a temp file of its own and a rename, making its folders.
 func (d Disk) Put(key string, b []byte) error {
 	if err := os.MkdirAll(string(d), 0o700); err != nil {
 		return err
@@ -48,10 +50,16 @@ func (d Disk) Put(key string, b []byte) error {
 	if err := r.MkdirAll(path.Dir(key), 0o700); err != nil {
 		return err
 	}
-	if err := r.WriteFile(key+".tmp", b, 0o600); err != nil {
+	tmp := key + "." + rand.Text() + ".tmp" // one per writer: two puts of a key don't write into one file
+	if err := r.WriteFile(tmp, b, 0o600); err != nil {
+		_ = r.Remove(tmp)
 		return err
 	}
-	return r.Rename(key+".tmp", key)
+	if err := r.Rename(tmp, key); err != nil {
+		_ = r.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // Delete removes key.
@@ -75,4 +83,29 @@ func (d Disk) DeleteAll(dir string) error {
 	}
 	defer r.Close()
 	return r.RemoveAll(dir)
+}
+
+// MoveTo moves every key into s, each deleted here once s has it, then the folder; none is no error.
+// A put that crashed midway left a temp file, it goes with the folder.
+func (d Disk) MoveTo(s Store) error {
+	err := fs.WalkDir(os.DirFS(string(d)), ".", func(key string, e fs.DirEntry, err error) error {
+		if err != nil || e.IsDir() || strings.HasSuffix(key, ".tmp") {
+			return err
+		}
+		b, err := d.Get(key)
+		if err == nil {
+			err = s.Put(key, b)
+		}
+		if err == nil {
+			err = d.Delete(key)
+		}
+		return err
+	})
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(string(d))
 }

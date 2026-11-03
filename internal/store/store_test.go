@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -61,5 +63,50 @@ func TestDisk(t *testing.T) {
 	}
 	if _, err := d.Get("a/bb/e.html"); err != nil {
 		t.Fatal("a/bb isn't under a/b:", err)
+	}
+}
+
+// Puts of one key at once: a reader gets one of them whole, and no temp file stays.
+func TestDiskConcurrentPut(t *testing.T) {
+	d := Disk(t.TempDir())
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Go(func() {
+			for range 20 {
+				if err := d.Put("a/k", []byte(strings.Repeat(string(rune('a'+i)), 1<<16))); err != nil {
+					t.Error(err)
+				}
+				if b, err := d.Get("a/k"); err != nil || len(b) != 1<<16 || strings.Count(string(b), string(b[:1])) != len(b) {
+					t.Error("torn read:", len(b), err)
+				}
+			}
+		})
+	}
+	wg.Wait()
+	if es, _ := os.ReadDir(filepath.Join(string(d), "a")); len(es) != 1 {
+		t.Fatal("left temp files:", len(es))
+	}
+}
+
+// The folder's keys end up in the other store, and the folder is gone.
+func TestDiskMoveTo(t *testing.T) {
+	from, to := Disk(filepath.Join(t.TempDir(), "r")), Disk(t.TempDir())
+	if err := from.MoveTo(to); err != nil {
+		t.Fatal("no folder:", err)
+	}
+	from.Put("h/o/r/7/versions.json", []byte("[]"))
+	from.Put("h/o/r/7/abc.html", []byte("x"))
+	os.WriteFile(filepath.Join(string(from), "h/o/r/7/abc.html.X.tmp"), nil, 0o600) // a crashed put
+	if err := from.MoveTo(to); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := to.Get("h/o/r/7/abc.html"); err != nil || string(b) != "x" {
+		t.Fatal(string(b), err)
+	}
+	if _, err := to.Get("h/o/r/7/abc.html.X.tmp"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("moved a temp file:", err)
+	}
+	if _, err := os.Stat(string(from)); !os.IsNotExist(err) {
+		t.Fatal("folder stayed:", err)
 	}
 }

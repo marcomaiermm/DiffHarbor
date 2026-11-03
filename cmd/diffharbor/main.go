@@ -108,5 +108,8 @@ func main() {
 		}
 		return
 	}
+	if err := job.MoveReports(); err != nil {
+		log.Println("moving the reports to S3:", err) // the next start tries again; DeleteReports deletes them on disk too
+	}
 	server.Serve(cfg)
 }

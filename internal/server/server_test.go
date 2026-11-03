@@ -55,8 +55,8 @@ func TestPendingResume(t *testing.T) {
 	gl := &forge.Event{Forge: "gitlab", Action: "opened"} // its forge is off: stays on disk
 	gl.Repository.FullName, gl.PullRequest.Number = "g/s/p", 1
 	latest.Lock()
-	keep(gh)
-	keep(gl)
+	save(pendingFile(gh.Key()), gh)
+	save(pendingFile(gl.Key()), gl)
 	latest.Unlock()
 	q := make(chan *forge.Event, 2)
 	resume(q)
@@ -75,6 +75,32 @@ func TestPendingResume(t *testing.T) {
 	done(key)
 	if _, err := os.Stat(pendingFile(key)); !os.IsNotExist(err) {
 		t.Fatal("kept after its review:", err)
+	}
+}
+
+// A closed PR's reports go through the worker; its deletingFile stays until they did, for retryDrops.
+func TestDrop(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "closed"}
+	e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = "o/r", 7, "https://github.com/o/r/pull/7"
+	job.Reports().Put("github.com/o/r/7/versions.json", []byte("[]"))
+	latest.Lock()
+	save(deletingFile(e.Key()), e)
+	latest.Unlock()
+	q := make(chan *forge.Event, 1)
+	retryDrops(q) // after a restart
+	r := <-q
+	if !closing(r) || r.Key() != e.Key() {
+		t.Fatalf("%+v", r)
+	}
+	if err := drop(r); err != nil {
+		t.Fatal(err)
+	}
+	if vs, err := job.Versions("github.com/o/r/7"); err != nil || len(vs) != 0 {
+		t.Fatal("kept its reports:", vs, err)
+	}
+	if retryDrops(q); len(q) != 0 {
+		t.Fatal("retries a done delete")
 	}
 }
 
@@ -117,5 +143,9 @@ func TestServeReport(t *testing.T) {
 	}
 	if w := get("/r/gitlab.example.com/g/s/p/3/" + sha(1)); w.Code != 200 {
 		t.Fatal("gitlab:", w.Code)
+	}
+	job.Reports().Put("github.com/o/r/9/versions.json", []byte("{")) // unreadable is no "none"
+	if w := get("/r/github.com/o/r/9"); w.Code != http.StatusBadGateway {
+		t.Fatal("unreadable list:", w.Code)
 	}
 }
