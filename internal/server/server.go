@@ -3,7 +3,6 @@
 package server
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"diffharbor/internal/agent"
@@ -298,7 +297,7 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self'; "+
 			"style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src data:; font-src data: https://cdn.jsdelivr.net; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 		name := dir + "/" + cmp.Or(sha, vs[0].SHA) + ".html"
-		b, err := job.Reports().Get(name)
+		f, err := job.Reports().Open(name)
 		if errors.Is(err, fs.ErrNotExist) {
 			http.NotFound(w, r)
 			return
@@ -308,7 +307,11 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "the report can't be read now", http.StatusBadGateway)
 			return
 		}
-		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(b))
+		defer f.Close()
+		h.Set("Content-Type", "text/html; charset=utf-8")
+		if _, err := io.Copy(w, f); err != nil {
+			log.Println(name, "report:", err) // the headers are out: the page ends short
+		}
 	}
 }
 

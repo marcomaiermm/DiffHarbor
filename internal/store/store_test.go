@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -24,6 +25,14 @@ func TestDisk(t *testing.T) {
 	}
 	if b, err := d.Get("a/b/c.html"); err != nil || string(b) != "x" {
 		t.Fatal(string(b), err)
+	}
+	if f, err := d.Open("a/b/c.html"); err != nil {
+		t.Fatal(err)
+	} else if b, _ := io.ReadAll(f); string(b) != "x" || f.Close() != nil {
+		t.Fatal("open:", string(b))
+	}
+	if _, err := d.Open("a/b/none.html"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("open none:", err)
 	}
 	if err := d.Put("a/b/c.html", []byte("y")); err != nil {
 		t.Fatal(err)

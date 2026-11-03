@@ -24,6 +24,7 @@ type S3 struct {
 	key, secret, region      string
 }
 
+// ponytail: the minute covers an Open's body too, a browser that slow gets a short page; a per-request deadline if reports grow.
 var client = &http.Client{Timeout: time.Minute}
 
 // NewS3 is the bucket at u, "https://host[:port]/bucket[/prefix]".
@@ -44,10 +45,24 @@ func NewS3(u, key, secret, region string) (*S3, error) {
 
 // Get reads key.
 func (s *S3) Get(key string) ([]byte, error) {
+	f, err := s.Open(key)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
+}
+
+// Open streams key.
+func (s *S3) Open(key string) (io.ReadCloser, error) {
 	if !fs.ValidPath(key) {
 		return nil, &fs.PathError{Op: "get", Path: key, Err: fs.ErrInvalid}
 	}
-	return s.do(http.MethodGet, s.prefix+key, nil, nil)
+	res, err := s.send(http.MethodGet, s.prefix+key, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return res.Body, nil
 }
 
 // Put writes key; S3 swaps an object whole.
@@ -98,6 +113,16 @@ func (s *S3) DeleteAll(dir string) error {
 
 // do sends a signed request on the object (or, "", the bucket) and returns the body of a 2xx.
 func (s *S3) do(method, object string, q url.Values, body []byte) ([]byte, error) {
+	res, err := s.send(method, object, q, body)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	return io.ReadAll(res.Body)
+}
+
+// send is do with the 2xx's body left to read.
+func (s *S3) send(method, object string, q url.Values, body []byte) (*http.Response, error) {
 	path := "/" + escape(s.bucket, false) + "/" + escape(object, true)
 	//nolint:gosec // the operator's REPORT_S3_URL, not a request's
 	req, err := http.NewRequestWithContext(context.Background(), method, s.endpoint+path, bytes.NewReader(body))
@@ -110,17 +135,15 @@ func (s *S3) do(method, object string, q url.Values, body []byte) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
-	b, err := io.ReadAll(res.Body)
-	switch {
-	case err != nil:
-		return nil, err
-	case res.StatusCode == http.StatusNotFound && method == http.MethodGet: // no object, or no bucket
-		return nil, &fs.PathError{Op: "get", Path: s.bucket + "/" + object, Err: fs.ErrNotExist}
-	case res.StatusCode/100 != 2:
-		return nil, fmt.Errorf("s3 %s %s: %s: %.300s", method, object, res.Status, b)
+	if res.StatusCode/100 == 2 {
+		return res, nil
 	}
-	return b, nil
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusNotFound && method == http.MethodGet { // no object, or no bucket
+		return nil, &fs.PathError{Op: "get", Path: s.bucket + "/" + object, Err: fs.ErrNotExist}
+	}
+	b, _ := io.ReadAll(io.LimitReader(res.Body, 300))
+	return nil, fmt.Errorf("s3 %s %s: %s: %s", method, object, res.Status, b)
 }
 
 // sign adds SigV4's headers to req: host, the payload's hash and the time, signed for service s3.

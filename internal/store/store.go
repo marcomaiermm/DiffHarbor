@@ -4,6 +4,7 @@ package store
 import (
 	"crypto/rand"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -12,8 +13,9 @@ import (
 
 // Store is where the reports live: a folder now, an S3 bucket next to it.
 type Store interface {
-	Get(key string) ([]byte, error) // fs.ErrNotExist when there is none
-	Put(key string, b []byte) error // whole or not at all: a reader never gets half of it
+	Get(key string) ([]byte, error)         // fs.ErrNotExist when there is none
+	Open(key string) (io.ReadCloser, error) // Get as a stream, for a report to a browser
+	Put(key string, b []byte) error         // whole or not at all: a reader never gets half of it
 	Delete(key string) error
 	DeleteAll(dir string) error // dir and everything under it; none is no error
 }
@@ -36,6 +38,16 @@ func (d Disk) Get(key string) ([]byte, error) {
 	}
 	defer r.Close()
 	return r.ReadFile(key)
+}
+
+// Open opens key; the file stays open past the root.
+func (d Disk) Open(key string) (io.ReadCloser, error) {
+	r, err := d.open(key)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	return r.Open(key)
 }
 
 // Put writes key through a temp file of its own and a rename, making its folders.
