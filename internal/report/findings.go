@@ -20,7 +20,6 @@ type finding struct {
 	Proof      string // why to believe it: a source shown without a model, or the second model's
 	Shown      bool   // Proof needs no model: the diff, the imports, a search
 	External   bool   // Href leaves the page: not in the diff
-	inline     bool   // on a line of the diff: a line comment in the draft
 }
 
 // fgroup is findings that weigh the same: what blocks the merge, what to fix before it, the rest.
@@ -38,7 +37,6 @@ type verdict struct {
 // draft is the review the person sends from the forge: the page posts nothing.
 type draft struct {
 	Event    string   // "Request changes" or "Comment"
-	Comments int      // findings on a line of the diff
 	Say      string   // what it holds of the findings: "1 blocker and 2 major"
 	Risks    []string // the merge risks by title
 	MD       string
@@ -75,7 +73,7 @@ func judge(v *view, found []*finding) {
 			fd.Loc += ":" + rest
 		}
 		if n, err := strconv.Atoi(rest); err == nil {
-			fd.Line, fd.inline = n, true
+			fd.Line = n
 		}
 		if where[p] != "" {
 			fd.Href = "#" + p
@@ -161,7 +159,8 @@ func blocking(v *view) []*finding {
 	return append(append([]*finding{}, v.Groups[0].Items...), v.Groups[1].Items...)
 }
 
-// draftOf is the draft review: the blocking findings, the decisions as questions, the minor ones in a line.
+// draftOf is the draft review, a summary: the blocking findings with their first point, the decisions as questions,
+// the minor ones by title. Their full text is the page's, and the PR's in DiffHarbor's review.
 func draftOf(v *view) draft {
 	d := draft{Event: "Comment"}
 	block := blocking(v)
@@ -176,17 +175,15 @@ func draftOf(v *view) draft {
 			b.WriteString("\n\nFix before merging:")
 			for _, fd := range block[1:] {
 				fmt.Fprintf(&b, "\n- %s  %s", fd.Loc, fd.Title)
+				if s := sentence(fd.Lead); s != "" {
+					b.WriteString(". " + s)
+				}
 			}
 		}
 	} else if len(v.Groups[2].Items) == 0 {
 		b.WriteString("No findings on " + short(v.SHA) + ".")
 	} else {
 		b.WriteString("Nothing blocks the merge on " + short(v.SHA) + ".")
-	}
-	for _, fd := range block {
-		if fd.inline {
-			d.Comments++
-		}
 	}
 	if len(v.Decisions) > 0 {
 		b.WriteString("\n\nQuestions:")
@@ -209,7 +206,7 @@ func draftOf(v *view) draft {
 	}
 	d.Say = "none"
 	if len(ns) > 0 {
-		d.Say = join(ns) + ", all in the draft"
+		d.Say = join(ns) + ", listed in the draft"
 	}
 	if v.Conflicts {
 		d.Risks = append(d.Risks, "conflicts")

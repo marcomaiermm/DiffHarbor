@@ -81,7 +81,7 @@ func TestRender(t *testing.T) {
 		"Storage first", `id="store/store.go"`, "Then the handler", `id="api/handler.go"`, `id="finding-1"`, "major · Error dropped",
 		`id="tests"`, "api/handler_test.go: TestHandle", `id="api/handler_test.go"`, `id="other"`, `id="README.md"`,
 		`id="deleted"`, `id="gone.go"`, `id="commits"`, "Work in progress", "/merge_requests/7/diffs?commit_id=aaaaaaaaaa",
-		`id="finish"`, "Request changes", "Review for !7 · 1 line comment",
+		`id="finish"`, "Request changes", "Review for !7</span>",
 		"Error dropped (handler.go:2).", "Questions:\n1. Should a failed save retry?", "Minor:\n- other.go  elsewhere", "Open the draft on GitLab",
 	}
 	for _, w := range []string{"acme/shop!7 · Save", ">GitLab <svg", // the forge's own names
@@ -651,7 +651,7 @@ func TestJudge(t *testing.T) {
 		Findings: []review.Comment{
 			{Path: "a.go", Line: 9, Severity: "minor", Title: "naming"},
 			{Path: "a.go", Line: 2, Severity: "critical", Title: "nil map", Body: "m is nil. It panics.\n\n_Verified:_ seen", Evidence: "seen"},
-			{Path: "a.go", Line: 2, Severity: "major", Title: "leak"},
+			{Path: "a.go", Line: 2, Severity: "major", Title: "leak", Body: "The file stays open.\n\nClose it."},
 		}})
 	var got []string
 	for _, g := range v.Groups {
@@ -672,8 +672,8 @@ func TestJudge(t *testing.T) {
 		v.Verdict.Body != "a.go:2: m is nil. After that, 2 more findings to fix, 1 minor finding and 1 decision." {
 		t.Errorf("verdict: %+v", v.Verdict)
 	}
-	if v.Draft.Event != "Request changes" || v.Draft.Comments != 3 || v.Draft.Say != "1 blocker, 2 major and 1 minor, all in the draft" ||
-		v.Draft.MD != "nil map (a.go:2). m is nil.\n\nFix before merging:\n- a.go:2  leak\n- a_test.go:4  skip/only: `t.Skip()`\n\nQuestions:\n1. Retry?\n\nMinor:\n- a.go:9  naming" {
+	if v.Draft.Event != "Request changes" || v.Draft.Say != "1 blocker, 2 major and 1 minor, listed in the draft" ||
+		v.Draft.MD != "nil map (a.go:2). m is nil.\n\nFix before merging:\n- a.go:2  leak. The file stays open.\n- a_test.go:4  skip/only: `t.Skip()`\n\nQuestions:\n1. Retry?\n\nMinor:\n- a.go:9  naming" {
 		t.Errorf("draft: %+v\n%s", v.Draft, v.Draft.MD)
 	}
 
@@ -683,7 +683,7 @@ func TestJudge(t *testing.T) {
 		t.Errorf("none: %+v %+v", v.Verdict, v.Draft)
 	}
 	v = prepare(Data{SHA: "0123456789", Diff: d, Findings: []review.Comment{{Path: "a.go", Line: 2, Severity: "minor", Title: "naming"}}})
-	if !v.Verdict.OK || v.Verdict.Short != "No blockers" || v.Draft.Event != "Comment" || v.Draft.Comments != 0 {
+	if !v.Verdict.OK || v.Verdict.Short != "No blockers" || v.Draft.Event != "Comment" {
 		t.Errorf("minor only: %+v %+v", v.Verdict, v.Draft)
 	}
 	// in its step, the file with the blocker comes first

@@ -2,7 +2,7 @@
 {{define "finish"}}
 <section id="finish" class="card fin mt-14" aria-labelledby="finish-h">
   <div class="card-header"><h2 class="card-title" id="finish-h">Finish the review</h2>
-    <p class="card-description">DiffHarbor drafts the review, you send it from {{.Forge.Name}}. Nothing is posted until you do.</p></div>
+    <p class="card-description">DiffHarbor drafts the review, you send it from {{.Forge.Name}}. Nothing is posted until you do. It sums the findings up: their full text is above.</p></div>
   <div class="card-content">
   <ul class="fin-l">
     {{if .Code}}<li><span>Code files</span><span id="fin-viewed" class="tabular-nums">{{.Code}} to read</span><a id="fin-next" class="font-mono text-[13px]" hidden></a></li>{{end}}
@@ -11,7 +11,7 @@
     {{with .Draft.Risks}}<li><span>Before you merge</span><span>{{join .}}</span><a href="#merge">merge risks</a></li>{{end}}
   </ul>
   <div class="draft">
-    <div class="draft-h"><span class="vd"{{if .Verdict.OK}} data-ok{{end}}>{{.Draft.Event}}</span><span>Review for {{.Forge.Ref}}{{.Number}} · {{plural .Draft.Comments "line comment" "line comments"}}</span></div>
+    <div class="draft-h"><span class="vd"{{if .Verdict.OK}} data-ok{{end}}>{{.Draft.Event}}</span><span>Review for {{.Forge.Ref}}{{.Number}}</span></div>
     <pre id="draft-md">{{.Draft.MD}}</pre>
   </div>
   <div class="fin-a">

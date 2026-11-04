@@ -388,7 +388,7 @@ func prepare(d Data) view {
 		if c.Line == 0 || at < 0 {
 			f.Findings = append(f.Findings, fd)
 		} else {
-			f.Lines[at].Findings, fd.inline = append(f.Lines[at].Findings, fd), true
+			f.Lines[at].Findings = append(f.Lines[at].Findings, fd)
 		}
 	}
 	var all []*file
