@@ -7,9 +7,9 @@
 import cytoscape from "https://cdn.jsdelivr.net/npm/cytoscape@3.34.4/dist/cytoscape.esm.min.mjs";
 import elk from "https://cdn.jsdelivr.net/npm/cytoscape-elk@2.3.0/+esm";
 cytoscape.use(elk);
-// a canvas takes no CSS variables: Geist's grays and the page's accents
+// a canvas takes no CSS variables: the theme's grays and accents
 const c = document.documentElement.classList.contains("dark")
-  ? { bg: "#0a0a0a", fg: "#ededed", muted: "#8f8f8f", box: "#3a3a3a", file: "#262626", line: "#525252", out: "#3b82f6", in: "#f59e0b", add: "#16a34a", del: "#e5484d" }
+  ? { bg: "#1a1b26", fg: "#c0caf5", muted: "#98a1cc", box: "#3b4261", file: "#292e42", line: "#565f89", out: "#7aa2f7", in: "#ff9e64", add: "#9ece6a", del: "#f77a91" }
   : { bg: "#ffffff", fg: "#171717", muted: "#6b6b6b", box: "#d4d4d4", file: "#e5e5e5", line: "#a3a3a3", out: "#2563eb", in: "#d97706", add: "#16a34a", del: "#e5484d" };
 const mono = "Geist Mono Variable, ui-monospace, monospace";
 const style = [
