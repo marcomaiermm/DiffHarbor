@@ -53,13 +53,13 @@ The server listens on `:3000`. Expose `POST /webhook/github` and/or `POST /webho
 
 ## How a review works
 
-1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, PRs into a branch other than the default branch (see `base_branches`), lockfiles, build output, generated code and binaries stay out. A pass gets up to 60k characters, code first, then tests, data and docs; larger PRs can be reviewed [in parts](#large-prs).
+1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, generated code and binaries stay out. A pass gets up to 60k characters, code first, then tests, data and docs; larger PRs can be reviewed [in parts](#large-prs).
 2. **Context.** The checks above, plus codegraph, co-change from git history, the repo's rules and skills from the base branch, learnings, and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings per pass.
 4. **Verify.** A cheaper model checks each finding in the code.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
-PRs from bots (Dependabot, Renovate) are skipped with a green status unless someone asks for a review.
+Two kinds of PRs are skipped with a green status unless someone asks for a review: PRs from bots (Dependabot, Renovate), and PRs into a branch other than the default branch or one in [`base_branches`](#per-repo-settings).
 
 ### Talking to the bot
 
@@ -147,6 +147,7 @@ Bedrock in the EU: `amazon-bedrock/eu.anthropic.…`. Each pass gets only its ow
 | `ITSAPLAN_URL`, `ITSAPLAN_API_KEY` | The itsaplan ticket a PR names (`ABC-12` in title, branch or description) goes into the review as what the PR must do. Never for PRs from forks. |
 | `LINEAR_API_KEY` | The same for Linear: a personal API key (read-only is enough). The ticket (`ENG-12`) is fetched by its identifier. |
 | `TICKET_PROVIDER` | `itsaplan` or `linear`. Required when both are configured (the server doesn't start otherwise); with one configured it is that one. |
+| `DATA_DIR`, `CACHE_DIR` | Where the data (learnings, pending reviews, reports, logins, the repos' uids) and the per-repo caches live. `/data` and `/cache` in the image; keep both on volumes, apart. |
 | `DOCKER_HOST` | With the `dind` service: Docker for testcontainers in the checks, isolated with [Sysbox](https://github.com/nestybox/sysbox) (install it on the host). Drop both if your tests don't need Docker. |
 
 ### Branding the report

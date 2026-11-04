@@ -9,7 +9,7 @@ description: The steps of a DiffHarbor review and how to talk to the bot.
 4. **Verify.** A cheaper model checks each finding in the code.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
-PRs from bots (Dependabot, Renovate) are skipped with a green status unless someone asks for a review.
+Two kinds of PRs are skipped with a green status unless someone asks for a review: PRs from bots (Dependabot, Renovate), and PRs into a branch other than the default branch or one in [`base_branches`](../per-repo/#reviewjson-reference).
 
 ## Talking to the bot
 

@@ -74,6 +74,7 @@ Use API keys. Pi can also log in with a ChatGPT subscription (`openai/…` witho
 | `ITSAPLAN_URL`, `ITSAPLAN_API_KEY` | The itsaplan ticket a PR names (`ABC-12` in title, branch or description) goes into the review as what the PR must do. Never for PRs from forks. |
 | `LINEAR_API_KEY` | The same for Linear: a personal API key (read-only is enough). The ticket (`ENG-12`) is fetched by its identifier. |
 | `TICKET_PROVIDER` | `itsaplan` or `linear`. Required when both are configured (the server doesn't start otherwise); with one configured it is that one. |
+| `DATA_DIR`, `CACHE_DIR` | Where the data (learnings, pending reviews, reports, logins, the repos' uids) and the per-repo caches live. `/data` and `/cache` in the image; keep both on volumes, apart. |
 | `DOCKER_HOST` | With the `dind` service: Docker for testcontainers in the checks, isolated with [Sysbox](https://github.com/nestybox/sysbox) (install it on the host). Drop both if your tests don't need Docker. |
 
 ## Branding the report
