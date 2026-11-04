@@ -315,7 +315,7 @@ const uses = async (name, list) => {
   hide();
   const s = list[0];
   const body = sheet.querySelector(".sheet-body");
-  sheet.querySelector(".sheet-kicker").replaceChildren(kind(s.kind), ...(s.pkg ? [el("span", "font-mono text-xs text-muted-foreground", "package " + s.pkg)] : []));
+  sheet.querySelector(".sheet-kicker").replaceChildren(kind(s.kind), ...(s.pkg ? [el("span", "font-mono text-xs text-muted-foreground", (s.unit ? s.unit + " " : "") + s.pkg)] : []));
   sheet.querySelector(".sheet-title").textContent = name;
   const refs = s.refs || [];
   sheet.querySelector(".sheet-description").textContent = s.uses

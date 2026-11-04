@@ -286,13 +286,13 @@ func TestSymbols(t *testing.T) {
 	write("b.ts", "/** Greets. */\nexport function greet(n: string) {\n  return n\n}\ngreet(\"x\")\n")
 	s := Symbols(dir, "+x := a.Limit + t.Count + Show(t)\n+greet(y)\n")
 	l := s["Limit"]
-	if len(l) != 1 || l[0].Sig != "const Limit = 3" || l[0].Doc != "Limit caps it." || l[0].Uses != 2 || l[0].Refs[0].In != "Use" {
+	if len(l) != 1 || l[0].Sig != "const Limit = 3" || l[0].Doc != "Limit caps it." || l[0].Uses != 2 || l[0].Refs[0].In != "Use" || l[0].Kind != "constant" || l[0].Unit != "package" {
 		t.Errorf("Limit %+v", l)
 	}
 	if n := s["Count"]; len(n) != 1 || n[0].Kind != "field of T" || n[0].Doc != "how many" {
 		t.Errorf("N %+v", n)
 	}
-	if g := s["greet"]; len(g) != 1 || g[0].Sig != "export function greet(n: string)" || g[0].Doc != "Greets." || g[0].Uses != 1 {
+	if g := s["greet"]; len(g) != 1 || g[0].Sig != "export function greet(n: string)" || g[0].Doc != "Greets." || g[0].Uses != 1 || g[0].Kind != "function" || g[0].Unit != "" {
 		t.Errorf("greet %+v", g)
 	}
 	if _, ok := s["Use"]; ok {
@@ -487,7 +487,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 	use := Ref{Path: "b.go", Line: 3, In: "Use", Text: "func Use() { Save() }"}
 	s := Symbols(dir, "+++ b/a.go\n+\tSave()\n+\t_ = Max\n+func Handle() {\n")
 	want := Symbol{
-		Kind: "func", Pkg: "a", Sig: "func Save()", Path: "a.go", Line: 5, Uses: 2, Files: 2, Exact: true,
+		Kind: "function", Pkg: "a", Unit: "package", Sig: "func Save()", Path: "a.go", Line: 5, Uses: 2, Files: 2, Exact: true,
 		Refs: []Ref{{Path: "a.go", Line: 8, In: "Handle", Text: "Save()"}, use}, Here: []string{"a.go:8"},
 		Outside: []Ref{use}, NOutside: 1, // b.go isn't in the diff
 	}
@@ -691,5 +691,27 @@ func TestJudge(t *testing.T) {
 	v = prepare(Data{Diff: two, Flow: []review.Step{{Title: "s", Files: []string{"a.go", "b.go"}}}, Findings: []review.Comment{{Path: "b.go", Line: 2, Severity: "critical", Title: "x"}}})
 	if fs := v.Steps[0].Files; fs[0].Path != "b.go" || fs[1].Path != "a.go" {
 		t.Errorf("blocker first: %s, %s", fs[0].Path, fs[1].Path)
+	}
+}
+
+// A step names the tests that call what it changes; it says none does only when codegraph knows every use.
+func TestTested(t *testing.T) {
+	st := step{Files: []*file{{Path: "a.go", Changes: []change{{Name: "Save"}}}}}
+	call := Ref{Path: "a_test.go", Line: 3, In: "TestSave"}
+	other := Ref{Path: "b.go", Line: 9, In: "Use"}
+	for _, c := range []struct {
+		s        Symbol
+		tests    []string
+		untested bool
+	}{
+		{Symbol{Path: "a.go", Exact: true, Refs: []Ref{other, call}, Uses: 2}, []string{"a_test.go TestSave"}, false},
+		{Symbol{Path: "a.go", Exact: true, Refs: []Ref{other}, Uses: 1}, nil, true},
+		{Symbol{Path: "a.go", Exact: true, Refs: []Ref{other}, Uses: 30}, nil, false}, // more uses than listed
+		{Symbol{Path: "a.go", Refs: []Ref{call}, Uses: 1}, nil, false},                 // by name only
+	} {
+		tests, untested := tested(st, map[string][]Symbol{"Save": {c.s}})
+		if !slices.Equal(tests, c.tests) || untested != c.untested {
+			t.Errorf("%+v: %v %v", c.s, tests, untested)
+		}
 	}
 }

@@ -2,6 +2,7 @@ package report
 
 import (
 	"cmp"
+	"diffharbor/internal/diff"
 	"fmt"
 	"path"
 	"slices"
@@ -316,4 +317,30 @@ func reach(steps []step, syms map[string][]Symbol) []affected {
 		return cmp.Or(cmp.Compare(b.Why, a.Why), cmp.Compare(b.N, a.N)) // "signature changed" before ""
 	})
 	return out[:min(len(out), maxAffected)]
+}
+
+// tested is the tests whose code uses a declaration the step changes, by codegraph's uses: by name, a common name
+// would be in every test. untested is true only when codegraph listed every use of them all and none is in a test.
+func tested(st step, syms map[string][]Symbol) (tests []string, untested bool) {
+	all, n := true, 0
+	for _, f := range st.Files {
+		for _, c := range f.Changes {
+			if c.State == "gone" {
+				continue
+			}
+			for _, s := range syms[c.Name] {
+				if s.Path != f.Path {
+					continue
+				}
+				n++
+				all = all && s.Exact && len(s.Refs) == s.Uses
+				for _, r := range s.Refs {
+					if t := strings.TrimSpace(path.Base(r.Path) + " " + r.In); s.Exact && diff.Kind(r.Path) == "test" && !slices.Contains(tests, t) {
+						tests = append(tests, t)
+					}
+				}
+			}
+		}
+	}
+	return tests, n > 0 && all && len(tests) == 0
 }

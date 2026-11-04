@@ -3,6 +3,7 @@ package report
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"diffharbor/internal/diff"
 	"go/ast"
 	"go/parser"
@@ -18,8 +19,9 @@ import (
 // Symbol is a declaration the page explains when a name in the diff is hovered: what it is, where it lives,
 // what names it elsewhere.
 type Symbol struct {
-	Kind  string   `json:"kind"`          // func, method, type, field, const, var; other languages: the keyword
-	Pkg   string   `json:"pkg,omitempty"` // Go: the package, to tell pkg.Name apart
+	Kind  string   `json:"kind"`           // function, method, type, constant, variable, "field of T", "method of T"
+	Pkg   string   `json:"pkg,omitempty"`  // the unit it is declared in, to tell pkg.Name apart; known for Go only
+	Unit  string   `json:"unit,omitempty"` // what the language calls Pkg: "package"
 	Sig   string   `json:"sig"`           // the declaration without its body
 	Doc   string   `json:"doc,omitempty"`
 	Path  string   `json:"path"`
@@ -176,6 +178,13 @@ func (ms mentions) scan(path string, src []byte, wanted map[string]bool) {
 	}
 }
 
+// kinds names a declaration's keyword in words no language owns: a Go func and a Python def are both a function.
+var kinds = map[string]string{
+	"func": "function", "function": "function", "fn": "function", "def": "function",
+	"class": "type", "struct": "type", "interface": "type", "trait": "type", "enum": "type",
+	"var": "variable", "let": "variable", "const": "constant",
+}
+
 var skipDir = map[string]bool{"node_modules": true, "vendor": true, "dist": true, "build": true, "target": true, "out": true, "testdata": true}
 
 // goDecls adds the package-level declarations of a Go file, and the fields and methods of its types.
@@ -200,7 +209,7 @@ func goDecls(path string, src []byte, wanted map[string]bool, syms map[string][]
 			}
 		}
 		syms[name.Name] = append(syms[name.Name], Symbol{
-			Kind: kind, Pkg: pkg, Sig: cut(b.String(), maxSig), Doc: cut(doc, maxDoc),
+			Kind: cmp.Or(kinds[kind], kind), Pkg: pkg, Unit: "package", Sig: cut(b.String(), maxSig), Doc: cut(doc, maxDoc),
 			Path: path, Line: fset.Position(name.Pos()).Line,
 		})
 	}
@@ -271,7 +280,7 @@ func lineDecls(path string, src []byte, wanted map[string]bool, syms map[string]
 			doc = append([]string{strings.TrimSpace(strings.TrimSuffix(strings.TrimLeft(t, "/*#-\" "), "*/"))}, doc...)
 		}
 		syms[m[2]] = append(syms[m[2]], Symbol{
-			Kind: strings.TrimSuffix(m[1], "*"), Sig: cut(sig, maxSig),
+			Kind: cmp.Or(kinds[strings.TrimSuffix(m[1], "*")], m[1]), Sig: cut(sig, maxSig),
 			Doc: cut(strings.TrimSpace(strings.Join(doc, "\n")), maxDoc), Path: path, Line: i + 1,
 		})
 	}

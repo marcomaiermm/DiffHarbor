@@ -256,14 +256,14 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
 .merge-row { @apply grid items-baseline gap-x-6 gap-y-1.5 border-t py-3 first:border-t-0 first:pt-0 last:pb-0 sm:grid-cols-[10rem_1fr]; }
 .merge-row > h3 { @apply flex items-center gap-1.5 text-sm font-medium; }
 .merge-row > h3 svg { @apply size-3.5 shrink-0 text-muted-foreground; }
-.merge-row[data-warn] > h3, .merge-row[data-warn] > h3 svg { @apply text-destructive; }
+.merge-row[data-warn] > h3, .merge-row[data-warn] > h3 svg { @apply text-major; } /* a risk, not a blocker: the major color */
 .merge-hint { @apply max-w-[72ch] text-[13px] text-muted-foreground; }
 .merge-items { @apply mt-2 flex flex-wrap gap-1.5; }
 .merge-items a { @apply inline-flex max-w-full min-w-0 items-baseline gap-1.5 rounded-md border px-2 py-0.5 text-xs hover:bg-muted; }
 .merge-items code { @apply min-w-0 truncate font-mono text-foreground; }
 .merge-items span { @apply shrink-0 text-muted-foreground; }
-.merge-items [data-warn] { @apply border-destructive/40; }
-.merge-items [data-warn] span { @apply text-destructive; }
+.merge-items [data-warn] { @apply border-major/40; }
+.merge-items [data-warn] span { @apply text-major; }
 .merge-commits { @apply mt-2 space-y-1 text-xs; }
 .merge-commits li { @apply flex min-w-0 items-baseline gap-2; }
 .merge-commits li > a { @apply shrink-0 font-mono text-muted-foreground hover:text-foreground hover:underline; }
@@ -330,6 +330,7 @@ a.frow[href]:hover .ftitle { @apply underline; }
 .draft pre { @apply overflow-x-auto p-3.5 font-mono text-[12.5px] leading-[1.7] whitespace-pre-wrap; background: var(--diff-bg); color: var(--diff-fg); }
 .fin-a { @apply mt-4 flex flex-wrap items-center gap-x-3.5 gap-y-2.5; }
 .inv-count[data-warn] { @apply bg-destructive/10 text-destructive; }
+#tab-merge .inv-count[data-warn] { @apply bg-major/10 text-major; }
 .tab-hint { @apply mb-4 max-w-[80ch] text-[13px] text-muted-foreground; }
 .tab-hint code { @apply font-mono text-foreground; }
 .since-head .tab-hint { @apply mb-0; }
@@ -412,9 +413,9 @@ html[data-filter="unviewed"] .sidebar-files li:has(.done) { display: none; }
 .sym-at > svg { @apply size-3 shrink-0; }
 .kind { @apply h-[18px] px-1.5 font-mono text-[10.5px]; }
 .kind::before { content: ""; @apply size-1.5 rounded-full; background: var(--k, var(--muted-foreground)); }
-.kind[data-k="func"], .kind[data-k="method"], .kind[data-k="function"], .kind[data-k="fn"], .kind[data-k="def"] { --k: #3b82f6; }
-.kind[data-k="type"], .kind[data-k="interface"], .kind[data-k="class"], .kind[data-k="struct"], .kind[data-k="trait"], .kind[data-k="enum"] { --k: #a855f7; }
-.kind[data-k="const"], .kind[data-k="var"], .kind[data-k="let"] { --k: #f59e0b; }
+.kind[data-k="function"], .kind[data-k="method"] { --k: #3b82f6; }
+.kind[data-k="type"] { --k: #a855f7; }
+.kind[data-k="constant"], .kind[data-k="variable"] { --k: #f59e0b; }
 .kind[data-k^="field"], .kind[data-k^="method of"] { --k: #14b8a6; }
 .sym-sig { @apply rounded-lg px-3 py-2.5 font-mono text-xs leading-5 whitespace-pre; background: var(--diff-bg); color: var(--diff-fg);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--diff-fg) 8%, transparent); }
@@ -453,6 +454,10 @@ dialog.sheet > .sheet-content { min-height: 100%; }
 .lead { @apply mt-3 max-w-[60ch] text-[17px] leading-snug font-medium tracking-[-0.01em] text-pretty; }
 .summary { @apply mt-3 max-w-[68ch] text-[15px] text-pretty text-muted-foreground; }
 .summary[data-under] { @apply mt-2 text-sm; }
+.meta { @apply mt-2 text-[13px] tabular-nums text-muted-foreground; }
+.step-tests { @apply mt-1 ml-8 text-[13px] text-muted-foreground; }
+.step-tests code { @apply font-mono text-xs text-foreground; }
+.step-tests[data-gap] { @apply text-major; }
 .story { @apply grid overflow-hidden rounded-lg border text-[13.5px] leading-relaxed @2xl:grid-cols-2; }
 .story > div { --c: var(--diff-del); @apply px-3.5 py-2.5; background: var(--diff-del-bg); }
 .story > div + div { @apply border-t border-dashed @2xl:border-t-0 @2xl:border-l; }

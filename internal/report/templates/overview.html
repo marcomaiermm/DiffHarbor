@@ -5,6 +5,7 @@
     <h1 class="text-[28px] leading-tight font-semibold tracking-[-0.03em] text-balance">{{.Title}}</h1>
     {{with .Story.Problem}}<p class="lead">{{.}}</p>{{end}}
     {{with .Summary}}<p class="summary"{{if $.Story.Problem}} data-under{{end}}>{{.}}</p>{{end}}
+    {{if or .Moved .Effort}}<p class="meta">{{if .Moved}}<span title="{{.Moved}} of {{.Added}} added lines only moved: folded in the diff">{{percent .Moved .Added}} of the lines only moved</span>{{end}}{{if and .Moved .Effort}} · {{end}}{{with .Effort}}<span title="{{.}} of 5">{{if le . 2}}low{{else if eq . 3}}medium{{else}}high{{end}} review effort</span>{{end}}</p>{{end}}
     {{with .Story}}{{if and .Before .After}}<div class="@container mt-5"><div class="story" role="note" aria-label="One case, before and after">
       <div data-side="before"><b><span aria-hidden="true">−</span>Before</b><p>{{.Before}}</p></div>
       <div data-side="after"><b><span aria-hidden="true">+</span>After</b><p>{{.After}}</p></div>
@@ -12,12 +13,8 @@
   </div>
   <div class="overflow-hidden rounded-lg border">
     <dl class="stats -mr-px -mb-px flex flex-wrap">
-      {{if .Effort}}<div class="statistic flex-1 basis-28 border-r max-sm:basis-2/5 border-b px-3.5 py-3"><dt class="statistic-title">Review effort</dt><dd class="statistic-value flex items-center gap-3"><span class="tabular-nums">{{.Effort}}<span class="text-muted-foreground">/5</span></span>
-        <span class="flex items-end gap-0.5" aria-hidden="true">{{range $n, $_ := seq 5}}<i class="w-1 rounded-sm {{if lt $n $.Effort}}bg-foreground{{else}}bg-muted{{end}}" style="height:calc({{inc $n}} * 4px)"></i>{{end}}</span></dd></div>{{end}}
-      {{with .Findings}}<div class="statistic flex-1 basis-28 border-r max-sm:basis-2/5 border-b px-3.5 py-3"><dt class="statistic-title">Open findings</dt><dd class="statistic-value tabular-nums text-destructive">{{len .}}</dd></div>{{end}}
+      {{with .Findings}}<div class="statistic flex-1 basis-28 border-r max-sm:basis-2/5 border-b px-3.5 py-3"><dt class="statistic-title">Open findings</dt><dd class="statistic-value tabular-nums{{if not $.Verdict.OK}} text-destructive{{end}}">{{len .}}</dd></div>{{end}}
       <div class="statistic flex-1 basis-28 border-r max-sm:basis-2/5 border-b px-3.5 py-3"{{with .NOther}} title="and {{.}} data and doc files"{{end}}><dt class="statistic-title">To read</dt><dd class="statistic-value tabular-nums whitespace-nowrap">{{.Code}}<span class="stat-unit">code</span>{{with .NTests}} · {{.}}<span class="stat-unit">tests</span>{{end}}</dd></div>
-      {{if .Moved}}<div class="statistic flex-1 basis-28 border-r max-sm:basis-2/5 border-b px-3.5 py-3" title="{{.Moved}} of {{.Added}} added lines only moved: folded in the diff"><dt class="statistic-title">Only moved</dt><dd class="statistic-value tabular-nums">{{percent .Moved .Added}}</dd>
-        <dd class="mt-1.5"><progress class="progress block h-1" value="{{.Moved}}" max="{{.Added}}">{{percent .Moved .Added}}</progress></dd></div>{{end}}
     </dl>
   </div></div>
   <section class="card focus mt-10" id="focus" aria-labelledby="verdict-h">

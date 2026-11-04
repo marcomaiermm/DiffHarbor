@@ -255,7 +255,9 @@ type change struct {
 type step struct {
 	Title, Why string
 	Files      []*file
-	Graph      *flow // how its changed declarations name each other, nil when they don't
+	Graph      *flow    // how its changed declarations name each other, nil when they don't
+	Tests      []string // the tests that call what it changes: "a_test.go TestSave"
+	Untested   bool     // codegraph knows every use of what it changes, and none is in a test
 }
 
 type group struct {
@@ -477,6 +479,7 @@ func prepare(d Data) view {
 	v.Tree = tree(files)
 	for i := range v.Steps {
 		v.Steps[i].Graph = graph(v.Steps, i, d.Symbols)
+		v.Steps[i].Tests, v.Steps[i].Untested = tested(v.Steps[i], d.Symbols)
 		v.Graphs = v.Graphs || v.Steps[i].Graph != nil
 	}
 	v.Inventory = inventory(ss, d.Symbols, d.Commits, d.Title, d.Whys)
