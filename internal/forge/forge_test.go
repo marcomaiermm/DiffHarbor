@@ -3,6 +3,7 @@ package forge
 import (
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -108,5 +109,28 @@ func TestStickyOutline(t *testing.T) {
 	}
 	if got := parseState(body); len(got.Flow) != 1 || got.Decisions[0] != "Retry on failure?" || got.Story.After != "the fallback reviews" || got.Report == "" {
 		t.Errorf("state: %+v", got)
+	}
+}
+
+type instance string
+
+func (instance) Bot() string                               { return "" }
+func (instance) Parse(http.Header, []byte) (*Event, error) { return nil, nil }
+func (instance) Open(*Event) (PR, error)                   { return nil, nil }
+func (instance) Boxes() bool                               { return false }
+func (i instance) Instance() string                        { return string(i) }
+
+// A repo's id is its forge's instance and its number, never its name; no number is no id.
+func TestRepoID(t *testing.T) {
+	e := &Event{Forge: "gitlab"}
+	e.Repository.FullName = "g/p"
+	if _, err := RepoID(instance("gitlab.com"), e); err == nil {
+		t.Fatal("no repository id: no error")
+	}
+	e.Repository.ID = 5
+	a, _ := RepoID(instance("gitlab.com"), e)
+	b, _ := RepoID(instance("git.example.com"), e)
+	if a != "gitlab:gitlab.com:5" || a == b {
+		t.Fatal(a, b)
 	}
 }

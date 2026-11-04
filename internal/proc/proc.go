@@ -103,8 +103,8 @@ func Run(c *exec.Cmd) ([]byte, error) {
 // Exists reports whether p exists.
 func Exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-// Workspace is a work dir for a job on repo that git, checks and Pi can write. As root it makes repo's user (node for
-// "", a dry run) the one Command runs as from now on, in a fresh home (the image's: Pi's extensions) and temp dir in
+// Workspace is a work dir for a job on repo, a forge.RepoID, that git, checks and Pi can write. As root it makes repo's
+// user (node for "", a dry run) the one Command runs as from now on, in a fresh home (the image's: Pi's extensions) and temp dir in
 // the work dir: what a PR's code leaves there (a git hook, Pi's config, `go env -w GOFLAGS=-toolexec=…`) goes with it.
 func Workspace(repo string) (string, error) {
 	if err := os.MkdirAll(workDir(), 0o755); err != nil {
@@ -115,6 +115,9 @@ func Workspace(repo string) (string, error) {
 	}
 	uid := uint32(1000)
 	if repo != "" {
+		if legacy(repo) { // a name: a new repo of an old one's name would get its uid and cache
+			return "", fmt.Errorf("repo uids: %s is no repo id", repo)
+		}
 		var err error
 		if uid, err = uidOf(filepath.Join(DataDir, "uids.json"), repo); err != nil {
 			return "", err
@@ -172,8 +175,8 @@ func name(uid uint32) {
 	}
 }
 
-// uidOf is repo's uid in the root-only file f, a new one for a repo f doesn't have: one past the highest, so no two
-// repos share one, and a repo keeps its uid (and its cache) across restarts.
+// uidOf is repo's uid in the root-only file f, a new one for a repo f doesn't have: one past the highest, the legacy
+// entries' too, so no two repos share one, and a repo keeps its uid (and its cache) across restarts and renames.
 func uidOf(f, repo string) (uint32, error) {
 	m, err := uids(f)
 	if err != nil {
@@ -223,6 +226,12 @@ func (c *Capped) String() string {
 	}
 	return string(c.head) + string(c.tail)
 }
+
+// legacy reports whether key is a repo's name, as uids.json had them before forge.RepoID (names have no colon). Who
+// owned such an entry is unknown: the repo of that name now may be another. So its uid stays taken, never handed out
+// again, and Clean drops its cache; the repo starts over with a uid of its own on its next job. The file stays as it
+// is: nothing to migrate is nothing a crash can cut in half.
+func legacy(key string) bool { return !strings.Contains(key, ":") }
 
 // uids is the repos' uids in f; none when there is no f yet.
 func uids(f string) (map[string]uint32, error) {
@@ -280,7 +289,8 @@ func Remove(p string) error {
 }
 
 // Clean readies CacheDir at the server's start: what isn't a repo's cache goes, i.e. the work dirs a crash left and,
-// as root, the cache all repos shared before each got its own uid (node's: any PR's code could have changed it).
+// as root, the cache all repos shared before each got its own uid (node's: any PR's code could have changed it) and
+// the legacy entries' caches.
 func Clean() error {
 	if !AsPi {
 		return os.RemoveAll(workDir())
@@ -297,10 +307,7 @@ func Clean() error {
 	if err != nil {
 		return err
 	}
-	keep := map[int]bool{1000: true}
-	for _, u := range m {
-		keep[int(u)] = true
-	}
+	keep := kept(m)
 	ds, err := os.ReadDir(CacheDir)
 	if err != nil {
 		return err
@@ -310,7 +317,7 @@ func Clean() error {
 		p := filepath.Join(CacheDir, d.Name())
 		fi, err := os.Lstat(p)
 		// A repo's cache, named for its owner (node couldn't make one for a repo's uid), and that uid still the repo's:
-		// without uids.json (a lost DATA_DIR) a new repo would get it, and the old one's cache.
+		// without uids.json (a lost DATA_DIR) a new repo would get it, and the old one's cache. A legacy uid's goes too.
 		if err == nil && fi.IsDir() && keep[owner(fi)] && d.Name() == strconv.Itoa(owner(fi)) {
 			continue
 		}
@@ -322,9 +329,20 @@ func Clean() error {
 		}
 	}
 	if len(old) > 0 {
-		log.Printf("removed the cache all repos shared from %s: %s", CacheDir, strings.Join(old, " "))
+		log.Printf("removed the caches no repo id owns from %s: %s", CacheDir, strings.Join(old, " "))
 	}
 	return nil
+}
+
+// kept is the uids whose caches Clean keeps: node's and the repo ids'.
+func kept(m map[string]uint32) map[int]bool {
+	keep := map[int]bool{1000: true}
+	for r, u := range m {
+		if !legacy(r) {
+			keep[int(u)] = true
+		}
+	}
+	return keep
 }
 
 // resolved is p with its symlinks resolved, of its nearest existing parent while it doesn't exist yet.

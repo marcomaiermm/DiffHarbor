@@ -32,6 +32,17 @@ type Forge interface {
 	Open(e *Event) (PR, error)
 	// Boxes reports whether a maintainer can tick a box in our comment (AskLarge); GitLab lets only its author.
 	Boxes() bool
+	// Instance is the host the forge's API is on: two GitLabs can each have a project 5.
+	Instance() string
+}
+
+// RepoID names e's repo for good: its forge, the forge's instance and the repo's ID, which survive a rename and
+// differ for a new repo of the old name.
+func RepoID(f Forge, e *Event) (string, error) {
+	if e.Repository.ID == 0 {
+		return "", fmt.Errorf("%s: no repository id", e.Repo())
+	}
+	return fmt.Sprintf("%s:%s:%d", e.Forge, f.Instance(), e.Repository.ID), nil
 }
 
 // PR is one pull or merge request, opened for a job.
