@@ -59,6 +59,10 @@ func TestSticky(t *testing.T) {
 	if got := parseState(body); got.SHA != "bbbbbbb" || got.Files["b.go"] != "new" {
 		t.Fatalf("parseState: %+v", got)
 	}
+	st.Secret = "S"
+	if got := parseState(st.Update(review.Result{}, "c", nil, true).render("", "", "", nil)); got.Secret != "S" {
+		t.Fatal("a review lost the report's secret:", got.Secret)
+	}
 	if Clean(body) == body || strings.Contains(Clean(body), "diffharbor:state") {
 		t.Fatal("clean")
 	}
