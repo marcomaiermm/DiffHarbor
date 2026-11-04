@@ -9,10 +9,10 @@
       {{- with .NTests}}{{$sep}}<span>{{plural . "test file" "test files"}}</span>{{$sep = " · "}}{{end}}
       {{- if .Moved}}{{$sep}}<span title="{{.Moved}} of {{.Added}} added lines only moved: folded in the diff">{{percent .Moved .Added}} of the lines only moved</span>{{$sep = " · "}}{{end}}
       {{- with .Effort}}{{$sep}}<span title="{{.}} of 5">{{if le . 2}}low{{else if eq . 3}}medium{{else}}high{{end}} review effort</span>{{end}}</p>{{end}}
-    <h1 class="text-[28px] leading-tight font-semibold tracking-[-0.03em] text-balance">{{.Title}}</h1>
+    <h1 class="title">{{.Title}}</h1>
     {{with .Story.Problem}}<p class="lead">{{.}}</p>{{end}}
     {{with .Summary}}<p class="summary"{{if $.Story.Problem}} data-under{{end}}>{{range $.Refs .}}{{.Text}}{{if .Path}}{{template "ref" .}}{{end}}{{end}}</p>{{end}}
-    {{with .Story}}{{if and .Before .After}}<div class="@container mt-5"><div class="story" role="note" aria-label="One case, before and after">
+    {{with .Story}}{{if and .Before .After}}<div class="@container mt-6"><div class="story" role="note" aria-label="One case, before and after">
       <div data-side="before"><b><span aria-hidden="true">−</span>Before</b><p>{{.Before}}</p>
         <p class="story-at">{{with $.Ref .BeforeAt}}{{template "ref" .}}{{else}}<span class="chip loc" data-dash title="No line of the diff shows this: the reviewer's model inferred it">not in the diff</span>{{end}}</p></div>
       <div data-side="after"><b><span aria-hidden="true">+</span>After</b><p>{{.After}}</p>

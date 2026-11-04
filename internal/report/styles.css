@@ -475,10 +475,11 @@ dialog.sheet > .sheet-content { min-height: 100%; }
 .commit-n { @apply text-xs text-muted-foreground; }
 .commit-only { @apply text-xs text-muted-foreground hover:text-foreground hover:underline; }
 /* one case told twice, as a diff tells it: what happened before, what happens now */
-.lead { @apply mt-3 max-w-[60ch] text-[17px] leading-snug font-medium tracking-[-0.01em] text-pretty; }
-.summary { @apply mt-3 max-w-[68ch] text-[15px] leading-[1.9] text-pretty text-muted-foreground; }
-.summary[data-under] { @apply mt-2 text-sm; }
+.lead { @apply mt-3.5 max-w-[720px] text-[17px] leading-[1.55] text-pretty; }
+.summary { @apply mt-3 max-w-[720px] text-[15px] leading-[1.9] text-pretty text-muted-foreground; }
+.summary[data-under] { @apply mt-2.5; }
 .meta { @apply mb-2.5 font-mono text-xs tabular-nums text-muted-foreground; }
+.title { @apply text-[32px] leading-[1.15] font-semibold tracking-[-0.035em] text-balance; }
 /* a step: its number, title, weight and how much of it is viewed; the tests that reach it; how its code connects */
 .step-head { @apply flex flex-wrap items-baseline gap-x-3 gap-y-1; }
 .step-head > .chip { @apply self-center; }
@@ -526,11 +527,13 @@ html:not([data-diff="split"]) .split-legend { display: none; }
 .ct li { @apply relative flex min-h-[36px] items-center gap-[10px] px-[14px] whitespace-nowrap hover:bg-muted/60; }
 .ct-g { @apply flex self-stretch empty:hidden; color: var(--gl); }
 .gc { @apply relative w-[24px] flex-none; }
-.gc[data-g="pipe"]::before, .gc[data-g="tee"]::before { @apply absolute inset-y-0 left-[11px] w-px bg-current content-['']; }
-.gc[data-g="tee"]::after { @apply absolute top-1/2 left-[11px] h-px w-[23px] bg-current content-['']; }
-.gc[data-g="end"]::before { @apply absolute top-0 left-[11px] h-1/2 w-[12px] rounded-bl-[6px] border-b border-l border-current content-['']; }
-.gc[data-g="end"]::after { @apply absolute top-1/2 left-[23px] h-px w-[11px] bg-current content-['']; }
-.ct li[data-kids]::after { @apply absolute bottom-0 left-[25px] w-px content-['']; top: calc(50% + 13px); background: var(--gl); }
+/* every guide is a 1px border, the bend's too: a border and a background round differently at a fractional zoom, and the bend's
+   foot sits on the row the horizontals are drawn on */
+.gc[data-g="pipe"]::before, .gc[data-g="tee"]::before { @apply absolute inset-y-0 left-[11px] border-l border-current content-['']; }
+.gc[data-g="tee"]::after { @apply absolute top-1/2 left-[11px] w-[23px] border-t border-current content-['']; }
+.gc[data-g="end"]::before { @apply absolute top-0 left-[11px] h-[calc(50%+1px)] w-[12px] rounded-bl-[6px] border-b border-l border-current content-['']; }
+.gc[data-g="end"]::after { @apply absolute top-1/2 left-[23px] w-[11px] border-t border-current content-['']; }
+.ct li[data-kids]::after { @apply absolute bottom-0 left-[25px] border-l content-['']; top: calc(50% + 13px); border-color: var(--gl); }
 .ct li.ct-entry[data-kids]::after { top: calc(50% + 10px); }
 .ct li[data-d="1"][data-kids]::after { left: 49px; }
 .ct li[data-d="2"][data-kids]::after { left: 73px; }
@@ -556,14 +559,15 @@ html:not([data-diff="split"]) .split-legend { display: none; }
 .ct-punch[data-sev] { @apply border-major; background: color-mix(in oklab, var(--major) 8%, transparent); }
 .ct-punch[data-sev="critical"] { @apply border-destructive; background: color-mix(in oklab, var(--destructive) 8%, transparent); }
 .ct-more { @apply whitespace-nowrap text-major hover:underline; }
-.story { @apply grid overflow-hidden rounded-lg border text-[13.5px] leading-relaxed @2xl:grid-cols-2; }
-.story > div { --c: var(--diff-del); @apply px-3.5 py-2.5; background: var(--diff-del-bg); }
-.story > div + div { @apply border-t border-dashed @2xl:border-t-0 @2xl:border-l; }
-.story > [data-side="after"] { --c: var(--diff-add); background: var(--diff-add-bg); }
-.story b { @apply mb-1 flex items-center gap-1.5 font-mono text-[11px] font-medium tracking-[0.08em] uppercase; color: color-mix(in oklab, var(--c) 85%, var(--foreground)); }
-.story b > span { @apply text-[13px] tracking-normal; color: var(--c); }
-.story p { @apply text-pretty text-muted-foreground; }
-.story [data-side="after"] p { @apply text-foreground; }
+/* the two sides are plain panels: only the label says which is which */
+.story { @apply grid overflow-hidden rounded-[10px] border text-[13.5px] leading-relaxed @2xl:grid-cols-2; }
+.story > div { --c: var(--diff-del); @apply px-4 py-3.5; }
+.story > div + div { @apply border-t @2xl:border-t-0 @2xl:border-l; }
+.story > [data-side="after"] { --c: var(--diff-add); }
+.story b { @apply flex items-center gap-1.5 font-mono text-xs font-medium; color: color-mix(in oklab, var(--c) 85%, var(--foreground)); }
+.story b > span { @apply text-[13px]; color: var(--c); }
+.story p { @apply mt-1.5 text-pretty text-muted-foreground; }
+.story .story-at { @apply mt-2.5; }
 /* motion only where it tells where you are: the page settling in, folds opening, rings filling, the jump target lighting up */
 :root { interpolate-size: allow-keywords; }
 html { scroll-padding-top: 5rem; }
