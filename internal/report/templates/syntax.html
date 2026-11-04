@@ -289,7 +289,7 @@ let anchor = null, timer = 0;
 const hide = () => { clearTimeout(timer); anchor = null; if (pop.matches(":popover-open")) pop.hidePopover(); };
 const show = async span => {
   clearTimeout(timer);
-  if (anchor === span) return;
+  if (anchor === span || !syms[span.dataset.sym]) return;
   anchor = span;
   const name = span.dataset.sym, list = pick(span, syms[name]);
   const item = span.closest(".arow"), turn = item?.dataset.oldHead; // an API row's: what it was
@@ -328,7 +328,7 @@ const use = async (r, name) => {
   return link(r.path, r.line, "use", el("span", "no", String(r.line)), c, r.in ? el("span", "in", r.in) : "");
 };
 // Find usages: the declarations, then the places that name it by file
-const open = async span => uses(span.dataset.sym, pick(span, syms[span.dataset.sym]));
+const open = async span => syms[span.dataset.sym] && uses(span.dataset.sym, pick(span, syms[span.dataset.sym]));
 const uses = async (name, list) => {
   hide();
   const s = list[0];
@@ -376,6 +376,11 @@ document.addEventListener("mouseover", e => {
   clearTimeout(timer);
   if (s) timer = setTimeout(() => show(s), 300);
   else if (anchor && !pop.contains(e.target)) timer = setTimeout(hide, 300);
+});
+document.addEventListener("focusin", e => { // a name the keyboard reaches shows its card, Enter its uses
+  const s = e.target.closest?.(".sym");
+  if (s?.matches(":focus-visible")) show(s);
+  else if (anchor && !pop.contains(e.target)) hide();
 });
 document.addEventListener("click", e => {
   const s = e.target.closest(".sym");
@@ -442,7 +447,7 @@ const split = table => {
       const bar = el("div", "gap-bar split-gap", ...clone(row.querySelector(".gap-bar")));
       bar.addEventListener("click", e => {
         const i = [...bar.querySelectorAll("button")].indexOf(e.target.closest("button"));
-        if (i >= 0) keep = { table, row, i };
+        if (i >= 0) keep = { table, row, i, prev: row.previousElementSibling, body: row.parentElement };
         (i < 0 ? row.querySelector(".gap-bar") : row.querySelectorAll("button")[i]).click();
       });
       box.append(bar);
@@ -485,8 +490,13 @@ const split = table => {
   table.parentElement.querySelector(":scope > .split")?.remove();
   table.after(box);
   if (keep?.table === table) {
-    const bs = [...lineOf.get(keep.row)?.querySelectorAll("button") || []];
-    (bs[keep.i]?.hidden ? bs.findLast(b => !b.hidden) : bs[keep.i])?.focus();
+    if (keep.row.isConnected) {
+      const bs = [...lineOf.get(keep.row)?.querySelectorAll("button") || []];
+      (bs[keep.i]?.hidden ? bs.findLast(b => !b.hidden) : bs[keep.i])?.focus();
+    } else { // the gap is gone: the first line it showed
+      const n = lineOf.get(keep.prev ? keep.prev.nextElementSibling : keep.body.rows[0]);
+      if (n) { n.tabIndex = -1; n.focus(); }
+    }
     keep = null;
   }
 };

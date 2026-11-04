@@ -147,12 +147,12 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
    width in view and stays put while a wide file scrolls, its buttons at the right edge. */
 .diff { container-type: inline-size; }
 .diff tr.gap > td { @apply p-0; }
-.gap-bar { @apply sticky left-0 flex min-h-[30px] w-[100cqw] cursor-pointer items-center gap-2 border-t py-[3px] pr-2 pl-4 font-mono text-xs; background: var(--diff-hunk); color: color-mix(in oklab, var(--diff-fg) 70%, var(--diff-hunk)); border-color: color-mix(in oklab, var(--diff-fg) 12%, transparent); }
+.gap-bar { @apply sticky left-0 flex min-h-[30px] w-[100cqw] cursor-pointer items-center gap-2 border-t py-[3px] pr-2 pl-4 font-mono text-xs; background: var(--diff-hunk); color: var(--diff-fg); border-color: color-mix(in oklab, var(--diff-fg) 12%, transparent); } /* the light theme's ink is no darker than this: no mix toward the band */
 .gap-bar:hover { background: var(--diff-hover); }
 .gap-bar > svg { @apply size-3.5 shrink-0 fill-none stroke-current stroke-2; stroke-linecap: round; stroke-linejoin: round; }
 .gap-bar > span { @apply mr-auto; }
-.gap-bar > .btn { @apply h-[22px] px-2 font-sans text-[11.5px] shadow-none pointer-coarse:h-7; background: transparent; color: color-mix(in oklab, var(--diff-fg) 80%, var(--diff-hunk)); border-color: color-mix(in oklab, var(--diff-fg) 22%, transparent); }
-.gap-bar:hover > .btn, .gap-bar > .btn:hover { color: var(--diff-fg); border-color: color-mix(in oklab, var(--diff-fg) 45%, transparent); }
+.gap-bar > .btn { @apply h-[22px] px-2 font-sans text-[11.5px] shadow-none pointer-coarse:h-7; background: transparent; color: var(--diff-fg); border-color: color-mix(in oklab, var(--diff-fg) 30%, transparent); }
+.gap-bar:hover > .btn, .gap-bar > .btn:hover { border-color: color-mix(in oklab, var(--diff-fg) 55%, transparent); }
 .hunk-seen { @apply -ml-2 flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 font-sans text-[11px]; color: var(--diff-muted); }
 .hunk-seen:hover { color: var(--diff-fg); background: var(--diff-hover); }
 .hunk-seen > svg { @apply opacity-40; }
@@ -382,8 +382,9 @@ html[data-filter="unviewed"] .sidebar-files li:has(.done) { display: none; }
 .change[data-state="moved"] { color: var(--diff-link); border-color: color-mix(in oklab, var(--diff-link) 45%, transparent); }
 .change[data-state="moved"]::before { content: "→ "; }
 /* a name in the diff the repo declares: hover for what it is, click for every place that names it */
-.diff .sym { cursor: pointer; text-decoration: underline dotted color-mix(in oklab, currentColor 40%, transparent); text-underline-offset: 3px; }
-.diff .sym:hover { text-decoration-color: currentColor; }
+:is(.diff, .ct) .sym { cursor: pointer; text-decoration: underline dotted color-mix(in oklab, currentColor 40%, transparent); text-underline-offset: 3px; }
+:is(.diff, .ct) .sym:is(:hover, :focus-visible) { text-decoration-color: currentColor; }
+.sym:focus-visible { @apply rounded-xs outline-2 outline-offset-1 outline-ring; }
 /* the hover card: kind, name, where; the signature in the code's colors; the doc; a footer that says what a click does */
 .sym-pop { margin: 0; @apply max-h-[min(30rem,70vh)] w-[min(32rem,calc(100vw-2rem))] overflow-y-auto p-0 text-[13px];
   box-shadow: 0 1px 1px rgb(0 0 0 / 0.04), 0 8px 16px -4px rgb(0 0 0 / 0.1), 0 24px 48px -12px rgb(0 0 0 / 0.18); }
@@ -508,13 +509,13 @@ html:not([data-diff="split"]) .split-legend { display: none; }
 /* where it runs: a tab per way in, its calls down to the change as a tree, the guides drawn as the design's */
 .ctabs { @apply mb-3.5 flex flex-wrap items-center gap-2; }
 /* the tabs are shadcn's outline toggles, pressed in the ring's color as the design's; Replay its outline button */
-.ctabs > .toggle { @apply h-[34px] gap-2 pr-3 pl-1.5 font-mono text-[13px] font-normal; }
+.ctabs > .toggle { @apply h-[34px] max-w-full min-w-0 gap-2 pr-3 pl-1.5 font-mono text-[13px] font-normal; }
 .ctabs > .toggle[aria-pressed="true"] { @apply border-ring text-foreground; background: color-mix(in oklab, var(--ring) 10%, var(--card)); }
-.ctabs > .btn { @apply ml-auto; }
+.ctabs > .btn { @apply ml-auto motion-reduce:hidden; } /* Replay: nothing moves to play again */
 /* a method: GET, POST, CALL; a chip in its color */
 .chip[data-m] { @apply h-5 rounded border-transparent px-1.5 font-mono text-[11px] font-semibold tracking-[0.04em]; --c: var(--muted-foreground); background: color-mix(in oklab, var(--c) 18%, transparent); color: var(--c); }
 .chip[data-m="GET"], .chip[data-m="HEAD"] { --c: var(--ring); }
-.chip[data-m="POST"], .chip[data-m="PUT"], .chip[data-m="PATCH"] { --c: var(--verified); }
+.chip[data-m="POST"], .chip[data-m="PUT"], .chip[data-m="PATCH"] { --c: var(--diff-add); }
 .chip[data-m="DELETE"] { --c: var(--destructive); }
 .ct-dot { @apply size-[7px] rounded-full bg-major; }
 .ct-dot[data-sev="critical"] { @apply bg-destructive; }
@@ -536,17 +537,17 @@ html:not([data-diff="split"]) .split-legend { display: none; }
 .ct li[data-d="6"][data-kids]::after { left: 169px; }
 .ct li[data-d="7"][data-kids]::after { left: 193px; }
 .ct li[data-d="8"][data-kids]::after { left: 217px; }
-.ct li[data-d="9"][data-kids]::after { left: 241px; }
+.ct li[data-d="9"][data-kids]::after { left: 241px; } /* the index walks 8 calls up: no row is deeper */
 .ct-route { @apply font-medium text-foreground; }
 .ct-sub { @apply font-sans text-[13px] text-muted-foreground; }
 .ct-pill { @apply inline-flex min-h-[26px] items-center gap-2 rounded-md border bg-card px-[9px] text-foreground; }
 .ct-pill code { font: inherit; }
-.ct li[data-st="new"] .ct-pill { border-color: color-mix(in oklab, var(--verified) 60%, transparent); }
+.ct li[data-st="new"] .ct-pill { border-color: color-mix(in oklab, var(--diff-add) 60%, transparent); }
 .ct li[data-st="chg"] .ct-pill { border-color: color-mix(in oklab, var(--ring) 60%, transparent); }
 .ct li[data-st="major"] .ct-pill { @apply border-major; background: color-mix(in oklab, var(--major) 10%, var(--card)); }
 .ct-end { @apply ml-auto flex items-center gap-3 pl-3 whitespace-nowrap; }
 .ct-tag { @apply font-sans text-[12.5px] text-muted-foreground; }
-.ct li[data-st="new"] .ct-tag { @apply text-verified; }
+.ct li[data-st="new"] .ct-tag { color: var(--diff-add); }
 .ct li[data-st="chg"] .ct-tag { @apply text-ring; }
 .ct-punch { @apply mt-3 rounded-r-lg border-l-[3px] border-ring px-3.5 py-2.5 text-sm leading-relaxed; background: color-mix(in oklab, var(--ring) 6%, transparent); }
 .ct-punch[data-sev] { @apply border-major; background: color-mix(in oklab, var(--major) 8%, transparent); }

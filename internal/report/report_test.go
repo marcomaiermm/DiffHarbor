@@ -412,9 +412,10 @@ func TestWays(t *testing.T) {
 	g := ws[0]
 	var rows []string
 	for _, r := range g.Rows {
-		rows = append(rows, fmt.Sprintf("%d %s %v %v %s %s %s:%d %s", r.D, r.Name, r.Cols, r.Kids, r.Tag, r.St, r.At.Path, r.At.Line, r.At.Href))
+		rows = append(rows, fmt.Sprintf("%d %s %v %v %s %s %v %s:%d %s", r.D, r.Name, r.Cols, r.Kids, r.Tag, r.St, r.Sym, r.At.Path, r.At.Line, r.At.Href))
 	}
-	if want := []string{"1 Handle [end] true signature chg server.go:3 ", "2 Save [blank end] false new major api.go:12 #api.go:12"}; !slices.Equal(rows, want) {
+	// Handle is named where the entry is: it shows where it is declared
+	if want := []string{"1 Handle [end] true signature chg true api.go:10 #api.go:10", "2 Save [blank end] false new major true api.go:12 #api.go:12"}; !slices.Equal(rows, want) {
 		t.Errorf("rows\n%q\nwant\n%q", rows, want)
 	}
 	if g.Reach != 2 || g.New != 1 || g.Sev != "major" || g.Finding != "#store.go:9" || g.Step != 1 || v.Steps[0].Way != &ws[0] {
@@ -422,6 +423,9 @@ func TestWays(t *testing.T) {
 	}
 	if got := g.Says(); got != "Runs 2 declarations the PR changes, 1 of them new. A major finding is on the way." {
 		t.Errorf("says %q", got)
+	}
+	if g.Name() != "GET /x" || ws[1].Name() != "main" { // CALL is no method to read
+		t.Errorf("names %q %q", g.Name(), ws[1].Name())
 	}
 	v.Ways = ws
 	if got := v.WaysSay(); got != "2 ways in · the GET /x path is in step 01" {

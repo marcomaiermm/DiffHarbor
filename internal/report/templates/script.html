@@ -209,7 +209,7 @@
           e.stopPropagation();
           const had = row.contains(document.activeElement), rs = act();
           draw();
-          if (had && !row.isConnected) rs[0].tabIndex = -1, rs[0].focus();
+          if (had && !row.isConnected) rs[0].cells[2].tabIndex = -1, rs[0].cells[2].focus();
           else if (had && b.hidden) all.focus();
         };
         bar.append(b);

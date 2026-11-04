@@ -34,6 +34,7 @@ type wrow struct {
 	Cols       []string
 	Kids       bool
 	Tag, St    string
+	Sym        bool // the page knows its declaration: it opens its card
 	Sev        *weighed
 	At         ref // where the one above names it, else where it is declared
 }
@@ -125,9 +126,10 @@ func ways(v *view, syms map[string][]Symbol) []way {
 			for _, k := range n.kids {
 				h, r := k.hop, wrow{Name: k.hop.Name, Path: k.hop.Path, D: d}
 				r.At = v.place(h.Path, h.Line)
-				if h.At > 0 && h.In != "" {
-					r.At = v.place(h.In, h.At)
+				if at := v.place(h.In, h.At); h.At > 0 && h.In != "" && at != e.w.At { // the entry shows that one
+					r.At = at
 				}
+				r.Sym = len(syms[h.Name]) > 0
 				if c := pr(h); c != nil {
 					r.Tag, r.St = "changed", "chg"
 					switch {
@@ -233,15 +235,23 @@ func (w way) Says() string {
 	return s
 }
 
+// Name is the way's name in a sentence: "GET /x", or the declaration's name alone.
+func (w way) Name() string {
+	if w.Method == "CALL" {
+		return w.Route
+	}
+	return w.Method + " " + w.Route
+}
+
 // Label is the way's name for a screen reader: "GET /x: its path to the change".
-func (w way) Label() string { return w.Method + " " + w.Route + ": its path to the change" }
+func (w way) Label() string { return w.Name() + ": its path to the change" }
 
 // WaysSay is the line beside "Where it runs": how many ways, and which a step shows.
 func (v view) WaysSay() string {
 	s := plural(len(v.Ways), "way in", "ways in")
 	for _, w := range v.Ways {
 		if w.Step > 0 {
-			return s + " · the " + w.Method + " " + w.Route + " path is in step " + fmt.Sprintf("%02d", w.Step)
+			return s + " · the " + w.Name() + " path is in step " + fmt.Sprintf("%02d", w.Step)
 		}
 	}
 	return s
