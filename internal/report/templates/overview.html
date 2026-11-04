@@ -28,7 +28,7 @@
     </div>
     {{with .Since}}<div class="since" id="since">
       <div class="since-head"><p class="tab-hint">Since the review of <code>{{short .Prev.SHA}}</code>, <time class="since-time" datetime="{{.Prev.At.Format "2006-01-02T15:04:05Z07:00"}}"></time>.</p>
-      {{with .Files}}<button type="button" class="toggle" data-variant="outline" data-size="sm" id="since-only" aria-pressed="false">{{icon "focus" ""}}Only what changed</button>{{end}}</div>
+</div>
     {{if or .Files .Back .New .Fixed .Risen .Eased}}<dl class="since-rows">
       {{if or .Files .Back}}<dt>Files</dt><dd class="since-list">{{range .Files}}<a href="#{{.Path}}" title="{{.Path}}">{{base .Path}}{{if not (index $.Since.Prev.Files .Path)}}<small>new</small>{{end}}</a>{{end}}{{range .Back}}<s title="{{.}}: no longer in the PR"><span class="sr-only">no longer in the PR: </span>{{base .}}</s>{{end}}</dd>{{end}}
       {{if or .New .Fixed}}<dt{{if .New}} data-warn{{end}}>Findings</dt><dd><ul>{{range .New}}<li title="{{.}}">{{finding .}}</li>{{end}}{{range .Fixed}}<li title="fixed: {{.}}"><s><span class="sr-only">fixed: </span>{{finding .}}</s></li>{{end}}</ul></dd>{{end}}

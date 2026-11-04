@@ -2,6 +2,11 @@
 {{define "flow"}}
 {{if .Steps}}<section id="flow" class="mt-14 border-t pt-10">
   <div class="mb-8 flex flex-wrap items-baseline gap-x-6 gap-y-2"><h2 class="text-xl font-semibold tracking-tight">Reading order</h2>
+    <div class="toggle-group" data-variant="outline" role="group" aria-label="Show">
+      <button type="button" class="toggle" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="toggle" data-filter="unviewed" aria-pressed="false">Not viewed</button>
+      {{with .Since}}{{if .Files}}<button type="button" class="toggle" data-filter="changed" aria-pressed="false" title="The files whose change differs from the last review's">Changed since {{short .Prev.SHA}}</button>{{end}}{{end}}
+    </div>
     <p class="keys"><kbd>j</kbd><kbd>k</kbd> file <kbd>n</kbd> finding <kbd>v</kbd> viewed <kbd>Esc</kbd> close</p></div>
   {{range $i, $s := .Steps}}
   <div class="mb-12" id="step-{{inc $i}}">

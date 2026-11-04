@@ -7,7 +7,8 @@
     </div>
   </div>
   <div class="sidebar-content">
-    <nav class="sidebar-nav"><a href="#overview" class="sidebar-link" title="Overview">{{icon "layout-grid" ""}}<span>Overview</span></a></nav>
+    <nav class="sidebar-nav"><a href="#overview" class="sidebar-link" title="Overview">{{icon "layout-grid" ""}}<span>Overview</span></a>
+      <a href="#focus" class="sidebar-link" title="Before you approve">{{if .Verdict.OK}}{{icon "circle-check" ""}}{{else}}{{icon "circle-alert" ""}}{{end}}<span>Before you approve</span>{{with .NFound}}<span class="sidebar-badge">{{.}}</span>{{end}}</a></nav>
     {{if .Steps}}<details class="sidebar-group" data-view="flow" open>
       <summary><span>Reading order</span>{{icon "chevron-right" ""}}</summary>
       <ol class="sidebar-nav">{{range $i, $s := .Steps}}
@@ -28,6 +29,7 @@
         {{if .Mechanical}}<a href="#mechanical" class="sidebar-link" title="Mechanical">{{icon "files" ""}}<span>Mechanical</span><span class="sidebar-badge">{{len .Mechanical}}</span></a>{{end}}
         {{if .Deleted}}<a href="#deleted" class="sidebar-link" title="Deleted">{{icon "trash-2" ""}}<span>Deleted</span><span class="sidebar-badge">{{len .Deleted}}</span></a>{{end}}
         {{if .Commits}}<a href="#commits" class="sidebar-link" title="Commits">{{icon "git-commit-horizontal" ""}}<span>Commits</span><span class="sidebar-badge">{{len .Commits}}</span></a>{{end}}
+        <a href="#finish" class="sidebar-link" title="Finish the review">{{icon "check" ""}}<span>Finish the review</span></a>
       </nav>
     </details>
   </div>{{end}}

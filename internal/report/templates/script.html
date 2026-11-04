@@ -89,14 +89,16 @@
     () => status.textContent = "The review text is on your clipboard.",
     () => status.textContent = "The browser kept the clipboard closed: select the text above and copy it."));
 
-  // versions: "Only what changed" leaves the files whose change differs from the last version's; the picker and a
-  // newer version's banner come from the PR's list of versions, next to this page's URL (none: a page alone)
-  const only = document.getElementById("since-only");
-  only?.addEventListener("click", () => {
-    const on = only.getAttribute("aria-pressed") !== "true";
-    only.setAttribute("aria-pressed", on);
-    document.documentElement.toggleAttribute("data-since", on);
+  // the filter over the files: all, the ones not viewed, the ones whose change differs from the last review's.
+  // For this page only: a filter left on hides files on the next PR
+  document.addEventListener("click", e => {
+    const t = e.target.closest(".toggle[data-filter]");
+    if (!t) return;
+    document.documentElement.dataset.filter = t.dataset.filter;
+    for (const b of document.querySelectorAll(".toggle[data-filter]")) b.setAttribute("aria-pressed", b === t);
   });
+  // versions: the picker and a newer version's banner come from the PR's list of versions, next to this page's URL
+  // (none: a page alone)
   const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto", style: "short" });
   const ago = at => {
     const s = (new Date(at) - Date.now()) / 1000;

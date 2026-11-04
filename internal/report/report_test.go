@@ -634,7 +634,7 @@ func TestSince(t *testing.T) {
 		t.Fatalf("%+v", s)
 	}
 	page := string(b)
-	for _, want := range []string{`id="since"`, `id="c.go" open data-changed`, "no longer in the PR", "Only what changed"} {
+	for _, want := range []string{`id="since"`, `id="c.go" open data-changed`, "no longer in the PR", `data-filter="changed"`, "Changed since 1111111"} {
 		if !strings.Contains(page, want) {
 			t.Error("missing", want)
 		}

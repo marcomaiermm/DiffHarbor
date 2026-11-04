@@ -349,8 +349,12 @@ a.frow[href]:hover .ftitle { @apply underline; }
 .badge.changed { color: var(--ring); border-color: color-mix(in oklab, var(--ring) 35%, transparent); }
 .nav-file[data-changed]::after { content: ""; @apply ml-auto size-1.5 shrink-0 rounded-full; background: var(--ring); }
 .tree-leaf.nav-file[data-changed]::after { @apply ml-1.5; }
-html[data-since] .file:not([data-changed]), html[data-since] [id^="step-"]:not(:has(.file[data-changed])),
-html[data-since] .sidebar-files li:not(:has([data-changed])) { display: none; }
+html[data-filter="changed"] .file:not([data-changed]), html[data-filter="changed"] [id^="step-"]:not(:has(.file[data-changed])),
+html[data-filter="changed"] .sidebar-files li:not(:has([data-changed])),
+html[data-filter="unviewed"] .file.seen, html[data-filter="unviewed"] [id^="step-"]:not(:has(.file:not(.seen))),
+html[data-filter="unviewed"] .sidebar-files li:has(.done) { display: none; }
+/* a wide side bar lists the files of the step being read, not all of them */
+@media (min-width: 900px) { .app-sidebar [data-step]:not(:has([aria-current])) > .sidebar-files { display: none; } }
 .reach-item li > .btn { @apply h-auto p-0; }
 /* a graph's right-click menu, shadcn's dropdown */
 .gmenu { position: fixed; inset: auto; @apply min-w-56; box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.25); }
