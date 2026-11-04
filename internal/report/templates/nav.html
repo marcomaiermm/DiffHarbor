@@ -17,7 +17,7 @@
       <summary><span>3 · Read the change</span>{{icon "chevron-right" ""}}</summary>
       <ol class="sidebar-nav">{{range $i, $s := .Steps}}
         <li data-step="step-{{inc $i}}">
-          <a href="#step-{{inc $i}}" class="sidebar-link font-medium text-foreground" title="{{$s.Title}}"><i class="ring-p" aria-hidden="true"></i><span class="truncate">{{$s.Title}}</span><span class="sidebar-badge nav-count"></span></a>
+          <a href="#step-{{inc $i}}" class="sidebar-link font-medium text-foreground" title="{{$s.Title}}"><i class="ring-p" aria-hidden="true"></i><span class="truncate">{{$s.Title}}</span>{{with $s.Weight}}<span class="ct-dot step-dot" data-sev="{{.Sev}}" role="img" aria-label="{{.Text}}"></span>{{end}}<span class="sidebar-badge nav-count"></span></a>
           <ul class="sidebar-files my-0.5 ml-[15px] space-y-px border-l pl-2">{{range $s.Files}}
             <li><a href="#{{.Path}}" data-path="{{.Path}}" title="{{.Path}}" class="nav-file"{{if .Changed}} data-changed{{end}}><span class="shrink-0">{{base .Short}}</span><span class="ml-2 min-w-0 truncate text-[11px] opacity-50">{{dir .Short}}</span></a></li>{{end}}
           </ul>

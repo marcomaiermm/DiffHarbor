@@ -536,6 +536,7 @@ html:not([data-diff="split"]) .split-legend { display: none; }
 .chip[data-m="DELETE"] { --c: var(--destructive); }
 .ct-dot { @apply size-[7px] rounded-full bg-major; }
 .ct-dot[data-sev="critical"] { @apply bg-destructive; }
+.step-dot { @apply size-1.5 shrink-0; }
 .ct { @apply m-0 grid list-none grid-cols-[minmax(100%,max-content)] overflow-x-auto rounded-[10px] border bg-background py-2.5 font-mono text-[13px]; --gl: color-mix(in oklab, var(--muted-foreground) 45%, transparent); }
 /* the guides are drawn at pixel offsets: what they hang on is in pixels too, or a larger root font moves the one off the other */
 .ct li { @apply relative flex min-h-[36px] items-center gap-[10px] px-[14px] whitespace-nowrap hover:bg-muted/60; }
