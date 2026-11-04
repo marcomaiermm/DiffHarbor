@@ -583,14 +583,17 @@ func prepare(d Data) view {
 				continue
 			}
 			s := &d.Symbols[c.c.Name][i]
-			s.State = "changed"
+			st := "changed"
 			switch {
 			case c.c.State == "new":
-				s.State = "new"
+				st = "new"
 			case c.c.sig:
-				s.State = "signature"
+				st = "signature"
 			}
-			if c.c.Sev == "critical" || c.c.Sev == "major" {
+			if rank := map[string]int{"changed": 1, "signature": 2, "new": 3}; rank[st] > rank[s.State] { // one name twice in a file: the most
+				s.State = st
+			}
+			if heavier(c.c.Sev, s.Sev) && c.c.Sev != "minor" {
 				s.Sev = c.c.Sev
 			}
 		}

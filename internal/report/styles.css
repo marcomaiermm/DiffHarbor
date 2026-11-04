@@ -435,7 +435,7 @@ html[data-filter="unviewed"] .sidebar-files li:has(.done) { display: none; }
 @keyframes m-cur { from, to { visibility: visible; } }
 .sym-card + .sym-card { @apply border-t border-dashed; }
 .sym-card { @apply space-y-2.5 p-3.5; }
-.sym-head { @apply flex min-w-0 items-center gap-2; }
+.sym-head { @apply flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1; }
 .sym-head > .chip { @apply h-[18px] shrink-0 text-[11px]; }
 .sym-name { @apply truncate font-mono text-[13px] font-semibold tracking-tight; }
 .sym-pkg { @apply font-normal text-muted-foreground; }

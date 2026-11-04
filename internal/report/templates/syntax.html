@@ -294,7 +294,7 @@ const chip = (text, data, cls = "") => {
 };
 const head = (s, name) => el("div", "sym-head", kind(s.kind),
   el("span", "sym-name", ...(s.pkg ? [el("span", "sym-pkg", s.pkg + ".")] : []), name),
-  ...(s.state === "new" ? [chip("new", { new: "" })] : s.state ? [chip(s.state, {}, "changed")] : []),
+  ...(s.state === "new" ? [chip("new", { new: "" })] : s.state ? [chip(s.state === "signature" ? "signature changed" : s.state, {}, "changed")] : []),
   ...(s.sev ? [chip(s.sev === "critical" ? "Blocker" : "Major", { sev: s.sev })] : []),
   at(s.path, s.line));
 const doc = s => s.doc.replace(/(?<!\n)\n(?!\n)/g, " "); // source line breaks go, paragraphs stay
