@@ -31,6 +31,8 @@ type Symbol struct {
 	Files int      `json:"files"`           // in how many files
 	Here  []string `json:"here,omitempty"`  // exact: the lines of the diff's files that name it, path:line
 	Exact bool     `json:"exact,omitempty"` // its uses are codegraph's, resolved; else lines that name it
+	State string   `json:"state,omitempty"` // what the PR did to it: "new", "changed", "signature"; "" nothing
+	Sev   string   `json:"sev,omitempty"`   // the heaviest finding on it that matters: "critical", "major"
 	Calls []string `json:"-"`               // exact: the declarations it names, path NUL name: the page's graphs
 	// exact: the first maxRefs places outside the diff's files that name it, and how many: what the change reaches
 	Outside  []Ref `json:"-"`

@@ -576,6 +576,25 @@ func prepare(d Data) view {
 	}
 	v.Retired = retire(d.Outline.Removed, files)
 	judge(&v, found)
+	chs, _ := decls(v.Steps)
+	for _, c := range chs { // the popover says what the PR did to it
+		for i, s := range d.Symbols[c.c.Name] {
+			if s.Path != c.f.Path || c.c.State == "gone" {
+				continue
+			}
+			s := &d.Symbols[c.c.Name][i]
+			s.State = "changed"
+			switch {
+			case c.c.State == "new":
+				s.State = "new"
+			case c.c.sig:
+				s.State = "signature"
+			}
+			if c.c.Sev == "critical" || c.c.Sev == "major" {
+				s.Sev = c.c.Sev
+			}
+		}
+	}
 	v.Ways = ways(&v, d.Symbols)
 	if len(d.Tests.Ran) > 0 || len(d.Tests.Broken) > 0 {
 		v.now.Tests = map[string]string{}
