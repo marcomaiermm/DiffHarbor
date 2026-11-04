@@ -46,7 +46,7 @@ func compare(prev *Version, now Version, files map[string]*file) *since {
 	s := &since{Prev: *prev}
 	for _, p := range slices.Sorted(maps.Keys(now.Files)) {
 		if now.Files[p] != prev.Files[p] && files[p] != nil {
-			files[p].Changed = true
+			files[p].Changed = short(prev.SHA)
 			s.Files = append(s.Files, files[p])
 		}
 	}

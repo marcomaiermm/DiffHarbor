@@ -86,6 +86,7 @@ func TestRender(t *testing.T) {
 		"Error dropped (handler.go:2).", "Questions:\n1. Should a failed save retry?", "Minor:\n- other.go  elsewhere", "Open the draft on GitLab",
 	}
 	for _, w := range []string{"acme/shop!7 · Save", ">GitLab <svg", // the forge's own names
+		`<span class="chip" data-sev="major">1 major</span>`, `data-progress="step-2"`, `<span class="chip" data-del>deleted</span>`, // a step's head, a file's
 		`<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2Zy`, `sizes="32x32" href="data:image/png;base64,iVBORw0KGgo`, `<img src="data:image/png;base64,iVBORw0KGgo`} { // the favicons, unescaped
 		if !strings.Contains(s, w) {
 			t.Errorf("%q missing", w)
@@ -298,6 +299,41 @@ func TestSymbols(t *testing.T) {
 	}
 	if _, ok := s["Use"]; ok {
 		t.Error("a name the diff doesn't show is indexed")
+	}
+}
+
+func TestCycles(t *testing.T) {
+	inv := &file{Path: "x/billing/invoice/invoice.go", Short: "billing/invoice/invoice.go", Changes: []change{{Name: "Validate"}, {Name: "Discount"}}}
+	set := &file{Path: "x/billing/settings/settings.go", Short: "billing/settings/settings.go", Changes: []change{{Name: "MaxDiscount"}}}
+	other := &file{Path: "x/api/api.go", Short: "api/api.go", Changes: []change{{Name: "Get"}}}
+	steps := []step{{Files: []*file{set}}, {Files: []*file{inv}}, {Files: []*file{other}}}
+	syms := map[string][]Symbol{
+		"Validate":    {{Path: inv.Path, Calls: []string{set.Path + "\x00MaxDiscount"}}},
+		"MaxDiscount": {{Path: set.Path, Calls: []string{inv.Path + "\x00Discount"}}},
+		"Get":         {{Path: other.Path, Calls: []string{inv.Path + "\x00Validate"}}}, // one way only: no cycle
+	}
+	want := []cycle{{"billing/invoice", "billing/settings", "Validate → MaxDiscount", "MaxDiscount → Discount"}}
+	for i := range 2 { // a use each way, one end in the step
+		if got := cycles(steps, i, syms); !reflect.DeepEqual(got, want) {
+			t.Errorf("step %d: %+v", i, got)
+		}
+	}
+	if got := cycles(steps, 2, syms); got != nil {
+		t.Errorf("a step the cycle doesn't touch: %+v", got)
+	}
+}
+
+func TestWeigh(t *testing.T) {
+	f := &file{Findings: []*finding{{Comment: review.Comment{Severity: "major"}}}, Lines: []line{{Findings: []*finding{{Comment: review.Comment{Severity: "major"}}, {Comment: review.Comment{Severity: "minor"}}}}}}
+	if w := f.Weight(); w == nil || *w != (weighed{"major", "2 major"}) {
+		t.Errorf("file: %+v", w)
+	}
+	g := &file{Lines: []line{{Findings: []*finding{{Comment: review.Comment{Severity: "critical"}}}}}}
+	if w := (step{Files: []*file{f, g}}).Weight(); w == nil || *w != (weighed{"critical", "1 blocker"}) {
+		t.Errorf("step: %+v", w)
+	}
+	if w := (&file{Findings: []*finding{{Comment: review.Comment{Severity: "minor"}}}}).Weight(); w != nil {
+		t.Errorf("minor only: %+v", w)
 	}
 }
 
@@ -635,7 +671,7 @@ func TestSince(t *testing.T) {
 		t.Fatalf("%+v", s)
 	}
 	page := string(b)
-	for _, want := range []string{`id="since"`, `id="c.go" open data-changed`, "no longer in the PR", `data-filter="changed"`, "Changed since 1111111"} {
+	for _, want := range []string{`id="since"`, `id="c.go" open data-changed`, "no longer in the PR", `data-filter="changed"`, "Changed since 1111111", "changed since 1111111</span>"} {
 		if !strings.Contains(page, want) {
 			t.Error("missing", want)
 		}

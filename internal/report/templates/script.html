@@ -66,6 +66,9 @@
       const k = files.filter(a => viewed.has(a.dataset.path)).length;
       s.querySelector(".ring-p").style.setProperty("--p", files.length ? k / files.length : 0);
       s.querySelector(".nav-count").textContent = k + "/" + files.length;
+      const head = document.querySelector('[data-progress="' + s.dataset.step + '"]'), done = files.length > 0 && k === files.length;
+      head.textContent = done ? "read" : k ? "reading · " + k + "/" + files.length : k + "/" + files.length;
+      head.toggleAttribute("data-done", done);
       if (files.length && k === files.length) s.dataset.status = "complete";
       else delete s.dataset.status;
     }

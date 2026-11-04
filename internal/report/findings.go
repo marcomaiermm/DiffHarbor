@@ -36,10 +36,10 @@ type verdict struct {
 
 // draft is the review the person sends from the forge: the page posts nothing.
 type draft struct {
-	Event    string   // "Request changes" or "Comment"
-	Say      string   // what it holds of the findings: "1 blocker and 2 major"
-	Risks    []string // the merge risks by title
-	MD       string
+	Event string   // "Request changes" or "Comment"
+	Say   string   // what it holds of the findings: "1 blocker and 2 major"
+	Risks []string // the merge risks by title
+	MD    string
 }
 
 // judge sorts the findings and the weakened tests into their groups and writes the verdict and the draft.
@@ -248,3 +248,51 @@ func join(s []string) string {
 }
 
 func short(sha string) string { return sha[:min(len(sha), 7)] }
+
+// weighed is what findings weigh: the heaviest of them that matters to the merge and how many, "1 blocker", "2 major".
+type weighed struct{ Sev, Text string }
+
+// weigh is nil for no finding, or minor ones only.
+func weigh(fds []*finding) *weighed {
+	crit, major := 0, 0
+	for _, fd := range fds {
+		switch fd.Severity {
+		case "critical":
+			crit++
+		case "major":
+			major++
+		}
+	}
+	switch {
+	case crit > 0:
+		return &weighed{"critical", plural(crit, "blocker", "blockers")}
+	case major > 0:
+		return &weighed{"major", strconv.Itoa(major) + " major"}
+	}
+	return nil
+}
+
+// found is the findings on f: on a line of it or on the file.
+func (f *file) found() []*finding {
+	fds := f.Findings
+	for _, l := range f.Lines {
+		fds = append(fds, l.Findings...)
+	}
+	return fds
+}
+
+func (f *file) Weight() *weighed { return weigh(f.found()) }
+
+func (s step) Weight() *weighed {
+	var fds []*finding
+	for _, f := range s.Files {
+		fds = append(fds, f.found()...)
+	}
+	return weigh(fds)
+}
+
+// heavier is whether severity a weighs more than b; "" weighs nothing.
+func heavier(a, b string) bool {
+	w := map[string]int{"minor": 1, "major": 2, "critical": 3}
+	return w[a] > w[b]
+}

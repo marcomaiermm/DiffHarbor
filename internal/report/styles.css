@@ -302,6 +302,11 @@ header .vd { @apply max-sm:px-1.5; }
 .chip { @apply inline-flex h-5 items-center gap-1 rounded-md border px-2 text-xs leading-none font-medium whitespace-nowrap text-muted-foreground; }
 .chip[data-dash] { @apply border-dashed; border-color: color-mix(in oklab, var(--foreground) 35%, transparent); }
 .chip[data-shown] { @apply border-transparent; background: color-mix(in oklab, var(--verified) 12%, transparent); color: var(--verified); }
+.chip[data-sev="critical"] { @apply border-transparent; background: color-mix(in oklab, var(--destructive) 14%, transparent); color: var(--destructive); }
+.chip[data-sev="major"] { @apply border-transparent; background: color-mix(in oklab, var(--major) 12%, transparent); color: var(--major); }
+.chip[data-new] { color: var(--diff-add); border-color: color-mix(in oklab, var(--diff-add) 40%, transparent); }
+.chip[data-del] { color: var(--diff-del); border-color: color-mix(in oklab, var(--diff-del) 40%, transparent); }
+.chip.changed { color: var(--ring); border-color: color-mix(in oklab, var(--ring) 45%, transparent); }
 .chip[data-major] { @apply border-transparent; background: color-mix(in oklab, var(--major) 12%, transparent); color: var(--major); }
 .fgrp { @apply mt-5 text-[12.5px] font-medium text-muted-foreground; }
 .fgrp b { @apply font-medium opacity-80; }
@@ -364,6 +369,8 @@ html[data-filter="unviewed"] .sidebar-files li:has(.done) { display: none; }
 .gmenu > button > svg { @apply size-3.5 shrink-0 text-muted-foreground; }
 .gmenu > button > kbd { @apply ml-auto; }
 /* the declarations a long file changes, each a jump to its first changed line */
+.cnav { @apply flex flex-wrap items-center gap-1.5 border-b px-3 py-2 text-xs text-muted-foreground; }
+.cnav > span { @apply mr-1; }
 .change { @apply font-mono hover:bg-accent hover:text-foreground; }
 .change[data-state="new"]::before { content: "+"; @apply text-diff-add; }
 .change[data-state="gone"] { @apply line-through decoration-diff-del/60; }
@@ -455,9 +462,18 @@ dialog.sheet > .sheet-content { min-height: 100%; }
 .summary { @apply mt-3 max-w-[68ch] text-[15px] text-pretty text-muted-foreground; }
 .summary[data-under] { @apply mt-2 text-sm; }
 .meta { @apply mt-2 text-[13px] tabular-nums text-muted-foreground; }
-.step-tests { @apply mt-1 ml-8 text-[13px] text-muted-foreground; }
-.step-tests code { @apply font-mono text-xs text-foreground; }
-.step-tests[data-gap] { @apply text-major; }
+/* a step: its number, title, weight and how much of it is viewed; the tests that reach it; how its code connects */
+.step-head { @apply flex flex-wrap items-baseline gap-x-3 gap-y-1; }
+.step-head > .chip { @apply self-center; }
+.step-progress { @apply ml-auto font-mono text-xs text-muted-foreground tabular-nums; }
+.step-progress[data-done] { color: var(--verified); }
+.stt { @apply mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[12.5px] text-muted-foreground sm:ml-8; }
+.stt-t { @apply font-mono text-foreground/80 hover:text-foreground; }
+.stt-gap { @apply inline-flex h-[22px] items-center rounded-md border border-dashed px-2 text-foreground/80; }
+.step-graph { @apply mt-4 rounded-[10px] border bg-card px-5 py-4 max-sm:px-3 sm:ml-8; }
+.step-graph > .graph { @apply mt-0; }
+.ct-cyc { @apply mb-3.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b pb-3 text-[12.5px] text-muted-foreground; }
+.ct-cyc code { @apply font-mono text-[13px] text-foreground; }
 .story { @apply grid overflow-hidden rounded-lg border text-[13.5px] leading-relaxed @2xl:grid-cols-2; }
 .story > div { --c: var(--diff-del); @apply px-3.5 py-2.5; background: var(--diff-del-bg); }
 .story > div + div { @apply border-t border-dashed @2xl:border-t-0 @2xl:border-l; }

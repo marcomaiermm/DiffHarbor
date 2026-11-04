@@ -151,6 +151,10 @@ var funcs = template.FuncMap{
 	"wip":      func(subject string) bool { return wip.MatchString(strings.TrimSpace(subject)) },
 	"dir":      func(p string) string { return p[:strings.LastIndex(p, "/")+1] }, // "a/b/" of a/b/c.go: muted, the name stands out
 	"base":     func(p string) string { return p[strings.LastIndex(p, "/")+1:] },
+	"test": func(t string) string { // "a_test.go TestSave" of step.Tests: "TestSave"; a file alone stays
+		_, n, ok := strings.Cut(t, " ")
+		return map[bool]string{true: n, false: t}[ok]
+	},
 	"tab": func(id, title string, n int, warn bool, first string) tab {
 		return tab{id, title, n, warn, id == first}
 	},
@@ -242,14 +246,16 @@ type file struct {
 	Findings         []*finding // on the file but no line it shows
 	Changes          []change   // the declarations it changes
 	Long             bool       // lists Changes above its diff
-	Changed          bool       // its change differs from Prev's, or it's new to the PR
+	Changed          string     // Prev's short SHA when its change differs from Prev's, or it's new to the PR
+	New, Gone        bool       // the PR adds or deletes it
 }
 
 // change is a declaration a file's diff touches: State "new", "gone" or "" (changed), ID its first changed line.
 type change struct {
 	Name, State, ID string
-	added, removed  bool // its declaring line
-	sig             bool // what callers see of it differs: see signature
+	Sev             string // the heaviest finding on its lines: "critical", "major", "minor"
+	added, removed  bool   // its declaring line
+	sig             bool   // what callers see of it differs: see signature
 }
 
 type step struct {
@@ -260,6 +266,7 @@ type step struct {
 	More       int      // past those
 	Partial    bool     // at least: a walk stopped short
 	Untested   bool     // no test reaches what it changes: see tested
+	Cycles     []cycle  // directories its changes make use each other
 }
 
 type group struct {
@@ -356,6 +363,7 @@ func prepare(d Data) view {
 	diff.EachDeleted(d.Diff, func(p, f string) {
 		files[p] = parse(p, f, d.Walkthrough[p])
 		files[p].ID = ids[p]
+		files[p].Gone = true
 		gone, v.Deleted = append(gone, p), append(v.Deleted, files[p])
 	})
 	skim := map[string]map[int]string{}
@@ -485,6 +493,7 @@ func prepare(d Data) view {
 		v.Steps[i].Graph = graph(v.Steps, i, d.Symbols)
 		st := &v.Steps[i]
 		st.Tests, st.More, st.Partial, st.Untested = tested(*st, d.Symbols)
+		st.Cycles = cycles(v.Steps, i, d.Symbols)
 		v.Graphs = v.Graphs || v.Steps[i].Graph != nil
 	}
 	v.Inventory = inventory(ss, d.Symbols, d.Commits, d.Title, d.Whys)
@@ -518,7 +527,8 @@ func trim(f *file, runs map[int]run) {
 // parse reads one file's diff into lines numbered as in the new file.
 func parse(p, f, note string) *file {
 	fl := &file{Path: p, Kind: diff.Kind(p), Note: note}
-	_, body, ok := strings.Cut(f, "\n@@")
+	head, body, ok := strings.Cut(f, "\n@@")
+	fl.New = strings.Contains(head+"\n", "\n--- /dev/null\n")
 	if !ok {
 		return fl
 	}
@@ -608,6 +618,7 @@ func changes(f *file, runs map[int]run) []change {
 	var cs []change
 	at := map[string]int{}
 	heads := map[string]*[2]string{} // name -> its signature before and now, the first the diff shows of each
+	sev := map[string]string{}
 	cur := ""
 	for i := range f.Lines {
 		l := &f.Lines[i]
@@ -632,6 +643,11 @@ func changes(f *file, runs map[int]run) []change {
 				h[0], h[1] = cmp.Or(h[0], before), cmp.Or(h[1], now)
 			}
 		}
+		for _, fd := range l.Findings {
+			if cur != "" && heavier(fd.Severity, sev[cur]) {
+				sev[cur] = fd.Severity
+			}
+		}
 		if cur == "" || l.Class == "ctx" || runs[l.Run].Where != "" { // moved code is no change
 			continue
 		}
@@ -646,6 +662,7 @@ func changes(f *file, runs map[int]run) []change {
 		}
 	}
 	for i, c := range cs {
+		cs[i].Sev = sev[c.Name]
 		if c.added != c.removed {
 			cs[i].State = map[bool]string{true: "new", false: "gone"}[c.added]
 		}

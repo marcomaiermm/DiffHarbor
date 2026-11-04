@@ -405,3 +405,36 @@ func tested(st step, syms map[string][]Symbol) (tests []string, more int, partia
 	}
 	return tests, more, partial, untested
 }
+
+// cycle is two directories the PR's changed declarations make use each other, one use each way: "Validate →
+// MaxDiscount".
+type cycle struct{ A, B, AB, BA string }
+
+// cycles is the pairs of directories that use each other through the changed declarations, a use in step i among
+// them; nil without codegraph's index.
+func cycles(steps []step, i int, syms map[string][]Symbol) []cycle {
+	all, byDecl := decls(steps)
+	edges, _ := arrows(all, byDecl, syms, -1)
+	type pair struct{ a, b string }
+	first, mine := map[pair]string{}, map[pair]bool{}
+	for _, e := range edges {
+		p := pair{path.Dir(all[e.a].f.Short), path.Dir(all[e.b].f.Short)}
+		if p.a == p.b {
+			continue
+		}
+		if first[p] == "" {
+			first[p] = all[e.a].c.Name + " → " + all[e.b].c.Name
+		}
+		if all[e.a].step == i || all[e.b].step == i {
+			mine[p], mine[pair{p.b, p.a}] = true, true
+		}
+	}
+	var cs []cycle
+	for p, ab := range first {
+		if ba := first[pair{p.b, p.a}]; ba != "" && p.a < p.b && mine[p] {
+			cs = append(cs, cycle{p.a, p.b, ab, ba})
+		}
+	}
+	slices.SortFunc(cs, func(x, y cycle) int { return cmp.Or(strings.Compare(x.A, y.A), strings.Compare(x.B, y.B)) })
+	return cs
+}
