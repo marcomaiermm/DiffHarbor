@@ -52,7 +52,7 @@ func TestPatchIDs(t *testing.T) {
 }
 
 func TestSkipAndOmitted(t *testing.T) {
-	for _, p := range []string{"api/x.pb.go", "src/routeTree.gen.ts", "web/__generated__/q.ts", ".terraform.lock.hcl", "Gemfile.lock"} {
+	for _, p := range []string{"api/x.pb.go", "src/routeTree.gen.ts", "web/styles.gen.css", "web/__generated__/q.ts", ".terraform.lock.hcl", "Gemfile.lock"} {
 		if !Skip.MatchString(p) {
 			t.Errorf("not skipped: %s", p)
 		}
