@@ -55,6 +55,12 @@ func (*Hub) Bot() string { return Slug }
 // Boxes is true: ticking a box edits our comment, which GitHub allows users with write access.
 func (*Hub) Boxes() bool { return true }
 
+// Instance is the API's host.
+func (*Hub) Instance() string {
+	u, _ := url.Parse(APIURL)
+	return u.Host
+}
+
 func verify(secret string, body []byte, sig string) bool {
 	m := hmac.New(sha256.New, []byte(secret))
 	m.Write(body)

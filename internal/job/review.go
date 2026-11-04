@@ -85,7 +85,11 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		return fmt.Sprintf("%s · `@%s <question>` to ask, `@%s review` for a full review", what, f.Bot(), f.Bot())
 	}
 
-	dir, err := agent.Workspace(e.Repo())
+	id, err := forge.RepoID(f, e)
+	if err != nil {
+		return err
+	}
+	dir, err := agent.Workspace(id)
 	if err != nil {
 		return err
 	}

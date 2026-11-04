@@ -47,7 +47,7 @@ func TestUIDOf(t *testing.T) {
 	for _, c := range []struct {
 		repo string
 		uid  uint32
-	}{{"o/a", firstUID}, {"gitlab/g/a", firstUID + 1}, {"o/a", firstUID}} {
+	}{{"github:api.github.com:1", firstUID}, {"gitlab:gitlab.com:1", firstUID + 1}, {"github:api.github.com:1", firstUID}} {
 		if uid, err := uidOf(f, c.repo); err != nil || uid != c.uid {
 			t.Fatalf("%s: %d %v, want %d", c.repo, uid, err, c.uid)
 		}
@@ -63,6 +63,35 @@ func TestUIDOf(t *testing.T) {
 	_ = os.WriteFile(f, []byte(`{"o/a":10000,"o/b":10000}`), 0o600)
 	if _, err := uidOf(f, "o/a"); err == nil {
 		t.Fatal("two repos share a uid: no error")
+	}
+}
+
+// After the upgrade a repo is its id: a rename keeps its uid, a new repo of an old name (a legacy entry's) gets a uid
+// and cache of its own, and the legacy uids are never handed out again. Restarts change nothing.
+func TestLegacyUIDs(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "uids.json")
+	legacy := `{"o/a":10000,"gitlab/g/p":10003}`
+	_ = os.WriteFile(f, []byte(legacy), 0o600)
+	a, b := "github:api.github.com:7", "github:api.github.com:8" // o/a, renamed later; a new o/a
+	for range 2 {                                                // a restart in between
+		if uid, err := uidOf(f, a); err != nil || uid != 10004 {
+			t.Fatalf("repo id: %d %v, want past the legacy uids", uid, err)
+		}
+		if uid, err := uidOf(f, b); err != nil || uid != 10005 {
+			t.Fatalf("new repo of the old name: %d %v", uid, err)
+		}
+	}
+	m, err := uids(f)
+	if err != nil || m["o/a"] != 10000 || m["gitlab/g/p"] != 10003 {
+		t.Fatalf("legacy entries must stay taken: %v %v", m, err)
+	}
+	if k := kept(m); !k[1000] || k[10000] || k[10003] || !k[10004] || !k[10005] {
+		t.Fatalf("Clean keeps %v", k)
+	}
+	defer func(pi bool, d, c string) { AsPi, DataDir, CacheDir = pi, d, c }(AsPi, DataDir, CacheDir)
+	AsPi, DataDir, CacheDir = true, filepath.Dir(f), t.TempDir()
+	if _, err := Workspace("o/a"); err == nil || !strings.Contains(err.Error(), "no repo id") {
+		t.Fatalf("a name took a uid: %v", err)
 	}
 }
 

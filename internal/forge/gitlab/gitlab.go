@@ -69,6 +69,12 @@ func (*Hub) Bot() string { return Bot }
 // Boxes is false: GitLab lets only a comment's author tick its boxes.
 func (*Hub) Boxes() bool { return false }
 
+// Instance is GITLAB_URL's host and path.
+func (*Hub) Instance() string {
+	u, _ := url.Parse(APIURL)
+	return u.Host + strings.TrimSuffix(u.Path, "/api/v4")
+}
+
 type apiError struct {
 	status int
 	msg    string
