@@ -71,3 +71,14 @@ func TestCommandEnv(t *testing.T) {
 		}
 	}
 }
+
+// Clean empties CACHE_DIR as root: it refuses one holding DATA_DIR (CACHE_DIR=/tmp, the data's default parent).
+func TestCleanOverlap(t *testing.T) {
+	defer func(pi bool, c, d string) { AsPi, CacheDir, DataDir = pi, c, d }(AsPi, CacheDir, DataDir)
+	AsPi, CacheDir = true, t.TempDir()
+	for _, d := range []string{CacheDir, filepath.Join(CacheDir, "diffharbor")} {
+		if DataDir = d; Clean() == nil {
+			t.Error("cleaned a CACHE_DIR holding DATA_DIR", d)
+		}
+	}
+}

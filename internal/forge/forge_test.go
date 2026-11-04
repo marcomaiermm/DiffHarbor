@@ -66,6 +66,9 @@ func TestSticky(t *testing.T) {
 	if Clean(body) == body || strings.Contains(Clean(body), "diffharbor:state") {
 		t.Fatal("clean")
 	}
+	if got := Clean("[report](https://x/r/github.com/o/r/1/ABCDEFGHIJKLMNOPQRSTUVWXYZ/versions)"); strings.Contains(got, "ABCDEF") {
+		t.Fatal("a report's secret reaches the prompt:", got)
+	}
 }
 
 func TestStickyOutline(t *testing.T) {

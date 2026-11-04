@@ -26,7 +26,7 @@ var (
 	// DataDir is the data volume (DATA_DIR): logins, learnings, pending jobs, the repos' uids.
 	DataDir = filepath.Join(os.TempDir(), "diffharbor")
 	// CacheDir is the cache (CACHE_DIR): as root a dir per repo's user (pnpm store, Go caches), and the work dirs.
-	CacheDir = os.TempDir()
+	CacheDir = filepath.Join(os.TempDir(), "diffharbor-cache") // never the temp dir itself: as root, Clean owns it
 )
 
 // firstUID is the first repo's uid and gid; the image's users are below it, node (1000) runs dry runs.
@@ -268,6 +268,10 @@ func Remove(p string) error {
 func Clean() error {
 	if !AsPi {
 		return os.RemoveAll(workDir())
+	}
+	// Clean takes CacheDir over and empties it: never a dir with other things in it, e.g. DataDir.
+	if rel, err := filepath.Rel(CacheDir, DataDir); err != nil || rel == "." || !strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("CACHE_DIR %s holds DATA_DIR %s: give each its own dir", CacheDir, DataDir)
 	}
 	// CacheDir was node's: root's now, or a repo's user could swap another's cache dir for a symlink.
 	if err := errors.Join(os.MkdirAll(CacheDir, 0o755), os.Lchown(CacheDir, 0, 0), os.Chmod(CacheDir, 0o755)); err != nil {

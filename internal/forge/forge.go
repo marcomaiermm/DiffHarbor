@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -124,7 +125,11 @@ func Rules(pick map[string]string, read func(string) string) string {
 	return text.Truncate(b.String(), 6000)
 }
 
-// Clean drops our hidden markers and state from a comment before it goes into a prompt.
+// reportSecret is a report link's secret (job.Secret) in a comment.
+var reportSecret = regexp.MustCompile(`/[A-Z2-7]{26}\b`)
+
+// Clean drops our hidden markers and state from a comment before it goes into a prompt, and report links' secrets.
 func Clean(s string) string {
+	s = reportSecret.ReplaceAllString(s, "/…") // a report link's secret: the comment's readers', not the model's
 	return text.Truncate(strings.TrimSpace(stateTag.ReplaceAllString(strings.NewReplacer(Mark, "", stickyMark, "").Replace(s), "")), 3000)
 }
