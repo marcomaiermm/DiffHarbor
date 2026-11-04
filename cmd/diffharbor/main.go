@@ -49,6 +49,7 @@ func dry() error {
 	}
 	b, _ := json.MarshalIndent(r, "", "  ")
 	fmt.Println(string(b), "\n"+stats)
+	fmt.Fprintln(os.Stderr, agent.Usage(dir))
 	return nil
 }
 

@@ -337,6 +337,43 @@ func Object(text string, v any) bool {
 	return i >= 0 && j > i && json.Unmarshal([]byte(text[i:j+1]), v) == nil
 }
 
+// Usage sums the tokens and cost of the pass sessions in dir, one line per pass and a total, for benches.
+func Usage(dir string) string {
+	type use struct {
+		in, cached, out, turns int
+		cost                   float64
+	}
+	var b strings.Builder
+	var sum use
+	fs, _ := filepath.Glob(filepath.Join(dir, "*.session"))
+	for _, f := range fs {
+		data, err := os.ReadFile(f) //nolint:gosec // our own workspace
+		if err != nil {
+			continue
+		}
+		var u use
+		for l := range bytes.SplitSeq(data, []byte("\n")) {
+			var e struct {
+				Message struct {
+					Usage *struct {
+						Input, Output, CacheRead int
+						Cost                     struct{ Total float64 }
+					}
+				}
+			}
+			if json.Unmarshal(l, &e) != nil || e.Message.Usage == nil {
+				continue
+			}
+			x := e.Message.Usage
+			u.in, u.cached, u.out, u.turns, u.cost = u.in+x.Input, u.cached+x.CacheRead, u.out+x.Output, u.turns+1, u.cost+x.Cost.Total
+		}
+		fmt.Fprintf(&b, "%-10s %2d turns  in %8d  cached %8d  out %6d  $%.3f\n", strings.TrimSuffix(filepath.Base(f), ".session"), u.turns, u.in, u.cached, u.out, u.cost)
+		sum = use{sum.in + u.in, sum.cached + u.cached, sum.out + u.out, sum.turns + u.turns, sum.cost + u.cost}
+	}
+	fmt.Fprintf(&b, "%-10s %2d turns  in %8d  cached %8d  out %6d  $%.3f", "total", sum.turns, sum.in, sum.cached, sum.out, sum.cost)
+	return b.String()
+}
+
 // Pi runs passes with the pi coding agent as a subprocess.
 type Pi struct{}
 
