@@ -96,7 +96,7 @@ func work(queue chan *forge.Event) {
 		if err != nil {
 			log.Println(e.Key(), err)
 		}
-		cancel()
+		cancel() // revokes the job's vault tokens: git's remote, Pi's keys
 		proc.KillOrphans()
 		running.Lock()
 		running.key = "" // idle: a later push or close has nothing to stop

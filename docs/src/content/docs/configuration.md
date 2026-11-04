@@ -33,7 +33,7 @@ Add a webhook on the project or group: `https://<host>/webhook/gitlab`, triggers
 |---|---|
 | `GITLAB_URL` | Default `https://gitlab.com`. |
 | `GITLAB_TOKEN` | A bot user's token (or a project/group access token) with scope `api` and at least the Developer role. Its username is the bot: `@<username> review`. |
-| `GITLAB_READ_TOKEN` | Recommended: a token with only `read_repository`, for git. Without it git gets the `api` token next to the MR's code; the server warns on start. |
+| `GITLAB_READ_TOKEN` | Optional: a token with only `read_repository` for git's fetches, else they use the `api` token. Either stays in the server: git fetches through its proxy. |
 | `GITLAB_WEBHOOK_SECRET` | The webhook's secret token. |
 
 Differences to GitHub: findings are diff discussions, fixes `suggestion:-N+0` blocks, and a finding GitLab refuses to place goes into the summary note. Large MRs in parts start with `@<bot> review all` (there is no checkbox). There is no redelivery: GitLab retries a failed webhook only briefly. Maintainers count as members, Developers as collaborators.

@@ -7,10 +7,12 @@ import (
 	"cmp"
 	"context"
 	"diffharbor/internal/proc"
+	"diffharbor/internal/vault"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,6 +101,53 @@ var keyEnvs = map[string]string{
 	"google": "GEMINI_API_KEY", "google-vertex": "GOOGLE_CLOUD_API_KEY", "azure": "AZURE_OPENAI_API_KEY",
 	"vercel-ai-gateway": "AI_GATEWAY_API_KEY", "opencode-go": "OPENCODE_API_KEY", "moonshotai": "MOONSHOT_API_KEY",
 	"moonshotai-cn": "MOONSHOT_API_KEY", "cloudflare-workers-ai": "CLOUDFLARE_API_KEY", "cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",
+	"amazon-bedrock": "AWS_BEARER_TOKEN_BEDROCK",
+}
+
+// vaulted are the providers whose key can stay in the vault: Pi's upstream for them (pi-ai providers/<name>.js;
+// Azure's is AZURE_OPENAI_BASE_URL, Bedrock's AWS_REGION's) and what a pass posts under it (pi-ai api/*.js).
+var vaulted = map[string]struct {
+	base  string
+	paths []string
+}{
+	"openai":         {"https://api.openai.com/v1", []string{"responses"}},
+	"anthropic":      {"https://api.anthropic.com", []string{"v1/messages"}},
+	"deepseek":       {"https://api.deepseek.com", []string{"chat/completions"}},
+	"azure":          {"", []string{"responses", "chat/completions", "deployments/*/chat/completions"}},
+	"amazon-bedrock": {"", []string{"model/*/converse-stream"}},
+}
+
+// upstream is the API provider's passes reach through the vault; "" = they get the key itself: no vault (not root),
+// a provider the vault doesn't know, or one that authenticates another way. The ChatGPT login: Pi treats only
+// requests to api.openai.com itself as ChatGPT's (pi-ai api/openai-responses.js isChatGPTSignIn). Bedrock's IAM keys:
+// SigV4 signs the host.
+func upstream(provider string) string {
+	v, ok := vaulted[provider]
+	if !ok || vault.URL() == "" || os.Getenv(KeyEnv(provider)) == "" || !providerFor(provider).keyed() {
+		return ""
+	}
+	switch provider {
+	case "azure":
+		return azureBase(os.Getenv("AZURE_OPENAI_BASE_URL"))
+	case "amazon-bedrock":
+		return "https://bedrock-runtime." + os.Getenv("AWS_REGION") + ".amazonaws.com"
+	}
+	return cmp.Or(os.Getenv(envName(provider)+"_BASE_URL"), v.base) // a gateway's
+}
+
+// azureBase is Pi's Azure endpoint for AZURE_OPENAI_BASE_URL u: an Azure host's bare URL gets /openai/v1
+// (pi-ai api/azure-openai-config.js normalizeAzureBaseUrl).
+func azureBase(u string) string {
+	p, err := url.Parse(strings.TrimRight(strings.TrimSpace(u), "/"))
+	if err != nil {
+		return ""
+	}
+	h := p.Hostname()
+	azure := strings.HasSuffix(h, ".openai.azure.com") || strings.HasSuffix(h, ".cognitiveservices.azure.com") || strings.HasSuffix(h, ".ai.azure.com")
+	if azure && slices.Contains([]string{"", "/openai", "/openai/v1/responses"}, strings.TrimRight(p.Path, "/")) {
+		p.Path, p.RawQuery = "/openai/v1", ""
+	}
+	return strings.TrimRight(p.String(), "/")
 }
 
 // KeyEnv is the env var holding provider's API key. A pass gets only its own provider's key.
@@ -141,9 +190,10 @@ func needs(provider string) string {
 	return strings.Join(sets, " or ")
 }
 
-// passEnv is the env a pass on provider authenticates with: its Need and Opt that are set, without them the
-// ChatGPT login's access token as the key.
-func passEnv(provider string) ([]string, error) {
+// passEnv is the env a pass on provider authenticates with until ctx is done: its Need and Opt that are set, without
+// them the ChatGPT login's access token as the key. Through the vault the key is a token, and the other secrets and
+// the endpoint stay out: models.json points Pi at the vault.
+func passEnv(ctx context.Context, provider string) ([]string, error) {
 	p := providerFor(provider)
 	if !p.keyed() {
 		if !p.Login {
@@ -153,18 +203,35 @@ func passEnv(provider string) ([]string, error) {
 		return []string{KeyEnv(provider) + "=" + token}, err
 	}
 	var env []string
+	up := upstream(provider)
 	ks := slices.Concat(slices.Concat(p.Need...), p.Opt)
 	for i, k := range ks {
-		if v := os.Getenv(k); v != "" && slices.Index(ks, k) == i {
-			env = append(env, k+"="+v)
+		v := os.Getenv(k)
+		if v == "" || slices.Index(ks, k) != i {
+			continue
 		}
+		switch {
+		case up != "" && k == KeyEnv(provider):
+			tok, err := vault.Key(ctx, provider, up, v, vaulted[provider].paths...)
+			if err != nil {
+				return nil, err
+			}
+			v = tok
+		case up != "" && (secretVar.MatchString(k) || strings.HasSuffix(k, "_BASE_URL")):
+			continue
+		}
+		env = append(env, k+"="+v)
+	}
+	if up != "" && provider == "amazon-bedrock" {
+		env = append(env, "AWS_BEDROCK_FORCE_HTTP1=1") // the vault is plain HTTP/1, the SDK's default HTTP/2
 	}
 	return env, nil
 }
 
 // Proxies routes built-in providers through a proxy or gateway (LiteLLM, a company's AI gateway):
 // <PROVIDER>_BASE_URL, e.g. ANTHROPIC_BASE_URL, becomes the provider's baseUrl in Pi's models.json; its models
-// and auth stay Pi's, the key is the proxy's. Only as root, where Pi runs as node: a local run keeps its own Pi config.
+// and auth stay Pi's, the key is the proxy's. A provider whose key the vault keeps points at the vault, which forwards
+// to the gateway. Only as root, where Pi runs as node: a local run keeps its own Pi config.
 func Proxies() error {
 	if !proc.AsPi {
 		return nil
@@ -176,7 +243,10 @@ func Proxies() error {
 func proxies(f string) error {
 	providers := map[string]any{}
 	for _, r := range Matrix {
-		if u := os.Getenv(envName(r.Name) + "_BASE_URL"); u != "" && r.Proxy {
+		switch u := os.Getenv(envName(r.Name) + "_BASE_URL"); {
+		case upstream(r.Name) != "":
+			providers[r.Name] = map[string]string{"baseUrl": vault.URL() + "/" + r.Name}
+		case u != "" && r.Proxy:
 			providers[r.Name] = map[string]string{"baseUrl": u}
 		}
 	}
@@ -302,7 +372,7 @@ func runPiOn(ctx context.Context, dir, name, system, m string, tools bool, promp
 	defer cancel()
 	// Soft deadline (review-guard.js refuses tool calls after it): 2 minutes left for the answer.
 	deadline := fmt.Sprintf("DIFFHARBOR_DEADLINE=%d", time.Now().Add(6*time.Minute).UnixMilli())
-	creds, err := passEnv(providerOf(m))
+	creds, err := passEnv(ctx, providerOf(m)) // a vault token dies with ctx, when this run ends
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", m, err)
 	}

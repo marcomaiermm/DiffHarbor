@@ -37,7 +37,7 @@ services:
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
-      # Claude on AWS Bedrock: region plus a Bedrock API key or IAM keys.
+      # Claude on AWS Bedrock: region plus a Bedrock API key (stays in the server) or IAM keys (Pi gets them, see README, Security).
       AWS_REGION: ${AWS_REGION:-}
       AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}

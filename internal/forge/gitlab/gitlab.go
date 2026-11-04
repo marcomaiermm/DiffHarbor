@@ -52,9 +52,7 @@ func Setup(cfg Config) (h *Hub, ok bool, err error) {
 	if h.secret == "" {
 		return nil, true, errors.New("GITLAB_WEBHOOK_SECRET is empty")
 	}
-	if readToken = cfg.ReadToken; readToken == "" {
-		log.Println("gitlab: no GITLAB_READ_TOKEN, git gets GITLAB_TOKEN next to the PR's code")
-	}
+	readToken = cfg.ReadToken // unset: git fetches with token, which stays in the vault like this one
 	var u struct {
 		Username string `json:"username"`
 	}

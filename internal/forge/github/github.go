@@ -336,7 +336,7 @@ func InstallToken(e *forge.Event) (token string, statuses bool, err error) {
 	return token, false, err
 }
 
-// ReadToken only reads the event's repo: for git, which runs as node next to the PR's code.
+// ReadToken only reads the event's repo: what git fetches with, through the vault.
 func ReadToken(e *forge.Event) (string, error) {
 	return Mint(e, map[string]string{"contents": "read"})
 }
