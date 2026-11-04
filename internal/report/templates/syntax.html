@@ -208,10 +208,13 @@ const code = async (sig, path) => el("pre", "sym-sig scroll-area", ...(await col
 ]));
 // code lines outside the diff, the API's and the reach list's, colored like it once their box opens: a hundred
 // signatures colored at load hold the page up; a signature's name shows the card
+// a way's node is a name alone: read as a call, it takes the color a function has, and the brackets are cut off
+const upto = (ts, n) => { let at = 0; return ts.flatMap(t => { const x = t.content.slice(0, Math.max(0, n - at)); at += t.content.length; return x ? [{ ...t, content: x }] : []; }); };
 const tint = box => {
-  for (const c of box.querySelectorAll(".inv-lines code, .reach-item li > code, .asig")) {
-    const path = c.closest("[data-path]")?.dataset.path;
-    if (path && lang(path)) colored(c.textContent, path).then(([ts = []]) => {
+  for (const c of box.querySelectorAll(".inv-lines code, .reach-item li > code, .asig, .ct-pill code")) {
+    const path = c.closest("[data-path]")?.dataset.path, node = c.matches(".ct-pill code"), text = c.textContent;
+    if (path && lang(path)) colored(node ? text + "()" : text, path).then(([ts = []]) => {
+      if (node) ts = upto(ts, text.length);
       c.replaceChildren(...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; }));
       const name = c.dataset.name, s = Object.hasOwn(syms, name ?? "") && [...c.children].find(s => s.textContent.trim() === name);
       if (s) { s.classList.add("sym"); s.dataset.sym = name; }
@@ -221,6 +224,7 @@ const tint = box => {
 for (const box of document.querySelectorAll("#explore details.box"))
   if (box.open) tint(box); // opened before the colors loaded
   else box.addEventListener("toggle", () => tint(box), { once: true });
+for (const w of document.querySelectorAll(".ctw")) if (!w.closest("details")) tint(w); // a step's way is always in view
 // the colored tokens of ts between two offsets of their text, split where those fall
 const cut = (ts, a, b) => {
   const out = [];
