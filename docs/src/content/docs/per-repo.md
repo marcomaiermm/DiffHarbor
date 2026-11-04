@@ -58,7 +58,7 @@ A broken `review.json` falls back to the defaults and says so in the review foot
 
 ## Large PRs
 
-A diff over 60k characters can be reviewed in parts: the files of a folder stay together, and the findings are merged, most severe first. Each part gets a review pass, then a second one on where its code meets the other parts' files, told what the first found, and one verify pass over both. Each part costs about two normal reviews.
+A diff over 60k characters can be reviewed in parts: the files of a folder stay together, each part gets its own review and verify pass, and the findings are merged, most severe first. Each part costs about one normal review.
 
 | `large_pr` | |
 |---|---|

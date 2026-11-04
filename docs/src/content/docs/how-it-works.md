@@ -5,7 +5,7 @@ description: The steps of a DiffHarbor review and how to talk to the bot.
 
 1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, generated code and binaries stay out. A pass gets up to 60k characters, code first, then tests, data and docs; larger PRs can be reviewed [in parts](../per-repo/#large-prs).
 2. **Context.** The checks, plus codegraph, co-change from git history, the repo's rules and skills from the base branch, learnings, and optionally the linked ticket.
-3. **Review.** The agent returns up to 10 findings per pass.
+3. **Review.** The agent returns up to 10 findings, then looks at the diff again for what it missed: the same session without tools, up to 10 more at about a tenth of the cost.
 4. **Verify.** A cheaper model checks each finding in the code.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 

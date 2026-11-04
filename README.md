@@ -55,7 +55,7 @@ The server listens on `:3000`. Expose `POST /webhook/github` and/or `POST /webho
 
 1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, generated code and binaries stay out. A pass gets up to 60k characters, code first, then tests, data and docs; larger PRs can be reviewed [in parts](#large-prs).
 2. **Context.** The checks above, plus codegraph, co-change from git history, the repo's rules and skills from the base branch, learnings, and optionally the linked ticket.
-3. **Review.** The agent returns up to 10 findings per pass.
+3. **Review.** The agent returns up to 10 findings, then looks at the diff again for what it missed: the same session without tools, up to 10 more at about a tenth of the cost.
 4. **Verify.** A cheaper model checks each finding in the code.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
@@ -222,7 +222,7 @@ A broken `review.json` falls back to the defaults and says so in the review foot
 
 ### Large PRs
 
-A diff over 60k characters can be reviewed in parts: the files of a folder stay together, and the findings are merged, most severe first. Each part gets a review pass, then a second one on where its code meets the other parts' files, told what the first found, and one verify pass over both. Each part costs about two normal reviews.
+A diff over 60k characters can be reviewed in parts: the files of a folder stay together, each part gets its own review and verify pass, and the findings are merged, most severe first. Each part costs about one normal review.
 
 | `large_pr` | |
 |---|---|

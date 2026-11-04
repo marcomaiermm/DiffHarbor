@@ -94,6 +94,9 @@ const (
 	verifyRepair = "Your last message ended without the required JSON. Do not call tools. Output the JSON verdicts now, using the evidence you already gathered. No prose outside the JSON."
 )
 
+// againTask resumes a review pass for a second look.
+const againTask = `Review the diff again, line by line, and report the defects your answer missed: other bugs, edge cases, wrong messages or docs, missing guards. Tools are off: use the code you already read. Do not repeat what you reported. End with the JSON object {"summary": "", "comments": [...]} and nothing else.`
+
 // Verified opens the verifier's evidence in a posted finding's body.
 const Verified = "_Verified:_ "
 
@@ -261,7 +264,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 		// One pass over the whole diff: about the findings of parts at a third fewer tokens, so only a diff past
 		// diff.Max splits.
 		block := fmt.Sprintf("## Diff\n\n```diff\n%s\n```\n", in.Parts[0])
-		p := runPart(ctx, in, "", head+block, "", block, m, vm)
+		p := runPart(ctx, in, "", head+block, block, m, vm)
 		r, tag, err := merge([]part{p}, m, vm, ci)
 		r.Tests = tests
 		return r, tag, err
@@ -286,17 +289,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 			if docs.Len() > 0 {
 				prompt += "\n## Changed docs and API specs in other parts (check what they claim about your files)\n\n```diff\n" + text.Truncate(docs.String(), 8000) + "\n```\n"
 			}
-			var others strings.Builder
-			for j, o := range in.Parts {
-				if j != k {
-					others.WriteString(diff.Map(o))
-				}
-			}
-			lens := fmt.Sprintf("%s## Files in this pull request\n\n%s\n\n## What the other parts change (the declarations their hunks sit in or add)\n\n%s\n## Diff, part %d of %d\n\n"+
-				"Another reviewer checks this part's code on its own. You check only where it meets code in other files: what this part produces that others store, render or act on, and what it consumes from them. Read the other side in cwd. Check:\n"+lensChecks+
-				"Report findings on the files in this part only, on the line here that causes them. Summary and walkthrough: one sentence each, they are not shown.\n\n```diff\n%s\n```\n",
-				head, strings.Join(files, "\n"), text.Truncate(others.String(), 12000), k+1, len(in.Parts), d)
-			ps[k] = runPart(ctx, in, strconv.Itoa(k+1), prompt, lens, fmt.Sprintf("## Diff\n\n```diff\n%s\n```\n", d), m, vm)
+			ps[k] = runPart(ctx, in, strconv.Itoa(k+1), prompt, fmt.Sprintf("## Diff\n\n```diff\n%s\n```\n", d), m, vm)
 		})
 	}
 	wg.Wait()
@@ -308,16 +301,6 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 // partsAtOnce is the parts a large review runs at once: the subscription's rate limit, the container's memory.
 const partsAtOnce = 2
 
-// lensChecks is what a part's second pass checks where its code meets other files: most of the evidence for a
-// finding in a part sits in another part's files or outside the diff.
-const lensChecks = `- a rule or constant kept in two places (a threshold, a set of states, an order, a limit): do both agree
-- a value the change adds or changes in a result, state or config: does every consumer that stores, renders, compares or acts on it get and handle it
-- a status, label or text that says a step ran or succeeded: is it set only when the step ran
-- implementations of one interface or flow (two providers, backends, clients): does one skip a check, filter or field the other has
-- order of steps: a value computed, stored or cached before a later step changes its input
-- references by name across files (template, selector, anchor, route, key, env var): does the other side still exist, also where it renders only under a condition
-`
-
 // part is one part's review: its verified result, found the findings sent to verification, kept those it confirmed.
 type part struct {
 	r           Result
@@ -327,26 +310,19 @@ type part struct {
 	err         error
 }
 
-// runPart reviews one part (name "" for a whole diff) with prompt, then with lens unless it is empty, and verifies
-// the findings of both against the part's diff block.
-func runPart(ctx context.Context, in Input, name, prompt, lens, block, m, vm string) part {
-	r, err := reviewPass(ctx, in, "review"+name, prompt, m)
+// runPart reviews one part (name "" for a whole diff) with prompt, takes a second look and verifies the findings of
+// both against the part's diff block.
+func runPart(ctx context.Context, in Input, name, prompt, block, m, vm string) part {
+	r, err := reviewPass(ctx, in, "review"+name, prompt, m, false)
 	if err != nil {
 		return part{err: err, files: diff.Paths(block)}
 	}
-	if lens != "" {
-		// A pass reports a part's worst two or three; a second one, told what the first found, reports others.
-		// After it, not beside it: a duplicate costs a verification and a merge that may keep the worse one.
-		if len(r.Comments) > 0 {
-			lens += "\n## Already reported (don't repeat these)\n\n" + findings(r.Comments, nil)
-		}
-		li := in
-		li.Guide = false
-		if l, err := reviewPass(ctx, li, "lens"+name, lens, m); err != nil {
-			log.Printf("lens%s: %v", name, err) // the first pass stands
-		} else {
-			r.Comments = append(r.Comments, l.Comments...)
-		}
+	// A pass reports its worst few; asked again, it reports others. Resumed without tools: its prompt and the code it
+	// read come from the cache, at about a twentieth of a fresh pass's input price, and it reads nothing new.
+	if more, err := reviewPass(ctx, in, "review"+name, "", m, true); err != nil {
+		log.Printf("review%s again: %v", name, err) // the first pass stands
+	} else {
+		r.Comments = append(r.Comments, more.Comments...)
 	}
 	slices.Sort(r.Fixed)
 	r.Fixed = slices.DeleteFunc(slices.Compact(r.Fixed), func(i int) bool { return i < 0 || i >= len(in.Prior) })
@@ -456,28 +432,33 @@ func merge(ps []part, m, vm, ci string) (Result, string, error) {
 	r.Decisions = r.Decisions[:min(len(r.Decisions), 3)]
 	slices.Sort(r.Fixed)
 	r.Fixed = slices.Compact(r.Fixed)
-	if len(ps) > 1 {
-		slices.SortStableFunc(r.Comments, func(a, b Comment) int { return rank[b.Severity] - rank[a.Severity] })
-		seen := map[string]bool{}
-		r.Comments = slices.DeleteFunc(r.Comments, func(c Comment) bool {
-			at := fmt.Sprintf("%s:%d", c.Path, c.Line)
-			dup := seen[at]
-			seen[at] = true
-			return dup
-		})
-	}
+	slices.SortStableFunc(r.Comments, func(a, b Comment) int { return rank[b.Severity] - rank[a.Severity] })
+	seen := map[string]bool{}
+	r.Comments = slices.DeleteFunc(r.Comments, func(c Comment) bool {
+		at := fmt.Sprintf("%s:%d", c.Path, c.Line)
+		dup := seen[at]
+		seen[at] = true
+		return dup
+	})
 	return r, tag, nil
 }
 
-// reviewPass runs one review pass, repairs a reply without JSON and parses it.
-func reviewPass(ctx context.Context, in Input, name, prompt, m string) (Result, error) {
+// reviewPass runs one review pass, or again resumes it for what it missed, repairs a reply without JSON and parses
+// it.
+func reviewPass(ctx context.Context, in Input, name, prompt, m string, again bool) (Result, error) {
 	system := reviewSystem
 	if in.Guide {
 		system += guideSchema
 	}
 	system += in.Trusted
-	out, err := in.Agent.Run(ctx, in.Dir, name, system, prompt,
-		"Review this pull request. End with the JSON object and nothing else.", m)
+	var out string
+	var err error
+	if again {
+		out, err = in.Agent.Continue(ctx, in.Dir, name, system, againTask, m)
+	} else {
+		out, err = in.Agent.Run(ctx, in.Dir, name, system, prompt,
+			"Review this pull request. End with the JSON object and nothing else.", m)
+	}
 	if err != nil {
 		return Result{}, err
 	}
