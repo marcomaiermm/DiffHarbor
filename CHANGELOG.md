@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.1.1...v0.2.0) (2026-11-04)
+
+
+### Features
+
+* **security:** harden the review sandbox, keys and supply chain ([#16](https://github.com/marcomaiermm/DiffHarbor/issues/16)) ([3956989](https://github.com/marcomaiermm/DiffHarbor/commit/395698978da22d633dea475190ba1ee437c0b64b))
+* **security:** keep model keys and git tokens in a root-held proxy ([3956989](https://github.com/marcomaiermm/DiffHarbor/commit/395698978da22d633dea475190ba1ee437c0b64b))
+
+
+### Bug Fixes
+
+* **chat:** answer only about the PR ([#14](https://github.com/marcomaiermm/DiffHarbor/issues/14)) ([7c0258b](https://github.com/marcomaiermm/DiffHarbor/commit/7c0258bdb015e08eb9df0bf6e5de811f0eb64f7a))
+* **deps:** update dependency sharp to ^0.35.0 [security] ([#19](https://github.com/marcomaiermm/DiffHarbor/issues/19)) ([cf26724](https://github.com/marcomaiermm/DiffHarbor/commit/cf26724f9c98771cd2587e724afa81d49c3ff340))
+
 ## [0.1.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.1.0...v0.1.1) (2026-11-03)
 
 
