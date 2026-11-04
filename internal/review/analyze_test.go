@@ -108,6 +108,23 @@ func TestAnalyze(t *testing.T) {
 		t.Fatalf("second look: %+v %v", r.Comments, calls)
 	}
 
+	// A further finder, without a second look: its findings verified with the first's, the first's summary. A failed
+	// first one leaves the other standing.
+	no := false
+	r, _, calls = run(map[string][]string{
+		"review": {finding}, "review.2": {`{"summary":"x","comments":[{"path":"a.md","line":2,"severity":"minor","title":"m","body":"b"}]}`},
+		"verify": {`{"verdicts":[{"i":0,"keep":true},{"i":1,"keep":true}]}`},
+	}, Settings{Passes: []Pass{{}, {Again: &no}}})
+	slices.Sort(calls)
+	if len(r.Comments) != 2 || r.Summary != "s" || strings.Join(calls, ",") != "review,review again,review.2,verify" {
+		t.Fatalf("passes: %+v %q %v", r.Comments, r.Summary, calls)
+	}
+	r, _, calls = run(map[string][]string{"review": {"x", "y"}, "review.2": {finding}, "verify": {keep}}, Settings{Passes: []Pass{{}, {}}})
+	slices.Sort(calls)
+	if len(r.Comments) != 1 || strings.Join(calls, ",") != "review,review repair,review.2,review.2 again,verify" {
+		t.Fatalf("first pass failed: %+v %v", r.Comments, calls)
+	}
+
 	// In parts: a review pass, a second look and a verify pass each, findings merged most severe first, a failed part
 	// named. A second look without JSON leaves its part's first pass standing.
 	other := `{"summary":"o","comments":[{"path":"a.md","line":1,"severity":"critical","title":"c","body":"b"},{"path":"b.md","line":5,"severity":"minor","title":"m","body":"b"}]}`

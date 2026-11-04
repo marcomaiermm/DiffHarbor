@@ -48,4 +48,7 @@ git rev-parse pr`)
 	if b := Behind(context.Background(), repo); len(b) != 301 || b[300].Subject != "base" || strings.Join(b[300].Paths, ",") != "b.txt" || len(b[0].Paths) > 0 {
 		t.Fatalf("Behind: %d commits, last %+v", len(b), b[len(b)-1])
 	}
+	if m := Messages(context.Background(), repo); m != "- pr" {
+		t.Fatalf("Messages: %q", m)
+	}
 }

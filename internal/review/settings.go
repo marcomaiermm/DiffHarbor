@@ -29,6 +29,9 @@ type Settings struct {
 	// all parts; "off": never.
 	LargePR  string `json:"large_pr"`
 	MaxParts int    `json:"max_parts"` // default 4, at most 8
+	// The finders per part, each with tools and then its second look, their findings verified together. Unset: one,
+	// the review model's. At most 3; the first is the review model's and always runs.
+	Passes []Pass `json:"passes"`
 	// The HTML report to read a PR with (reading order, commits, tests), when the server has REPORT_URL.
 	// "auto" (default): from ReportFiles changed files; "always"; "off".
 	Report string `json:"report"`
@@ -58,6 +61,15 @@ type SyntaxTheme struct {
 	Dark  string `json:"dark"`
 }
 
+// Pass is a finder of review.json's passes.
+type Pass struct {
+	// provider/id[:level]; unset: agent.SecondFor the review model. A server's REVIEW_MODEL pins it like review_model.
+	Model    string `json:"model"`
+	Again    *bool  `json:"again"`     // false: no second look
+	MinLines int    `json:"min_lines"` // runs on a PR with at least this many changed lines in the files it reviews
+	MaxLines int    `json:"max_lines"` // and at most this many; 0 = any
+}
+
 type pkgSettings struct {
 	MinSeverity string `json:"min_severity"` // minor|major|critical: post nothing below it
 	Tests       *bool  `json:"tests"`        // false: don't run the tests of changed packages; unset = inherit, at the top run unless CI does
@@ -79,6 +91,28 @@ var (
 func (cfg Settings) Models() (review, verify string) {
 	review = cmp.Or(agent.Model, cfg.ReviewModel, agent.Default())
 	return review, cmp.Or(agent.VerifyModel, cfg.VerifyModel, agent.VerifyFor(review))
+}
+
+// Finders returns the passes a PR with lines changed lines gets, with their models.
+func (cfg Settings) Finders(lines int) []Pass {
+	review, _ := cfg.Models()
+	ps := cfg.Passes
+	if len(ps) == 0 {
+		ps = []Pass{{}}
+	}
+	var out []Pass
+	for k, p := range ps {
+		switch {
+		case k == 0:
+			p.Model = review
+		case p.Model == "" || agent.Model != "":
+			p.Model = agent.SecondFor(review)
+		}
+		if lines >= p.MinLines && (p.MaxLines == 0 || lines <= p.MaxLines) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // Parts returns the parts a review may split into; confirmed: someone asked for all of them (the box, `review all`).
@@ -150,7 +184,20 @@ func LoadSettings(s string) (Settings, error) {
 			return Settings{}, fmt.Errorf("path %q: want one inside the repo, from its root", p)
 		}
 	}
-	for _, m := range []string{cfg.ReviewModel, cfg.VerifyModel} {
+	if len(cfg.Passes) > 3 {
+		return Settings{}, fmt.Errorf("passes: %d, want at most 3", len(cfg.Passes))
+	}
+	models := []string{cfg.ReviewModel, cfg.VerifyModel}
+	for k, p := range cfg.Passes {
+		if k == 0 && (p.Model != "" || p.MinLines != 0 || p.MaxLines != 0) {
+			return Settings{}, fmt.Errorf("passes: the first is review_model's and always runs, it takes again only")
+		}
+		if p.MinLines < 0 || p.MaxLines < 0 || p.MaxLines > 0 && p.MaxLines < p.MinLines {
+			return Settings{}, fmt.Errorf("passes %d: min_lines %d, max_lines %d: want 0 <= min_lines <= max_lines, max_lines 0 = any", k+1, p.MinLines, p.MaxLines)
+		}
+		models = append(models, p.Model)
+	}
+	for _, m := range models {
 		if m != "" && !modelRe.MatchString(m) { // goes to pi's argv: no flag
 			return Settings{}, fmt.Errorf("model %q: want provider/id[:level]", m)
 		}
