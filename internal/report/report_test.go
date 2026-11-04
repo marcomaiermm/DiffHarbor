@@ -487,7 +487,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 	use := Ref{Path: "b.go", Line: 3, In: "Use", Text: "func Use() { Save() }"}
 	s := Symbols(dir, "+++ b/a.go\n+\tSave()\n+\t_ = Max\n+func Handle() {\n")
 	want := Symbol{
-		Kind: "function", Pkg: "a", Unit: "package", Sig: "func Save()", Path: "a.go", Line: 5, Uses: 2, Files: 2, Exact: true,
+		Kind: "function", Pkg: "a", Unit: "package", Sig: "func Save()", Path: "a.go", Line: 5, From: 5, To: 5, Uses: 2, Files: 2, Exact: true,
 		Refs: []Ref{{Path: "a.go", Line: 8, In: "Handle", Text: "Save()"}, use}, Here: []string{"a.go:8"},
 		Outside: []Ref{use}, NOutside: 1, // b.go isn't in the diff
 	}
@@ -696,12 +696,15 @@ func TestJudge(t *testing.T) {
 
 // A step names the tests that call what it changes; it says none does only when codegraph knows every use.
 func TestTested(t *testing.T) {
-	code := func(names ...string) *file {
-		f := &file{Path: "a.go", Kind: "code"}
-		for _, n := range names {
-			f.Changes = append(f.Changes, change{Name: n})
-		}
-		return f
+	// a.go: Save on lines 3-5, Load on 7-9; the diff adds line 4 and, after line 8, removes one
+	diff := []line{{Class: "hunk", Text: "@@ -1,9 +1,9 @@"}, {Class: "ctx", No: "3"}, {Class: "add", No: "4", Text: "\tx++"},
+		{Class: "ctx", No: "8"}, {Class: "del", Text: "\ty--"}, {Class: "ctx", No: "9"}}
+	code := func(ls ...line) *file {
+		return &file{Path: "a.go", Kind: "code", Lines: append(slices.Clone(diff), ls...), Changes: []change{{Name: "Save"}}}
+	}
+	save := func(s Symbol) map[string][]Symbol {
+		s.Path, s.Exact, s.From, s.To = "a.go", true, 3, 5
+		return map[string][]Symbol{"Save": {s}, "Load": {{Path: "a.go", Exact: true, From: 7, To: 9, Untested: true}}}
 	}
 	many := make([]string, 10)
 	for i := range many {
@@ -715,20 +718,20 @@ func TestTested(t *testing.T) {
 		more     int
 		untested bool
 	}{
-		{"a test reaches it", code("Save"), map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Tests: []string{"a_test.go TestSave"}}}}, []string{"a_test.go TestSave"}, 0, false},
-		{"none does", code("Save"), map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Untested: true}}}, nil, 0, true},
-		{"a guess does", code("Save"), map[string][]Symbol{"Save": {{Path: "a.go", Exact: true}}}, nil, 0, false},
-		{"not the index's", code("Save"), map[string][]Symbol{"Save": {{Path: "a.go", Untested: true}}}, nil, 0, false},
-		{"another file's", code("Save"), map[string][]Symbol{"Save": {{Path: "b.go", Exact: true, Untested: true}}}, nil, 0, false},
-		{"a change it doesn't know", code("Save", "Load"), map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Untested: true}}}, nil, 0, false},
-		{"a removed one reaches nothing", &file{Path: "a.go", Kind: "code", Changes: []change{{Name: "Save"}, {Name: "Old", State: "gone"}}},
-			map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Untested: true}}}, nil, 0, true},
-		{"a line outside", &file{Path: "a.go", Kind: "code", Stray: true, Changes: []change{{Name: "Save"}}},
-			map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Untested: true}}}, nil, 0, false},
-		{"not code", &file{Path: "a.go", Kind: "config", Changes: []change{{Name: "Save"}}},
-			map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Untested: true}}}, nil, 0, false},
-		{"nothing changed", code(), nil, nil, 0, false},
-		{"counted past maxTests", code("Save"), map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Tests: many}}}, many[:maxTests], 2, false},
+		{"a test reaches it", code(), save(Symbol{Tests: []string{"a_test.go TestSave"}}), []string{"a_test.go TestSave"}, 0, false},
+		{"none is found", code(), save(Symbol{Untested: true}), nil, 0, true},
+		{"a guess finds one", code(), save(Symbol{}), nil, 0, false},
+		{"the line removed in Load: Load's tests", code(), map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, From: 3, To: 5, Untested: true}},
+			"Load": {{Path: "a.go", Exact: true, From: 7, To: 9, Tests: []string{"a_test.go TestLoad"}}}}, []string{"a_test.go TestLoad"}, 0, false},
+		{"a line in no declaration", code(line{Class: "add", No: "11", Text: "register(Save)"}), save(Symbol{Untested: true}), nil, 0, false},
+		{"a comment in none", code(line{Class: "add", No: "11", Text: "// Save saves."}), save(Symbol{Untested: true}), nil, 0, true},
+		{"one the index doesn't know", code(), map[string][]Symbol{"Save": {{Path: "a.go", Untested: true}}}, nil, 0, false},
+		{"a removed one", &file{Path: "a.go", Kind: "code", Lines: diff, Changes: []change{{Name: "Save"}, {Name: "Old", State: "gone"}}},
+			save(Symbol{Untested: true}), nil, 0, false},
+		{"cut short", &file{Path: "a.go", Kind: "code", Lines: diff, Cut: 9}, save(Symbol{Untested: true}), nil, 0, false},
+		{"not code", &file{Path: "a.go", Kind: "config", Lines: diff}, save(Symbol{Untested: true}), nil, 0, false},
+		{"nothing changed", &file{Path: "a.go", Kind: "code"}, save(Symbol{Untested: true}), nil, 0, false},
+		{"counted past maxTests", code(), save(Symbol{Tests: many}), many[:maxTests], 2, false},
 	} {
 		tests, more, _, untested := tested(step{Files: []*file{c.f}}, c.syms)
 		if !slices.Equal(tests, c.tests) || more != c.more || untested != c.untested {

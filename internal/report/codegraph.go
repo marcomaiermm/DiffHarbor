@@ -26,7 +26,7 @@ const out = { nodes: [], edges: [] }, skip = "('file', 'import')", list = JSON.s
 const other = (p, own) => dbs.some(d => d.prefix.length > own.length && p.startsWith(d.prefix)); // a deeper index's
 for (const { db: file, prefix } of dbs) {
   const db = new DatabaseSync(file, { readOnly: true });
-  for (const n of db.prepare("select name, file_path path, start_line line from nodes where kind not in " + skip +
+  for (const n of db.prepare("select name, file_path path, start_line line, end_line end from nodes where kind not in " + skip +
     " and name in (select value from json_each(?))").all(list)) {
     n.path = prefix + n.path;
     if (!other(n.path, prefix)) out.nodes.push(n);
@@ -47,7 +47,7 @@ type cgIndex struct {
 	dbs   []cgDB
 	Nodes []struct {
 		Name, Path string
-		Line       int
+		Line, End  int
 	}
 	Edges []struct {
 		Line                int // 0: unknown, the source's first line that names it
@@ -103,8 +103,8 @@ func runNode(script string, in, out any) bool {
 }
 
 // exact replaces what the name scan guessed with the index's resolved edges, for the declarations the index knows:
-// who names one (Refs, Uses, Files; Here, the lines of the diff's files; Outside, those of the others), what it
-// names (Calls). Those it doesn't know, a Go struct's fields, keep the scan's.
+// its lines (From, To), who names one (Refs, Uses, Files; Here, the lines of the diff's files; Outside, those of
+// the others), what it names (Calls). Those it doesn't know, a Go struct's fields, keep the scan's.
 func (idx *cgIndex) exact(repo string, changed map[string]bool, syms map[string][]Symbol) {
 	type key struct{ path, name string }
 	at := map[key][]*Symbol{}
@@ -133,6 +133,7 @@ func (idx *cgIndex) exact(repo string, changed map[string]bool, syms map[string]
 	for _, n := range idx.Nodes {
 		if s := find(n.Path, n.Name, n.Line); s != nil && known[s] == nil {
 			known[s] = &uses{seen: map[Ref]bool{}, files: map[string]bool{}}
+			s.From, s.To = n.Line, n.End
 		}
 	}
 	lines := sources(repo)

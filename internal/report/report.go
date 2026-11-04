@@ -243,7 +243,6 @@ type file struct {
 	Changes          []change   // the declarations it changes
 	Long             bool       // lists Changes above its diff
 	Changed          bool       // its change differs from Prev's, or it's new to the PR
-	Stray            bool       // a line it changes is in none of Changes: a step's tests can't tell what it does
 }
 
 // change is a declaration a file's diff touches: State "new", "gone" or "" (changed), ID its first changed line.
@@ -592,7 +591,7 @@ func tree(files map[string]*file) []*node {
 	return root.Kids
 }
 
-// inert is a changed line outside a declaration that runs nothing: blank, a comment, an import, an import block's.
+// inert is a changed line outside any declaration that runs nothing: blank, a comment, an import, an import block's.
 var inert = regexp.MustCompile(`^\s*(?:$|//|/\*|\*|#(?:\s|$)|--|import\b|from\s|use\s|using\s|package\s|#include\b|"[^"]*"\s*[,;]?\s*$|\w+\s+"[^"]*"\s*$|[()]\s*$)`)
 
 // minChanges is the lines a file shows before it lists the declarations it changes.
@@ -632,7 +631,6 @@ func changes(f *file, runs map[int]run) []change {
 			}
 		}
 		if cur == "" || l.Class == "ctx" || runs[l.Run].Where != "" { // moved code is no change
-			f.Stray = f.Stray || cur == "" && l.Class != "ctx" && runs[l.Run].Where == "" && !inert.MatchString(l.Text)
 			continue
 		}
 		k, ok := at[cur]

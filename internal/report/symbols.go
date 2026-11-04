@@ -39,6 +39,7 @@ type Symbol struct {
 	// TestSave"; Partial, past what a walk reads. Untested: no test reaches it, not even by name: see cgTests.
 	Tests             []string `json:"-"`
 	Partial, Untested bool     `json:"-"`
+	From, To          int      `json:"-"` // exact: its lines by the index, from a decorator or a doc maybe
 }
 
 // Ref is a line that names a symbol, and the declaration it sits in.

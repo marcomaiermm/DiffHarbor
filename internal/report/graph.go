@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -322,35 +323,83 @@ func reach(steps []step, syms map[string][]Symbol) []affected {
 const maxTests = 8
 
 // tested is the tests that reach what the step changes through codegraph's uses, its callers' and theirs, nearest
-// first; more past maxTests, partial when a walk stopped short: at least that many. untested only when every file
-// is code, every changed line in a declaration codegraph knows, and not even a guess by name reaches a test from
-// one: see cgTests. Removed ones reach nothing.
+// first; more past maxTests, partial when a walk stopped short: at least that many. What it changes: the declarations
+// the index puts its changed lines in, and those Changes names. untested, that no test was found, only when every
+// file is code and shown whole, nothing is removed (the base's tests aren't the head's), every changed line is in a
+// declaration of the index or runs nothing (inert), and not even a guess by name finds a test: see cgTests.
 func tested(st step, syms map[string][]Symbol) (tests []string, more int, partial, untested bool) {
-	untested = true
-	n := 0
-	for _, f := range st.Files {
-		untested = untested && f.Kind == "code" && !f.Stray && f.Cut == 0
-		for _, c := range f.Changes {
-			if c.State == "gone" {
-				continue
+	in := map[string][]*Symbol{} // the index's declarations by file
+	for name := range syms {
+		for i := range syms[name] {
+			if s := &syms[name][i]; s.Exact && s.To > 0 {
+				in[s.Path] = append(in[s.Path], s)
 			}
-			n++
-			known := false
-			for _, s := range syms[c.Name] {
-				if s.Path != f.Path || !s.Exact {
-					continue
-				}
-				known, untested, partial = true, untested && s.Untested, partial || s.Partial
-				for _, t := range s.Tests {
-					if !slices.Contains(tests, t) {
-						tests = append(tests, t)
-					}
-				}
-			}
-			untested = untested && known
 		}
 	}
-	untested = untested && n > 0 && len(tests) == 0
+	// around is the innermost declaration of p that holds lines a to b
+	around := func(p string, a, b int) *Symbol {
+		var best *Symbol
+		for _, s := range in[p] {
+			if s.From <= a && b <= s.To && (best == nil || s.From > best.From) {
+				best = s
+			}
+		}
+		return best
+	}
+	var touched []*Symbol // the claim's: the declarations its changed lines are in
+	var named []*Symbol   // and those Changes names, for the list
+	add := func(to *[]*Symbol, s *Symbol) {
+		if s != nil && !slices.Contains(*to, s) {
+			*to = append(*to, s)
+		}
+	}
+	untested = true
+	for _, f := range st.Files {
+		untested = untested && f.Kind == "code" && f.Cut == 0
+		for _, c := range f.Changes {
+			untested = untested && c.State != "gone"
+			for i, s := range syms[c.Name] {
+				if s.Exact && s.Path == f.Path {
+					add(&named, &syms[c.Name][i])
+				}
+			}
+		}
+		at := 0 // the new side's line before the next
+		for _, l := range f.Lines {
+			var s *Symbol
+			switch l.Class {
+			case "hunk":
+				if m := hunk.FindStringSubmatch(l.Text); m != nil {
+					n, _ := strconv.Atoi(m[2])
+					at = n - 1
+				}
+				continue
+			case "ctx":
+				at, _ = strconv.Atoi(l.No)
+				continue
+			case "add":
+				at, _ = strconv.Atoi(l.No)
+				s = around(f.Path, at, at)
+			case "del": // between at and at+1: in a declaration that holds both
+				s = around(f.Path, at, at+1)
+			default:
+				continue
+			}
+			if s == nil {
+				untested = untested && inert.MatchString(l.Text)
+			}
+			add(&touched, s)
+		}
+	}
+	for _, s := range slices.Concat(touched, named) {
+		partial = partial || s.Partial
+		for _, t := range s.Tests {
+			if !slices.Contains(tests, t) {
+				tests = append(tests, t)
+			}
+		}
+	}
+	untested = untested && len(touched) > 0 && len(tests) == 0 && !slices.ContainsFunc(touched, func(s *Symbol) bool { return !s.Untested })
 	if len(tests) > maxTests {
 		more, tests = len(tests)-maxTests, tests[:maxTests]
 	}
