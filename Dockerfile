@@ -21,7 +21,7 @@ RUN tailwindcss -i internal/report/styles.css -o /tmp/styles.css --minify && { c
 FROM node:24-alpine
 # fallow's musl binary needs a CPU with AVX2.
 RUN apk add --no-cache curl git ripgrep fd bash ast-grep shellcheck luacheck actionlint zizmor osv-scanner && npm install -g --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.4.0 \
-    squawk-cli@2.70.0 oxlint@1.90.0 oxlint-tsgolint@7.0.2005 fallow@3.36.0 && npm cache clean --force && corepack enable && mkdir -p /cache /data && chmod 755 /cache && chmod 700 /data
+    squawk-cli@2.70.0 oxlint@1.90.0 oxlint-tsgolint@7.0.2005 fallow@3.38.1 && npm cache clean --force && corepack enable && mkdir -p /cache /data && chmod 755 /cache && chmod 700 /data
 # codegraph bundles a glibc Node; run its JS on Alpine's Node 24 instead (gcompat for the native kernel).
 RUN apk add --no-cache gcompat libgcc libstdc++ && npm install -g --ignore-scripts --no-audit --no-fund @colbymchenry/codegraph@1.6.2 && npm cache clean --force \
     && P=/usr/local/lib/node_modules/@colbymchenry/codegraph/node_modules/@colbymchenry/codegraph-linux-x64 && rm "$P/node" /usr/local/bin/codegraph \
