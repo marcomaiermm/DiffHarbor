@@ -836,3 +836,15 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 		}
 	}
 }
+
+// an imports hunk says what it brings in and drops; a line that only moved is neither
+func TestImported(t *testing.T) {
+	ls := []line{{Class: "ctx", Text: "import ("}, {Class: "del", Text: `	"fmt"`}, {Class: "del", Text: `	"os"`},
+		{Class: "add", Text: `	x "a/b"`}, {Class: "add", Text: `	"os"`}, {Class: "ctx", Text: ")"}}
+	if got := imported(ls); got != "a/b in · fmt out" {
+		t.Errorf("imported %q", got)
+	}
+	if got := imported([]line{{Class: "add", Text: "use std::io;"}}); got != "use std::io in" {
+		t.Errorf("imported %q", got)
+	}
+}
