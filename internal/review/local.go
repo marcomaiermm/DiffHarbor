@@ -111,6 +111,7 @@ func Checkout(ctx context.Context, repo, cloneURL, head, base, token string) (st
 // Commit is one commit of the PR: its subject and size.
 type Commit struct {
 	SHA, Subject    string
+	Author          string // its author's name
 	Files, Add, Del int
 	Lines           []string // "+" or "-" and the trimmed line, for each it adds or removes: which commit brought a declaration
 	Paths           []string // Behind's: the files it changes
@@ -125,7 +126,7 @@ func Commits(ctx context.Context, repo string) []Commit {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	out, err := proc.Run(proc.Command(ctx, repo, nil, "git", "log", "--reverse", "--no-merges", "--no-renames",
-		"--format=%x00%H%x09%s", "-p", "-U0", "refs/base..HEAD"))
+		"--format=%x00%H%x09%an%x09%s", "-p", "-U0", "refs/base..HEAD"))
 	if err != nil {
 		return nil
 	}
@@ -156,11 +157,12 @@ func parseCommits(log string) []Commit {
 	var cs []Commit
 	for c := range strings.SplitSeq(log, "\x00") {
 		head, patch, _ := strings.Cut(c, "\n")
-		sha, subject, ok := strings.Cut(head, "\t")
-		if !ok {
+		sha, rest, ok := strings.Cut(head, "\t")
+		author, subject, ok2 := strings.Cut(rest, "\t")
+		if !ok || !ok2 {
 			continue
 		}
-		cm := Commit{SHA: sha, Subject: subject}
+		cm := Commit{SHA: sha, Author: author, Subject: subject}
 		header := false // a file's header, up to its first hunk: "--- a/x" is no removed line
 		for l := range strings.SplitSeq(patch, "\n") {
 			switch {

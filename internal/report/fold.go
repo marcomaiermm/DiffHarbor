@@ -102,6 +102,9 @@ func skims(ls []line, skim map[int]string, runs map[int]run, id int) int {
 			end++
 		}
 		what, note := routine(ls[start:end]), ""
+		if strings.HasPrefix(what, "imports") {
+			note = imported(ls[start:end])
+		}
 		if what == "" {
 			what, note = said(ls[start:end], skim)
 		}
@@ -284,6 +287,49 @@ func routine(ls []line) string {
 		return "comments only"
 	}
 	return "" // blank lines: as cheap to read as the fold
+}
+
+// imported is what an imports hunk brings in and drops, "a/b in · c out": a line's quoted path, or the line.
+// One on both sides only moved.
+func imported(ls []line) string {
+	name := func(t string) string {
+		if _, q, ok := strings.Cut(t, `"`); ok {
+			if p, _, ok := strings.Cut(q, `"`); ok {
+				return p
+			}
+		}
+		return strings.TrimRight(t, ";,")
+	}
+	var in, out []string
+	for _, l := range ls {
+		t := strings.TrimSpace(l.Text)
+		if t == "" || t == ")" || strings.HasSuffix(t, "(") || commentLine.MatchString(t) {
+			continue
+		}
+		switch l.Class {
+		case "add":
+			in = append(in, name(t))
+		case "del":
+			out = append(out, name(t))
+		}
+	}
+	list := func(ns, other []string, dir string) string {
+		ns = slices.DeleteFunc(slices.Clone(ns), func(n string) bool { return slices.Contains(other, n) })
+		switch {
+		case len(ns) == 0:
+			return ""
+		case len(ns) > 3:
+			return strings.Join(ns[:3], ", ") + " and " + strconv.Itoa(len(ns)-3) + " more " + dir
+		}
+		return join(ns) + " " + dir
+	}
+	var say []string
+	for _, s := range []string{list(in, out, "in"), list(out, in, "out")} {
+		if s != "" {
+			say = append(say, s)
+		}
+	}
+	return strings.Join(say, " · ")
 }
 
 // parts cuts a file's lines into plain and folded runs. A run with a finding in it stays open.

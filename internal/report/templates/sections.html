@@ -1,47 +1,63 @@
 {{/* The sections after the overview, one template each. */}}
 {{define "flow"}}
 {{if .Steps}}<section id="flow" class="mt-14 border-t pt-10">
-  <h2 class="mb-8 text-xl font-semibold tracking-tight">Reading order</h2>
+  <div class="flex flex-wrap items-baseline gap-x-6 gap-y-2"><h2 class="text-xl font-semibold tracking-tight">Read the change</h2>
+    <div class="toggle-group" data-variant="outline" role="group" aria-label="Show">
+      <button type="button" class="toggle" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="toggle" data-filter="unviewed" aria-pressed="false">Not viewed</button>
+      {{with .Since}}{{if .Files}}<button type="button" class="toggle" data-filter="changed" aria-pressed="false" title="The files whose change differs from the last review's">Changed since {{short .Prev.SHA}}</button>{{end}}{{end}}
+    </div>
+  </div>
+  <p class="mt-1.5 text-muted-foreground">{{if not .Flow}}The changed code, in the diff's order.{{else if eq .InSteps .Code}}Every changed code file sits in one of the {{.NSteps}} steps.{{else}}{{.InSteps}} of the {{.Code}} changed code files sit in the {{.NSteps}} steps, the rest after them.{{end}} Hover a name for its card, click it for every use.<span class="split-legend"> Split: <span class="text-ring">changed</span>, <span class="text-diff-add">added</span>, removed.</span></p>
+  <p class="keys mt-2 mb-8"><span><kbd>j</kbd> <kbd>k</kbd> next and previous file</span><span><kbd>n</kbd> next finding</span><span><kbd>v</kbd> viewed</span><span><kbd>Esc</kbd> closes a card</span></p>
   {{range $i, $s := .Steps}}
   <div class="mb-12" id="step-{{inc $i}}">
-    <div class="flex items-baseline gap-3">
+    <div class="step-head">
       <span class="font-mono text-xs text-muted-foreground tabular-nums">{{printf "%02d" (inc $i)}}</span>
       <h3 class="text-lg font-semibold tracking-tight">{{$s.Title}}</h3>
+      {{with $s.Weight}}<span class="chip" data-sev="{{.Sev}}">{{.Text}}</span>{{end}}
+      <span class="step-progress" data-progress="step-{{inc $i}}"></span>
     </div>
-    {{with $s.Why}}<p class="mt-1 ml-8 text-muted-foreground">{{.}}</p>{{end}}
-    {{with $s.Graph}}<details class="trace-collapsible mt-3 ml-8"{{if not $i}} open{{end}}>
-      <summary><span class="trace-line"><span class="trace-icon">{{icon "workflow" ""}}</span><span class="trace-title">How the changed code connects</span><span class="trace-icon trace-chevron">{{icon "chevron-right" ""}}</span></span></summary>
-      {{template "graph" .}}
-    </details>{{end}}
-    <div class="mt-4 space-y-3">{{range $s.Files}}{{template "file" .}}{{end}}</div>
+    {{with $s.Why}}<p class="mt-1.5 ml-8 text-muted-foreground">{{.}}</p>{{end}}
+    {{with $s.Check}}<p class="step-check"><span>Check</span> · {{.}}</p>{{end}}
+    {{if or $s.Tests $s.Gap}}<p class="stt" title="Found by following calls from the test files into this step's code. No model involved."><span>Tests that reach it</span>
+      {{- range $s.Tests}}{{$r := $.Run (test .)}}<a{{if or $.Tests $.Outline.Added $.Outline.Weakened}} href="#tests"{{end}} class="stt-t" title="{{.}}{{with $r.Text}}: {{.}}{{end}}">{{if $r.Mark}}{{template "run-mark" $r}}{{end}}<span class="font-mono">{{test .}}</span>{{with $r.When}}<span class="text-muted-foreground">{{.}}</span>{{end}}</a>{{end}}
+      {{- if $s.Partial}}<span>and more</span>{{else}}{{with $s.More}}<span>and {{.}} more</span>{{end}}{{end}}
+      {{- with $s.Gap}}<span class="stt-gap">{{.}}</span>{{end}}</p>{{end}}
+    {{if or $s.Graph $s.Cycles $s.Way}}<div class="step-graph" aria-label="How the step's code connects">
+      {{range $s.Cycles}}<p class="ct-cyc"><span class="sev" data-sev="major">Cycle</span><code>{{.A}} ⇄ {{.B}}</code><span>this step's changes make them use each other: {{.AB}}, {{.BA}}</span></p>{{end}}
+      {{with $s.Way}}<p class="way-h"><span class="sev" data-sev="{{.Sev}}">{{if eq .Sev "critical"}}Blocker{{else}}Major{{end}}</span>the path from {{.Name}} to the finding</p><div class="ctw">{{template "way" .}}</div>{{end}}
+      {{with $s.Graph}}{{template "graph" .}}{{end}}
+    </div>{{end}}
+    <div class="mt-3.5 space-y-2 sm:ml-8">{{range $s.Files}}{{template "file" .}}{{end}}</div>
   </div>
   {{end}}
+  {{if or .Tests .Outline.Added .Outline.Weakened .Other .Mechanical .Deleted}}<div class="rest-group"><h2 class="text-xl font-semibold tracking-tight">Tests, data and the rest</h2>
+    <p class="mt-1 text-muted-foreground">Outside the reading order and closed until you need them.</p></div>{{end}}
 </section>{{end}}
 {{end}}
 
 {{define "tests"}}
-{{if or .Tests .Outline.Added .Outline.Weakened}}<section id="tests" class="mt-14 border-t pt-10">
-  <h2 class="text-xl font-semibold tracking-tight">Tests</h2>
-  <p class="mt-1 mb-6 text-muted-foreground">Read the cases, not the test code.{{if .Outline.Snapshots}} {{.Outline.Snapshots}} snapshot or golden files updated.{{end}}</p>
-  {{with .Outline.Added}}<div class="mb-4 rounded-lg border">
-    <h3 class="border-b px-4 py-3 text-sm font-medium">{{len .}} new cases</h3>
-    <ul class="gap-x-8 px-4 py-3 font-mono text-xs leading-6 text-muted-foreground sm:columns-2">{{range .}}<li class="break-inside-avoid break-words before:mr-2 before:text-diff-add before:content-['+']">{{.}}</li>{{end}}</ul>
-  </div>{{end}}
+{{if or .Tests .Outline.Added .Outline.Weakened}}<section id="tests" class="rest">
+  <div class="rest-head"><h3>Tests</h3><span>{{.NTests}}</span><span class="rest-v"></span></div>
+  <p class="rest-intro">{{with .TestsSay}}{{.}} {{end}}Read the cases, not the test code.{{if .Outline.Snapshots}} {{.Outline.Snapshots}} snapshot or golden files updated.{{end}}</p>
+  {{with .Cases}}<ul class="cases">{{range .}}<li>{{if .Run.Mark}}{{template "run-mark" .Run}}{{else}}<span class="run" aria-hidden="true">{{if .Skip}}{{icon "minus" ""}}{{else}}+{{end}}</span>{{end}}<span class="case-n" title="{{.Path}}">{{.Name}}</span><span class="case-s">{{.State}}</span></li>{{end}}</ul>{{end}}
   <div class="space-y-3">{{range .Tests}}{{template "file" .}}{{end}}</div>
 </section>{{end}}
 {{end}}
 
 {{define "other"}}
-{{with .Other}}<section id="other" class="mt-14 border-t pt-10">
-  <h2 class="mb-6 text-xl font-semibold tracking-tight">Data and docs</h2>
+{{with .Other}}<section id="other" class="rest">
+  <div class="rest-head"><h3>Data and docs</h3><span>{{len .}}</span><span class="rest-v"></span></div>
+  <p class="rest-intro">What isn't code or tests: data, configuration, docs.</p>
   <div class="space-y-3">{{range .}}{{template "file" .}}{{end}}</div>
 </section>{{end}}
 {{end}}
 
 {{define "mechanical"}}
-{{with .Mechanical}}<section id="mechanical" class="mt-14 border-t pt-10">
-  <h2 class="text-xl font-semibold tracking-tight">Mechanical</h2>
-  <p class="mt-1 mb-6 text-muted-foreground">Repeated edits, moves, whitespace and generated files: skim, don't read.</p>
+{{with .Mechanical}}<section id="mechanical" class="rest">
+  <div class="rest-head"><h3>Mechanical</h3><span>{{len .}}</span><span class="rest-v"></span></div>
+  <p class="rest-intro">Repeated edits, moves, whitespace and generated files: skim, don't read.</p>
   <div class="trace">{{range .}}
   <details class="trace-collapsible">
     <summary><span class="trace-line"><span class="trace-icon">{{icon "files" ""}}</span><span class="trace-title first-letter:uppercase">{{.What}}</span><span class="trace-description">{{add (len .Files) (len .Names)}}</span><span class="trace-icon trace-chevron">{{icon "chevron-right" ""}}</span></span></summary>
@@ -54,22 +70,23 @@
 {{end}}
 
 {{define "deleted"}}
-{{with .Deleted}}<section id="deleted" class="mt-14 border-t pt-10">
-  <h2 class="text-xl font-semibold tracking-tight">Deleted</h2>
-  <p class="mt-1 mb-6 text-muted-foreground">Moved code is folded; the rest is what the PR drops.</p>
+{{with .Deleted}}<section id="deleted" class="rest">
+  <div class="rest-head"><h3>Deleted</h3><span>{{len .}}</span><span class="rest-v"></span></div>
+  <p class="rest-intro">Moved code is folded; the rest is what the PR drops.</p>
   <div class="space-y-3">{{range .}}{{template "file" .}}{{end}}</div>
 </section>{{end}}
 {{end}}
 
 {{define "commits"}}
-{{if .Commits}}<section id="commits" class="mt-14 border-t pt-10">
-  <h2 class="text-xl font-semibold tracking-tight">Commits</h2>
-  <p class="mt-1 mb-6 text-muted-foreground">{{if .Stepwise}}Each commit is a step: they can be reviewed one by one.{{else}}Work in progress, not steps: follow the reading order.{{end}}</p>
-  <ol class="timeline commits">{{range .Commits}}
-    <li class="timeline-item"><div class="timeline-dot"{{if not (wip .Subject)}} data-variant="active"{{end}}></div><div class="timeline-content">
-      <a href="{{$.Forge.PRCommit}}{{.SHA}}" class="timeline-title{{if wip .Subject}} text-muted-foreground{{end}}">{{.Subject}}</a>
-      <p class="timeline-description font-mono text-xs">{{short .SHA}} · {{.Files}} files · <span class="text-diff-add">+{{.Add}}</span> <span class="text-diff-del">−{{.Del}}</span></p>
-    </div></li>{{end}}
-  </ol>
+{{if .Commits}}<section id="commits" class="mt-10">
+  <details class="box">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">Commits</span><span class="bs-note" title="{{if .Stepwise}}Each one a step: review them one by one{{else}}Work in progress, not steps: follow the reading order{{end}}">{{len .Commits}}{{with .Authors}} by {{join .}}{{end}} · newest last</span></summary>
+    <ol class="bb commits">{{range .Commits}}
+      <li><a href="{{$.Forge.Commit}}{{.SHA}}" class="font-mono" target="_blank" rel="noopener">{{short .SHA}}</a><span class="commit-s{{if wip .Subject}} text-muted-foreground{{end}}">{{.Subject}}</span>
+        {{- if $.Prev}}{{if eq $.Prev.SHA .SHA}}<span class="chip">last review</span>{{if $.Prev.Broken}}<span class="chip" data-sev="critical">does not build</span>{{end}}{{end}}{{end}}
+        {{- if and (eq .SHA $.SHA) $.Data.Tests.Broken}}<span class="chip" data-sev="critical" title="The tests: {{join $.Data.Tests.Broken}} did not build">does not build</span>{{end}}
+        <span class="font-mono commit-n">{{plural .Files "file" "files"}} · <span class="text-diff-add">+{{.Add}}</span> <span class="text-diff-del">−{{.Del}}</span></span><a href="{{$.Forge.PRCommit}}{{.SHA}}" class="commit-only">Only this commit</a></li>{{end}}
+    </ol>
+  </details>
 </section>{{end}}
 {{end}}

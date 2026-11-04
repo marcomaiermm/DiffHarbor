@@ -11,6 +11,7 @@ import (
 	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/text"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -42,11 +43,14 @@ Max 10 comments, [] if none.`
 // guideSchema asks for a reading guide too: the report a person reads a large PR with.
 const guideSchema = `
 Also add to the JSON, for the person who reviews it after you:
-"flow":[{"title":"<step, a few words>","why":"<one sentence: what this step does, why read it here>","files":["<changed code file>"]}]
+"flow":[{"title":"<step, a few words>","why":"<one sentence: what this step does, why read it here>","check":"<the one question to answer while reading it, a few words>",
+"files":["<changed code file>"],"placed":{"<one of its files>":"<only where not obvious: a few words on why it sits in this step>"}}]
  the order to read the changed code files in, following the logic (entry point, then what it calls, then data and storage), 3-8 steps; tests, docs, data and mechanical edits stay out;
-"story":{"problem":"<one sentence, at most 20 words: what was wrong or missing before>","before":"<at most 25 words: one concrete case, an input or action and what happened>","after":"<at most 25 words: the same case now>"}
+"story":{"problem":"<one sentence, at most 20 words: what was wrong or missing before>","before":"<at most 25 words: one concrete case, an input or action and what happened>","after":"<at most 25 words: the same case now>",
+"before_at":"<path:line of the code that did it before, empty if outside the diff>","after_at":"<path:line of the code that does it now>","proof":"<the test that runs this case, as go test names it (TestX/sub), empty if none>"}
  only for a change in behaviour a user or caller sees; omit it for refactors, tests, docs;
-"decisions":["<a question only a person can answer: scope, product behaviour, architecture, risk; no bug>"] max 3, [] if none;
+"decisions":[{"text":"<a question only a person can answer: scope, product behaviour, architecture, risk; no bug>","at":"<path:line it is about, empty if none>"}] max 3, [] if none;
+In the summary, put the place of each main claim right after it as (path:line).
 "routine":[{"path":"<changed file>","line":<a line of the hunk in the new file>,"why":"<a few words>"}] hunks the person can skip: no behaviour to check (a rename, a parameter passed through, log or error text, call sites updated to a new signature), never one with a finding; [] if none.`
 
 const reviewSystem = `Senior code reviewer. Review only what the diff changes.
@@ -87,6 +91,9 @@ const (
 	verifyRepair = "Your last message ended without the required JSON. Do not call tools. Output the JSON verdicts now, using the evidence you already gathered. No prose outside the JSON."
 )
 
+// Verified opens the verifier's evidence in a posted finding's body.
+const Verified = "_Verified:_ "
+
 // Comment is a finding, inline on a line of the diff.
 type Comment struct {
 	Path     string `json:"path"`
@@ -99,6 +106,9 @@ type Comment struct {
 	// suggestion. Quoted code instead of line numbers: models miscount lines.
 	Existing string `json:"existing,omitempty"`
 	Fix      string `json:"fix,omitempty"`
+	// Evidence is the verifier's reason to keep it, empty when no verify pass confirmed it. Not read from the
+	// review model's JSON: it must not vouch for itself.
+	Evidence string `json:"-"`
 }
 
 // Result is a review: the walkthrough, the findings and the earlier ones now fixed.
@@ -108,26 +118,49 @@ type Result struct {
 	Diagram     string            `json:"diagram,omitempty"`     // mermaid
 	Effort      int               `json:"effort,omitempty"`      // 1-5
 	Flow        []Step            `json:"flow,omitempty"`        // reading order, with Input.Guide
-	Decisions   []string          `json:"decisions,omitempty"`   // what only a person can decide, with Input.Guide
+	Decisions   []Decision        `json:"decisions,omitempty"`   // what only a person can decide, with Input.Guide
 	Story       Story             `json:"story,omitzero"`        // the problem and one case before and after, with Input.Guide
 	Routine     []Routine         `json:"routine,omitempty"`     // hunks a person can skip, with Input.Guide
 	Fixed       []int             `json:"fixed,omitempty"`       // indexes into input.prior
 	Comments    []Comment         `json:"comments"`
 	Failed      []string          `json:"-"` // files of parts whose review failed: not reviewed
+	Dropped     []Comment         `json:"-"` // what the verifier dropped, its reason in Evidence
+	Tests       checks.Tests      `json:"-"` // what the checks' test runs report, per test
 }
 
 // Step is one step of the reading order: a few files and why they come here.
 type Step struct {
-	Title string   `json:"title"`
-	Why   string   `json:"why"`
-	Files []string `json:"files"`
+	Title  string            `json:"title"`
+	Why    string            `json:"why"`
+	Check  string            `json:"check,omitempty"` // the question to read it with
+	Files  []string          `json:"files"`
+	Placed map[string]string `json:"placed,omitempty"` // path -> why it sits here, where that isn't obvious
 }
 
 // Story is what the PR fixes, told by one concrete case: what happened before, what happens now.
 type Story struct {
-	Problem string `json:"problem"`
-	Before  string `json:"before"`
-	After   string `json:"after"`
+	Problem  string `json:"problem"`
+	Before   string `json:"before"`
+	After    string `json:"after"`
+	BeforeAt string `json:"before_at,omitempty"` // path:line of the old behaviour, "" outside the diff
+	AfterAt  string `json:"after_at,omitempty"`  // path:line of the new
+	Proof    string `json:"proof,omitempty"`     // the test that runs the case, "TestX/sub"
+}
+
+// Decision is a question only a person can settle, and the place it is about.
+type Decision struct {
+	Text string `json:"text"`
+	At   string `json:"at,omitempty"` // path:line, "" for none
+}
+
+// UnmarshalJSON takes a plain string too: what states before the place held, and what a model may still write.
+func (d *Decision) UnmarshalJSON(b []byte) error {
+	if s := ""; json.Unmarshal(b, &s) == nil {
+		*d = Decision{Text: s}
+		return nil
+	}
+	type plain Decision
+	return json.Unmarshal(b, (*plain)(d))
 }
 
 // Routine is a hunk with nothing to check: the report folds it.
@@ -180,8 +213,8 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 		ci = in.Settings.CITests
 	}
 	var hints strings.Builder
-	fmt.Fprintf(&hints, "## Check results (lint, types, tests, secrets, vulnerabilities; may include issues the change didn't cause)\n\n```\n%s\n```\n\n",
-		checks.Run(ctx, repo, in.Checks, patch, files, in.Settings.RunsTests, in.Settings.InstallScripts, in.Registries))
+	found, tests := checks.Run(ctx, repo, in.Checks, patch, files, in.Settings.RunsTests, in.Settings.InstallScripts, in.Registries)
+	fmt.Fprintf(&hints, "## Check results (lint, types, tests, secrets, vulnerabilities; may include issues the change didn't cause)\n\n```\n%s\n```\n\n", found)
 	gctx, cancel := context.WithTimeout(ctx, time.Minute)
 	gitLog, err := proc.Run(proc.Command(gctx, repo, nil, "git", "log", "-n", historyDepth, "--format=%x00", "--name-only", "--no-renames"))
 	cancel()
@@ -226,7 +259,9 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 		// diff.Max splits.
 		block := fmt.Sprintf("## Diff\n\n```diff\n%s\n```\n", in.Parts[0])
 		p := runPart(ctx, in, "", head+block, block, m, vm)
-		return merge([]part{p}, m, vm, ci)
+		r, tag, err := merge([]part{p}, m, vm, ci)
+		r.Tests = tests
+		return r, tag, err
 	}
 	// One pass per part, partsAtOnce at a time: each reads its files closely and its context stays small.
 	ps := make([]part, len(in.Parts))
@@ -252,7 +287,9 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 		})
 	}
 	wg.Wait()
-	return merge(ps, m, vm, ci)
+	r, tag, err := merge(ps, m, vm, ci)
+	r.Tests = tests
+	return r, tag, err
 }
 
 // partsAtOnce is the parts a large review runs at once: the subscription's rate limit, the container's memory.
@@ -292,11 +329,11 @@ func runPart(ctx context.Context, in Input, name, prompt, block, m, vm string) p
 	}
 	out, err := in.Agent.Run(ctx, in.Dir, "verify"+name, verifySystem+in.Trusted, task+block,
 		"Verify these findings. End with the JSON verdicts.", vm)
-	kept, fixed, ok := verdicts(r.Comments, r.Fixed, out)
+	kept, dropped, fixed, ok := verdicts(r.Comments, r.Fixed, out)
 	if err == nil && !ok {
 		out, err = in.Agent.Continue(ctx, in.Dir, "verify"+name, verifySystem+in.Trusted, verifyRepair, vm)
 		if err == nil {
-			kept, fixed, ok = verdicts(r.Comments, r.Fixed, out)
+			kept, dropped, fixed, ok = verdicts(r.Comments, r.Fixed, out)
 		}
 	}
 	if err != nil || !ok {
@@ -305,7 +342,7 @@ func runPart(ctx context.Context, in Input, name, prompt, block, m, vm string) p
 		return part{r: r, found: len(r.Comments)}
 	}
 	p := part{r: r, found: len(r.Comments), kept: len(kept), verified: true}
-	p.r.Fixed, p.r.Comments = fixed, kept
+	p.r.Fixed, p.r.Comments, p.r.Dropped = fixed, kept, dropped
 	return p
 }
 
@@ -348,6 +385,7 @@ func merge(ps []part, m, vm, ci string) (Result, string, error) {
 		r.Effort = max(r.Effort, p.r.Effort)
 		r.Fixed = append(r.Fixed, p.r.Fixed...)
 		r.Comments = append(r.Comments, p.r.Comments...)
+		r.Dropped = append(r.Dropped, p.r.Dropped...)
 	}
 	tag := m // the footer: model and verifier
 	if verify && vm != m {
@@ -411,9 +449,9 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string) (Result, 
 	return r, nil
 }
 
-// verdicts keeps the findings the verifier confirmed, with its path and line fix and evidence,
-// and the fix claims it confirmed (only those in claimed).
-func verdicts(cs []Comment, claimed []int, text string) ([]Comment, []int, bool) {
+// verdicts keeps the findings the verifier confirmed, with its path and line fix and evidence, the others with its
+// reason to drop them, and the fix claims it confirmed (only those in claimed).
+func verdicts(cs []Comment, claimed []int, text string) (kept, dropped []Comment, _ []int, _ bool) {
 	var v struct {
 		Verdicts *[]struct {
 			I        int    `json:"i"`
@@ -426,7 +464,7 @@ func verdicts(cs []Comment, claimed []int, text string) ([]Comment, []int, bool)
 		Fixed []int `json:"fixed"`
 	}
 	if !agent.Object(text, &v) || v.Verdicts == nil {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	var fixed []int
 	for _, i := range v.Fixed {
@@ -434,7 +472,7 @@ func verdicts(cs []Comment, claimed []int, text string) ([]Comment, []int, bool)
 			fixed = append(fixed, i)
 		}
 	}
-	kept := []Comment{}
+	kept = []Comment{}
 	seen, why := map[int]bool{}, map[int]string{}
 	for _, d := range *v.Verdicts {
 		if !d.Keep && d.I >= 0 && d.I < len(cs) {
@@ -453,8 +491,9 @@ func verdicts(cs []Comment, claimed []int, text string) ([]Comment, []int, bool)
 			c.Prompt = strings.ReplaceAll(c.Prompt, fmt.Sprintf("line %d", c.Line), fmt.Sprintf("line %d", d.Line))
 			c.Line = d.Line
 		}
+		c.Evidence = cmp.Or(d.Evidence, "kept by the verifier")
 		if d.Evidence != "" {
-			c.Body += "\n\n_Verified:_ " + d.Evidence
+			c.Body += "\n\n" + Verified + d.Evidence
 		}
 		if d.Fix != nil && !*d.Fix {
 			c.Existing, c.Fix = "", ""
@@ -463,15 +502,17 @@ func verdicts(cs []Comment, claimed []int, text string) ([]Comment, []int, bool)
 	}
 	for i := range cs { // a finding without a verdict was never checked: repair, else post unverified
 		if _, dropped := why[i]; !seen[i] && !dropped {
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
 	}
 	for i, c := range cs {
 		if !seen[i] {
 			log.Printf("verify dropped %s:%d %s: %s", c.Path, c.Line, c.Title, why[i])
+			c.Evidence = why[i]
+			dropped = append(dropped, c)
 		}
 	}
-	return kept, fixed, true
+	return kept, dropped, fixed, true
 }
 
 // parse pulls the JSON object out of the model's reply; ok is false when there is none.

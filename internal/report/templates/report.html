@@ -8,11 +8,18 @@
 <!-- shadcn-html's components sit in @layer components: before Tailwind's base, or its preflight would win -->
 <style>@layer theme, base, components, utilities;</style>
 <!-- shadcn-html: the theme and the components the page uses, one request; the tokens below retune it -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/combine/gh/codylindley/shadcn-html@0.7.13-alpha/dist/theme/default-semantic-tokens.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/card/card.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/alert/alert.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/badge/badge.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/checkbox/checkbox.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/collapsible/collapsible.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/toggle/toggle.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/toggle-group/toggle-group.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/sidebar/sidebar.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/sheet/sheet.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/tree-view/tree-view.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/statistic/statistic.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/scroll-area/scroll-area.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/tabs/tabs.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/button/button.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/button-group/button-group.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/separator/separator.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/progress/progress.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/timeline/timeline.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/context-menu/context-menu.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/popover/popover.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/accordion/accordion.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/breadcrumb/breadcrumb.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/combine/gh/codylindley/shadcn-html@0.7.13-alpha/dist/theme/default-semantic-tokens.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/card/card.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/alert/alert.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/badge/badge.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/checkbox/checkbox.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/collapsible/collapsible.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/toggle/toggle.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/toggle-group/toggle-group.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/sidebar/sidebar.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/sheet/sheet.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/tree-view/tree-view.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/scroll-area/scroll-area.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/tabs/tabs.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/button/button.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/button-group/button-group.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/separator/separator.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/progress/progress.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/timeline/timeline.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/context-menu/context-menu.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/popover/popover.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/accordion/accordion.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/breadcrumb/breadcrumb.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.3.0/index.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@5.3.0/index.css">
 {{template "theme" .}}
-<script>if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");</script>
+<script>{
+  const dark = matchMedia("(prefers-color-scheme: dark)");
+  if (dark.matches) document.documentElement.classList.add("dark");
+  // ponytail: the code's and the graphs' colors are drawn for one theme; a reload redraws them, live would recolor every token.
+  // Not under the reader's eyes: a switch at sunset reloads once the tab is away.
+  const reload = () => location.reload();
+  dark.addEventListener("change", () => document.hidden ? reload() : addEventListener("visibilitychange", reload, { once: true }));
+}</script>
 <script src="https://cdn.jsdelivr.net/gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/tabs/tabs.js" defer></script>
 {{template "styles" .}}
 {{block "head" .}}{{end}}
@@ -43,7 +50,9 @@
 {{template "other" .}}
 {{template "mechanical" .}}
 {{template "deleted" .}}
+{{template "explore" .}}
 {{template "commits" .}}
+{{template "finish" .}}
 
 </main>
 </div>

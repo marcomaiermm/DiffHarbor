@@ -6,7 +6,7 @@
   --background: #fff; --foreground: #171717; --card: #fff; --card-foreground: #171717;
   --muted: #f5f5f5; --muted-foreground: #6b6b6b; --accent: #f2f2f2; --accent-foreground: #171717;
   --secondary: #f2f2f2; --secondary-foreground: #171717; --primary: #171717; --primary-foreground: #fff;
-  --border: #ebebeb; --ring: #0070f3; --destructive: #e5484d; --radius: 0.5rem;
+  --border: #ebebeb; --ring: #0070f3; --destructive: #c62a2f; --radius: 0.5rem;
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   --sidebar: #fafafa; --sidebar-foreground: #171717; --sidebar-accent: #ebebeb; --sidebar-accent-foreground: #171717;
@@ -15,23 +15,32 @@
   /* the code's colors: the syntax theme's background and text once it loads, the rest mixed from them */
   --diff-bg: #e1e2e7; --diff-fg: #3760bf; --diff-add: #587539; --diff-del: #c64343; --diff-link: #007197;
   --diff-mod: rgb(46 125 233 / 0.13); --diff-mod-chg: rgb(46 125 233 / 0.3);
+  --major: #b15c00; --verified: #0f766e; /* a finding to fix, shown without a model */
+  --k-fn: #1f5fc4; --k-type: #7847bd; --k-var: #8c6c3e; /* a declaration's kind: 4.5:1 or better on the popover */
 }
+/* Harbor Night: Tokyo Night's grounds and inks, the brand blue for what is current or done */
 .dark {
-  --background: #0a0a0a; --foreground: #ededed; --card: #0a0a0a; --card-foreground: #ededed;
-  --muted: #1a1a1a; --muted-foreground: #a1a1a1; --accent: #1c1c1c; --accent-foreground: #ededed;
-  --secondary: #1f1f1f; --secondary-foreground: #ededed; --primary: #ededed; --primary-foreground: #0a0a0a;
-  --border: #262626; --ring: #52a8ff; --destructive: #ff6166;
-  --sidebar: #0a0a0a; --sidebar-foreground: #ededed; --sidebar-accent: #1c1c1c; --sidebar-accent-foreground: #ededed;
-  --sidebar-border: #262626; --sidebar-ring: #52a8ff; --input: #262626; --popover: #0a0a0a; --popover-foreground: #ededed;
-  --diff-bg: #1a1b26; --diff-fg: #a9b1d6; --diff-add: #9ece6a; --diff-del: #f7768e; --diff-link: #7dcfff;
+  --background: #16161e; --foreground: #c0caf5; --card: #1a1b26; --card-foreground: #c0caf5;
+  --muted: #1f2335; --muted-foreground: #98a1cc; --accent: #24283b; --accent-foreground: #e0e6ff;
+  --secondary: #1f2335; --secondary-foreground: #c0caf5; --primary: #5c88fc; --primary-foreground: #0f1020;
+  --border: #292e42; --ring: #5c88fc; --destructive: #f77a91;
+  --sidebar: #16161e; --sidebar-foreground: #c0caf5; --sidebar-accent: #1f2335; --sidebar-accent-foreground: #e0e6ff;
+  --sidebar-border: #292e42; --sidebar-ring: #5c88fc; --input: #30364f; --popover: #1f2335; --popover-foreground: #c0caf5;
+  --diff-bg: #1a1b26; --diff-fg: #a9b1d6; --diff-add: #9ece6a; --diff-del: #f77a91; --diff-link: #7dcfff;
   --diff-mod: rgb(122 162 247 / 0.13); --diff-mod-chg: rgb(122 162 247 / 0.32);
+  --major: #ff9e64; --verified: #73daca;
+  --k-fn: #7aa2f7; --k-type: #bb9af7; --k-var: #e0af68;
 }
 :root {
   --diff-add-bg: rgb(158 206 106 / 0.14); --diff-del-bg: rgb(247 118 142 / 0.13); /* a line added, removed: diff, inventory, story */
   --diff-hunk: color-mix(in oklab, var(--diff-fg) 5%, var(--diff-bg));
   --diff-hover: color-mix(in oklab, var(--diff-fg) 12%, var(--diff-bg));
-  --diff-dim: color-mix(in oklab, var(--diff-fg) 32%, var(--diff-bg));
+  --gap-ink: color-mix(in oklab, var(--diff-fg), var(--foreground) 45%); /* the page text in the code ink: 4.5:1 on the gap band */
+  --diff-dim: color-mix(in oklab, var(--gap-ink) 80%, var(--diff-bg)); /* line numbers: 4.5:1 or better */
   --diff-muted: color-mix(in oklab, var(--diff-fg) 58%, var(--diff-bg));
+}
+.dark {
+  --diff-dim: color-mix(in oklab, var(--gap-ink) 70%, var(--diff-bg)); /* the dark ink is brighter: 70% reads 4.8:1 */
 }
 </style>
 {{end}}

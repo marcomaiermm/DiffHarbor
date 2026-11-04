@@ -7,27 +7,35 @@
     </div>
   </div>
   <div class="sidebar-content">
-    <nav class="sidebar-nav"><a href="#overview" class="sidebar-link" title="Overview">{{icon "layout-grid" ""}}<span>Overview</span></a></nav>
+    <p class="side-h">1 · Orient</p>
+    <nav class="sidebar-nav"><a href="#overview" class="sidebar-link" title="What changed and why">{{icon "layout-grid" ""}}<span>What changed and why</span></a></nav>
+    <p class="side-h">2 · Before you approve</p>
+    <nav class="sidebar-nav"><a href="#findings" class="sidebar-link" title="Findings">{{if .Verdict.OK}}{{icon "circle-check" ""}}{{else}}{{icon "circle-alert" ""}}{{end}}<span>Findings</span><span class="sidebar-badge">{{.NFound}}</span></a>
+      {{with .Decisions}}<a href="#decide" class="sidebar-link" title="Decisions">{{icon "circle-question-mark" ""}}<span>Decisions</span><span class="sidebar-badge">{{len .}}</span></a>{{end}}
+      {{with .MergeN}}<a href="#merge" class="sidebar-link" title="Merge risks">{{icon "triangle-alert" ""}}<span>Merge risks</span><span class="sidebar-badge">{{.}}</span></a>{{end}}</nav>
     {{if .Steps}}<details class="sidebar-group" data-view="flow" open>
-      <summary><span>Reading order</span>{{icon "chevron-right" ""}}</summary>
+      <summary><span>3 · Read the change</span>{{icon "chevron-right" ""}}</summary>
       <ol class="sidebar-nav">{{range $i, $s := .Steps}}
         <li data-step="step-{{inc $i}}">
-          <a href="#step-{{inc $i}}" class="sidebar-link font-medium text-foreground" title="{{$s.Title}}"><i class="ring-p" aria-hidden="true"></i><span class="truncate">{{$s.Title}}</span><span class="sidebar-badge nav-count"></span></a>
-          <ul class="sidebar-files my-0.5 ml-[15px] space-y-px border-l pl-2">{{range $s.Files}}
+          <a href="#step-{{inc $i}}" class="sidebar-link font-medium text-foreground" title="{{$s.Title}}"><i class="ring-p" aria-hidden="true"></i><span class="flex-1 truncate">{{$s.Title}}</span>{{with $s.Weight}}<span class="ct-dot step-dot" data-sev="{{.Sev}}" role="img" aria-label="{{.Text}}"></span>{{end}}<span class="sidebar-badge nav-count"></span></a>
+          <ul class="sidebar-files my-0.5 ml-[15px] space-y-px border-l pl-1.5">{{range $s.Files}}
             <li><a href="#{{.Path}}" data-path="{{.Path}}" title="{{.Path}}" class="nav-file"{{if .Changed}} data-changed{{end}}><span class="shrink-0">{{base .Short}}</span><span class="ml-2 min-w-0 truncate text-[11px] opacity-50">{{dir .Short}}</span></a></li>{{end}}
           </ul>
         </li>{{end}}
       </ol>
+      {{if .Flow}}<p class="side-note">{{if eq .InSteps .Code}}All {{.Code}} code files are in a step.{{else}}{{.InSteps}} of {{.Code}} code files are in a step, the rest after them.{{end}}</p>{{end}}
     </details>{{end}}
     <ul class="tree mt-3" data-view="tree" role="tree">{{template "tree" .Tree}}</ul>
     <details class="sidebar-group" open>
-      <summary><span>More</span>{{icon "chevron-right" ""}}</summary>
+      <summary><span>4 · The rest</span>{{icon "chevron-right" ""}}</summary>
       <nav class="sidebar-nav">
-        {{if or .Tests .Outline.Added .Outline.Weakened}}<a href="#tests" class="sidebar-link" title="Tests">{{icon "flask-conical" ""}}<span>Tests</span><span class="sidebar-badge">{{.NTests}}</span></a>{{end}}
+        {{if or .Tests .Outline.Added .Outline.Weakened}}<a href="#tests" class="sidebar-link" title="Tests">{{icon "flask-conical" ""}}<span>Tests</span><span class="sidebar-badge"{{if .Skipped}} data-warn{{end}}>{{if .Skipped}}{{.Skipped}} skipped{{else}}{{.NTests}}{{end}}</span></a>{{end}}
         {{if .Other}}<a href="#other" class="sidebar-link" title="Data and docs">{{icon "file-text" ""}}<span>Data and docs</span><span class="sidebar-badge">{{.NOther}}</span></a>{{end}}
         {{if .Mechanical}}<a href="#mechanical" class="sidebar-link" title="Mechanical">{{icon "files" ""}}<span>Mechanical</span><span class="sidebar-badge">{{len .Mechanical}}</span></a>{{end}}
         {{if .Deleted}}<a href="#deleted" class="sidebar-link" title="Deleted">{{icon "trash-2" ""}}<span>Deleted</span><span class="sidebar-badge">{{len .Deleted}}</span></a>{{end}}
+        {{if or .Inventory .Deps .Affected .Ways .Diagram}}<a href="#explore" class="sidebar-link" title="Look closer">{{icon "search" ""}}<span>Look closer</span></a>{{end}}
         {{if .Commits}}<a href="#commits" class="sidebar-link" title="Commits">{{icon "git-commit-horizontal" ""}}<span>Commits</span><span class="sidebar-badge">{{len .Commits}}</span></a>{{end}}
+        <a href="#finish" class="sidebar-link" title="Finish the review">{{icon "check" ""}}<span>Finish the review</span></a>
       </nav>
     </details>
   </div>{{end}}

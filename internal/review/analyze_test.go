@@ -70,7 +70,7 @@ func TestAnalyze(t *testing.T) {
 
 	r, stats, calls := run(map[string][]string{"review": {finding}, "verify": {keep}}, Settings{})
 	if len(r.Comments) != 1 || r.Comments[0].Line != 2 || r.Comments[0].Prompt != "fix line 2" ||
-		!strings.Contains(r.Comments[0].Body, "_Verified:_ seen") || !strings.HasSuffix(stats, "1/1 verified") ||
+		!strings.Contains(r.Comments[0].Body, "_Verified:_ seen") || r.Comments[0].Evidence != "seen" || !strings.HasSuffix(stats, "1/1 verified") ||
 		strings.Join(calls, ",") != "review,verify" {
 		t.Fatalf("kept: %+v %q %v", r.Comments, stats, calls)
 	}
@@ -81,7 +81,7 @@ func TestAnalyze(t *testing.T) {
 	}
 
 	r, stats, calls = run(map[string][]string{"review": {finding}, "verify": {"no", "still no"}}, Settings{})
-	if len(r.Comments) != 1 || !strings.HasSuffix(stats, "unverified") || strings.Join(calls, ",") != "review,verify,verify repair" {
+	if len(r.Comments) != 1 || r.Comments[0].Evidence != "" || !strings.HasSuffix(stats, "unverified") || strings.Join(calls, ",") != "review,verify,verify repair" {
 		t.Fatalf("unverified: %+v %q %v", r.Comments, stats, calls)
 	}
 

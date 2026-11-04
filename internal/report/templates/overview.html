@@ -2,54 +2,69 @@
 {{define "overview"}}
 <section id="overview" class="rise">
   <div class="space-y-6"><div>
-    <h1 class="text-[28px] leading-tight font-semibold tracking-[-0.03em] text-balance">{{.Title}}</h1>
+    {{if or .Authors .Commits .Code .NTests .Moved .Effort}}<p class="meta">{{$sep := ""}}
+      {{- with .Authors}}<span>{{join .}}</span>{{$sep = " · "}}{{end}}
+      {{- with .Commits}}{{$sep}}<span>{{plural (len .) "commit" "commits"}}</span>{{$sep = " · "}}{{end}}
+      {{- with .Code}}{{$sep}}<span>{{plural . "code file" "code files"}}{{if $.Flow}}{{if eq $.InSteps .}} in {{plural $.NSteps "step" "steps"}}{{else}}, {{$.InSteps}} in {{plural $.NSteps "step" "steps"}}{{end}}{{end}}</span>{{$sep = " · "}}{{end}}
+      {{- with .NTests}}{{$sep}}<span>{{plural . "test file" "test files"}}</span>{{$sep = " · "}}{{end}}
+      {{- if .Moved}}{{$sep}}<span title="{{.Moved}} of {{.Added}} added lines only moved: folded in the diff">{{percent .Moved .Added}} of the lines only moved</span>{{$sep = " · "}}{{end}}
+      {{- with .Effort}}{{$sep}}<span title="{{.}} of 5">{{if le . 2}}low{{else if eq . 3}}medium{{else}}high{{end}} review effort</span>{{end}}</p>{{end}}
+    <h1 class="title">{{.Title}}</h1>
     {{with .Story.Problem}}<p class="lead">{{.}}</p>{{end}}
-    {{with .Summary}}<p class="summary"{{if $.Story.Problem}} data-under{{end}}>{{.}}</p>{{end}}
-    {{with .Story}}{{if and .Before .After}}<div class="@container mt-5"><div class="story" role="note" aria-label="One case, before and after">
-      <div data-side="before"><b><span aria-hidden="true">−</span>Before</b><p>{{.Before}}</p></div>
-      <div data-side="after"><b><span aria-hidden="true">+</span>After</b><p>{{.After}}</p></div>
+    {{with .Summary}}<p class="summary"{{if $.Story.Problem}} data-under{{end}}>{{range $.Refs .}}{{.Text}}{{if .Path}}{{template "ref" .}}{{end}}{{end}}</p>{{end}}
+    {{with .Story}}{{if and .Before .After}}<div class="@container mt-6"><div class="story" role="note" aria-label="One case, before and after">
+      <div data-side="before"><b><span aria-hidden="true">−</span>Before</b><p>{{.Before}}</p>
+        <p class="story-at">{{with $.Ref .BeforeAt}}{{template "ref" .}}{{else}}<span class="chip loc" data-dash title="No line of the diff shows this: the reviewer's model inferred it">not in the diff</span>{{end}}</p></div>
+      <div data-side="after"><b><span aria-hidden="true">+</span>After</b><p>{{.After}}</p>
+        {{if or .Proof ($.Ref .AfterAt)}}<p class="story-at">{{with .Proof}}{{$r := $.Run .}}<a href="#tests" class="chip loc"{{if and (eq $r.Mark "pass") (not $r.When)}} data-shown{{else if eq $r.Mark "fail"}} data-sev="critical"{{else}} data-dash{{end}} title="The test that shows it{{with $r.Text}}: {{.}}{{end}}">{{template "run-mark" $r}}{{.}}{{with $r.Text}} · {{.}}{{end}}</a>{{end}}{{with $.Ref .AfterAt}}{{template "ref" .}}{{end}}</p>{{end}}</div>
     </div></div>{{end}}{{end}}
-  </div>
-  <div class="overflow-hidden rounded-lg border">
-    <dl class="stats -mr-px -mb-px flex flex-wrap">
-      {{if .Effort}}<div class="statistic flex-1 basis-28 border-r max-sm:basis-2/5 border-b px-3.5 py-3"><dt class="statistic-title">Review effort</dt><dd class="statistic-value flex items-center gap-3"><span class="tabular-nums">{{.Effort}}<span class="text-muted-foreground">/5</span></span>
-        <span class="flex items-end gap-0.5" aria-hidden="true">{{range $n, $_ := seq 5}}<i class="w-1 rounded-sm {{if lt $n $.Effort}}bg-foreground{{else}}bg-muted{{end}}" style="height:calc({{inc $n}} * 4px)"></i>{{end}}</span></dd></div>{{end}}
-      {{with .Findings}}<div class="statistic flex-1 basis-28 border-r max-sm:basis-2/5 border-b px-3.5 py-3"><dt class="statistic-title">Open findings</dt><dd class="statistic-value tabular-nums text-destructive">{{len .}}</dd></div>{{end}}
-      <div class="statistic flex-1 basis-28 border-r max-sm:basis-2/5 border-b px-3.5 py-3"{{with .NOther}} title="and {{.}} data and doc files"{{end}}><dt class="statistic-title">To read</dt><dd class="statistic-value tabular-nums whitespace-nowrap">{{.Code}}<span class="stat-unit">code</span>{{with .NTests}} · {{.}}<span class="stat-unit">tests</span>{{end}}</dd></div>
-      {{if .Moved}}<div class="statistic flex-1 basis-28 border-r max-sm:basis-2/5 border-b px-3.5 py-3" title="{{.Moved}} of {{.Added}} added lines only moved: folded in the diff"><dt class="statistic-title">Only moved</dt><dd class="statistic-value tabular-nums">{{percent .Moved .Added}}</dd>
-        <dd class="mt-1.5"><progress class="progress block h-1" value="{{.Moved}}" max="{{.Added}}">{{percent .Moved .Added}}</progress></dd></div>{{end}}
-    </dl>
   </div></div>
-  {{if or .Since .Decisions .Outline.Weakened .Loose .Risks .BaseMoved .Conflicts .Others}}{{$first := ""}}{{$mwarn := .Conflicts}}{{$mn := len .Risks}}{{$clash := false}}
-  {{- if .Since}}{{$first = "since"}}{{else if .Decisions}}{{$first = "decide"}}{{else if or .Risks .BaseMoved .Conflicts}}{{$first = "merge"}}{{else if .Outline.Weakened}}{{$first = "weakened"}}{{else if .Others}}{{$first = "others"}}{{else}}{{$first = "loose"}}{{end}}
-  {{- range .Risks}}{{range .Items}}{{if .Warn}}{{$mwarn = true}}{{end}}{{end}}{{end}}{{if .BaseMoved}}{{$mn = inc $mn}}{{end}}{{if .Conflicts}}{{$mn = inc $mn}}{{end}}
-  {{- range .Others}}{{if .Clash}}{{$clash = true}}{{end}}{{end}}
-  <div class="card attend mt-10" id="attend">
-    <div class="scroll-area"><div class="tab-list inv-tabs" data-variant="line" role="tablist" aria-label="Before you read">
-      {{with .Since}}{{template "tab" (tab "since" (printf "Since %s" (short .Prev.SHA)) (len .Files) false $first)}}{{end}}
-      {{with .Decisions}}{{template "tab" (tab "decide" "Decisions" (len .) false $first)}}{{end}}
-      {{if or .Risks .BaseMoved .Conflicts}}{{template "tab" (tab "merge" "Merge risks" $mn $mwarn $first)}}{{end}}
-      {{with .Outline.Weakened}}{{template "tab" (tab "weakened" "Weakened tests" (len .) true $first)}}{{end}}
-      {{with .Others}}{{template "tab" (tab "others" "Open PRs" (len .) $clash $first)}}{{end}}
-      {{with .Loose}}{{template "tab" (tab "loose" "Outside the diff" (len .) false $first)}}{{end}}
+  <section class="card focus mt-10" id="focus" aria-labelledby="verdict-h">
+    <div class="verdict">
+      <span class="vd"{{if .Verdict.OK}} data-ok{{end}}>{{.Verdict.Short}}</span>
+      <h2 id="verdict-h">{{.Verdict.Title}}</h2>
+      <p>{{.Verdict.Body}} <a href="#finish" class="whitespace-nowrap">Finish the review {{icon "arrow-right" "inline size-3.5"}}</a></p>
+    </div>
+    {{with .Since}}<p class="since" id="since"><span>Since your review of <code>{{short .Prev.SHA}}</code>{{if not .Prev.At.IsZero}}, <time class="since-time" datetime="{{.Prev.At.Format "2006-01-02T15:04:05Z07:00"}}"></time>{{end}}
+      {{- with .Files}}: {{range $i, $f := .}}{{sep $i (len $.Since.Files)}}{{if not (index $.Since.Prev.Files .Path)}}the new {{end}}<a href="#{{.Path}}" title="{{.Path}}">{{base .Path}}</a>{{end}}{{end}}.</span>
+      {{- with .Back}}<span>No longer in the PR: {{range $i, $p := .}}{{sep $i (len $.Since.Back)}}<s title="{{.}}">{{base .}}</s>{{end}}.</span>{{end}}
+      {{- if or .Fixed .New}}<span>{{.Say}}{{with .New}}: {{range $i, $k := .}}{{sep $i (len $.Since.New)}}<span data-sev="{{$.Since.Sev .}}" title="{{.}}">{{finding .}}</span>{{end}}{{end}}.</span>{{end}}
+      {{- if or .Risen .Eased}}<span>Merge risks{{with .Risen}}, new: {{range $i, $p := .}}{{sep $i (len $.Since.Risen)}}<code title="{{.}}">{{base .}}</code>{{end}}{{end}}{{with .Eased}}, gone: {{range $i, $p := .}}{{sep $i (len $.Since.Eased)}}<s title="{{.}}">{{base .}}</s>{{end}}{{end}}.</span>{{end}}
+      {{- if not (or .Files .Back .New .Fixed .Risen .Eased)}}<span>The diff is the same: a rebase or a new base, nothing to read again.</span>{{end}}</p>{{end}}
+    <div class="scroll-area"><div class="tab-list inv-tabs" data-variant="line" role="tablist" aria-label="Before you approve">
+      {{template "tab" (tab "findings" "Findings" .NFound (not .Verdict.OK) "findings")}}
+      {{with .Decisions}}{{template "tab" (tab "decide" "Decisions" (len .) false "findings")}}{{end}}
+      {{if .MergeN}}{{template "tab" (tab "merge" "Merge risks" .MergeN .MergeWarn "findings")}}{{end}}
     </div></div>
     <div class="card-content">
-    {{with .Since}}<div class="tab-content" role="tabpanel" id="since" aria-labelledby="tab-since" tabindex="0"{{if ne $first "since"}} hidden{{end}}>
-      <div class="since-head"><p class="tab-hint">What changed since the review of <code>{{short .Prev.SHA}}</code>, <time class="since-time" datetime="{{.Prev.At.Format "2006-01-02T15:04:05Z07:00"}}"></time>.</p>
-      {{with .Files}}<button type="button" class="toggle" data-variant="outline" data-size="sm" id="since-only" aria-pressed="false">{{icon "focus" ""}}Only what changed</button>{{end}}</div>
-    {{if or .Files .Back .New .Fixed .Risen .Eased}}<dl class="since-rows">
-      {{if or .Files .Back}}<dt>Files</dt><dd class="since-list">{{range .Files}}<a href="#{{.Path}}" title="{{.Path}}">{{base .Path}}{{if not (index $.Since.Prev.Files .Path)}}<small>new</small>{{end}}</a>{{end}}{{range .Back}}<s title="{{.}}: no longer in the PR"><span class="sr-only">no longer in the PR: </span>{{base .}}</s>{{end}}</dd>{{end}}
-      {{if or .New .Fixed}}<dt{{if .New}} data-warn{{end}}>Findings</dt><dd><ul>{{range .New}}<li title="{{.}}">{{finding .}}</li>{{end}}{{range .Fixed}}<li title="fixed: {{.}}"><s><span class="sr-only">fixed: </span>{{finding .}}</s></li>{{end}}</ul></dd>{{end}}
-      {{if or .Risen .Eased}}<dt>Merge risks</dt><dd class="since-list">{{range .Risen}}<span title="{{.}}">{{base .}}</span>{{end}}{{range .Eased}}<s title="{{.}}"><span class="sr-only">no longer: </span>{{base .}}</s>{{end}}</dd>{{end}}
-    </dl>{{else}}<p class="since-same">The diff is the same as at the last review: a rebase or a new base, nothing to read again.</p>{{end}}
+    <div class="tab-content" role="tabpanel" id="findings" aria-labelledby="tab-findings" tabindex="0">
+      <p class="legend"><span class="chip" data-shown>green</span>shown without a model: the diff, the imports or a search<span class="chip" data-dash>dashed</span>a second model agreed, which is no proof</p>
+      {{if not .NFound}}<div class="empty">
+        <h3>No findings on {{short .SHA}}{{if .Failed}} in the files reviewed{{end}}</h3>
+        <p>{{with .Dropped}}A second model checked {{plural (len .) "finding" "findings"}} against the code and kept none.{{else}}The review found nothing it could point to in the code.{{end}} That is no proof{{if or .Decisions .MergeN}}, so the decisions and merge risks still need you{{end}}.</p>
+      </div>{{end}}
+      {{range .Groups}}{{if .Items}}<h3 class="fgrp">{{.Title}} <b>· {{len .Items}}</b></h3>
+      <ul class="flist">{{range .Items}}<li><a class="frow"{{with .Href}} href="{{.}}"{{end}}>
+        {{template "sev" .Severity}}
+        <span class="min-w-0"><span class="ftitle">{{.Title}}</span>{{with .Lead}}<span class="flead">{{.}}</span>{{end}}</span>
+        <span class="floc"><span class="font-mono" title="{{.Path}}">{{.Where}}</span><span class="chip" data-{{if .Shown}}shown{{else}}dash{{end}}{{with .Evidence}} title="Verified: {{.}}"{{end}}>{{.Proof}}</span></span>
+      </a></li>{{end}}</ul>{{end}}{{end}}
+      {{with .Outside}}<h3 class="fgrp">Outside the diff <b>· {{len .}}</b></h3>
+      {{range .}}{{template "finding" .}}{{end}}{{end}}
+      {{with .Settled}}<details class="settled">
+        <summary>{{icon "chevron-right" "box-chev"}}{{.}}</summary>
+        <ul>{{with $.Since}}{{range .Fixed}}<li><s data-fixed title="{{.}}">{{with $.Since.Sev .}}{{.}} · {{end}}{{finding .}}</s> · fixed in {{short $.SHA}}</li>{{end}}{{end}}
+          {{- range $.Dropped}}<li><s title="{{.Path}}">{{.Severity}} · {{or .Title .Body}}</s> · dropped{{with .Evidence}}: {{.}}{{end}}</li>{{end}}
+          {{- range $.Retired}}<li class="font-mono text-xs">{{join .Names}} · removed with {{.With}}</li>{{end}}</ul>
+      </details>{{end}}
+    </div>
+    {{with .Decisions}}<div class="tab-content" role="tabpanel" id="decide" aria-labelledby="tab-decide" tabindex="0" hidden>
+      <p class="tab-hint">What only a person can settle: product, architecture or risk. The draft review asks them as questions.</p>
+      <ol class="list-decimal space-y-2 pl-5 text-sm">{{range .}}<li>{{.Text}}{{with $.Ref .At}} <a class="dloc"{{with .Href}} href="{{.}}"{{end}}{{if .Out}} target="_blank" rel="noopener"{{end}} title="{{.Path}}:{{.Line}}">{{base .Path}}:{{.Line}}</a>{{end}}</li>{{end}}</ol>
     </div>{{end}}
-    {{with .Decisions}}<div class="tab-content" role="tabpanel" id="decide" aria-labelledby="tab-decide" tabindex="0"{{if ne $first "decide"}} hidden{{end}}>
-      <p class="tab-hint">For you to decide: product, architecture or risk, what only a person can settle.</p>
-      <ul class="list-disc space-y-1 pl-5 text-sm">{{range .}}<li>{{.}}</li>{{end}}</ul>
-    </div>{{end}}
-    {{if or .Risks .BaseMoved .Conflicts}}<div class="tab-content" role="tabpanel" id="merge" aria-labelledby="tab-merge" tabindex="0"{{if ne $first "merge"}} hidden{{end}}>
+    {{if .MergeN}}<div class="tab-content" role="tabpanel" id="merge" aria-labelledby="tab-merge" tabindex="0" hidden>
       <p class="tab-hint">Before you merge: what merging alone doesn't finish, read from the diff and the base as of this review.</p>
-      {{if .Conflicts}}<div class="merge-row" data-warn><h3>{{icon "triangle-alert" ""}}Conflicts</h3><p class="merge-hint">{{.Forge.Name}} can't merge it into its base as it is: merge or rebase the base first, then read the result again.</p></div>{{end}}
+      {{if .Conflicts}}<div class="merge-row" data-major><h3>{{icon "triangle-alert" ""}}Conflicts</h3><p class="merge-hint">{{.Forge.Name}} can't merge it into its base as it is: merge or rebase the base first, then read the result again.</p></div>{{end}}
       {{with .BaseMoved}}<div class="merge-row"><h3>{{icon "git-commit-horizontal" ""}}The base moved on</h3><div>
         <p class="merge-hint">{{len $.Behind}} {{if eq (len $.Behind) 1}}commit{{else}}commits{{end}} since the fork, {{len .}} of them change files of this PR: what it was written against changed.</p>
         <ul class="merge-commits">{{range .}}<li><a href="{{$.Forge.Commit}}{{.SHA}}" target="_blank" rel="noopener">{{short .SHA}}</a><span>{{.Subject}}</span><code>{{range $i, $p := .Paths}}{{if $i}}, {{end}}{{base $p}}{{end}}</code></li>{{end}}</ul>
@@ -58,63 +73,81 @@
         <p class="merge-hint">{{.Hint}}</p>
         <ul class="merge-items">{{range .Items}}<li><a href="#{{.ID}}"{{if .Warn}} data-warn{{end}} title="{{.What}}"><code>{{.What}}</code><span>{{.Note}}</span></a></li>{{end}}{{with .More}}<li class="self-center text-xs text-muted-foreground">and {{.}} more</li>{{end}}</ul>
       </div></div>{{end}}
-    </div>{{end}}
-    {{with .Outline.Weakened}}<div class="tab-content" role="tabpanel" id="weakened" aria-labelledby="tab-weakened" tabindex="0"{{if ne $first "weakened"}} hidden{{end}}>
-      <p class="tab-hint">Tests the PR skips, narrows or loosens.</p>
-      <ul class="space-y-1 text-sm">{{range .}}<li><code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs break-all">{{.At}}</code> <span class="text-destructive">{{.What}}</span></li>{{end}}</ul>
-    </div>{{end}}
-    {{with .Others}}<div class="tab-content" role="tabpanel" id="others" aria-labelledby="tab-others" tabindex="0"{{if ne $first "others"}} hidden{{end}}>
-      <p class="tab-hint">Open PRs on the same files. Whichever merges second gets the conflicts, at the files in red for sure: both change the same lines there.</p>
-      <ul>{{range .}}<li class="other">
-      <div class="other-row"><a href="{{.URL}}" target="_blank" rel="noopener">{{$.Forge.Ref}}{{.Number}}</a><span>{{.Title}}</span>{{if .Draft}}<span class="badge" data-variant="outline">Draft</span>{{end}}{{with .Clash}}<span class="badge" data-variant="destructive">same lines</span>{{end}}<span class="other-by">{{.Author}}</span></div>
-      <p class="other-files">{{$o := .}}{{range .Files}}<a href="#{{.}}" title="{{.}}"{{if has $o.Clash .}} data-clash{{end}}>{{base .}}</a>{{end}}</p>
-    </li>{{end}}</ul>
-    </div>{{end}}
-    {{with .Loose}}<div class="tab-content" role="tabpanel" id="loose" aria-labelledby="tab-loose" tabindex="0"{{if ne $first "loose"}} hidden{{end}}>
-      <p class="tab-hint">Findings on lines the diff doesn't show.</p>
-      {{range .}}{{template "finding" .}}{{end}}
+      {{with .Others}}<div class="merge-row"><h3>{{icon "git-pull-request" ""}}Open PRs</h3><div>
+        <p class="merge-hint">On the same files. Whichever merges second gets the conflicts, for sure at the files marked: both change the same lines there.</p>
+        <ul>{{range .}}<li class="other">
+        <div class="other-row"><a href="{{.URL}}" target="_blank" rel="noopener">{{$.Forge.Ref}}{{.Number}}</a><span>{{.Title}}</span>{{if .Draft}}<span class="badge" data-variant="outline">Draft</span>{{end}}{{with .Clash}}<span class="chip" data-major>same lines</span>{{end}}<span class="other-by">{{.Author}}</span></div>
+        <p class="other-files">{{$o := .}}{{range .Files}}<a href="#{{.}}" title="{{.}}"{{if has $o.Clash .}} data-clash{{end}}>{{base .}}</a>{{end}}</p>
+      </li>{{end}}</ul>
+      </div></div>{{end}}
     </div>{{end}}
     </div>
-  </div>{{end}}
-  {{if or .Inventory .Deps .Affected .Diagram}}<div class="mt-10 space-y-4">
-  {{with .Inventory}}<div class="card" id="happened">
-    <div class="card-header"><h2 class="card-title">What happened to the code</h2>
-      <p class="card-description">Each declaration the PR touches, moves and renames matched across files.</p></div>
-    <div class="card-content">
-      <div class="scroll-area"><div class="tab-list inv-tabs" data-variant="line" role="tablist" aria-label="Kind of change">{{range $i, $g := .}}<button type="button" class="tab-trigger" role="tab" id="inv-tab-{{.Key}}" aria-controls="inv-{{.Key}}" aria-selected="{{eq $i 0}}"{{if $i}} tabindex="-1"{{end}}{{with .Hint}} title="{{.}}"{{end}}>{{.Title}}<span class="badge inv-count" data-variant="secondary">{{add (len .Items) .More}}</span></button>{{end}}</div></div>
-      {{range $i, $g := .}}<div class="tab-content" role="tabpanel" id="inv-{{.Key}}" aria-labelledby="inv-tab-{{.Key}}" tabindex="0"{{if $i}} hidden{{end}}>
-        <div class="relative"><div class="scroll-area inv-scroll"><ul>{{range $it := .Items}}<li class="inv-item" data-path="{{.File}}"{{with .OldHead}} data-old-head="{{.}}" data-head="{{$it.Head}}"{{end}}>
-          <div class="inv-row"><a href="#{{.ID}}" class="inv-name">{{.Name}}</a><span class="inv-path">{{.Path}}</span>{{if or .NPlus .NMinus}}<span class="inv-n">{{with .NPlus}}<ins>+{{.}}</ins>{{end}}{{with .NMinus}}<del>−{{.}}</del>{{end}}</span>{{end}}</div>
-          {{if .OldID}}<p class="inv-move">{{icon "arrow-right-left" ""}}<span>{{if .Was}}renamed from{{else}}moved from{{end}}</span><a href="#{{.OldID}}" title="Where it was">{{with .Was}}<del>{{.}}</del>{{end}}{{if or .From (not .Was)}}<span>{{with .From}}{{.}}:{{else}}line {{end}}{{.OldLine}}</span>{{end}}</a></p>{{end}}
-          {{if .Commit}}<p class="inv-sub" title="The commit that added it: {{.Why}}">{{icon "git-commit-horizontal" ""}}<span>{{.Why}}</span></p>{{else if .Doc}}<p class="inv-sub" title="{{.Doc}}"><span>{{.Doc}}</span></p>{{else if .Why}}<p class="inv-sub" title="A small model's reading of its code: {{.Why}}">{{icon "sparkles" ""}}<span>{{.Why}}</span></p>{{end}}
-          {{if and .OldHead (not .OldID)}}<div class="inv-lines scroll-area"><code class="del">{{.OldHead}}</code><code class="add">{{.Head}}</code></div>{{end}}
-          {{if or .Plus .Minus}}<div class="inv-lines scroll-area">{{range .Minus}}<code class="del">{{.}}</code>{{end}}{{range .Plus}}<code class="add">{{.}}</code>{{end}}</div>{{end}}
-        </li>{{end}}</ul></div><button type="button" class="btn inv-down" data-variant="outline" data-size="icon" aria-label="Scroll the list down">{{icon "arrow-down" ""}}</button></div>
-        {{with .More}}<p class="inv-hint mt-2">and {{.}} more in the diff</p>{{end}}
-      </div>{{end}}
+  </section>
+</section>
+{{end}}
+{{/* A place a model's text names, see view.Refs; a test's mark by how it ran, see view.Run. */}}
+{{define "ref"}}<a class="chip loc"{{with .Href}} href="{{.}}"{{end}}{{if .Out}} target="_blank" rel="noopener"{{end}} title="{{.Path}}:{{.Line}}{{if .Out}}, not in the diff{{end}}">{{icon "code" ""}}{{base .Path}}:{{.Line}}</a>{{end}}
+{{define "run-mark"}}<span class="run" data-mark="{{.Mark}}"{{if .When}} data-stale{{end}} role="img" aria-label="{{if eq .Mark "pass"}}passed{{else if eq .Mark "fail"}}failed{{else if eq .Mark "skip"}}skipped{{else}}not run{{end}}{{with .When}} {{.}}{{end}}">
+  {{- if eq .Mark "pass"}}{{icon "check" ""}}{{else if eq .Mark "fail"}}{{icon "x" ""}}{{else if eq .Mark "skip"}}{{icon "minus" ""}}{{else}}{{icon "circle-dashed" ""}}{{end}}</span>{{end}}
+{{/* Look closer: what the steps don't show, after them and closed until asked. */}}
+{{define "way"}}<ol class="ct" aria-label="{{.Label}}">
+  <li class="ct-entry"{{if .Rows}} data-kids{{end}}><span class="chip" data-m="{{.Method}}">{{.Method}}</span><span class="ct-route">{{.Route}}</span>{{with .Sub}}<span class="ct-sub">{{.}}</span>{{end}}<span class="ct-end">{{template "way-at" .At}}</span></li>
+  {{- range .Rows}}
+  <li data-d="{{.D}}"{{with .St}} data-st="{{.}}"{{end}}{{if .Kids}} data-kids{{end}}><span class="ct-g" aria-hidden="true">{{range .Cols}}<span class="gc" data-g="{{.}}"></span>{{end}}</span><span class="ct-pill"><code data-path="{{.Path}}"{{if .Sym}} class="sym" tabindex="0" data-sym="{{.Name}}"{{end}}>{{.Call}}</code></span><span class="ct-end">{{with .Sev}}<span class="chip" data-sev="{{.Sev}}">{{.Text}}</span>{{else}}{{with .Tag}}<span class="ct-tag">{{.}}</span>{{end}}{{end}}{{template "way-at" .At}}</span></li>
+  {{- end}}
+</ol>
+<p class="ct-punch"{{with .Sev}} data-sev="{{.}}"{{end}}>{{.Says}}{{with .Finding}} <a href="{{.}}" class="ct-more">See the finding →</a>{{end}}</p>{{end}}
+
+{{define "way-at"}}{{if .Line}}<a class="aloc"{{with .Href}} href="{{.}}"{{end}}{{if .Out}} target="_blank" rel="noopener"{{end}} title="{{.Path}}:{{.Line}}{{if .Out}}, not in the diff{{end}}">{{base .Path}}:{{.Line}}</a>{{end}}{{end}}
+
+{{define "explore"}}{{if or .Inventory .Deps .Affected .Ways .Diagram}}
+<section id="explore" class="mt-16 border-t pt-10" aria-labelledby="explore-h">
+  <h2 id="explore-h" class="text-xl font-semibold tracking-tight">Look closer</h2>
+  <p class="mt-1 mb-5 text-muted-foreground">Optional, after the steps: the declarations as a diff, where the code runs into the change, and how the changed directories use each other. A dashed AI means the reason was read from the code, not from a commit.</p>
+  <div class="space-y-2.5">
+  {{with .API}}<details class="box" id="happened">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">The API, before and after</span><span class="api-legend"><span><b class="am-add">+</b> new</span><span><b class="am-chg">~</b> changed</span><span><b class="am-mv">→</b> moved</span><span><b class="am-del">−</b> removed</span></span></summary>
+    <div class="bb api">{{range .}}
+      <p class="apkg">{{.Pkg}}</p>
+      {{range $r := .Items}}<details class="arow" data-path="{{.File}}"{{with .OldHead}} data-old-head="{{.}}" data-head="{{$r.Head}}"{{end}}>
+        <summary class="as{{if eq .Mark "−"}} as-del{{end}}"><span class="am" data-mark="{{.Word}}" role="img" aria-label="{{.Word}}">{{.Mark}}</span><code class="asig" data-name="{{.Name}}">{{.Sig}}</code><span class="ainfo">
+          {{- range .Info}}<span>{{.}}</span>{{end}}
+          {{- with .Sev}}<span class="chip" data-sev="{{.Sev}}">{{.Text}}</span>{{end}}
+          {{- with .Outside}}<button type="button" class="alink" data-uses="{{$r.Name}}" data-path="{{$r.File}}">{{plural . "use" "uses"}} outside</button>{{end}}
+          {{- if and .Why (not .Commit) (not .Doc)}}<span class="chip" data-dash>AI</span>{{end}}</span></summary>
+        <div class="ab">{{if .Commit}}<span>{{.Why}}</span><a class="chip font-mono" href="{{$.Forge.PRCommit}}{{.SHA}}" target="_blank" rel="noopener" title="The commit that added it">commit {{short .SHA}}</a>{{else if .Doc}}<span>{{.Doc}}</span>{{else if .Why}}<span>{{.Why}}</span><span class="chip" data-dash title="A small model's reading of its code">AI · read from the code</span>{{end}}
+          {{- with .OldID}}<a class="aloc" href="#{{.}}">was {{with $r.From}}{{base .}}:{{else}}line {{end}}{{$r.OldLine}}</a>{{end}}<a class="aloc" href="#{{.ID}}">{{base .File}}{{with .Line}}:{{.}}{{end}}</a></div>
+        {{if and .OldHead (not .OldID)}}<div class="inv-lines scroll-area"><code class="del">{{.OldHead}}</code><code class="add">{{.Head}}</code></div>{{end}}
+        {{if or .Plus .Minus}}<div class="inv-lines scroll-area">{{range .Minus}}<code class="del">{{.}}</code>{{end}}{{range .Plus}}<code class="add">{{.}}</code>{{end}}</div>{{end}}
+      </details>{{end}}{{end}}
+      {{with $.APIMore}}<p class="inv-hint mt-2">and {{.}} more in the diff</p>{{end}}
     </div>
-  </div>{{end}}
-  {{with .Deps}}<details class="card deps-card">
-    <summary class="card-header"><h2 class="card-title"><span class="trace-icon trace-chevron">{{icon "chevron-right" ""}}</span>Dependencies between {{len .Dirs}} changed directories{{with .Cycles}} · <span class="text-destructive">{{.}} {{if eq . 1}}cycle{{else}}cycles{{end}}</span>{{end}}</h2>
-      {{with .Top}}<p class="card-description">Most used: {{range $i, $t := .}}{{if $i}}, {{end}}<span class="font-mono text-foreground">{{$t}}</span>{{end}}.</p>{{end}}</summary>
-    <div class="card-content"><p class="mb-3 text-[13px] text-muted-foreground">A row's changed code calls or names a column's, the number how many declarations; hover a cell for which. What uses comes before what it uses, so the numbers sit right of the diagonal. A red one left of it is a cycle: those directories use each other.</p><div class="deps-wrap scroll-area"><table class="deps">
-      <thead><tr><th></th>{{range $i, $d := .Dirs}}<th scope="col" title="{{$d.Label}}">{{inc $i}}</th>{{end}}</tr></thead>
-      <tbody>{{range $d := .Dirs}}<tr><th scope="row"><a href="{{$d.Href}}" title="{{$d.Label}}"><span class="deps-no"></span><span class="truncate">{{$d.Label}}</span></a></th>{{range $c := $d.Cells}}<td{{if .Self}} class="d-self"{{else if .Back}} class="d-back"{{else if .N}} class="d-use" style="--n: {{.N}}"{{end}}{{if .N}} data-n="{{.N}}" data-names="{{.Names}}"{{end}}>{{if .N}}{{.N}}{{end}}</td>{{end}}</tr>{{end}}</tbody>
-    </table></div><p class="deps-say"></p></div>
   </details>{{end}}
-  {{with .Affected}}<div class="card">
-    <div class="card-header"><h2 class="card-title">What the change reaches outside the PR</h2>
-      <p class="card-description">Code outside the diff that calls or names what changed.</p></div>
-    <div class="card-content accordion">{{range .}}<details class="accordion-item reach-item">
+  {{with .Ways}}<details class="box" id="ways">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">Where it runs</span><span class="bs-note">{{$.WaysSay}}</span></summary>
+    <div class="bb">
+      <div class="ctabs" role="group" aria-label="Ways into the change">{{range $i, $w := .}}<button type="button" class="toggle" data-variant="outline" data-way="{{$i}}" aria-controls="way-{{$i}}" aria-pressed="{{if eq $i 0}}true{{else}}false{{end}}"><span class="chip" data-m="{{.Method}}">{{.Method}}</span><span class="truncate" title="{{.Route}}">{{.Route}}</span>{{if .Sev}}<span class="ct-dot" data-sev="{{.Sev}}" role="img" aria-label="has a {{if eq .Sev "critical"}}blocker{{else}}major finding{{end}}"></span>{{end}}</button>{{end}}
+        <button type="button" class="btn" data-variant="outline" data-size="xs" data-replay>{{icon "rotate-ccw" ""}}Replay</button></div>
+      {{range $i, $w := .}}<div class="ctw" id="way-{{$i}}" data-way="{{$i}}"{{if $i}} hidden{{end}}>{{template "way" .}}</div>{{end}}
+    </div>
+  </details>{{end}}
+  {{with .Affected}}<details class="box">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">What the change reaches outside the PR</span><span class="bs-note">{{plural (len .) "declaration" "declarations"}} called or named by code outside the diff</span></summary>
+    <div class="bb accordion">{{range .}}<details class="accordion-item reach-item">
       <summary class="accordion-trigger"><a href="#{{.ID}}">{{.Name}}</a>{{with .Why}}<span class="badge" data-variant="outline">{{.}}</span>{{end}}<span class="reach-path">{{.Path}}</span><span class="reach-n">{{.N}} {{if eq .N 1}}place{{else}}places{{end}}</span>{{icon "chevron-down" "accordion-chevron size-4"}}</summary>
       <ul>{{range .Refs}}<li><a href="{{$.Forge.Blob}}{{.Path}}#L{{.Line}}" target="_blank" rel="noopener">{{.Path}}:{{.Line}}</a>{{with .In}}<span class="shrink-0 text-muted-foreground">in {{.}}</span>{{end}}<code data-path="{{.Path}}">{{.Text}}</code></li>{{end}}
         <li><button type="button" class="btn" data-variant="link" data-size="xs" data-uses="{{.Name}}" data-path="{{.Path}}">Every use</button></li></ul>
     </details>{{end}}</div>
-  </div>{{end}}
-  {{with .Diagram}}<div class="card">
-    <div class="card-header"><h2 class="card-title">How the parts talk</h2></div>
-    <div class="card-content scroll-area"><pre class="mermaid flex justify-center [&_svg]:max-h-96">{{.}}</pre></div>
-  </div>{{end}}
-  </div>{{end}}
+  </details>{{end}}
+  {{with .Deps}}<details class="box">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">{{if .New}}New uses between directories{{else}}Uses between the changed directories{{end}}</span>{{with .Cycles}}<span class="bs-note text-destructive">{{plural . "cycle" "cycles"}}</span>{{end}}</summary>
+    <div class="bb">{{with .New}}<ul class="dl">{{range .}}<li><b class="am-add" role="img" aria-label="new">+</b><code>{{.From}} → {{.To}}</code><span>{{.Why}}</span>{{if .Cycle}}<span class="chip" data-sev="critical">new cycle</span>{{end}}</li>{{end}}</ul>{{end}}
+      {{with .Old}}<p class="deps-old">Between declarations that were there before: {{join .}}.</p>{{end}}</div>
+  </details>{{end}}
+  {{with .Diagram}}<details class="box">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">How the parts talk</span></summary>
+    <div class="bb scroll-area"><pre class="mermaid flex justify-center [&_svg]:max-h-96">{{.}}</pre></div>
+  </details>{{end}}
+  </div>
 </section>
-{{end}}
+{{end}}{{end}}

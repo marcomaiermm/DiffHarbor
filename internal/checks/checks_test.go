@@ -3,9 +3,11 @@ package checks
 import (
 	"context"
 	"diffharbor/internal/proc"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -27,7 +29,7 @@ printf '[{"file":"m.sql","line":0,"rule_name":"%s","message":"%s lines"}]' "$*" 
 		os.MkdirAll(filepath.Join(repo, filepath.Dir(f)), 0o755)
 		os.WriteFile(filepath.Join(repo, f), []byte("echo repo \"$@\"\n"), 0o644)
 	}
-	out := Run(context.Background(), repo, []Script{{".review/a.sh", "repo.sh"}, {"b.sh", "repo.sh"}}, "", []string{".github/workflows/ci.yml", "a.sh", "web/package.json", "gone.go", "m.sql"}, func(string) bool { return true }, false, nil)
+	out, _ := Run(context.Background(), repo, []Script{{".review/a.sh", "repo.sh"}, {"b.sh", "repo.sh"}}, "", []string{".github/workflows/ci.yml", "a.sh", "web/package.json", "gone.go", "m.sql"}, func(string) bool { return true }, false, nil)
 	for _, want := range []string{
 		"gitleaks dir --no-banner --redact --log-level warn -v a.sh", "shellcheck -f gcc a.sh",
 		"actionlint -no-color .github/workflows/ci.yml", "zizmor -q --offline --format github .github/workflows/ci.yml", "osv-scanner scan source --format table web",
@@ -67,6 +69,11 @@ printf '[{"file":"m.sql","line":0,"rule_name":"%s","message":"%s lines"}]' "$*" 
 go: downloading example.com/m v1.0.0`
 	if got := testFailures(js); got != "go: downloading example.com/m v1.0.0\n    b_test.go:9: want 2\n(1 more tests failed the same way)\nq.go:3: undefined: x" {
 		t.Errorf("testFailures: %q", got)
+	}
+	var ran Tests
+	testRuns(js, &ran)
+	if !maps.Equal(ran.Ran, map[string]string{"TestA": "pass", "TestB": "fail", "TestC": "fail"}) || !slices.Equal(ran.Broken, []string{"q"}) {
+		t.Errorf("testRuns: %+v", ran)
 	}
 }
 
@@ -119,7 +126,7 @@ func TestMonorepoChecks(t *testing.T) {
 	}
 	patch := filepath.Join(t.TempDir(), "pr.diff")
 	os.WriteFile(patch, []byte("diff --git a/svc/b.go b/svc/b.go\n--- a/svc/b.go\n+++ b/svc/b.go\n@@ -1 +1 @@\n-x\n+package svc\n"), 0o644)
-	out := Run(context.Background(), repo, nil, patch, []string{"svc/cmd/a.go", "svc/b.go", "apps/web/src/a.ts"}, func(f string) bool { return f != "svc/b.go" }, false, nil)
+	out, _ := Run(context.Background(), repo, nil, patch, []string{"svc/cmd/a.go", "svc/b.go", "apps/web/src/a.ts"}, func(f string) bool { return f != "svc/b.go" }, false, nil)
 	for _, want := range []string{
 		"pnpm @" + filepath.Base(repo) + " install", "gofmt @svc -l cmd/a.go b.go", "go @svc vet ./. ./cmd",
 		"go @svc test -json -short -count=1 -timeout=4m ./cmd", "vitest @web related --run --reporter=dot src/a.ts",
@@ -199,10 +206,22 @@ func TestInstallScripts(t *testing.T) {
 		os.WriteFile(filepath.Join(repo, c.lock), nil, 0o644)
 		os.WriteFile(filepath.Join(repo, ".ver"), []byte(c.version), 0o644)
 		for scripts, want := range map[bool]string{false: c.off, true: c.on} {
-			out := Run(context.Background(), repo, nil, "", []string{"a.ts"}, func(string) bool { return false }, scripts, nil)
+			out, _ := Run(context.Background(), repo, nil, "", []string{"a.ts"}, func(string) bool { return false }, scripts, nil)
 			if !strings.Contains(out, "\n"+want+"\n") {
 				t.Errorf("%s (%q) with scripts=%v, want %q in:\n%s", c.lock, c.version, scripts, want, out)
 			}
 		}
+	}
+}
+
+// A line split across writes reaches f whole, once its end comes.
+func TestLineWriter(t *testing.T) {
+	var got []string
+	w := &lineWriter{f: func(l string) { got = append(got, l) }}
+	for _, p := range []string{"a\nb", "c\n", "d"} {
+		w.Write([]byte(p))
+	}
+	if !slices.Equal(got, []string{"a", "bc"}) {
+		t.Errorf("lines %q", got)
 	}
 }

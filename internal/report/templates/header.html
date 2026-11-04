@@ -12,7 +12,8 @@
       <li class="breadcrumb-item hidden min-w-0 md:flex"><span class="breadcrumb-page truncate font-normal text-muted-foreground" aria-current="page">{{.Title}}</span></li>
     </ol></nav>
     <div class="ml-auto flex shrink-0 items-center gap-3">
-      <span id="progress-text" class="hidden font-mono text-xs tabular-nums text-muted-foreground sm:block"></span>
+      <a href="#focus" class="vd"{{if .Verdict.OK}} data-ok{{end}} title="{{.Verdict.Title}}">{{if .Verdict.OK}}{{icon "circle-check" ""}}{{else}}{{icon "circle-alert" ""}}{{end}}<span class="max-sm:sr-only">{{.Verdict.Short}}</span></a>
+      <span id="progress-text" data-steps="{{.NSteps}}" class="hidden font-mono text-xs tabular-nums text-muted-foreground xl:block"></span>
       <div class="toggle-group view-toggle" data-variant="outline" role="group" aria-label="Diff layout">
         <button type="button" class="toggle" data-diff="unified" aria-pressed="true" title="One column">{{icon "rows-2" ""}}Unified</button>
         <button type="button" class="toggle" data-diff="split" aria-pressed="false" title="Side by side, the changes joined">{{icon "columns-2" ""}}Split</button>
@@ -22,6 +23,6 @@
       <a href="{{.URL}}" class="btn" data-variant="outline" data-size="sm">{{.Forge.Name}} {{icon "arrow-up-right" "size-3.5"}}</a>
     </div>
   </div>
-  <div class="absolute inset-x-0 -bottom-px h-px"><div id="progress" class="h-full bg-foreground" style="width:0"></div></div>
+  <div class="absolute inset-x-0 -bottom-px h-0.5 bg-muted" aria-hidden="true"><div id="progress" class="h-full w-0 bg-ring"></div></div>
 </header>
 {{end}}

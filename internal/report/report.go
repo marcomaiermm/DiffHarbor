@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"diffharbor/internal/assets"
+	"diffharbor/internal/checks"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
@@ -20,6 +21,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -37,7 +39,7 @@ type Data struct {
 	Summary     string
 	Diagram     string // mermaid
 	Effort      int
-	Decisions   []string
+	Decisions   []review.Decision
 	Story       review.Story
 	Flow        []review.Step
 	Walkthrough map[string]string // path -> one line
@@ -53,7 +55,11 @@ type Data struct {
 	Behind      []review.Commit    // the base's commits since the fork point (review.Behind)
 	Conflicts   bool               // the forge says the PR conflicts with its base
 	Forge       Forge
-	Prev        *Version // the version before: the report marks what changed since; nil for the first
+	Prev        *Version          // the version before: the report marks what changed since; nil for the first
+	Dropped     []review.Comment  // what the verifier dropped, its reason in Evidence
+	Failed      []string          // files whose review part failed: not reviewed
+	Tests       checks.Tests      // what the checks' test runs report at SHA; empty when none ran
+	Sources     map[string]string // the head's text of changed files, for the lines between hunks (see Sources)
 }
 
 // Forge is how the forge hosting the repository names and links what a report points to.
@@ -137,7 +143,12 @@ func compile(dir string) (string, error) {
 var tmpl = template.Must(parseTemplates(nil))
 
 var funcs = template.FuncMap{
-	"short":    func(s string) string { return s[:min(len(s), 7)] },
+	"short":  short,
+	"plural": plural,
+	"join":   join,
+	"sep": func(i, n int) string { // before the i-th of n in a list: "", ", ", " and "
+		return map[bool]string{true: "", false: map[bool]string{true: " and ", false: ", "}[i == n-1]}[i == 0]
+	},
 	"inc":      func(i int) int { return i + 1 },
 	"add":      func(a, b int) int { return a + b },
 	"icon":     icon,
@@ -149,6 +160,10 @@ var funcs = template.FuncMap{
 	"wip":      func(subject string) bool { return wip.MatchString(strings.TrimSpace(subject)) },
 	"dir":      func(p string) string { return p[:strings.LastIndex(p, "/")+1] }, // "a/b/" of a/b/c.go: muted, the name stands out
 	"base":     func(p string) string { return p[strings.LastIndex(p, "/")+1:] },
+	"test": func(t string) string { // "a_test.go TestSave" of step.Tests: "TestSave"; a file alone stays
+		_, n, ok := strings.Cut(t, " ")
+		return map[bool]string{true: n, false: t}[ok]
+	},
 	"tab": func(id, title string, n int, warn bool, first string) tab {
 		return tab{id, title, n, warn, id == first}
 	},
@@ -224,8 +239,18 @@ type line struct {
 	ID              string // a jump target: where a declaration's change starts
 	Old             int    // the line in the old file: del and ctx lines
 	Run             int    // the folded run the line is in, 0 = shown
-	Findings        []review.Comment
+	Findings        []*finding
 }
+
+// Range is a hunk line's "@@ -a,b +c,d @@", Fn what follows it: the declaration git found it in.
+func (l line) Range() string {
+	if i := strings.Index(l.Text[min(2, len(l.Text)):], "@@"); strings.HasPrefix(l.Text, "@@") && i >= 0 {
+		return l.Text[:i+4]
+	}
+	return l.Text
+}
+
+func (l line) Fn() string { return strings.TrimSpace(l.Text[len(l.Range()):]) }
 
 type file struct {
 	Path, Kind, Note string
@@ -234,26 +259,58 @@ type file struct {
 	Open             bool   // unfolded: code in the reading order
 	Add, Del         int
 	Lines            []line
-	Parts            []part           // Lines as shown: plain runs and folded ones
-	Moved            int              // added lines that only moved here
-	Cut              int              // lines left out past maxLines
-	Findings         []review.Comment // on the file but no line it shows
-	Changes          []change         // the declarations it changes
-	Long             bool             // lists Changes above its diff
-	Changed          bool             // its change differs from Prev's, or it's new to the PR
+	Parts            []part     // Lines as shown: plain runs and folded ones
+	Moved            int        // added lines that only moved here
+	Cut              int        // lines left out past maxLines
+	Findings         []*finding // on the file but no line it shows
+	Changes          []change   // the declarations it changes
+	Moves            []change   // the declarations that only moved here, ID their fold
+	Long             bool       // lists Changes above its diff
+	Changed          string     // Prev's short SHA when its change differs from Prev's, or it's new to the PR
+	Placed           string     // why the guide put it in its step, when it isn't plain
+	Skipped          int        // tests it skips or narrows to one (skip, only)
+	New, Gone        bool       // the PR adds or deletes it
+	Src              string     // its text at the head, for the lines between hunks: Data.Sources
+	SrcN             int        // its lines
 }
 
 // change is a declaration a file's diff touches: State "new", "gone" or "" (changed), ID its first changed line.
 type change struct {
 	Name, State, ID string
-	added, removed  bool // its declaring line
-	sig             bool // what callers see of it differs: see signature
+	Sev             string // the heaviest finding on its lines: "critical", "major", "minor"
+	added, removed  bool   // its declaring line
+	sig             bool   // what callers see of it differs: see signature
 }
 
 type step struct {
 	Title, Why string
+	Check      string // what to check in it, the guide's
 	Files      []*file
-	Graph      *flow // how its changed declarations name each other, nil when they don't
+	Graph      *flow    // how its changed declarations name each other, nil when they don't
+	Tests      []string // the tests that reach what it changes, the first maxTests: "a_test.go TestSave"
+	More       int      // past those
+	Partial    bool     // at least: a walk stopped short
+	Untested   bool     // no test reaches what it changes: see tested
+	Cycles     []cycle  // directories its changes make use each other
+	Way        *way     // a way into the change that reaches a major finding in its files
+	bare       []string // what it changes that no test calls
+}
+
+// Gap is what of the step no test reaches: "none: scanLine is not called by any test"; "" when tests reach all.
+func (s step) Gap() string {
+	b := s.bare
+	if len(b) > 3 {
+		b = append(b[:3:3], plural(len(s.bare)-3, "more", "more"))
+	}
+	switch {
+	case s.Untested && len(b) == 0:
+		return "none found that reaches what this step changes"
+	case s.Untested:
+		return "none: " + join(b) + map[bool]string{true: " is", false: " are"}[len(s.bare) == 1] + " not called by any test"
+	case len(b) > 0 && !s.Partial:
+		return "none reaches " + join(b)
+	}
+	return ""
 }
 
 type group struct {
@@ -267,20 +324,32 @@ type view struct {
 	Steps                []step
 	Tests, Other         []*file
 	Mechanical           []group
-	Loose                []review.Comment // findings outside the diff
-	Deleted              []*file          // what moved out of them folds, the rest is what the PR drops
-	Stepwise             bool             // the commits read one by one
+	Deleted              []*file // what moved out of them folds, the rest is what the PR drops
+	Stepwise             bool    // the commits read one by one
 	Code, NTests, NOther int
+	InSteps, NSteps      int // of Code, the files in the reading order's steps; those steps
 	Added, Moved         int // added lines, and those of them that only moved
 	Tree                 []*node
 	Inventory            []bucket        // what the PR did to its declarations
 	Deps                 *deps           // which changed directories use which
 	Affected             []affected      // changed code the rest of the repo uses
+	Ways                 []way           // how the code reaches the change: routes, declarations nothing calls
 	Graphs               bool            // a graph to draw: the page loads cytoscape
 	Risks                []risk          // what a merge doesn't finish
 	BaseMoved            []review.Commit // of Behind, those that change the PR's files
 	Since                *since          // what changed from Prev
-	now                  Version         // what the next version compares with
+	Groups               []fgroup        // the findings and weakened tests by weight
+	NFound               int             // in Groups
+	Outside              []*finding      // on a file the diff doesn't show: in full under the list
+	Verdict              verdict
+	Draft                draft
+	MergeN               int       // rows of the merge risks: Risks, BaseMoved, Conflicts, Others
+	MergeWarn            bool      // one of them is sure trouble
+	Authors              []string  // of the commits, first one first
+	Skipped              int       // tests the PR skips or narrows to one
+	Retired              []retired // deleted tests with the code they tested: no finding
+	now                  Version   // what the next version compares with
+	files                map[string]*file
 }
 
 // node is a directory of the side bar's file tree, or a file when File is set.
@@ -329,21 +398,26 @@ func Asks(d Data) (keys, texts []string) {
 
 // prepare is the page's view of d.
 func prepare(d Data) view {
-	v := view{Data: d}
+	v := view{Data: d, files: map[string]*file{}}
 	v.Themes.Light = cmp.Or(v.Themes.Light, "tokyo-night-day") // the page carries this one: Shiki has only the dark
 	v.Themes.Dark = cmp.Or(v.Themes.Dark, "tokyo-night")
-	files := map[string]*file{}
+	files := v.files
 	var order []string
 	ids := diff.PatchIDs(d.Diff)
 	diff.EachFile(d.Diff, func(p, f string) {
 		files[p] = parse(p, f, d.Walkthrough[p])
 		files[p].ID = ids[p]
+		if fl := files[p]; !fl.New && fl.Cut == 0 && d.Sources[p] != "" {
+			fl.Src = d.Sources[p]
+			fl.SrcN = strings.Count(strings.TrimSuffix(fl.Src, "\n"), "\n") + 1
+		}
 		order = append(order, p)
 	})
 	var gone []string
 	diff.EachDeleted(d.Diff, func(p, f string) {
 		files[p] = parse(p, f, d.Walkthrough[p])
 		files[p].ID = ids[p]
+		files[p].Gone = true
 		gone, v.Deleted = append(gone, p), append(v.Deleted, files[p])
 	})
 	skim := map[string]map[int]string{}
@@ -357,17 +431,28 @@ func prepare(d Data) view {
 	for _, p := range gone { // after fold: the moves it finds are in the whole file
 		trim(files[p], runs)
 	}
-	for _, c := range d.Findings {
+	var found []*finding
+	for i, c := range d.Findings {
+		fd := &finding{Comment: c}
+		found = append(found, fd)
 		f := files[c.Path]
-		if f == nil {
-			v.Loose = append(v.Loose, c)
+		fd.ID = "finding-" + strconv.Itoa(i+1)
+		fd.Href = "#" + fd.ID
+		if f == nil { // outside the diff: in full under the list, a link to the file on the forge
+			if d.Forge.Blob != "" {
+				fd.Blob = d.Forge.Blob + c.Path
+				if c.Line > 0 {
+					fd.Blob += "#L" + strconv.Itoa(c.Line)
+				}
+			}
+			v.Outside = append(v.Outside, fd)
 			continue
 		}
 		at := slices.IndexFunc(f.Lines, func(l line) bool { return l.No == strconv.Itoa(c.Line) })
 		if c.Line == 0 || at < 0 {
-			f.Findings = append(f.Findings, c)
+			f.Findings = append(f.Findings, fd)
 		} else {
-			f.Lines[at].Findings = append(f.Lines[at].Findings, c)
+			f.Lines[at].Findings = append(f.Lines[at].Findings, fd)
 		}
 	}
 	var all []*file
@@ -375,17 +460,36 @@ func prepare(d Data) view {
 		all = append(all, files[p])
 	}
 	v.Risks, v.BaseMoved = risks(all), baseMoved(d.Behind, files) // before parts, like spans: risks marks the lines it jumps to
+	v.MergeN, v.MergeWarn = len(v.Risks), d.Conflicts
+	for _, r := range v.Risks {
+		for _, it := range r.Items {
+			v.MergeWarn = v.MergeWarn || it.Warn
+		}
+	}
+	for _, b := range []bool{len(v.BaseMoved) > 0, d.Conflicts, len(d.Others) > 0} {
+		if b {
+			v.MergeN++
+		}
+	}
+	for _, o := range d.Others {
+		v.MergeWarn = v.MergeWarn || len(o.Clash) > 0
+	}
 	v.now = stamp(v, ids)
-	v.Since = compare(d.Prev, v.now, files)
 	var ss []*span
 	for _, p := range slices.Concat(order, gone) {
 		f := files[p]
-		f.Changes = changes(f, runs)
+		f.Changes, f.Moves = changes(f, runs)
 		ss = append(ss, spans(f, runs)...) // before parts: it marks the lines it jumps to
 		f.Long = len(f.Lines) >= minChanges
 		f.Parts = parts(f.Lines, runs)
 		v.Added += f.Add
 		v.Moved += f.Moved
+	}
+	for _, w := range d.Outline.Weakened {
+		if p, _, _ := strings.Cut(w.At, ":"); strings.HasPrefix(w.What, "skip/only") && files[p] != nil {
+			files[p].Skipped++
+			v.Skipped++
+		}
 	}
 	skip := d.Outline.Skippable()
 	used := map[string]bool{}
@@ -401,10 +505,11 @@ func prepare(d Data) view {
 		v.Mechanical = append(v.Mechanical, mg)
 	}
 	for _, s := range d.Flow {
-		st := step{Title: s.Title, Why: s.Why}
+		st := step{Title: s.Title, Why: s.Why, Check: s.Check}
 		for _, p := range s.Files {
 			if f := files[p]; f != nil && !used[p] && !skip[p] {
 				f.Open = f.Moved*5 < f.Add*4 // mostly moved: the folds would be all there is
+				f.Placed = s.Placed[p]
 				st.Files, used[p] = append(st.Files, f), true
 			}
 		}
@@ -426,6 +531,10 @@ func prepare(d Data) view {
 			v.Other = append(v.Other, f)
 		}
 	}
+	v.NSteps = len(v.Steps)
+	for _, s := range v.Steps {
+		v.InSteps += len(s.Files)
+	}
 	if len(rest) > 0 {
 		title := "The rest of the code"
 		if len(v.Steps) == 0 {
@@ -435,6 +544,8 @@ func prepare(d Data) view {
 	}
 	for _, s := range v.Steps {
 		v.Code += len(s.Files)
+		// a file with a finding that blocks the merge goes first in its step: what to fix is what to read first
+		slices.SortStableFunc(s.Files, func(a, b *file) int { return cmp.Compare(rank(b), rank(a)) })
 	}
 	v.NTests, v.NOther = len(v.Tests), len(v.Other)
 	pre := shared(order) // the side bar drops the directory all files share
@@ -444,6 +555,9 @@ func prepare(d Data) view {
 	v.Tree = tree(files)
 	for i := range v.Steps {
 		v.Steps[i].Graph = graph(v.Steps, i, d.Symbols)
+		st := &v.Steps[i]
+		st.Tests, st.More, st.Partial, st.Untested, st.bare = tested(*st, d.Symbols)
+		st.Cycles = cycles(v.Steps, i, d.Symbols)
 		v.Graphs = v.Graphs || v.Steps[i].Graph != nil
 	}
 	v.Inventory = inventory(ss, d.Symbols, d.Commits, d.Title, d.Whys)
@@ -455,7 +569,283 @@ func prepare(d Data) view {
 		}
 	}
 	v.Stepwise = len(d.Commits) > 1 && messy*3 < len(d.Commits) // under a third wip
+	for _, c := range d.Commits {
+		if c.Author != "" && !slices.Contains(v.Authors, c.Author) {
+			v.Authors = append(v.Authors, c.Author)
+		}
+	}
+	v.Retired = retire(d.Outline.Removed, files)
+	judge(&v, found) // adds the weakened tests' findings to v.now
+	v.Since = compare(d.Prev, v.now, files)
+	chs, _ := decls(v.Steps)
+	for _, c := range chs { // the popover says what the PR did to it
+		for i, s := range d.Symbols[c.c.Name] {
+			if s.Path != c.f.Path || c.c.State == "gone" {
+				continue
+			}
+			s := &d.Symbols[c.c.Name][i]
+			st := "changed"
+			switch {
+			case c.c.State == "new":
+				st = "new"
+			case c.c.sig:
+				st = "signature"
+			}
+			if rank := map[string]int{"changed": 1, "signature": 2, "new": 3}; rank[st] > rank[s.State] { // one name twice in a file: the most
+				s.State = st
+			}
+			if heavier(c.c.Sev, s.Sev) && c.c.Sev != "minor" {
+				s.Sev = c.c.Sev
+			}
+		}
+	}
+	v.Ways = ways(&v, d.Symbols)
+	if len(d.Tests.Ran) > 0 || len(d.Tests.Broken) > 0 {
+		v.now.Tests = map[string]string{}
+		names := []string{d.Story.Proof}
+		for _, s := range v.Steps {
+			for _, t := range s.Tests {
+				_, n, _ := strings.Cut(t, " ")
+				names = append(names, n)
+			}
+		}
+		for _, c := range d.Outline.Added {
+			_, n, _ := strings.Cut(c, ": ")
+			names = append(names, n)
+		}
+		for _, n := range names {
+			if n != "" {
+				v.now.Tests[testKey(n)] = cmp.Or(ranOf(d.Tests.Ran, n), "none")
+			}
+		}
+	}
 	return v
+}
+
+// Settled is the line over what left the findings: fixed since the last review, dropped by the cross-check,
+// tests deleted with their code; "" for none.
+func (v view) Settled() string {
+	var p []string
+	if v.Since != nil && len(v.Since.Fixed) > 0 {
+		p = append(p, strconv.Itoa(len(v.Since.Fixed))+" fixed")
+	}
+	if n := len(v.Dropped); n > 0 {
+		p = append(p, strconv.Itoa(n)+" dropped by the cross-check")
+	}
+	n := 0
+	for _, r := range v.Retired {
+		n += len(r.Names)
+	}
+	if n > 0 {
+		p = append(p, plural(n, "test", "tests")+" removed with their code")
+	}
+	return strings.Join(p, " · ")
+}
+
+// retired is the tests the PR deletes with the declaration they are named after: nothing is left to test.
+type retired struct {
+	Names []string // "TestTotalNet"
+	With  string   // "totalNet"
+}
+
+// retire is those of the deleted cases ("path: TestTotalNet") whose name, past "Test", starts with a declaration
+// the PR deletes and adds nowhere: TestTotalNet and TestTotalNetRounding with totalNet.
+func retire(removed []string, files map[string]*file) []retired {
+	gone, kept := map[string]bool{}, map[string]bool{}
+	for _, f := range files {
+		if f.Kind != "code" {
+			continue
+		}
+		for _, c := range f.Changes {
+			if c.State == "gone" {
+				gone[c.Name] = true
+			} else {
+				kept[c.Name] = true
+			}
+		}
+	}
+	var out []retired
+	for _, rc := range removed {
+		_, n, _ := strings.Cut(rc, ": ")
+		rest, ok := strings.CutPrefix(n, "Test")
+		if !ok {
+			continue
+		}
+		for g := range gone {
+			if kept[g] || len(g) < 3 || len(rest) < len(g) || !strings.EqualFold(rest[:len(g)], g) {
+				continue
+			}
+			if r := rest[len(g):]; r != "" && !(r[0] == '_' || r[0] >= 'A' && r[0] <= 'Z') { // TestTotalNet is no test of Total's
+				continue
+			}
+			left, r := false, strings.TrimPrefix(rest[len(g):], "_")
+			for k := range kept { // TestTotalNet with Net left: it may test what stays
+				left = left || len(k) >= 3 && len(r) >= len(k) && strings.EqualFold(r[:len(k)], k)
+			}
+			if left {
+				continue
+			}
+			i := slices.IndexFunc(out, func(r retired) bool { return r.With == g })
+			if i < 0 {
+				i, out = len(out), append(out, retired{With: g})
+			}
+			out[i].Names = append(out[i].Names, n)
+			break
+		}
+	}
+	return out
+}
+
+// ref is a stretch of a model's text and the place it names after it: "invoice.go:42", "(a/invoice.go:42)".
+type ref struct {
+	Text, Path, Href string // Path "": the text after the last place
+	Line             int
+	Out              bool // Href is the forge's: the file is not in the diff
+}
+
+var place = regexp.MustCompile(`\(([\w./-]+\.[A-Za-z]\w*):(\d+)\)|\b([\w./-]+\.[A-Za-z]\w*):(\d+)\b`)
+
+// Refs is s cut at the places it names, each one resolved to a file of the diff when one ends in it.
+func (v view) Refs(s string) []ref {
+	var out []ref
+	last := 0
+	for _, m := range place.FindAllStringSubmatchIndex(s, -1) {
+		g := 2
+		if m[2] < 0 {
+			g = 6
+		}
+		n, _ := strconv.Atoi(s[m[g+2]:m[g+3]])
+		r := v.place(s[m[g]:m[g+1]], n)
+		r.Text, last = s[last:m[0]], m[1]
+		out = append(out, r)
+	}
+	return append(out, ref{Text: s[last:]})
+}
+
+// Ref is the place at names, "path:line"; nil when it names none.
+func (v view) Ref(at string) *ref {
+	if rs := v.Refs(at); len(rs) > 1 {
+		return &rs[0]
+	}
+	return nil
+}
+
+func (v view) place(p string, line int) ref {
+	if v.files[p] == nil {
+		var hit []string
+		for q := range v.files {
+			if strings.HasSuffix(q, "/"+p) {
+				hit = append(hit, q)
+			}
+		}
+		if len(hit) == 1 {
+			p = hit[0]
+		}
+	}
+	r := ref{Path: p, Line: line}
+	if v.files[p] != nil {
+		r.Href = "#" + p + ":" + strconv.Itoa(line) // the script finds the line
+	} else if v.Forge.Blob != "" {
+		r.Href, r.Out = v.Forge.Blob+p+"#L"+strconv.Itoa(line), true
+	}
+	return r
+}
+
+// testRun is how a test fared at the head and at the last review. Mark is what its sign shows: the head's
+// outcome, else the last review's with When saying so ("on 1111111"), none when it ran at neither; "" unknown.
+type testRun struct{ Mark, When, Text string }
+
+// Run is test name's run, its spaces as go test writes them; empty when no test ran at either version.
+func (v view) Run(name string) testRun {
+	say := map[string]string{"pass": "passed", "fail": "failed", "skip": "skipped", "none": "not run"}
+	var r testRun
+	var parts []string
+	prev := ""
+	if v.Prev != nil && v.Prev.Tests != nil {
+		if prev = v.Prev.Tests[testKey(name)]; prev != "" {
+			parts = append(parts, say[prev]+" on "+short(v.Prev.SHA))
+		}
+	}
+	if t := v.Data.Tests; len(t.Ran) > 0 || len(t.Broken) > 0 {
+		r.Mark = cmp.Or(ranOf(t.Ran, name), "none")
+		if prev == r.Mark {
+			parts = nil // the same as at the last review
+		}
+		parts = append(parts, say[r.Mark]+" on "+short(v.SHA))
+	}
+	if (r.Mark == "" || r.Mark == "none") && prev != "" && prev != "none" {
+		r.Mark, r.When = prev, "on "+short(v.Prev.SHA)
+	} else if r.Mark == "" && prev == "none" {
+		r.Mark = "none"
+	}
+	r.Text = strings.Join(parts, ", ")
+	return r
+}
+
+// tcase is a test case the PR adds or a test it now skips, and how it ran.
+type tcase struct {
+	Path, Name, State string
+	Skip              bool
+	Run               testRun
+}
+
+// Cases is the new cases, then the skips: a skip by its line, what the diff shows of it.
+func (v view) Cases() []tcase {
+	var cs []tcase
+	for _, c := range v.Outline.Added {
+		p, n, _ := strings.Cut(c, ": ")
+		r := v.Run(n)
+		cs = append(cs, tcase{Path: p, Name: n, State: cmp.Or(r.Text, "new"), Run: r})
+	}
+	for _, w := range v.Outline.Weakened {
+		if code, ok := strings.CutPrefix(w.What, "skip/only: "); ok {
+			cs = append(cs, tcase{Path: w.At, Name: strings.Trim(code, "`"), State: "skipped or narrowed · " + path.Base(w.At), Skip: true})
+		}
+	}
+	return cs
+}
+
+// TestsSay is the line over the cases: how many new ones passed, what did not build, what is skipped now.
+func (v view) TestsSay() string {
+	var p []string
+	if t := v.Data.Tests; len(t.Ran) > 0 || len(t.Broken) > 0 {
+		n := 0
+		for _, c := range v.Outline.Added {
+			if _, name, _ := strings.Cut(c, ": "); ranOf(t.Ran, name) == "pass" {
+				n++
+			}
+		}
+		if of := len(v.Outline.Added); of > 0 {
+			p = append(p, fmt.Sprintf("%d of %d new cases passed on %s.", n, of, short(v.SHA)))
+		}
+		if len(t.Broken) > 0 {
+			p = append(p, join(t.Broken)+map[bool]string{true: " does", false: " do"}[len(t.Broken) == 1]+" not build on "+short(v.SHA)+", so nothing ran there.")
+		}
+	}
+	if v.Skipped > 0 {
+		p = append(p, plural(v.Skipped, "test is", "tests are")+" now skipped or narrowed to one.")
+	}
+	return strings.Join(p, " ")
+}
+
+func testKey(name string) string { return strings.ReplaceAll(name, " ", "_") }
+
+// ranOf is name's outcome in ran: by its full name, or as the one subtest of that name.
+func ranOf(ran map[string]string, name string) string {
+	n := testKey(name)
+	if st, ok := ran[n]; ok {
+		return st
+	}
+	st := ""
+	for k, s := range ran {
+		if strings.HasSuffix(k, "/"+n) {
+			if st != "" {
+				return "" // two of that name: no telling which
+			}
+			st = s
+		}
+	}
+	return st
 }
 
 // trim cuts a deleted file to its first maxGone lines and what moved out of it, which the other side links to.
@@ -476,7 +866,8 @@ func trim(f *file, runs map[int]run) {
 // parse reads one file's diff into lines numbered as in the new file.
 func parse(p, f, note string) *file {
 	fl := &file{Path: p, Kind: diff.Kind(p), Note: note}
-	_, body, ok := strings.Cut(f, "\n@@")
+	head, body, ok := strings.Cut(f, "\n@@")
+	fl.New = strings.Contains(head+"\n", "\n--- /dev/null\n")
 	if !ok {
 		return fl
 	}
@@ -551,18 +942,21 @@ func tree(files map[string]*file) []*node {
 	return root.Kids
 }
 
+// inert is a changed line outside any declaration that runs nothing: blank, a comment, an import, an import block's.
+var inert = regexp.MustCompile(`^\s*(?:$|//|/\*|\*|#(?:\s|$)|--|import\b|from\s|use\s|using\s|package\s|#include\b|"[^"]*"\s*[,;]?\s*$|\w+\s+"[^"]*"\s*$|[()]\s*$)`)
+
 // minChanges is the lines a file shows before it lists the declarations it changes.
 const minChanges = 60
 
 // changes lists the declarations whose lines the diff adds or removes, past folded runs: the one a hunk's header
-// names, then each one a line of the hunk declares.
-func changes(f *file, runs map[int]run) []change {
+// names, then each one a line of the hunk declares. moves is those whose head only moved here.
+func changes(f *file, runs map[int]run) (cs, moves []change) {
 	if f.Kind != "code" && f.Kind != "test" {
-		return nil
+		return nil, nil
 	}
-	var cs []change
 	at := map[string]int{}
 	heads := map[string]*[2]string{} // name -> its signature before and now, the first the diff shows of each
+	sev := map[string]string{}
 	cur := ""
 	for i := range f.Lines {
 		l := &f.Lines[i]
@@ -587,6 +981,14 @@ func changes(f *file, runs map[int]run) []change {
 				h[0], h[1] = cmp.Or(h[0], before), cmp.Or(h[1], now)
 			}
 		}
+		for _, fd := range l.Findings {
+			if cur != "" && heavier(fd.Severity, sev[cur]) {
+				sev[cur] = fd.Severity
+			}
+		}
+		if head && l.Class == "add" && runs[l.Run].Where != "" && !slices.ContainsFunc(moves, func(c change) bool { return c.Name == cur }) {
+			moves = append(moves, change{Name: cur, ID: "fold-" + strconv.Itoa(l.Run), State: "moved"})
+		}
 		if cur == "" || l.Class == "ctx" || runs[l.Run].Where != "" { // moved code is no change
 			continue
 		}
@@ -601,6 +1003,7 @@ func changes(f *file, runs map[int]run) []change {
 		}
 	}
 	for i, c := range cs {
+		cs[i].Sev = sev[c.Name]
 		if c.added != c.removed {
 			cs[i].State = map[bool]string{true: "new", false: "gone"}[c.added]
 		}
@@ -608,5 +1011,49 @@ func changes(f *file, runs map[int]run) []change {
 			cs[i].sig = h[0] != "" && h[1] != "" && !same(h[0], h[1])
 		}
 	}
-	return cs
+	moves = slices.DeleteFunc(moves, func(m change) bool { _, ok := at[m.Name]; return ok }) // moved and changed is a change
+	return cs, moves
+}
+
+// rank is 1 for a file with a finding that blocks the merge, 0 for the others.
+func rank(f *file) int {
+	for _, fd := range f.Findings {
+		if fd.Severity == "critical" || fd.Severity == "major" {
+			return 1
+		}
+	}
+	for _, l := range f.Lines {
+		for _, fd := range l.Findings {
+			if fd.Severity == "critical" || fd.Severity == "major" {
+				return 1
+			}
+		}
+	}
+	return 0
+}
+
+// maxSource and maxSources are the bytes of one changed file and of all that a report carries for the lines
+// between hunks: past them a file shows its hunks only.
+const maxSource, maxSources = 256 << 10, 2 << 20 // ponytail: the page carries them whole; per gap if pages grow
+
+// Sources is the text at the checkout repo of the files diffText changes and keeps, for the unchanged lines
+// between and around hunks; a file too big, unreadable or not text stays out.
+func Sources(repo, diffText string) map[string]string {
+	out, total := map[string]string{}, 0
+	root, err := os.OpenRoot(repo) // the PR's symlinks don't reach out of the checkout
+	if err != nil {
+		return out
+	}
+	defer root.Close()
+	diff.EachFile(diffText, func(p, _ string) {
+		if fi, err := root.Lstat(filepath.FromSlash(p)); err != nil || !fi.Mode().IsRegular() || fi.Size() > maxSource {
+			return
+		}
+		b, err := root.ReadFile(filepath.FromSlash(p))
+		if err != nil || len(b) > maxSource || total+len(b) > maxSources || bytes.IndexByte(b, 0) >= 0 {
+			return
+		}
+		out[p], total = string(b), total+len(b)
+	})
+	return out
 }

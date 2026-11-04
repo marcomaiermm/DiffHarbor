@@ -241,6 +241,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(repo, raw), Themes: cfg.SyntaxTheme,
 			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, repo),
 			Conflicts: pr.Mergeable != nil && !*pr.Mergeable, Forge: p.Links(),
+			Dropped: r.Dropped, Failed: r.Failed, Tests: r.Tests, Sources: report.Sources(repo, raw),
 		}
 		// what the new code is for, where no doc comment or commit says: one call, the provider's small model
 		if keys, texts := report.Asks(d); len(keys) > 0 {
@@ -427,7 +428,9 @@ func openFindings(threads, open []forge.Thread, r review.Result) []review.Commen
 	var cs []review.Comment
 	for _, t := range threads {
 		if !t.Resolved && !fixed[t.ID] {
-			cs = append(cs, review.Comment{Path: t.Path, Line: t.Line, Body: forge.Clean(t.Body)})
+			c := forge.Parse(forge.Clean(t.Body))
+			c.Path, c.Line = t.Path, t.Line
+			cs = append(cs, c)
 		}
 	}
 	return append(cs, r.Comments...)

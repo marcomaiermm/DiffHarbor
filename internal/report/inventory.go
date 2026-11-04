@@ -3,9 +3,12 @@ package report
 import (
 	"cmp"
 	"diffharbor/internal/review"
+	"diffharbor/internal/text"
 	"fmt"
+	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -21,8 +24,9 @@ type span struct {
 	text, oldText string   // its declaring line, added and removed, trimmed: as a commit has it
 	add, del      []string // its other added and removed lines of code, trimmed
 	id, oldID     string   // its first added line, its first removed one
-	oldLine       int      // the old file's line of oldID
+	line, oldLine int      // the new file's line of id, the old file's of oldID
 	moved, n      int      // of its lines, how many moved and all
+	fds           []*finding
 }
 
 // noCode is a line that changes no behaviour: blank, a closing bracket, a comment. It also keeps a new
@@ -105,6 +109,7 @@ func spans(f *file, runs map[int]run) []*span {
 		switch {
 		case add && s.id == "":
 			s.id = l.ID
+			s.line, _ = strconv.Atoi(l.No)
 		case !add && s.oldID == "":
 			s.oldID, s.oldLine = l.ID, l.Old
 		}
@@ -121,6 +126,7 @@ func spans(f *file, runs map[int]run) []*span {
 			s.del = append(s.del, t)
 		}
 		s.n++
+		s.fds = append(s.fds, l.Findings...)
 		if runs[l.Run].Where != "" {
 			s.moved++
 		}
@@ -138,6 +144,11 @@ type item struct {
 	Doc           string // its doc comment's first sentence
 	Why           string // the subject of the commit that brought it, else the model's line
 	Commit        bool   // Why is a commit's
+	SHA           string // that commit's
+	Sig           string // its declaration without the body, on one line: now, removed before
+	Line          int    // Sig's, in its file then
+	Outside       int    // the places outside the diff's files that name it
+	Sev           *weighed
 	Head, OldHead string // signature changed, renamed: its declaring line now and before
 	Plus, Minus   []string
 	NPlus, NMinus int
@@ -171,25 +182,39 @@ func inventory(ss []*span, syms map[string][]Symbol, commits []review.Commit, ti
 			gs[g].More++
 		}
 	}
-	brought := map[string]string{} // "+line" -> the subject of the last commit that adds it
-	if len(commits) > 1 {          // one commit says what the title says
+	brought := map[string]review.Commit{} // "+line" -> the last commit that adds it
+	if len(commits) > 1 {                 // one commit says what the title says
 		for _, c := range commits {
 			if s := strings.TrimSpace(c.Subject); !wip.MatchString(s) && s != title {
 				for _, l := range c.Lines {
-					brought[l] = s
+					brought[l] = review.Commit{SHA: c.SHA, Subject: s}
 				}
 			}
 		}
 	}
 	row := func(s *span, line string) item {
 		it := item{Name: s.name, Path: s.f.Short, File: s.f.Path, ID: cmp.Or(s.id, s.oldID), key: s.f.Path + "\x00" + s.name}
+		it.Sig, it.Line, it.Sev = cmp.Or(s.head, s.oldHead), s.line, weigh(s.fds)
+		if s.head == "" && s.id == "" { // removed
+			it.Line = s.oldLine
+		}
 		for _, sym := range syms[s.name] {
-			if sym.Path == s.f.Path && sym.Doc != "" {
+			if sym.Path != s.f.Path || s.head == "" && s.id == "" {
+				continue
+			}
+			if sym.Doc != "" {
 				it.Doc = sentence(sym.Doc)
 			}
+			if sym.Exact {
+				it.Outside = sym.NOutside
+			}
+			first, _, _ := strings.Cut(sym.Sig, "\n") // a type's: its fields are the diff's to show
+			it.Sig, it.Line = cmp.Or(it.Sig, text.OneLine(first, 200)), sym.Line
 		}
-		if len(line) > 1 { // "+" alone: no line to tell by
-			it.Why = brought[line]
+		it.Sig = cmp.Or(strings.TrimRight(it.Sig, " \t{"), s.name) // the body's brace: not what callers see
+		if len(line) > 1 {                                         // "+" alone: no line to tell by
+			c := brought[line]
+			it.Why, it.SHA = c.Subject, c.SHA
 		}
 		it.Commit = it.Why != ""
 		return it
@@ -281,7 +306,7 @@ func whyOf(gs []bucket, whys map[string]string) {
 		for i := range g.Items {
 			it := &g.Items[i]
 			if it.Commit && by[it.Why]*2 >= n {
-				it.Why, it.Commit = "", false
+				it.Why, it.Commit, it.SHA = "", false, ""
 			}
 			if it.Why == "" && it.Doc == "" {
 				it.Why = whys[it.key]
@@ -391,4 +416,62 @@ func sentence(doc string) string {
 		doc = doc[:i+1]
 	}
 	return cut(doc, 200)
+}
+
+// apkg is a directory's rows of the inventory: its API before and after.
+type apkg struct {
+	Pkg   string
+	Items []arow
+}
+
+// arow is a row with its mark: "+" new, "~" changed, "→" moved, "−" removed, and what to know of it at a glance.
+type arow struct {
+	item
+	Mark, Word string
+	Info       []string // "behaviour", "from a.go:3, unchanged"
+}
+
+// API is the inventory by directory, each in the order new, changed, moved, removed.
+func (v view) API() []apkg {
+	marks := map[string][2]string{"new": {"+", "new"}, "signature": {"~", "changed"}, "body": {"~", "changed"},
+		"reworked": {"→", "moved"}, "moved": {"→", "moved"}, "removed": {"−", "removed"}}
+	var ps []apkg
+	at := map[string]int{}
+	for _, g := range v.Inventory {
+		for _, it := range g.Items {
+			r := arow{item: it, Mark: marks[g.Key][0], Word: marks[g.Key][1]}
+			switch g.Key {
+			case "signature":
+				r.Info = []string{"signature"}
+			case "body":
+				r.Info = []string{"behaviour"}
+			case "reworked", "moved":
+				from := "from line " + strconv.Itoa(it.OldLine)
+				if it.From != "" {
+					from = "from " + path.Base(it.From) + ":" + strconv.Itoa(it.OldLine)
+				}
+				if it.Was != "" {
+					from += " as " + it.Was
+				}
+				r.Info = []string{from + map[bool]string{true: ", changed", false: ", unchanged"}[g.Key == "reworked"]}
+			}
+			p := path.Dir(it.File)
+			k, ok := at[p]
+			if !ok {
+				k, at[p] = len(ps), len(ps)
+				ps = append(ps, apkg{Pkg: p})
+			}
+			ps[k].Items = append(ps[k].Items, r)
+		}
+	}
+	slices.SortStableFunc(ps, func(a, b apkg) int { return strings.Compare(a.Pkg, b.Pkg) })
+	return ps
+}
+
+// APIMore is the rows past maxItems the inventory leaves out.
+func (v view) APIMore() (n int) {
+	for _, g := range v.Inventory {
+		n += g.More
+	}
+	return n
 }

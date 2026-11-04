@@ -15,7 +15,7 @@ const day = { name: "tokyo-night-day", type: "light", colors: { "editor.backgrou
     { scope: ["keyword.operator", "punctuation.accessor", "constant.character.escape", "string.regexp"], settings: { foreground: "#006a83" } },
     { scope: ["string", "string.quoted", "string.template", "punctuation.definition.string"], settings: { foreground: "#587539" } },
     { scope: ["constant", "constant.numeric", "constant.language", "support.constant", "variable.other.constant"], settings: { foreground: "#b15c00" } },
-    { scope: ["entity.name.function", "support.function", "variable.function", "meta.function-call.generic"], settings: { foreground: "#2e7de9" } },
+    { scope: ["entity.name.function", "support.function", "variable.function", "meta.function-call.generic"], settings: { foreground: "#1f5fc4" } },
     { scope: ["entity.name.type", "entity.name.class", "support.type", "support.class", "entity.other.inherited-class", "entity.name.namespace", "entity.name.package", "storage.type.numeric.go", "storage.type.string.go", "storage.type.boolean.go", "storage.type.byte.go", "storage.type.error.go"], settings: { foreground: "#188092" } },
     { scope: ["variable.parameter", "meta.parameter"], settings: { foreground: "#8c6c3e" } },
     { scope: ["variable.other.property", "variable.other.object.property", "support.variable.property", "meta.property-name", "support.type.property-name", "variable.other.member"], settings: { foreground: "#387068" } },
@@ -82,6 +82,13 @@ const marks = rows => {
   flush();
   return m;
 };
+// a token's text in its color; a name the repo declares opens its card
+const tok = (text, t) => {
+  const s = el("span", "", text);
+  if (t.color) s.style.color = t.color;
+  if (Object.hasOwn(syms, t.content)) { s.classList.add("sym"); s.dataset.sym = t.content; s.tabIndex = -1; }
+  return s;
+};
 const paint = async table => {
   const rows = [...table.querySelectorAll("tr.del, tr.add, tr.ctx, tr.hunk")];
   const code = rows.filter(r => !r.classList.contains("hunk"));
@@ -90,8 +97,23 @@ const paint = async table => {
   if (hl && l) {
     // each hunk on its own and each side on its own: a string or comment that one hunk or the removed side
     // leaves open must not color the rest
+    const inside = st => st.getScopes().some(s => /^(string|comment)\b/.test(s));
     const side = rs => {
-      const ts = hl.codeToTokens(rs.map(r => r.cells[2].textContent).join("\n"), { lang: l, theme }).tokens;
+      const text = rs.map(r => r.cells[2].textContent), opts = { lang: l, theme };
+      let ts = hl.codeToTokens(text.join("\n"), opts).tokens;
+      // a hunk that starts inside a string or comment opened above it: its closing delimiter reads as an opening
+      // one and colors the rest. When the hunk ends inside one opened by a line that is only the delimiter
+      // (a lone ` or */), the lines up to that one are the string, the rest code.
+      if (inside(hl.getLastGrammarState(text.join("\n"), opts))) {
+        let st, at = -1, open;
+        for (const [i, t] of text.entries()) {
+          st = hl.getLastGrammarState(t, { ...opts, grammarState: st });
+          if (!inside(st)) at = -1;
+          else if (at < 0) [at, open] = [i, st];
+        }
+        if (at >= 0 && !/\w/.test(text[at])) ts = [...hl.codeToTokens(text.slice(0, at + 1).join("\n"), { ...opts, grammarState: open }).tokens,
+          ...hl.codeToTokens(text.slice(at + 1).join("\n"), opts).tokens];
+      }
       rs.forEach((r, i) => tokens.set(r, ts[i]));
     };
     try {
@@ -115,11 +137,8 @@ const paint = async table => {
       // cut a token where the changed part starts and ends
       for (const [a, b] of [[at, Math.min(from, at + t.content.length)], [Math.max(at, from), Math.min(to, at + t.content.length)], [Math.max(at, to), at + t.content.length]]) {
         if (b <= a) continue;
-        const s = document.createElement("span");
-        s.textContent = t.content.slice(a - at, b - at);
-        if (t.color) s.style.color = t.color;
-        if (a >= from && b <= to && to > from) s.className = "chg";
-        if (Object.hasOwn(syms, t.content)) { s.classList.add("sym"); s.dataset.sym = t.content; }
+        const s = tok(t.content.slice(a - at, b - at), t);
+        if (a >= from && b <= to && to > from) s.classList.add("chg");
         spans.push(s);
       }
       at += t.content.length;
@@ -133,15 +152,6 @@ const paint = async table => {
 // that names it. Built with textContent, never markup: the repo's text is the PR author's.
 const syms = JSON.parse(document.getElementById("symbols").textContent) || {};
 const pop = document.getElementById("sym"), sheet = document.getElementById("uses");
-// the inventory's lists: which edge has more past it, for the fade
-for (const sc of document.querySelectorAll(".inv-scroll")) {
-  const edges = () => Object.assign(sc.dataset, { above: sc.scrollTop > 1, below: sc.scrollTop + sc.clientHeight < sc.scrollHeight - 1 });
-  sc.addEventListener("scroll", edges, { passive: true });
-  new ResizeObserver(edges).observe(sc); // a hidden tab's list measures once it shows
-  sc.nextElementSibling.addEventListener("click", () => sc.scrollBy({ top: sc.clientHeight * 0.8 }));
-}
-// the inventory's names show the same card; a click still goes to the diff
-for (const a of document.querySelectorAll(".inv-name")) if (Object.hasOwn(syms, a.textContent)) { a.classList.add("sym"); a.dataset.sym = a.textContent; }
 const el = (tag, cls, ...kids) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -196,12 +206,25 @@ const code = async (sig, path) => el("pre", "sym-sig scroll-area", ...(await col
   ...(i ? ["\n"] : []),
   ...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; }),
 ]));
-// code lines outside the diff, the inventory's and the reach list's, colored like it
-for (const c of document.querySelectorAll(".inv-lines code, .reach-item li > code")) {
-  const path = c.closest("[data-path]")?.dataset.path;
-  if (path && lang(path)) colored(c.textContent, path).then(([ts = []]) =>
-    c.replaceChildren(...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; })));
-}
+// code lines outside the diff, the API's and the reach list's, colored like it once their box opens: a hundred
+// signatures colored at load hold the page up; a signature's name shows the card
+// a way's node that is a name alone, a handler passed on, is read as a call: it takes a function's color, the brackets cut off
+const upto = (ts, n) => { let at = 0; return ts.flatMap(t => { const x = t.content.slice(0, Math.max(0, n - at)); at += t.content.length; return x ? [{ ...t, content: x }] : []; }); };
+const tint = box => {
+  for (const c of box.querySelectorAll(".inv-lines code, .reach-item li > code, .asig, .ct-pill code")) {
+    const path = c.closest("[data-path]")?.dataset.path, node = c.matches(".ct-pill code") && !c.textContent.endsWith(")"), text = c.textContent;
+    if (path && lang(path)) colored(node ? text + "()" : text, path).then(([ts = []]) => {
+      if (node) ts = upto(ts, text.length);
+      c.replaceChildren(...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; }));
+      const name = c.dataset.name, s = Object.hasOwn(syms, name ?? "") && [...c.children].find(s => s.textContent.trim() === name);
+      if (s) { s.classList.add("sym"); s.dataset.sym = name; }
+    });
+  }
+};
+for (const box of document.querySelectorAll("#explore details.box"))
+  if (box.open) tint(box); // opened before the colors loaded
+  else box.addEventListener("toggle", () => tint(box), { once: true });
+for (const w of document.querySelectorAll(".ctw")) if (!w.closest("details")) tint(w); // a step's way is always in view
 // the colored tokens of ts between two offsets of their text, split where those fall
 const cut = (ts, a, b) => {
   const out = [];
@@ -263,20 +286,28 @@ const pick = (span, list) => {
   const near = c.filter(s => s.path.startsWith(dir) && !s.path.slice(dir.length).includes("/"));
   return (near.length ? near : c).slice(0, 3);
 };
+// what the PR did to it and the finding on it, as the diff's chips say it
+const chip = (text, data, cls = "") => {
+  const c = el("span", ("chip " + cls).trim(), text);
+  Object.assign(c.dataset, data);
+  return c;
+};
 const head = (s, name) => el("div", "sym-head", kind(s.kind),
-  el("span", "sym-name", ...(s.pkg ? [el("span", "sym-pkg", s.pkg + ".")] : []), name), at(s.path, s.line));
+  el("span", "sym-name", ...(s.pkg ? [el("span", "sym-pkg", s.pkg + ".")] : []), name),
+  ...(s.state === "new" ? [chip("new", { new: "" })] : s.state ? [chip(s.state === "signature" ? "signature changed" : s.state, {}, "changed")] : []),
+  ...(s.sev ? [chip(s.sev === "critical" ? "Blocker" : "Major", { sev: s.sev })] : []),
+  at(s.path, s.line));
 const doc = s => s.doc.replace(/(?<!\n)\n(?!\n)/g, " "); // source line breaks go, paragraphs stay
 let anchor = null, timer = 0;
 const hide = () => { clearTimeout(timer); anchor = null; if (pop.matches(":popover-open")) pop.hidePopover(); };
 const show = async span => {
   clearTimeout(timer);
-  if (anchor === span) return;
+  if (anchor === span || !syms[span.dataset.sym]) return;
   anchor = span;
   const name = span.dataset.sym, list = pick(span, syms[name]);
-  const item = span.closest(".inv-item"), turn = item?.dataset.oldHead; // an inventory row's: what it was
+  const item = span.closest(".arow"), turn = item?.dataset.oldHead; // an API row's: what it was
   const cards = await Promise.all(list.map(async (s, i) => {
     const card = el("div", "sym-card", head(s, name), i || !turn ? await code(s.sig, s.path) : await morph(turn, item.dataset.head, s.path));
-    if (!i && item?.querySelector(".inv-move")) card.append(item.querySelector(".inv-move").cloneNode(true));
     if (s.doc) card.append(el("p", "sym-doc", doc(s)));
     return card;
   }));
@@ -310,12 +341,12 @@ const use = async (r, name) => {
   return link(r.path, r.line, "use", el("span", "no", String(r.line)), c, r.in ? el("span", "in", r.in) : "");
 };
 // Find usages: the declarations, then the places that name it by file
-const open = async span => uses(span.dataset.sym, pick(span, syms[span.dataset.sym]));
+const open = async span => syms[span.dataset.sym] && uses(span.dataset.sym, pick(span, syms[span.dataset.sym]));
 const uses = async (name, list) => {
   hide();
   const s = list[0];
   const body = sheet.querySelector(".sheet-body");
-  sheet.querySelector(".sheet-kicker").replaceChildren(kind(s.kind), ...(s.pkg ? [el("span", "font-mono text-xs text-muted-foreground", "package " + s.pkg)] : []));
+  sheet.querySelector(".sheet-kicker").replaceChildren(kind(s.kind), ...(s.pkg ? [el("span", "font-mono text-xs text-muted-foreground", (s.unit ? s.unit + " " : "") + s.pkg)] : []));
   sheet.querySelector(".sheet-title").textContent = name;
   const refs = s.refs || [];
   sheet.querySelector(".sheet-description").textContent = s.uses
@@ -349,28 +380,9 @@ document.addEventListener("sym:uses", e => {
 });
 document.addEventListener("click", e => {
   const b = e.target.closest("[data-uses]");
+  if (b?.closest("summary")) e.preventDefault(); // the sheet, not the row
   if (b) document.dispatchEvent(new CustomEvent("sym:uses", { detail: { name: b.dataset.uses, path: b.dataset.path } }));
 });
-// the matrix: a cell lights its row and column and says who uses whom with which names
-for (const t of document.querySelectorAll(".deps")) {
-  const say = t.closest(".card-content").querySelector(".deps-say"), rows = [...t.rows], label = i => rows[i].cells[0].textContent.replace(/^\d+/, "");
-  const idle = "Hover a number for the names, click a directory to go to its first file.";
-  say.textContent = idle;
-  t.addEventListener("mouseover", e => {
-    const td = e.target.closest("td");
-    for (const x of t.querySelectorAll(".hl, .at")) x.classList.remove("hl", "at");
-    if (!td) return void (say.textContent = idle);
-    const r = td.parentElement.rowIndex, c = td.cellIndex;
-    for (const row of rows) row.cells[c].classList.add("hl");
-    for (const x of rows[r].cells) x.classList.add("hl");
-    if (!td.dataset.n) return void (say.textContent = idle);
-    td.classList.add("at");
-    const from = label(r), to = label(c);
-    say.replaceChildren(el("b", "", from), from === to ? " within itself: " : td.classList.contains("d-back") ? " uses, in a cycle, " : " uses ",
-      ...(from === to ? [] : [el("b", "", to), ": "]), td.dataset.names);
-  });
-  t.addEventListener("mouseleave", () => { for (const x of t.querySelectorAll(".hl, .at")) x.classList.remove("hl", "at"); say.textContent = idle; });
-}
 sheet.addEventListener("click", e => { if (e.target === sheet || e.target.closest("[data-sheet-close]")) sheet.close(); });
 document.addEventListener("mouseover", e => {
   const s = e.target.closest?.(".sym");
@@ -378,14 +390,20 @@ document.addEventListener("mouseover", e => {
   if (s) timer = setTimeout(() => show(s), 300);
   else if (anchor && !pop.contains(e.target)) timer = setTimeout(hide, 300);
 });
+document.addEventListener("focusin", e => { // a name the keyboard reaches shows its card, Enter its uses
+  const s = e.target.closest?.(".sym");
+  if (s?.matches(":focus-visible")) show(s);
+  else if (anchor && !pop.contains(e.target)) hide();
+});
 document.addEventListener("click", e => {
   const s = e.target.closest(".sym");
+  if (s?.closest("summary")) e.preventDefault(); // the sheet, not the row
   if (s && !s.closest("a")) open(s);
   else if (!pop.contains(e.target)) hide();
 });
 addEventListener("keydown", e => {
   if (e.key === "Escape") hide();
-  else if (e.key === "Enter" && anchor && pop.matches(":popover-open") && !e.target.closest?.("a, button, input, textarea")) {
+  else if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229 && anchor && pop.matches(":popover-open") && !e.target.closest?.("a, button, input, textarea")) {
     e.preventDefault();
     open(anchor);
   }
@@ -398,6 +416,7 @@ addEventListener("scroll", e => { if (anchor && !pop.contains(e.target)) hide();
 const LH = 20, GW = 40, NS = "http://www.w3.org/2000/svg";
 const splitOn = () => document.documentElement.dataset.diff === "split";
 const lineOf = new WeakMap(); // a row of the table -> what shows it side by side
+let keep = null; // the gap button clicked side by side, to focus again once it is drawn anew
 const clone = node => [...node.childNodes].map(n => n.cloneNode(true));
 const split = table => {
   const box = el("div", "split");
@@ -436,14 +455,21 @@ const split = table => {
       lineOf.set(row, b);
     } else if (row.matches("tr.gone") || fold && !fold.classList.contains("open")) {
       continue;
+    } else if (row.matches("tr.gap")) { // its buttons click the table's
+      flush();
+      const bar = el("div", "gap-bar split-gap", ...clone(row.querySelector(".gap-bar")));
+      bar.addEventListener("click", e => {
+        const i = [...bar.querySelectorAll("button")].indexOf(e.target.closest("button"));
+        if (i >= 0) keep = { table, row, i, prev: row.previousElementSibling, body: row.parentElement };
+        (i < 0 ? row.querySelector(".gap-bar") : row.querySelectorAll("button")[i]).click();
+      });
+      box.append(bar);
+      lineOf.set(row, bar);
     } else if (row.matches("tr.hunk")) {
       flush();
-      const orig = row.querySelector(".hunk-seen"), b = el("button", "hunk-seen", ...clone(orig));
-      b.type = "button";
-      b.title = orig.title;
-      b.setAttribute("aria-pressed", orig.getAttribute("aria-pressed"));
+      const orig = row.querySelector(".hunk-seen"), b = orig.cloneNode(true);
       b.addEventListener("click", e => { e.stopPropagation(); orig.click(); split(table); });
-      const bar = el("div", "split-bar", b, el("span", "min-w-0 truncate", row.querySelector(".truncate").textContent));
+      const bar = el("div", "split-bar", ...[...row.querySelector(".hunk-in").children].map(c => c === orig ? b : c.cloneNode(true)));
       box.append(bar);
       lineOf.set(row, bar);
     } else if (row.matches("tr.ctx")) {
@@ -473,6 +499,16 @@ const split = table => {
   flush();
   table.parentElement.querySelector(":scope > .split")?.remove();
   table.after(box);
+  if (keep?.table === table) {
+    if (keep.row.isConnected) {
+      const bs = [...lineOf.get(keep.row)?.querySelectorAll("button") || []];
+      (bs[keep.i]?.hidden ? bs.findLast(b => !b.hidden) : bs[keep.i])?.focus();
+    } else { // the gap is gone: the first line it showed
+      const n = lineOf.get(keep.prev ? keep.prev.nextElementSibling : keep.body.rows[0]);
+      if (n) { n.tabIndex = -1; n.focus(); }
+    }
+    keep = null;
+  }
 };
 const tables = [...document.querySelectorAll("table[data-path]")];
 const wideEnough = matchMedia("(min-width: 1024px)");
@@ -488,9 +524,16 @@ if (splitOn()) {
   if (location.hash) dispatchEvent(new HashChangeEvent("hashchange")); // the jump on load hit the hidden table
 }
 
+const painted = new WeakSet();
 const seen = new IntersectionObserver(es => {
-  for (const e of es) if (e.isIntersecting) { seen.unobserve(e.target); paint(e.target.querySelector("table")); }
+  for (const e of es) if (e.isIntersecting) { seen.unobserve(e.target); painted.add(e.target.querySelector("table")); paint(e.target.querySelector("table")); }
 }, { rootMargin: "800px" });
+// lines a gap showed: colored on their own once the table is (else with it), side by side again
+document.addEventListener("diff:rows", ({ detail: { table, rows } }) => {
+  const done = painted.has(table) && lang(table.dataset.path) ? colored(rows.map(r => r.cells[2].textContent).join("\n"), table.dataset.path).then(ls =>
+    rows.forEach((r, i) => r.cells[2].replaceChildren(...(ls[i] || []).map(t => tok(t.content, t))))) : Promise.resolve();
+  done.then(() => { if (splitOn()) split(table); });
+});
 document.querySelectorAll(".diff").forEach(d => seen.observe(d));
 </script>
 {{end}}

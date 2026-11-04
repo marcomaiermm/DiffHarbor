@@ -465,6 +465,10 @@ func Threads(repo string, n int, token string) ([]forge.Thread, error) {
 									Line         int    `json:"line"`
 									OriginalLine int    `json:"originalLine"`
 									Body         string `json:"body"`
+									Author       struct {
+										Type  string `json:"__typename"`
+										Login string `json:"login"`
+									} `json:"author"`
 								} `json:"nodes"`
 							} `json:"comments"`
 						} `json:"nodes"`
@@ -473,7 +477,7 @@ func Threads(repo string, n int, token string) ([]forge.Thread, error) {
 			} `json:"repository"`
 		}
 		err := graphql(token, `query($o:String!,$r:String!,$n:Int!,$a:String){repository(owner:$o,name:$r){pullRequest(number:$n){
-reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{databaseId path line originalLine body}}}}}}}`,
+reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{databaseId path line originalLine body author{__typename login}}}}}}}}`,
 			map[string]any{"o": owner, "r": name, "n": n, "a": after}, &d)
 		if err != nil {
 			return nil, err
@@ -484,6 +488,9 @@ reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isRes
 				continue
 			}
 			c := t.Comments.Nodes[0]
+			if a := c.Author; a.Type != "Bot" || strings.TrimSuffix(a.Login, "[bot]") != Slug { // the mark is copyable, the author isn't
+				continue
+			}
 			ts = append(ts, forge.Thread{ID: t.ID, Comment: c.DatabaseID, Resolved: t.IsResolved, Path: c.Path, Line: c.Line, Original: c.OriginalLine, Body: c.Body})
 		}
 		if !rt.PageInfo.HasNextPage {

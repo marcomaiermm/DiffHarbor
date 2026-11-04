@@ -11,6 +11,7 @@ import (
 	"diffharbor/internal/text"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"maps"
 	"os"
@@ -124,6 +125,14 @@ func noScripts(cmd []string, yarnVersion string) []string {
 // Script is a repo's own check: Name its path in the repo, File the copy that runs (from the base branch).
 type Script struct{ Name, File string }
 
+// Tests is what the test runs among the checks report: each test's outcome by its name as the runner prints it
+// ("TestTotal", "TestTotal/discount"), "pass", "fail" or "skip", and the packages that do not build. Empty when
+// no test ran. ponytail: go test only; vitest and jest print no per-test result here, a JSON reporter if wanted.
+type Tests struct {
+	Ran    map[string]string `json:"ran,omitempty"`
+	Broken []string          `json:"broken,omitempty"`
+}
+
 // Run runs the built-in checks for files, then the repo's own scripts with the files after "--". patch is
 // the diff under review as a file. JS and Go checks run per package (nearest package.json or go.mod), so a
 // monorepo's apps get theirs; tests(file) says whether the tests of file's package run. Installs skip lifecycle
@@ -131,11 +140,12 @@ type Script struct{ Name, File string }
 // read from regs, through the vault until Run returns.
 //
 //nolint:gocognit,gocyclo // the checks step by step, each step a few lines
-func Run(ctx context.Context, repo string, scripts []Script, patch string, files []string, tests func(string) bool, installScripts bool, regs []Registry) string {
+func Run(ctx context.Context, repo string, scripts []Script, patch string, files []string, tests func(string) bool, installScripts bool, regs []Registry) (string, Tests) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	started := time.Now()
 	var out strings.Builder
+	var ran Tests
 	env := append(proc.ToolEnv(), "NO_COLOR=1")
 	if h := os.Getenv("DOCKER_HOST"); h != "" { // dind for testcontainers, see compose.yml
 		env = append(env, "DOCKER_HOST="+h)
@@ -145,12 +155,18 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 		fmt.Fprintf(&out, "\n### npm registries\n%s\n", err)
 	}
 	env = append(env, regEnv...)
-	// in runs a tool in dir (repo-relative) and returns stdout and stderr.
+	// in runs a tool in dir (repo-relative) and returns stdout and stderr. tee, when set, gets each line whole,
+	// the ones the cap drops from the middle too.
+	var tee func(string)
 	in := func(dir string) func(string, ...string) string {
 		return func(name string, args ...string) string {
 			b := proc.Capped{N: 1 << 20}
+			var w io.Writer = &b
+			if tee != nil {
+				w = io.MultiWriter(&b, &lineWriter{f: tee})
+			}
 			c := proc.Command(ctx, filepath.Join(repo, dir), env, name, args...)
-			c.Stdout, c.Stderr = &b, &b
+			c.Stdout, c.Stderr = w, w
 			_ = c.Run()
 			return b.String()
 		}
@@ -336,8 +352,10 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 		section("deadcode (unreachable functions the change added)"+where, grep(run("deadcode", "-test", "./..."), onAdded), 40)
 		// -short skips what tests mark as slow; testcontainers get Docker from dind.
 		if len(tested) > 0 {
-			section("go test -short (changed packages; failed tests only)"+where,
-				testFailures(run("go", append([]string{"test", "-json", "-short", "-count=1", "-timeout=4m"}, tested...)...)), 80)
+			tee = func(l string) { testRuns(l, &ran) } // a big run's middle is past the cap
+			js := run("go", append([]string{"test", "-json", "-short", "-count=1", "-timeout=4m"}, tested...)...)
+			tee = nil
+			section("go test -short (changed packages; failed tests only)"+where, testFailures(js), 80)
 		}
 	}
 
@@ -410,7 +428,49 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 		s += "\n(checks timed out)"
 	}
 	log.Printf("checks: %d bytes in %s", len(s), time.Since(started).Round(time.Second))
-	return text.Truncate(s, 12_000)
+	return text.Truncate(s, 12_000), ran
+}
+
+// testRuns adds what go test -json reports to t: a test's outcome, a package that does not build. A test that ran
+// in two packages under one name fails if either fails.
+// lineWriter hands f each line as it is written.
+type lineWriter struct {
+	buf []byte
+	f   func(string)
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			return len(p), nil
+		}
+		w.f(string(w.buf[:i]))
+		w.buf = w.buf[i+1:]
+	}
+}
+
+func testRuns(js string, t *Tests) {
+	for l := range strings.SplitSeq(js, "\n") {
+		var e struct{ Action, Package, ImportPath, Test string }
+		if json.Unmarshal([]byte(l), &e) != nil {
+			continue
+		}
+		switch {
+		case e.Action == "build-fail" || e.Action == "fail" && e.Test == "" && strings.Contains(e.Package, "[build failed]"):
+			if p, _, _ := strings.Cut(cmp.Or(e.ImportPath, e.Package), " "); !slices.Contains(t.Broken, p) { // "q [q.test]"
+				t.Broken = append(t.Broken, p)
+			}
+		case e.Test != "" && (e.Action == "pass" || e.Action == "fail" || e.Action == "skip"):
+			if t.Ran == nil {
+				t.Ran = map[string]string{}
+			}
+			if t.Ran[e.Test] != "fail" {
+				t.Ran[e.Test] = e.Action
+			}
+		}
+	}
 }
 
 // testFailures keeps what go test -json printed for failed tests, builds and packages: a failed package prints

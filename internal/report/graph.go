@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 )
 
 // maxExternal is the changed declarations of other steps a step's graph shows; past it, none. Past maxStep
 // declarations a step's graph is too large to read even zoomed, past maxDirs directories the PR's matrix: none.
-// maxAffected is the changed declarations "outside the PR" lists, maxPairs the names a matrix cell spells out.
-const maxExternal, maxStep, maxDirs, maxAffected, maxPairs = 12, 60, 40, 30, 8
+// maxAffected is the changed declarations "outside the PR" lists.
+const maxExternal, maxStep, maxDirs, maxAffected = 12, 60, 40, 30
 
 // flow is a graph for the page's cytoscape: a box per file, in it the changed declarations, an edge from one to
 // each it names.
@@ -140,37 +141,32 @@ func build(all []changed, used map[int]bool, edges []edge, i int) *flow {
 	return g
 }
 
-// deps is which changed directories use which: a row's changed code calls or names a column's. Ordered so that a
-// use is right of the diagonal; one left of it is a cycle's.
+// deps is which changed directories use which: a directory's changed code calls or names another's.
 type deps struct {
-	Dirs   []dep
+	New    []newDep
+	Old    []string // "a → b": every such use joins declarations that were there before the PR
 	Cycles int      // groups of directories that use each other
-	Top    []string // the heaviest uses between two: "a → b (n)"
 }
 
-type dep struct {
-	Label, Href string // Href: its first changed file
-	Cells       []cell
-}
-
-type cell struct {
-	N     int    // the row's changed declarations' uses of the column's
-	Self  bool   // the diagonal: uses within the directory
-	Back  bool   // left of the diagonal: the column uses the row too, through others maybe
-	Names string // the first few "a → b"
+// newDep is a use between two directories that only declarations the PR adds make: new to the PR's code, maybe
+// not to the directories, whose other code the index doesn't read here.
+type newDep struct {
+	From, To string
+	Why      string // "Handle uses Save", and how many more
+	Cycle    bool   // To uses From back, through others maybe
 }
 
 // matrix is the PR's changed directories and their uses of each other; nil without codegraph's index, with no use
-// between two of them or past maxDirs: 40 columns is what a page holds.
+// between two of them or past maxDirs.
 func matrix(steps []step, syms map[string][]Symbol) *deps {
 	all, byDecl := decls(steps)
 	edges, _ := arrows(all, byDecl, syms, -1)
 	dirOf := func(f *file) string { return path.Dir(f.Short) }
 	var dirs []string
-	first := map[string]*file{}
+	seen := map[string]bool{}
 	for _, d := range all {
-		if k := dirOf(d.f); first[k] == nil {
-			first[k], dirs = d.f, append(dirs, k)
+		if k := dirOf(d.f); !seen[k] {
+			seen[k], dirs = true, append(dirs, k)
 		}
 	}
 	slices.Sort(dirs)
@@ -182,21 +178,24 @@ func matrix(steps []step, syms map[string][]Symbol) *deps {
 		at[d] = k
 	}
 	n := len(dirs)
-	w, pairs := make([][]int, n), make([][][]string, n)
+	w, fresh, pairs := make([][]int, n), make([][]int, n), make([][][]string, n)
 	for r := range n {
-		w[r], pairs[r] = make([]int, n), make([][]string, n)
+		w[r], fresh[r], pairs[r] = make([]int, n), make([]int, n), make([][]string, n)
 	}
 	cross := false
 	for _, e := range edges {
 		a, b := at[dirOf(all[e.a].f)], at[dirOf(all[e.b].f)]
 		w[a][b]++
-		pairs[a][b] = append(pairs[a][b], all[e.a].c.Name+" → "+all[e.b].c.Name)
+		if all[e.a].c.State == "new" || all[e.b].c.State == "new" {
+			fresh[a][b]++
+		}
+		pairs[a][b] = append(pairs[a][b], all[e.a].c.Name+" uses "+all[e.b].c.Name)
 		cross = cross || a != b
 	}
 	if !cross {
 		return nil
 	}
-	ord, reach := order(w)
+	_, reach := order(w)
 	m := &deps{}
 	counted := make([]bool, n) // a cycle is counted by its first directory
 	for i := range n {
@@ -210,30 +209,20 @@ func matrix(steps []step, syms map[string][]Symbol) *deps {
 			m.Cycles++
 		}
 	}
-	type use struct{ a, b, n int }
-	var top []use
 	for a := range n {
 		for b := range n {
-			if a != b && w[a][b] > 0 {
-				top = append(top, use{a, b, w[a][b]})
+			switch {
+			case a == b || w[a][b] == 0:
+			case fresh[a][b] == w[a][b]:
+				why := pairs[a][b][0]
+				if k := len(pairs[a][b]) - 1; k > 0 {
+					why += fmt.Sprintf(" and %d more", k)
+				}
+				m.New = append(m.New, newDep{dirs[a], dirs[b], why, reach[b][a]})
+			default:
+				m.Old = append(m.Old, dirs[a]+" → "+dirs[b])
 			}
 		}
-	}
-	slices.SortStableFunc(top, func(x, y use) int { return cmp.Compare(y.n, x.n) })
-	for _, u := range top[:min(len(top), 3)] {
-		m.Top = append(m.Top, fmt.Sprintf("%s → %s (%d)", dirs[u.a], dirs[u.b], u.n))
-	}
-	for ri, r := range ord {
-		row := dep{Label: dirs[r], Href: "#" + first[dirs[r]].Path}
-		for ci, c := range ord {
-			ps := pairs[r][c]
-			names := strings.Join(ps[:min(len(ps), maxPairs)], ", ")
-			if len(ps) > maxPairs {
-				names += fmt.Sprintf(" +%d", len(ps)-maxPairs)
-			}
-			row.Cells = append(row.Cells, cell{N: w[r][c], Self: r == c, Back: w[r][c] > 0 && ci < ri, Names: names})
-		}
-		m.Dirs = append(m.Dirs, row)
 	}
 	return m
 }
@@ -316,4 +305,132 @@ func reach(steps []step, syms map[string][]Symbol) []affected {
 		return cmp.Or(cmp.Compare(b.Why, a.Why), cmp.Compare(b.N, a.N)) // "signature changed" before ""
 	})
 	return out[:min(len(out), maxAffected)]
+}
+
+// maxTests is the tests a step names; past them, how many more.
+const maxTests = 8
+
+// tested is the tests that reach what the step changes through codegraph's uses, its callers' and theirs, nearest
+// first; more past maxTests, partial when a walk stopped short: at least that many. What it changes: the declarations
+// the index puts its changed lines in, and those Changes names. untested, that no test was found, only when every
+// file is code and shown whole, nothing is removed (the base's tests aren't the head's), every changed line is in a
+// declaration of the index or runs nothing (inert), and not even a guess by name finds a test: see cgTests.
+func tested(st step, syms map[string][]Symbol) (tests []string, more int, partial, untested bool, bare []string) {
+	in := map[string][]*Symbol{} // the index's declarations by file
+	names := map[*Symbol]string{}
+	for name := range syms {
+		for i := range syms[name] {
+			s := &syms[name][i]
+			names[s] = name
+			if s.Exact && s.To > 0 {
+				in[s.Path] = append(in[s.Path], s)
+			}
+		}
+	}
+	// around is the innermost declaration of p that holds lines a to b
+	around := func(p string, a, b int) *Symbol {
+		var best *Symbol
+		for _, s := range in[p] {
+			if s.From <= a && b <= s.To && (best == nil || s.From > best.From) {
+				best = s
+			}
+		}
+		return best
+	}
+	var touched []*Symbol // the claim's: the declarations its changed lines are in
+	var named []*Symbol   // and those Changes names, for the list
+	add := func(to *[]*Symbol, s *Symbol) {
+		if s != nil && !slices.Contains(*to, s) {
+			*to = append(*to, s)
+		}
+	}
+	untested = true
+	for _, f := range st.Files {
+		untested = untested && f.Kind == "code" && f.Cut == 0
+		for _, c := range f.Changes {
+			untested = untested && c.State != "gone"
+			for i, s := range syms[c.Name] {
+				if s.Exact && s.Path == f.Path {
+					add(&named, &syms[c.Name][i])
+				}
+			}
+		}
+		at := 0 // the new side's line before the next
+		for _, l := range f.Lines {
+			var s *Symbol
+			switch l.Class {
+			case "hunk":
+				if m := hunk.FindStringSubmatch(l.Text); m != nil {
+					n, _ := strconv.Atoi(m[2])
+					at = n - 1
+				}
+				continue
+			case "ctx":
+				at, _ = strconv.Atoi(l.No)
+				continue
+			case "add":
+				at, _ = strconv.Atoi(l.No)
+				s = around(f.Path, at, at)
+			case "del": // between at and at+1: in a declaration that holds both
+				s = around(f.Path, at, at+1)
+			default:
+				continue
+			}
+			if s == nil {
+				untested = untested && inert.MatchString(l.Text)
+			}
+			add(&touched, s)
+		}
+	}
+	for _, s := range slices.Concat(touched, named) {
+		partial = partial || s.Partial
+		for _, t := range s.Tests {
+			if !slices.Contains(tests, t) {
+				tests = append(tests, t)
+			}
+		}
+	}
+	untested = untested && len(touched) > 0 && len(tests) == 0 && !slices.ContainsFunc(touched, func(s *Symbol) bool { return !s.Untested })
+	for _, s := range touched {
+		if s.Untested && len(s.Tests) == 0 && !slices.Contains(bare, names[s]) {
+			bare = append(bare, names[s])
+		}
+	}
+	if len(tests) > maxTests {
+		more, tests = len(tests)-maxTests, tests[:maxTests]
+	}
+	return tests, more, partial, untested, bare
+}
+
+// cycle is two directories the PR's changed declarations make use each other, one use each way: "Validate →
+// MaxDiscount".
+type cycle struct{ A, B, AB, BA string }
+
+// cycles is the pairs of directories that use each other through the changed declarations, a use in step i among
+// them; nil without codegraph's index.
+func cycles(steps []step, i int, syms map[string][]Symbol) []cycle {
+	all, byDecl := decls(steps)
+	edges, _ := arrows(all, byDecl, syms, -1)
+	type pair struct{ a, b string }
+	first, mine := map[pair]string{}, map[pair]bool{}
+	for _, e := range edges {
+		p := pair{path.Dir(all[e.a].f.Short), path.Dir(all[e.b].f.Short)}
+		if p.a == p.b {
+			continue
+		}
+		if first[p] == "" {
+			first[p] = all[e.a].c.Name + " → " + all[e.b].c.Name
+		}
+		if all[e.a].step == i || all[e.b].step == i {
+			mine[p], mine[pair{p.b, p.a}] = true, true
+		}
+	}
+	var cs []cycle
+	for p, ab := range first {
+		if ba := first[pair{p.b, p.a}]; ba != "" && p.a < p.b && mine[p] {
+			cs = append(cs, cycle{p.a, p.b, ab, ba})
+		}
+	}
+	slices.SortFunc(cs, func(x, y cycle) int { return cmp.Or(strings.Compare(x.A, y.A), strings.Compare(x.B, y.B)) })
+	return cs
 }

@@ -74,7 +74,7 @@ func TestNpmThroughVault(t *testing.T) {
 	os.WriteFile(filepath.Join(repo, "a.js"), nil, 0o644)
 
 	regs := []checks.Registry{{Scope: "", URL: up.URL + "/npm/", Token: "tokA"}, {Scope: "@corp", URL: up.URL + "/npm/internal/", Token: "tokB"}}
-	out := checks.Run(context.Background(), repo, nil, "", []string{"a.js"}, func(string) bool { return false }, false, regs)
+	out, _ := checks.Run(context.Background(), repo, nil, "", []string{"a.js"}, func(string) bool { return false }, false, regs)
 	for _, p := range []string{"node_modules/a/package.json", "node_modules/@corp/b/package.json"} {
 		if _, err := os.Stat(filepath.Join(repo, p)); err != nil {
 			t.Errorf("not installed: %s\n%s", p, out)

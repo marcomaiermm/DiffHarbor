@@ -3,6 +3,7 @@ package report
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"diffharbor/internal/diff"
 	"go/ast"
 	"go/parser"
@@ -18,9 +19,10 @@ import (
 // Symbol is a declaration the page explains when a name in the diff is hovered: what it is, where it lives,
 // what names it elsewhere.
 type Symbol struct {
-	Kind  string   `json:"kind"`          // func, method, type, field, const, var; other languages: the keyword
-	Pkg   string   `json:"pkg,omitempty"` // Go: the package, to tell pkg.Name apart
-	Sig   string   `json:"sig"`           // the declaration without its body
+	Kind  string   `json:"kind"`           // function, method, type, constant, variable, "field of T", "method of T"
+	Pkg   string   `json:"pkg,omitempty"`  // the unit it is declared in, to tell pkg.Name apart; known for Go only
+	Unit  string   `json:"unit,omitempty"` // what the language calls Pkg: "package"
+	Sig   string   `json:"sig"`            // the declaration without its body
 	Doc   string   `json:"doc,omitempty"`
 	Path  string   `json:"path"`
 	Line  int      `json:"line"`
@@ -29,10 +31,33 @@ type Symbol struct {
 	Files int      `json:"files"`           // in how many files
 	Here  []string `json:"here,omitempty"`  // exact: the lines of the diff's files that name it, path:line
 	Exact bool     `json:"exact,omitempty"` // its uses are codegraph's, resolved; else lines that name it
+	State string   `json:"state,omitempty"` // what the PR did to it: "new", "changed", "signature"; "" nothing
+	Sev   string   `json:"sev,omitempty"`   // the heaviest finding on it that matters: "critical", "major"
 	Calls []string `json:"-"`               // exact: the declarations it names, path NUL name: the page's graphs
 	// exact: the first maxRefs places outside the diff's files that name it, and how many: what the change reaches
 	Outside  []Ref `json:"-"`
 	NOutside int   `json:"-"`
+	// exact, in the diff's files: the tests that reach it through the index's uses, nearest first: "a_test.go
+	// TestSave"; Partial, past what a walk reads. Untested: no test reaches it, not even by name: see cgTests.
+	Tests             []string `json:"-"`
+	Partial, Untested bool     `json:"-"`
+	From, To          int      `json:"-"` // exact: its lines by the index, from a decorator or a doc maybe
+	Ways              []Way    `json:"-"` // exact, in the diff's files: how the code reaches it, see cgTests
+}
+
+// Way is how the code reaches a declaration: from a route it registers ("GET", "/x/{id}", where), or from a
+// declaration nothing calls but a runner ("CALL", its name, where), down a chain of calls.
+type Way struct {
+	Method, Route, Path string
+	Line                int
+	Chain               []Hop // the first it runs first, the declaration last
+}
+
+// Hop is a declaration on a way, and the line of the one before that names it (In, At; 0 when unknown).
+type Hop struct {
+	Name, Path, In string
+	Line, At       int
+	Call           string `json:"-"` // how that line names it: "inv.Validate()", see callAt; "" unknown
 }
 
 // Ref is a line that names a symbol, and the declaration it sits in.
@@ -42,6 +67,9 @@ type Ref struct {
 	In   string `json:"in,omitempty"`
 	Text string `json:"text"` // the line, trimmed and cut
 }
+
+// gofmt prints as gofmt does: tabs indent, spaces align, so a column stays a column at any tab width.
+var gofmt = printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
 
 const (
 	maxRefs, maxSymbols = 20, 3000
@@ -136,6 +164,7 @@ func Symbols(repo, diffText string) map[string][]Symbol {
 			changed[p] = true
 		}
 		idx.exact(repo, changed, syms)
+		idx.tests(repo, changed, syms)
 	}
 	return syms
 }
@@ -176,6 +205,13 @@ func (ms mentions) scan(path string, src []byte, wanted map[string]bool) {
 	}
 }
 
+// kinds names a declaration's keyword in words no language owns: a Go func and a Python def are both a function.
+var kinds = map[string]string{
+	"func": "function", "function": "function", "fn": "function", "def": "function",
+	"class": "type", "struct": "type", "interface": "type", "trait": "type", "enum": "type",
+	"var": "variable", "let": "variable", "const": "constant",
+}
+
 var skipDir = map[string]bool{"node_modules": true, "vendor": true, "dist": true, "build": true, "target": true, "out": true, "testdata": true}
 
 // goDecls adds the package-level declarations of a Go file, and the fields and methods of its types.
@@ -192,7 +228,7 @@ func goDecls(path string, src []byte, wanted map[string]bool, syms map[string][]
 		}
 		var b strings.Builder
 		b.WriteString(prefix)
-		_ = printer.Fprint(&b, fset, sig)
+		_ = gofmt.Fprint(&b, fset, sig)
 		doc := ""
 		for _, d := range docs {
 			if doc = strings.TrimSpace(d.Text()); doc != "" {
@@ -200,7 +236,7 @@ func goDecls(path string, src []byte, wanted map[string]bool, syms map[string][]
 			}
 		}
 		syms[name.Name] = append(syms[name.Name], Symbol{
-			Kind: kind, Pkg: pkg, Sig: cut(b.String(), maxSig), Doc: cut(doc, maxDoc),
+			Kind: cmp.Or(kinds[kind], kind), Pkg: pkg, Unit: "package", Sig: cut(b.String(), maxSig), Doc: cut(doc, maxDoc),
 			Path: path, Line: fset.Position(name.Pos()).Line,
 		})
 	}
@@ -271,7 +307,7 @@ func lineDecls(path string, src []byte, wanted map[string]bool, syms map[string]
 			doc = append([]string{strings.TrimSpace(strings.TrimSuffix(strings.TrimLeft(t, "/*#-\" "), "*/"))}, doc...)
 		}
 		syms[m[2]] = append(syms[m[2]], Symbol{
-			Kind: strings.TrimSuffix(m[1], "*"), Sig: cut(sig, maxSig),
+			Kind: cmp.Or(kinds[strings.TrimSuffix(m[1], "*")], m[1]), Sig: cut(sig, maxSig),
 			Doc: cut(strings.TrimSpace(strings.Join(doc, "\n")), maxDoc), Path: path, Line: i + 1,
 		})
 	}
