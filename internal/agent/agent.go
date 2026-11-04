@@ -117,13 +117,16 @@ var vaulted = map[string]struct {
 	"amazon-bedrock": {"", []string{"model/*/converse-stream"}},
 }
 
+// vaultURL is vault.URL; tests that start the vault turn it off for the others, as Start can't be undone.
+var vaultURL = vault.URL
+
 // upstream is the API provider's passes reach through the vault; "" = they get the key itself: no vault (not root),
 // a provider the vault doesn't know, or one that authenticates another way. The ChatGPT login: Pi treats only
 // requests to api.openai.com itself as ChatGPT's (pi-ai api/openai-responses.js isChatGPTSignIn). Bedrock's IAM keys:
 // SigV4 signs the host.
 func upstream(provider string) string {
 	v, ok := vaulted[provider]
-	if !ok || vault.URL() == "" || os.Getenv(KeyEnv(provider)) == "" || !providerFor(provider).keyed() {
+	if !ok || vaultURL() == "" || os.Getenv(KeyEnv(provider)) == "" || !providerFor(provider).keyed() {
 		return ""
 	}
 	switch provider {
@@ -140,7 +143,7 @@ func upstream(provider string) string {
 func azureBase(u string) string {
 	p, err := url.Parse(strings.TrimRight(strings.TrimSpace(u), "/"))
 	if err != nil {
-		return ""
+		return u // the vault refuses it: the pass fails, rather than Pi getting the key
 	}
 	h := p.Hostname()
 	azure := strings.HasSuffix(h, ".openai.azure.com") || strings.HasSuffix(h, ".cognitiveservices.azure.com") || strings.HasSuffix(h, ".ai.azure.com")
@@ -250,7 +253,7 @@ func proxies(f string) error {
 	for _, r := range Matrix {
 		switch u := os.Getenv(envName(r.Name) + "_BASE_URL"); {
 		case upstream(r.Name) != "":
-			providers[r.Name] = map[string]string{"baseUrl": vault.URL() + "/" + r.Name}
+			providers[r.Name] = map[string]string{"baseUrl": vaultURL() + "/" + r.Name}
 		case u != "" && r.Proxy:
 			providers[r.Name] = map[string]string{"baseUrl": u}
 		}

@@ -175,15 +175,9 @@ func name(uid uint32) {
 // uidOf is repo's uid in the root-only file f, a new one for a repo f doesn't have: one past the highest, so no two
 // repos share one, and a repo keeps its uid (and its cache) across restarts.
 func uidOf(f, repo string) (uint32, error) {
-	m := map[string]uint32{}
-	b, err := os.ReadFile(f) //nolint:gosec // DataDir's
-	if err == nil {
-		err = json.Unmarshal(b, &m)
-	} else if errors.Is(err, os.ErrNotExist) {
-		err = nil
-	}
-	if err != nil { // never start over: the next repo would get a uid that is another's
-		return 0, fmt.Errorf("repo uids: %w", err)
+	m, err := uids(f)
+	if err != nil {
+		return 0, err
 	}
 	if uid, ok := m[repo]; ok {
 		return uid, nil
@@ -193,7 +187,7 @@ func uidOf(f, repo string) (uint32, error) {
 		uid = max(uid, u+1)
 	}
 	m[repo] = uid
-	b, _ = json.Marshal(m)
+	b, _ := json.Marshal(m)
 	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
 		return 0, err
 	}
@@ -228,6 +222,21 @@ func (c *Capped) String() string {
 		return string(c.head) + "\n[… cut …]\n" + string(t[len(t)-c.N:])
 	}
 	return string(c.head) + string(c.tail)
+}
+
+// uids is the repos' uids in f; none when there is no f yet.
+func uids(f string) (map[string]uint32, error) {
+	m := map[string]uint32{}
+	b, err := os.ReadFile(f) //nolint:gosec // DataDir's
+	if err == nil {
+		err = json.Unmarshal(b, &m)
+	} else if errors.Is(err, os.ErrNotExist) {
+		err = nil
+	}
+	if err != nil { // never start over: the next repo would get a uid that is another's
+		return nil, fmt.Errorf("repo uids: %w", err)
+	}
+	return m, nil
 }
 
 // ReadFile reads p. ReadFile, WriteFile and Remove touch the checkout and work dir as the job's user when we're root:
@@ -269,13 +278,21 @@ func Clean() error {
 	if !AsPi {
 		return os.RemoveAll(workDir())
 	}
-	// Clean takes CacheDir over and empties it: never a dir with other things in it, e.g. DataDir.
-	if rel, err := filepath.Rel(CacheDir, DataDir); err != nil || rel == "." || !strings.HasPrefix(rel, "..") {
+	// Clean takes CacheDir over and empties it: never a dir with other things in it, e.g. DataDir, also by a symlink.
+	if rel, err := filepath.Rel(resolved(CacheDir), resolved(DataDir)); err != nil || rel == "." || !strings.HasPrefix(rel, "..") {
 		return fmt.Errorf("CACHE_DIR %s holds DATA_DIR %s: give each its own dir", CacheDir, DataDir)
 	}
 	// CacheDir was node's: root's now, or a repo's user could swap another's cache dir for a symlink.
 	if err := errors.Join(os.MkdirAll(CacheDir, 0o755), os.Lchown(CacheDir, 0, 0), os.Chmod(CacheDir, 0o755)); err != nil {
 		return err
+	}
+	m, err := uids(filepath.Join(DataDir, "uids.json"))
+	if err != nil {
+		return err
+	}
+	keep := map[int]bool{1000: true}
+	for _, u := range m {
+		keep[int(u)] = true
 	}
 	ds, err := os.ReadDir(CacheDir)
 	if err != nil {
@@ -285,8 +302,10 @@ func Clean() error {
 	for _, d := range ds {
 		p := filepath.Join(CacheDir, d.Name())
 		fi, err := os.Lstat(p)
-		if err == nil && fi.IsDir() && jobUser(owner(fi)) && d.Name() == strconv.Itoa(owner(fi)) {
-			continue // a user's cache, named for its owner: node couldn't make one for a repo's uid
+		// A repo's cache, named for its owner (node couldn't make one for a repo's uid), and that uid still the repo's:
+		// without uids.json (a lost DATA_DIR) a new repo would get it, and the old one's cache.
+		if err == nil && fi.IsDir() && keep[owner(fi)] && d.Name() == strconv.Itoa(owner(fi)) {
+			continue
 		}
 		if d.Name() != "work" {
 			old = append(old, d.Name())
@@ -301,6 +320,17 @@ func Clean() error {
 	return nil
 }
 
+// resolved is p with its symlinks resolved, of its nearest existing parent while it doesn't exist yet.
+func resolved(p string) string {
+	p, _ = filepath.Abs(p)
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	} else if dir := filepath.Dir(p); dir != p {
+		return filepath.Join(resolved(dir), filepath.Base(p))
+	}
+	return p
+}
+
 // CleanTmp drops what the users left in the temp dirs all share, before each job: the next job's code would find it.
 func CleanTmp() error {
 	if !AsPi {
@@ -311,7 +341,10 @@ func CleanTmp() error {
 
 func cleanTmp(dirs ...string) error {
 	for _, dir := range dirs {
-		ds, _ := os.ReadDir(dir)
+		ds, err := os.ReadDir(dir)
+		if err != nil && !errors.Is(err, os.ErrNotExist) { // what is left there would reach the next job
+			return err
+		}
 		for _, d := range ds {
 			p := filepath.Join(dir, d.Name())
 			if fi, err := os.Lstat(p); err != nil || !jobUser(owner(fi)) {

@@ -181,17 +181,17 @@ func TestCITests(t *testing.T) {
 func TestInstallScripts(t *testing.T) {
 	bin := t.TempDir() // fake installers print how they were called
 	for _, tool := range []string{"npm", "pnpm", "yarn"} {
-		os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\n[ \"$1\" = --version ] && exec cat .ver\necho \"$(basename \"$0\") $* scripts=${YARN_ENABLE_SCRIPTS:-on}\"\n"), 0o755)
+		os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\n[ \"$1\" = --version ] && exec cat .ver\necho \"$(basename \"$0\") $*\"\n"), 0o755)
 	}
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	defer func(pi bool) { proc.AsPi = pi }(proc.AsPi)
 	proc.AsPi = false
 	for _, c := range []struct{ lock, version, off, on string }{
-		{"package-lock.json", "{}", "npm ci --no-audit --no-fund --loglevel=error --ignore-scripts scripts=on", "npm ci --no-audit --no-fund --loglevel=error scripts=on"},
-		{"pnpm-lock.yaml", "", "pnpm install --frozen-lockfile --prefer-offline --reporter=silent --ignore-scripts scripts=on", "pnpm install --frozen-lockfile --prefer-offline --reporter=silent scripts=on"},
-		{"yarn.lock", "1.22.22\n", "yarn install --immutable --silent --ignore-scripts scripts=on", "yarn install --immutable --silent scripts=on"},
-		{"yarn.lock", "", "yarn install --immutable --silent --ignore-scripts scripts=on", "yarn install --immutable --silent scripts=on"}, // unknown: the flag
-		{"yarn.lock", "! Corepack is about to download yarn\n4.9.2\n", "yarn install --immutable --silent scripts=false", "yarn install --immutable --silent scripts=on"},
+		{"package-lock.json", "{}", "npm ci --no-audit --no-fund --loglevel=error --ignore-scripts", "npm ci --no-audit --no-fund --loglevel=error"},
+		{"pnpm-lock.yaml", "", "pnpm install --frozen-lockfile --prefer-offline --reporter=silent --ignore-scripts", "pnpm install --frozen-lockfile --prefer-offline --reporter=silent"},
+		{"yarn.lock", "1.22.22\n", "yarn install --immutable --silent --ignore-scripts", "yarn install --immutable --silent"},
+		{"yarn.lock", "", "yarn install --immutable --silent --ignore-scripts", "yarn install --immutable --silent"}, // unknown: the flag
+		{"yarn.lock", "! Corepack is about to download yarn\n4.9.2\n", "yarn install --immutable --silent --mode=skip-build", "yarn install --immutable --silent"},
 	} {
 		repo := t.TempDir()
 		os.WriteFile(filepath.Join(repo, "package.json"), []byte("{}"), 0o644)

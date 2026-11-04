@@ -76,9 +76,23 @@ func TestCommandEnv(t *testing.T) {
 func TestCleanOverlap(t *testing.T) {
 	defer func(pi bool, c, d string) { AsPi, CacheDir, DataDir = pi, c, d }(AsPi, CacheDir, DataDir)
 	AsPi, CacheDir = true, t.TempDir()
-	for _, d := range []string{CacheDir, filepath.Join(CacheDir, "diffharbor")} {
-		if DataDir = d; Clean() == nil {
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(CacheDir, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{CacheDir, filepath.Join(CacheDir, "diffharbor"), filepath.Join(link, "not", "yet")} {
+		if DataDir = d; Clean() == nil || !strings.Contains(Clean().Error(), "holds DATA_DIR") { // not root's chown failing
 			t.Error("cleaned a CACHE_DIR holding DATA_DIR", d)
 		}
+	}
+}
+
+func TestCleanTmpErrors(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(f, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cleanTmp(filepath.Join(f, "..", "missing")) != nil || cleanTmp(f) == nil {
+		t.Error("a missing dir is clean, an unreadable one isn't")
 	}
 }

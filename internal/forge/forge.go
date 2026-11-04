@@ -128,8 +128,11 @@ func Rules(pick map[string]string, read func(string) string) string {
 // reportSecret is a report link's secret (job.Secret) in a comment.
 var reportSecret = regexp.MustCompile(`/[A-Z2-7]{26}\b`)
 
+// Redact cuts report links' secrets from text for a prompt: they are the PR's readers', not the model's.
+func Redact(s string) string { return reportSecret.ReplaceAllString(s, "/…") }
+
 // Clean drops our hidden markers and state from a comment before it goes into a prompt, and report links' secrets.
 func Clean(s string) string {
-	s = reportSecret.ReplaceAllString(s, "/…") // a report link's secret: the comment's readers', not the model's
+	s = Redact(s)
 	return text.Truncate(strings.TrimSpace(stateTag.ReplaceAllString(strings.NewReplacer(Mark, "", stickyMark, "").Replace(s), "")), 3000)
 }

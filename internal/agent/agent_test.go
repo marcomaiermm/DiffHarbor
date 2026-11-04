@@ -141,6 +141,8 @@ func TestVaulted(t *testing.T) {
 	if err := vault.Start(); err != nil {
 		t.Fatal(err)
 	}
+	vaultURL = vault.URL
+	t.Cleanup(func() { vaultURL = func() string { return "" } })
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	for p, want := range map[string]string{

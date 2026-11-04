@@ -108,17 +108,17 @@ const (
 	timeout  = 10 * time.Minute
 )
 
-// noScripts is an install command without lifecycle scripts. Yarn classic wants the flag, Berry rejects it and
-// wants YARN_ENABLE_SCRIPTS=false (classic ignores that): told apart by the yarn that runs (version, its last line
-// after corepack's), not the PR's lockfile. Anything but a Berry version gets the flag: Berry fails, never runs
-// scripts. The CLI flags beat a PR's .npmrc.
+// noScripts is an install command without lifecycle scripts. Yarn classic wants the flag, Berry rejects it and wants
+// --mode=skip-build (YARN_ENABLE_SCRIPTS=false still runs the root's and a dependenciesMeta "built" one's): told
+// apart by the yarn that runs (version, its last line after corepack's), not the PR's lockfile. Anything but a Berry
+// version gets the flag: Berry fails, never runs scripts. The CLI flags beat a PR's .npmrc and .yarnrc.yml.
 func noScripts(cmd []string, yarnVersion string) []string {
 	v := strings.TrimSpace(yarnVersion)
 	v = v[strings.LastIndex(v, "\n")+1:]
 	if major, _, _ := strings.Cut(v, "."); cmd[0] != "yarn" || major < "2" || len(major) != 1 {
 		return append(cmd, "--ignore-scripts")
 	}
-	return append([]string{"env", "YARN_ENABLE_SCRIPTS=false"}, cmd...)
+	return append(cmd, "--mode=skip-build")
 }
 
 // Script is a repo's own check: Name its path in the repo, File the copy that runs (from the base branch).

@@ -140,7 +140,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		if !slices.Contains(files, t.Path) {
 			continue
 		}
-		c := review.Comment{Path: t.Path, Line: cmp.Or(t.Line, t.Original), Body: text.Truncate(strings.ReplaceAll(t.Body, forge.Mark, ""), 600)}
+		c := review.Comment{Path: t.Path, Line: cmp.Or(t.Line, t.Original), Body: text.Truncate(strings.ReplaceAll(forge.Redact(t.Body), forge.Mark, ""), 600)}
 		if t.Resolved {
 			closed = append(closed, c)
 		} else {
@@ -168,7 +168,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		tid, tk = ticket.Lookup(ctx, cfg.Tickets, pr.Title, pr.Head.Ref, pr.Body)
 	}
 	r, stats, err := review.Analyze(ctx, review.Input{
-		Agent: agent.Pi{}, Dir: dir, Title: pr.Title, Body: pr.Body, Ticket: tk, Parts: parts,
+		Agent: agent.Pi{}, Dir: dir, Title: pr.Title, Body: forge.Redact(pr.Body), Ticket: tk, Parts: parts,
 		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo())), Checks: scripts, Prior: prior, Closed: closed, Settings: cfg,
 		Guide: guide && only == nil, // an incremental review sees a few files: the last full one's reading order stays
 	})
