@@ -150,12 +150,13 @@ type Input struct {
 	Agent       Agent
 	Dir         string // temp dir, checkout in Dir/repo
 	Title, Body string
-	Ticket      string          // ticket.Lookup(): the linked issue, "" = none
-	Parts       []string        // diff.Filter: one review and one verify pass each
-	Trusted     string          // TrustedContext()
-	Checks      []checks.Script // the repo's own check scripts
-	Prior       []Comment       // open findings from earlier reviews on these files
-	Closed      []Comment       // resolved ones: fixed or declined
+	Ticket      string            // ticket.Lookup(): the linked issue, "" = none
+	Parts       []string          // diff.Filter: one review and one verify pass each
+	Trusted     string            // TrustedContext()
+	Checks      []checks.Script   // the repo's own check scripts
+	Registries  []checks.Registry // the npm registries the installs read from
+	Prior       []Comment         // open findings from earlier reviews on these files
+	Closed      []Comment         // resolved ones: fixed or declined
 	Settings    Settings
 	Guide       bool // ask for Result.Flow and Decisions
 }
@@ -180,7 +181,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	}
 	var hints strings.Builder
 	fmt.Fprintf(&hints, "## Check results (lint, types, tests, secrets, vulnerabilities; may include issues the change didn't cause)\n\n```\n%s\n```\n\n",
-		checks.Run(ctx, repo, in.Checks, patch, files, in.Settings.RunsTests, in.Settings.InstallScripts))
+		checks.Run(ctx, repo, in.Checks, patch, files, in.Settings.RunsTests, in.Settings.InstallScripts, in.Registries))
 	gctx, cancel := context.WithTimeout(ctx, time.Minute)
 	gitLog, err := proc.Run(proc.Command(gctx, repo, nil, "git", "log", "-n", historyDepth, "--format=%x00", "--name-only", "--no-renames"))
 	cancel()

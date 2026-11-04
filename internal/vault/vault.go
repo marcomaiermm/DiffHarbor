@@ -1,14 +1,17 @@
-// Package vault keeps the model keys and the forge's git tokens in the root server. node (git, checks, Pi, the PR's
-// code) gets random tokens instead, which work only through the vault's proxy on 127.0.0.1, only for one provider's
-// API or one repo's fetches, and only until the run or job that got them ends.
+// Package vault keeps the model keys, the forge's git tokens and the npm registries' tokens in the root server. node
+// (git, checks, Pi, the PR's code) gets random tokens instead, which work only through the vault's proxy on 127.0.0.1,
+// only for one provider's API, one repo's fetches or one registry's reads, and only until the run or job that got
+// them ends.
 package vault
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -16,6 +19,7 @@ import (
 	"net/url"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -67,6 +71,14 @@ func Git(ctx context.Context, cloneURL, token string) (string, error) {
 	return base + "/git/" + tok, err
 }
 
+// Npm lends token, which reads the npm registry at registry, until ctx is done and returns the registry the installs
+// use instead: the vault sends the token upstream for GETs and points the registry's URLs in its answers (tarballs,
+// redirects) back at itself. A token with a colon is user:password, Basic auth.
+func Npm(ctx context.Context, registry, token string) (string, error) {
+	tok, err := lend(ctx, "npm", strings.TrimSuffix(registry, "/")+"/", token, nil)
+	return base + "/npm/" + tok + "/", err
+}
+
 func lend(ctx context.Context, route, upstream, key string, paths []string) (string, error) {
 	up, err := url.Parse(upstream)
 	if err != nil || up.Scheme != "https" && up.Scheme != "http" || up.Host == "" {
@@ -103,7 +115,7 @@ var authHeaders = []string{"Authorization", "X-Api-Key", "Api-Key"}
 func serve(w http.ResponseWriter, r *http.Request) {
 	route, rest, _ := strings.Cut(strings.TrimPrefix(r.URL.EscapedPath(), "/"), "/")
 	header, tok := "", ""
-	if route == "git" {
+	if route == "git" || route == "npm" {
 		tok, rest, _ = strings.Cut(rest, "/")
 	} else {
 		for _, h := range authHeaders {
@@ -134,26 +146,73 @@ func serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case route == "git":
 		r.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("x-access-token:"+l.key)))
+	case route == "npm" && strings.Contains(l.key, ":"):
+		r.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(l.key)))
+	case route == "npm":
+		r.Header.Set("Authorization", "Bearer "+l.key)
 	case header == "Authorization":
 		r.Header.Set(header, "Bearer "+l.key)
 	default:
 		r.Header.Set(header, l.key)
 	}
 	p, _ := url.PathUnescape(rest) // allowed checked it
-	(&httputil.ReverseProxy{
+	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Path, pr.Out.URL.RawPath = "/"+p, "/"+rest
 			pr.SetURL(l.up) // the loan's upstream, whatever Host the client sent
 		},
 		FlushInterval: -1, // SSE streams through
-	}).ServeHTTP(w, r)
+	}
+	if route == "npm" {
+		r.Header.Del("Accept-Encoding") // the transport asks for gzip itself and unpacks it: pointBack reads plain JSON
+		for _, h := range []string{"X-Http-Method-Override", "X-Http-Method", "X-Method-Override"} {
+			r.Header.Del(h) // GETs only: no upstream framework turns one into a DELETE
+		}
+		rp.ModifyResponse = func(res *http.Response) error { return pointBack(res, l.up.String(), base+"/npm/"+l.tok+"/") }
+	}
+	rp.ServeHTTP(w, r)
+}
+
+// maxJSON bounds a registry answer pointBack rewrites: PR code picks what it fetches, the root server holds it.
+const maxJSON = 64 << 20
+
+// pointBack points up's URLs in a registry's answer at via: a packument's tarballs, a redirect (also a relative one).
+// Fetched from up directly they'd go without the token.
+func pointBack(res *http.Response, up, via string) error {
+	if h := res.Header.Get("Location"); h != "" {
+		if loc, err := res.Request.URL.Parse(h); err == nil && strings.HasPrefix(loc.String(), up) {
+			res.Header.Set("Location", via+strings.TrimPrefix(loc.String(), up))
+		}
+	}
+	if res.Request.Method == http.MethodHead || !strings.Contains(res.Header.Get("Content-Type"), "json") {
+		return nil
+	}
+	b, err := io.ReadAll(io.LimitReader(res.Body, maxJSON+1))
+	res.Body.Close()
+	if err != nil {
+		return err
+	}
+	if len(b) > maxJSON {
+		return errors.New("vault: registry answer over 64 MiB")
+	}
+	b = bytes.ReplaceAll(b, []byte(up), []byte(via))
+	res.Body, res.ContentLength = io.NopCloser(bytes.NewReader(b)), int64(len(b))
+	res.Header.Set("Content-Length", strconv.Itoa(len(b)))
+	res.Header.Del("ETag") // not the upstream's bytes any more
+	return nil
 }
 
 // allowed reports whether a request may reach l's upstream: a model API's POSTs to its paths, a git fetch's
-// info/refs and git-upload-pack. Never a path that walks out of the upstream's.
+// info/refs and git-upload-pack, a registry's GETs (no publish). Never a path that walks out of the upstream's.
 func allowed(l *loan, method, rest, service string) bool {
 	p, err := url.PathUnescape(rest)
-	if err != nil || path.Clean("/"+p) != "/"+p || !slices.ContainsFunc(l.paths, func(pat string) bool {
+	if err != nil || path.Clean("/"+p) != "/"+p {
+		return false
+	}
+	if l.route == "npm" {
+		return method == http.MethodGet || method == http.MethodHead
+	}
+	if !slices.ContainsFunc(l.paths, func(pat string) bool {
 		ok, _ := path.Match(pat, rest)
 		return ok
 	}) {

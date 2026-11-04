@@ -127,10 +127,11 @@ type Script struct{ Name, File string }
 // Run runs the built-in checks for files, then the repo's own scripts with the files after "--". patch is
 // the diff under review as a file. JS and Go checks run per package (nearest package.json or go.mod), so a
 // monorepo's apps get theirs; tests(file) says whether the tests of file's package run. Installs skip lifecycle
-// scripts unless installScripts: a dependency's postinstall would run as the repo's user next to the PR's code.
+// scripts unless installScripts: a dependency's postinstall would run as the repo's user next to the PR's code. They
+// read from regs, through the vault until Run returns.
 //
 //nolint:gocognit,gocyclo // the checks step by step, each step a few lines
-func Run(ctx context.Context, repo string, scripts []Script, patch string, files []string, tests func(string) bool, installScripts bool) string {
+func Run(ctx context.Context, repo string, scripts []Script, patch string, files []string, tests func(string) bool, installScripts bool, regs []Registry) string {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	started := time.Now()
@@ -139,6 +140,11 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 	if h := os.Getenv("DOCKER_HOST"); h != "" { // dind for testcontainers, see compose.yml
 		env = append(env, "DOCKER_HOST="+h)
 	}
+	regEnv, regURLs, err := registryEnv(ctx, regs)
+	if err != nil {
+		fmt.Fprintf(&out, "\n### npm registries\n%s\n", err)
+	}
+	env = append(env, regEnv...)
 	// in runs a tool in dir (repo-relative) and returns stdout and stderr.
 	in := func(dir string) func(string, ...string) string {
 		return func(name string, args ...string) string {
@@ -213,7 +219,12 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 				}
 				cmd = noScripts(cmd, v)
 			}
-			section("install"+titled(filepath.Dir(lock)), in(filepath.Dir(lock))(cmd[0], cmd[1:]...), -20)
+			restore := pointAt(ctx, filepath.Join(repo, lock), regURLs)
+			res := in(filepath.Dir(lock))(cmd[0], cmd[1:]...)
+			if err := restore(); err != nil {
+				res += "\nrestoring " + lock + " after pointing it at the registries: " + err.Error()
+			}
+			section("install"+titled(filepath.Dir(lock)), res, -20)
 		}
 		// bin finds a tool in the package's node_modules/.bin or a parent's (workspaces hoist them); "" = none.
 		bin := func(t string) string {
