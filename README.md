@@ -53,7 +53,7 @@ The server listens on `:3000`. Expose `POST /webhook/github` and/or `POST /webho
 
 ## How a review works
 
-1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, generated code and binaries stay out. A pass gets up to 60k characters, code first, then tests, data and docs; larger PRs can be reviewed [in parts](#large-prs).
+1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, vendored and generated code (by name or a "Code generated … DO NOT EDIT" header) and binaries stay out. A pass gets up to 60k characters, code first, then tests, data, stylesheets and docs; larger PRs can be reviewed [in parts](#large-prs).
 2. **Context.** The checks above, plus codegraph, co-change from git history, the repo's rules and skills from the base branch, learnings, and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings per pass.
 4. **Verify.** A cheaper model checks each finding in the code.
@@ -222,7 +222,7 @@ A broken `review.json` falls back to the defaults and says so in the review foot
 
 ### Large PRs
 
-A diff over 60k characters can be reviewed in parts: the files of a folder stay together, each part gets its own review and verify pass, and the findings are merged, most severe first. Each part costs about one normal review.
+A diff over 60k characters can be reviewed in parts: the files of a folder stay together, a file over 60k is cut at its hunks, a hunk over 60k at its lines, each part gets its own review and verify pass, and the findings are merged, most severe first. Each part costs about one normal review.
 
 | `large_pr` | |
 |---|---|

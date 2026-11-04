@@ -3,7 +3,7 @@ title: How a review works
 description: The steps of a DiffHarbor review and how to talk to the bot.
 ---
 
-1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, generated code and binaries stay out. A pass gets up to 60k characters, code first, then tests, data and docs; larger PRs can be reviewed [in parts](../per-repo/#large-prs).
+1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, vendored and generated code (by name or a "Code generated … DO NOT EDIT" header) and binaries stay out. A pass gets up to 60k characters, code first, then tests, data, stylesheets and docs; larger PRs can be reviewed [in parts](../per-repo/#large-prs).
 2. **Context.** The checks, plus codegraph, co-change from git history, the repo's rules and skills from the base branch, learnings, and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings per pass.
 4. **Verify.** A cheaper model checks each finding in the code.

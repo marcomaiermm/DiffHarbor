@@ -148,7 +148,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		return err
 	}
 	if e.Kind == "issue_comment" { // a review thread has its hunk
-		d, _ := diff.Filter(raw, nil, nil, 1)
+		d, _ := diff.Filter(raw, "", nil, nil, 1)
 		fmt.Fprintf(&about, "## Diff (may be cut; read files for more)\n\n```diff\n%s\n```\n\n", text.Truncate(strings.Join(d, ""), 20_000))
 	}
 	cfg, _ := review.LoadSettings(p.File(pr.Base.SHA, "review.json")) // broken: defaults, the review says so
