@@ -1066,8 +1066,14 @@ func TestSources(t *testing.T) {
 	d := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -4 +4 @@\n-func A() { }\n+func A() {}\n" +
 		"diff --git a/b.go b/b.go\nnew file mode 100644\n--- /dev/null\n+++ b/b.go\n@@ -0,0 +1 @@\n+package a\n"
 	os.WriteFile(filepath.Join(dir, "b.go"), []byte("package a\n"), 0o644)
+	out := t.TempDir()
+	os.WriteFile(filepath.Join(out, "secret"), []byte("no"), 0o644)
+	os.Symlink(filepath.Join(out, "secret"), filepath.Join(dir, "c.go"))
+	os.Symlink(out, filepath.Join(dir, "d"))
+	d += "diff --git a/c.go b/c.go\nnew file mode 120000\n--- /dev/null\n+++ b/c.go\n@@ -0,0 +1 @@\n+x\n" +
+		"diff --git a/d/secret b/d/secret\n--- a/d/secret\n+++ b/d/secret\n@@ -1 +1 @@\n-n\n+no\n"
 	src := Sources(dir, d)
-	if len(src) != 2 {
+	if len(src) != 2 || src["c.go"] != "" || src["d/secret"] != "" {
 		t.Fatalf("sources %v", src)
 	}
 	b, _, err := Render(Data{Repo: "o/r", Number: 1, SHA: "abc", Diff: d, Sources: src})

@@ -1032,11 +1032,16 @@ const maxSource, maxSources = 256 << 10, 2 << 20 // ponytail: the page carries t
 // between and around hunks; a file too big, unreadable or not text stays out.
 func Sources(repo, diffText string) map[string]string {
 	out, total := map[string]string{}, 0
+	root, err := os.OpenRoot(repo) // the PR's symlinks don't reach out of the checkout
+	if err != nil {
+		return out
+	}
+	defer root.Close()
 	diff.EachFile(diffText, func(p, _ string) {
-		if !filepath.IsLocal(p) {
+		if fi, err := root.Lstat(filepath.FromSlash(p)); err != nil || !fi.Mode().IsRegular() || fi.Size() > maxSource {
 			return
 		}
-		b, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(p)))
+		b, err := root.ReadFile(filepath.FromSlash(p))
 		if err != nil || len(b) > maxSource || total+len(b) > maxSources || bytes.IndexByte(b, 0) >= 0 {
 			return
 		}
