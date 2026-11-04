@@ -81,7 +81,7 @@ func TestRender(t *testing.T) {
 		"What only a person can settle", "Should a failed save retry?",
 		"Storage first", `id="store/store.go"`, "Then the handler", `id="api/handler.go"`, `id="finding-1"`, "major · Error dropped",
 		`id="tests"`, "api/handler_test.go: TestHandle", `id="api/handler_test.go"`, `id="other"`, `id="README.md"`,
-		`id="deleted"`, `id="gone.go"`, `id="commits"`, "Work in progress", "/merge_requests/7/diffs?commit_id=aaaaaaaaaa",
+		`id="deleted"`, `id="gone.go"`, `id="commits"`, "work in progress", "/merge_requests/7/diffs?commit_id=aaaaaaaaaa", "Only this commit",
 		`id="finish"`, "Request changes", "Review for !7</span>",
 		"Error dropped (handler.go:2).", "Questions:\n1. Should a failed save retry?", "Minor:\n- other.go  elsewhere", "Open the draft on GitLab",
 	}
@@ -120,7 +120,7 @@ func TestRender(t *testing.T) {
 func TestStory(t *testing.T) {
 	cs := []review.Commit{{Subject: "feat: add Save"}, {Subject: "fix(api): handle a nil store"}, {Subject: "test: cover Save"}, {Subject: "fixup! feat: add Save"}}
 	b, _, _ := Render(Data{Repo: "a/b", Commits: cs})
-	if !strings.Contains(string(b), "Each commit is a step") { // 1 of 4 is wip: still a story
+	if !strings.Contains(string(b), "each one a step") { // 1 of 4 is wip: still a story
 		t.Error("conventional commits read as a story")
 	}
 }

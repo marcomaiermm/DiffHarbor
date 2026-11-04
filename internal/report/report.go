@@ -283,6 +283,7 @@ type view struct {
 	Deleted              []*file // what moved out of them folds, the rest is what the PR drops
 	Stepwise             bool    // the commits read one by one
 	Code, NTests, NOther int
+	InSteps, NSteps      int // of Code, the files in the reading order's steps; those steps
 	Added, Moved         int // added lines, and those of them that only moved
 	Tree                 []*node
 	Inventory            []bucket        // what the PR did to its declarations
@@ -470,6 +471,10 @@ func prepare(d Data) view {
 		default:
 			v.Other = append(v.Other, f)
 		}
+	}
+	v.NSteps = len(v.Steps)
+	for _, s := range v.Steps {
+		v.InSteps += len(s.Files)
 	}
 	if len(rest) > 0 {
 		title := "The rest of the code"

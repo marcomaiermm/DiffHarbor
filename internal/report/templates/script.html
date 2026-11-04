@@ -61,6 +61,10 @@
       next.hidden = !left;
       if (left) { next.href = "#" + left.dataset.path; next.textContent = "next: " + left.dataset.path.split("/").pop(); }
     }
+    for (const r of document.querySelectorAll(".rest")) {
+      const bs = boxes.filter(b => r.contains(b));
+      r.querySelector(".rest-v").textContent = bs.length ? bs.filter(b => b.checked).length + "/" + bs.length + " viewed" : "";
+    }
     for (const s of steps) {
       const files = [...s.querySelectorAll("a[data-path]")];
       const k = files.filter(a => viewed.has(a.dataset.path)).length;

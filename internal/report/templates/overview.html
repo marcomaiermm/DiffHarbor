@@ -2,10 +2,15 @@
 {{define "overview"}}
 <section id="overview" class="rise">
   <div class="space-y-6"><div>
+    {{if or .Commits .Code .NTests .Moved .Effort}}<p class="meta">{{$sep := ""}}
+      {{- with .Commits}}<span>{{plural (len .) "commit" "commits"}}</span>{{$sep = " · "}}{{end}}
+      {{- with .Code}}{{$sep}}<span>{{plural . "code file" "code files"}}{{if $.Flow}}{{if eq $.InSteps .}} in {{plural $.NSteps "step" "steps"}}{{else}}, {{$.InSteps}} in {{plural $.NSteps "step" "steps"}}{{end}}{{end}}</span>{{$sep = " · "}}{{end}}
+      {{- with .NTests}}{{$sep}}<span>{{plural . "test file" "test files"}}</span>{{$sep = " · "}}{{end}}
+      {{- if .Moved}}{{$sep}}<span title="{{.Moved}} of {{.Added}} added lines only moved: folded in the diff">{{percent .Moved .Added}} of the lines only moved</span>{{$sep = " · "}}{{end}}
+      {{- with .Effort}}{{$sep}}<span title="{{.}} of 5">{{if le . 2}}low{{else if eq . 3}}medium{{else}}high{{end}} review effort</span>{{end}}</p>{{end}}
     <h1 class="text-[28px] leading-tight font-semibold tracking-[-0.03em] text-balance">{{.Title}}</h1>
     {{with .Story.Problem}}<p class="lead">{{.}}</p>{{end}}
     {{with .Summary}}<p class="summary"{{if $.Story.Problem}} data-under{{end}}>{{.}}</p>{{end}}
-    {{if or .Moved .Effort}}<p class="meta">{{if .Moved}}<span title="{{.Moved}} of {{.Added}} added lines only moved: folded in the diff">{{percent .Moved .Added}} of the lines only moved</span>{{end}}{{if and .Moved .Effort}} · {{end}}{{with .Effort}}<span title="{{.}} of 5">{{if le . 2}}low{{else if eq . 3}}medium{{else}}high{{end}} review effort</span>{{end}}</p>{{end}}
     {{with .Story}}{{if and .Before .After}}<div class="@container mt-5"><div class="story" role="note" aria-label="One case, before and after">
       <div data-side="before"><b><span aria-hidden="true">−</span>Before</b><p>{{.Before}}</p></div>
       <div data-side="after"><b><span aria-hidden="true">+</span>After</b><p>{{.After}}</p></div>

@@ -44,6 +44,10 @@
 .sidebar-link > svg { @apply size-3.5; }
 .sidebar-badge { @apply bg-transparent px-0 font-mono font-normal tabular-nums text-muted-foreground/70; }
 .sidebar-group { @apply mt-4; }
+.side-h { @apply mt-4 flex h-7 items-center px-2 font-mono text-[11px] text-muted-foreground/70 first:mt-0; }
+.sidebar-group > summary > span { @apply font-mono text-[11px]; }
+.side-note { @apply mt-1.5 px-2 text-[11.5px] text-muted-foreground/70; }
+.app-sidebar[data-state="collapsed"] :is(.side-h, .side-note) { display: none; }
 .sidebar-group > summary { @apply h-7 px-2 py-0 text-xs font-medium tracking-normal normal-case text-muted-foreground/70; }
 .sidebar-group > .sidebar-nav { padding: 0.125rem 0 0; }
 .app-sidebar .toggle-group .toggle, header .toggle-group .toggle { @apply h-7 min-w-7 gap-1.5 px-2 text-xs font-normal; }
@@ -98,7 +102,16 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
 .trace-icon svg { @apply pointer-events-none size-4; }
 .trace-title ~ .trace-icon { @apply -ml-1; }
 .trace-title { @apply min-w-0 truncate; }
-.keys { @apply ml-auto flex items-center gap-1.5 text-xs text-muted-foreground; }
+.keys { @apply flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground; }
+.keys > span { @apply inline-flex items-center gap-1; }
+/* the rest after the steps: tests, data and docs, mechanical, deleted */
+.rest-group { @apply mt-16 border-t pt-10; }
+.rest { @apply mt-10; }
+.rest-head { @apply flex flex-wrap items-baseline gap-x-3 gap-y-1; }
+.rest-head h3 { @apply text-base font-semibold tracking-tight; }
+.rest-head > span { @apply font-mono text-xs text-muted-foreground tabular-nums; }
+.rest-head > .rest-v { @apply ml-auto; }
+.rest-intro { @apply mt-1 mb-4 text-muted-foreground; }
 .keys kbd { @apply inline-flex h-5 min-w-5 items-center justify-center rounded border bg-muted px-1 font-mono text-[11px] text-foreground; }
 @media (hover: none) { .keys { display: none; } }
 .trace-description { @apply shrink-0 tabular-nums text-muted-foreground/70; }
@@ -455,13 +468,25 @@ dialog.sheet > .sheet-content { min-height: 100%; }
 .stats .statistic-value { @apply text-xl font-semibold; }
 .stat-unit { @apply ml-1 text-sm font-normal tracking-normal text-muted-foreground; }
 /* the commits: shadcn's timeline, a dot filled for a step, hollow for work in progress */
-.commits .timeline-item { @apply pb-3; }
-.commits .timeline-title { @apply hover:underline; }
+.box { @apply rounded-[10px] border bg-card; }
+.box > summary { @apply list-none; }
+.box > summary::-webkit-details-marker { display: none; }
+.bs { @apply flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3.5; }
+.bs-note { @apply ml-auto text-xs text-muted-foreground; }
+.box-chev { @apply size-3.5 shrink-0 text-muted-foreground transition-transform; }
+.box[open] > summary .box-chev { @apply rotate-90; }
+.bb { @apply px-4 pb-4 sm:pl-[42px]; }
+.commits { @apply flex flex-col text-[13px]; }
+.commits > li { @apply flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b py-[7px] last:border-b-0; }
+.commits > li > a.font-mono { @apply text-xs; color: var(--ring); }
+.commit-s { flex: 1 1 260px; }
+.commit-n { @apply text-xs text-muted-foreground; }
+.commit-only { @apply text-xs text-muted-foreground hover:text-foreground hover:underline; }
 /* one case told twice, as a diff tells it: what happened before, what happens now */
 .lead { @apply mt-3 max-w-[60ch] text-[17px] leading-snug font-medium tracking-[-0.01em] text-pretty; }
 .summary { @apply mt-3 max-w-[68ch] text-[15px] text-pretty text-muted-foreground; }
 .summary[data-under] { @apply mt-2 text-sm; }
-.meta { @apply mt-2 text-[13px] tabular-nums text-muted-foreground; }
+.meta { @apply mb-2.5 font-mono text-xs tabular-nums text-muted-foreground; }
 /* a step: its number, title, weight and how much of it is viewed; the tests that reach it; how its code connects */
 .step-head { @apply flex flex-wrap items-baseline gap-x-3 gap-y-1; }
 .step-head > .chip { @apply self-center; }
