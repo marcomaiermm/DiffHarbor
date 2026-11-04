@@ -442,12 +442,11 @@ html[data-filter="unviewed"] .sidebar-files li:has(.done) { display: none; }
 .sym-at { @apply ml-auto flex min-w-0 shrink items-center gap-1 font-mono text-[11px] text-muted-foreground hover:text-foreground; }
 .sym-at > span { @apply truncate; }
 .sym-at > svg { @apply size-3 shrink-0; }
-.kind { @apply h-[18px] px-1.5 font-mono text-[10.5px]; }
-.kind::before { content: ""; @apply size-1.5 rounded-full; background: var(--k, var(--muted-foreground)); }
-.kind[data-k="function"], .kind[data-k="method"] { --k: #3b82f6; }
-.kind[data-k="type"] { --k: #a855f7; }
-.kind[data-k="constant"], .kind[data-k="variable"] { --k: #f59e0b; }
-.kind[data-k^="field"], .kind[data-k^="method of"] { --k: #14b8a6; }
+.kind { @apply h-[18px] px-1.5 font-mono text-[10.5px]; color: var(--k, var(--muted-foreground)); border-color: var(--k, var(--border)); }
+.kind[data-k="function"], .kind[data-k="method"] { --k: var(--k-fn); }
+.kind[data-k="type"] { --k: var(--k-type); }
+.kind[data-k="constant"], .kind[data-k="variable"] { --k: var(--k-var); }
+.kind[data-k^="field"], .kind[data-k^="method of"] { --k: var(--diff-link); }
 .sym-sig { @apply rounded-lg px-3 py-2.5 font-mono text-xs leading-5 whitespace-pre; tab-size: 4; background: var(--diff-bg); color: var(--diff-fg);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--diff-fg) 8%, transparent); }
 .sym-doc { @apply line-clamp-4 text-[13px] leading-relaxed text-pretty text-muted-foreground; }
