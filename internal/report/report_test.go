@@ -378,12 +378,14 @@ func TestGraph(t *testing.T) {
 		t.Errorf("no edges, still a graph: %+v", g)
 	}
 	store.Short = "store/store.go"
-	m := &deps{Dirs: []dep{
-		{Label: ".", Href: "#api.go", Cells: []cell{{Self: true}, {N: 1, Names: "Handle → Save"}}},
-		{Label: "store", Href: "#store.go", Cells: []cell{{}, {Self: true}}},
-	}, Top: []string{". → store (1)"}}
+	m := &deps{New: []newDep{{From: ".", To: "store", Why: "Handle uses Save"}}} // Save is new: so is the use
 	if got := matrix(steps, syms); !reflect.DeepEqual(got, m) {
 		t.Errorf("matrix %+v", got)
+	}
+	store.Changes[0].State = "" // both there before; and Save uses Handle back: a cycle
+	syms["Save"] = []Symbol{{Path: "store.go", Calls: []string{"api.go\x00Handle"}}}
+	if got := matrix(steps, syms); !reflect.DeepEqual(got, &deps{Old: []string{". → store", "store → ."}, Cycles: 1}) {
+		t.Errorf("matrix, old uses %+v", got)
 	}
 	if got := matrix(steps, map[string][]Symbol{}); got != nil {
 		t.Errorf("no uses, still a matrix: %+v", got)
@@ -611,7 +613,7 @@ new file mode 100644
 +
 +func Fresh() {}
 `,
-		Commits: []review.Commit{{Subject: "feat: add Fresh", Lines: []string{"+func Fresh() {}"}}, {Subject: "wip", Lines: []string{"+func Sig(a, b int) int {"}}},
+		Commits: []review.Commit{{SHA: "f00dfacecafe", Subject: "feat: add Fresh", Lines: []string{"+func Fresh() {}"}}, {Subject: "wip", Lines: []string{"+func Sig(a, b int) int {"}}},
 		Whys:    map[string]string{"a.go\x00Sig": "takes b too", "a.go\x00Body": "unasked"},
 	}
 	var got []string
@@ -630,6 +632,43 @@ new file mode 100644
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("inventory\n%s", strings.Join(got, "\n"))
+	}
+	v := prepare(d)
+	got = nil
+	for _, p := range v.API() {
+		for _, r := range p.Items {
+			got = append(got, fmt.Sprintf("%s %s %s · %s:%d %s %q", p.Pkg, r.Mark, r.Sig, r.File, r.Line, r.SHA, r.Info))
+		}
+	}
+	want = []string{
+		`. + func Fresh() · b.go:15 f00dfacecafe []`,
+		`. ~ func Sig(a, b int) int · a.go:3  ["signature"]`,
+		`. ~ Body · a.go:8  ["behaviour"]`,
+		`. → func Shift(n int) int · b.go:9  ["from a.go:9 as shift, changed"]`,
+		`. → func Matrix() []string · b.go:3  ["from a.go:3 as matrix, unchanged"]`,
+		`. − func Old() · a.go:23  []`,
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("API\n%s", strings.Join(got, "\n"))
+	}
+	b, _, err := Render(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{
+		`<p class="apkg">.</p>`,
+		`aria-label="new">&#43;</span><code class="asig" data-name="Fresh">func Fresh()</code>`,
+		`<span>feat: add Fresh</span><a class="chip font-mono"`,
+		`>commit f00dfac</a>`,
+		`<a class="aloc" href="#b.go~`,
+		`>b.go:15</a>`,
+		`<span>takes b too</span><span class="chip" data-dash title="A small model's reading of its code">AI · read from the code</span>`,
+		`<span>from a.go:3 as matrix, unchanged</span>`,
+		`<summary class="as as-del">`,
+	} {
+		if !strings.Contains(string(b), w) {
+			t.Errorf("page without %s", w)
+		}
 	}
 	if keys, texts := Asks(d); !slices.Equal(keys, []string{"a.go\x00Sig"}) || !strings.Contains(texts[0], "func Sig(a, b int) int {") {
 		t.Errorf("asks %q %q", keys, texts)
@@ -951,8 +990,8 @@ func TestStepTests(t *testing.T) {
 	}
 	d := Data{
 		Repo: "a/b", SHA: "2222222bbb",
-		Diff: file("a.go", "+func A() {}\n+\n") + file("a_test.go", "+func TestA(t *testing.T) {}\n+func TestB(t *testing.T) { t.Skip(\"later\") }\n"),
-		Flow: []review.Step{{Title: "A", Check: "A returns", Files: []string{"a.go"}, Placed: map[string]string{"a.go": "here because B calls it"}}},
+		Diff:  file("a.go", "+func A() {}\n+\n") + file("a_test.go", "+func TestA(t *testing.T) {}\n+func TestB(t *testing.T) { t.Skip(\"later\") }\n"),
+		Flow:  []review.Step{{Title: "A", Check: "A returns", Files: []string{"a.go"}, Placed: map[string]string{"a.go": "here because B calls it"}}},
 		Tests: checks.Tests{Ran: map[string]string{"TestA": "pass", "TestB": "skip"}, Broken: []string{"c"}},
 	}
 	d.Outline = diff.Analyze(d.Diff)

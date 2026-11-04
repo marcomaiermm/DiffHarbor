@@ -191,61 +191,43 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
 .graph-legend i { @apply inline-block h-3 w-4 rounded-[3px] border; }
 .graph-legend i.line { @apply h-0.5 rounded-none border-0; }
 .graph:not([data-drawn]) > :not(.cy) { visibility: hidden; }
-/* the PR's directories and which use which: a row uses a column; darker the more declarations */
-.deps-wrap { @apply w-fit max-w-full rounded-lg border; }
-.deps { @apply border-separate border-spacing-0 font-mono text-xs; --use: #3b82f6; }
-.deps th, .deps td { @apply h-7 border-b border-r border-border/60 p-0 text-center tabular-nums; }
-.deps thead th { @apply sticky top-0 min-w-7 bg-muted/60 font-normal text-muted-foreground; }
-.deps thead th:first-child, .deps tbody th { @apply sticky left-0 z-[1] bg-background; }
-.deps tbody th { @apply max-w-72 px-0 text-left font-normal; }
-.deps tbody th a { @apply flex h-7 items-center gap-2 truncate pr-3 text-foreground hover:underline; }
-.deps tbody { counter-reset: row; }
-.deps-no { @apply w-7 shrink-0 text-center text-muted-foreground tabular-nums; }
-.deps-no::before { counter-increment: row; content: counter(row); }
-.deps td.d-use { background: color-mix(in oklab, var(--use) min(75%, calc(12% + var(--n) * 9%)), transparent); @apply font-medium text-foreground; }
-.deps td.d-back { @apply bg-destructive/25 font-semibold text-destructive; }
-.deps td.d-self { @apply bg-muted/70 text-muted-foreground; }
-.deps td[data-n] { @apply cursor-default; }
-.deps :is(td, th).hl { box-shadow: inset 0 0 0 999px color-mix(in oklab, currentColor 7%, transparent); }
-.deps td.at { @apply outline-2 -outline-offset-2 outline-foreground; }
-.deps-say { @apply mt-2 min-h-5 text-xs text-muted-foreground; }
-.deps-say b { @apply font-mono font-medium text-foreground; }
 /* shadcn's contains the wheel (a sideways one kept it from the page) and draws the thumb in --border, which vanishes
    on the code's background: a thumb mixed from the text it scrolls */
 .scroll-area { overscroll-behavior: auto; scrollbar-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent) transparent; }
 .inv-lines, .sym-sig { scrollbar-color: color-mix(in oklab, var(--diff-fg) 35%, transparent) transparent; }
-/* what the PR did to its declarations, a tab per kind */
+/* the API before and after: by directory, a row a declaration, its mark, signature and what to know of it */
+.api-legend { @apply ml-auto hidden gap-3 font-mono text-xs text-muted-foreground sm:flex; }
+.api-legend b, .dl b { @apply font-mono font-semibold; }
+.am-add { @apply text-diff-add; }
+.am-chg, .am-mv { @apply text-ring; }
+.am-del { @apply text-diff-del; }
+.apkg { @apply mt-4 mb-1 ml-2 font-mono text-[13px] font-medium text-muted-foreground first:mt-0; }
+.arow > summary { @apply list-none; }
+.arow > summary::-webkit-details-marker { @apply hidden; }
+.as { @apply grid cursor-pointer grid-cols-[14px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 rounded-md px-2 py-1.5 hover:bg-muted/60 sm:grid-cols-[14px_minmax(0,1fr)_auto]; }
+.am { @apply text-center font-mono text-[13px] font-semibold; }
+.am[data-mark="new"] { @apply text-diff-add; }
+.am:is([data-mark="changed"], [data-mark="moved"]) { @apply text-ring; }
+.am[data-mark="removed"] { @apply text-diff-del; }
+.asig { @apply font-mono text-[13px] leading-5 wrap-anywhere text-foreground; }
+.as-del .asig { @apply text-muted-foreground line-through decoration-diff-del/60; }
+.ainfo { @apply col-start-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[13px] whitespace-nowrap text-muted-foreground sm:col-start-3 sm:justify-end; }
+.alink { @apply cursor-pointer text-ring underline decoration-dotted underline-offset-3 hover:text-foreground; }
+.ab { @apply flex flex-wrap items-baseline gap-x-3 gap-y-1.5 pt-0.5 pr-2 pb-2.5 pl-[34px] text-sm leading-relaxed; }
+.aloc { @apply font-mono text-xs text-ring hover:underline; }
+.ab > .aloc:first-of-type { @apply ml-auto; }
+.arow > .inv-lines { @apply mb-2.5 ml-[34px]; }
+/* the new dependencies, one a row */
+.dl { @apply flex flex-col gap-2 text-sm; }
+.dl li { @apply flex flex-wrap items-baseline gap-x-3 gap-y-1; }
+.dl code { @apply font-mono text-[13px] text-foreground; }
+.dl span:not(.chip) { @apply text-muted-foreground; }
+.deps-old { @apply mt-2.5 text-xs text-muted-foreground; }
+/* a tab list that scrolls sideways, and the API's lines */
 .inv-tabs { @apply flex w-max min-w-full; }
 .inv-tabs .tab-trigger { @apply gap-2 px-3 text-[13px]; }
 .inv-count { @apply h-4 px-1.5 text-muted-foreground tabular-nums; }
 .inv-hint { @apply mb-1 text-xs text-muted-foreground; }
-.inv-item { @apply border-t py-2.5 first:border-t-0; }
-.inv-row { @apply flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm; }
-.inv-name { @apply font-mono font-semibold hover:underline; }
-.inv-path { @apply min-w-0 truncate font-mono text-xs text-muted-foreground; }
-.inv-n { @apply ml-auto flex shrink-0 gap-1.5 font-mono text-xs tabular-nums; }
-.inv-n ins { @apply text-diff-add no-underline; }
-.inv-n del { @apply text-diff-del no-underline; }
-.inv-sub { @apply mt-0.5 flex max-w-[80ch] min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground; }
-.inv-sub > span { @apply truncate; }
-.inv-sub svg { @apply size-3.5 shrink-0; }
-/* scrolls in itself; the edge with more past it fades out */
-.inv-scroll {
-  @apply -mr-2 max-h-[30rem] overflow-y-auto pr-2;
-  --above: 0px; --below: 0px;
-  mask-image: linear-gradient(transparent, #000 var(--above), #000 calc(100% - var(--below)), transparent);
-}
-.inv-scroll[data-above="true"] { --above: 2.5rem; }
-.inv-scroll[data-below="true"] { --below: 4rem; }
-/* shadcn's scroll button: while more is below, a page further down */
-.inv-down { @apply invisible absolute bottom-3 left-1/2 size-8 -translate-x-1/2 rounded-full bg-background opacity-0 shadow-md; }
-.inv-down svg { @apply size-4; }
-.inv-scroll[data-below="true"] + .inv-down { @apply visible opacity-100; }
-.inv-move { @apply mt-1 flex min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground; }
-.inv-move svg { @apply size-3.5 shrink-0; }
-.inv-move a { @apply flex min-w-0 items-baseline gap-1.5 truncate rounded-sm font-mono text-xs text-foreground underline decoration-border underline-offset-4 hover:decoration-current; }
-.inv-move del { @apply text-diff-del decoration-diff-del/50; }
-.inv-move del + span { @apply text-muted-foreground; }
 .inv-lines { @apply mt-1.5 grid max-w-full rounded-md border font-mono text-xs; background: var(--diff-bg); color: var(--diff-fg); }
 .inv-lines code { @apply px-2 py-0.5 whitespace-pre; }
 .inv-lines .add { background: var(--diff-add-bg); }
@@ -424,7 +406,6 @@ html[data-filter="unviewed"] .sidebar-files li:has(.done) { display: none; }
 @keyframes m-plain { from, to { background: transparent; } }
 @keyframes m-hold { from, to { font-size: 0; } }
 @keyframes m-cur { from, to { visibility: visible; } }
-.sym-card > .inv-move { @apply mt-0; }
 .sym-card + .sym-card { @apply border-t border-dashed; }
 .sym-card { @apply space-y-2.5 p-3.5; }
 .sym-head { @apply flex min-w-0 items-center gap-2; }
@@ -525,8 +506,7 @@ html:not([data-diff="split"]) .split-legend { display: none; }
 :root { interpolate-size: allow-keywords; }
 html { scroll-padding-top: 5rem; }
 @media (prefers-reduced-motion: no-preference) {
-  html, .inv-scroll { scroll-behavior: smooth; }
-  .inv-down { transition: opacity 150ms ease, visibility 150ms; }
+  html { scroll-behavior: smooth; }
   .rise > * { animation: rise 500ms cubic-bezier(.2, .7, .2, 1) both; }
   .rise > :nth-child(2) { animation-delay: 60ms; } .rise > :nth-child(3) { animation-delay: 120ms; }
   .rise > :nth-child(4) { animation-delay: 180ms; } .rise > :nth-child(n+5) { animation-delay: 240ms; }

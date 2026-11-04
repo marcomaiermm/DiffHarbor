@@ -93,30 +93,25 @@
 {{define "explore"}}{{if or .Inventory .Deps .Affected .Diagram}}
 <section id="explore" class="mt-16 border-t pt-10" aria-labelledby="explore-h">
   <h2 id="explore-h" class="text-xl font-semibold tracking-tight">Look closer</h2>
-  <p class="mt-1 mb-5 text-muted-foreground">Optional, after the steps: the declarations as a diff, how the changed directories use each other, and what the change reaches outside the PR.</p>
+  <p class="mt-1 mb-5 text-muted-foreground">Optional, after the steps: the declarations as a diff, what the change reaches outside the PR, and how the changed directories use each other. A dashed AI means the reason was read from the code, not from a commit.</p>
   <div class="space-y-2.5">
-  {{with .Inventory}}<details class="box" id="happened">
-    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">The declarations, before and after</span><span class="bs-note">each one the PR touches, moves and renames matched across files</span></summary>
-    <div class="bb">
-      <div class="scroll-area"><div class="tab-list inv-tabs" data-variant="line" role="tablist" aria-label="Kind of change">{{range $i, $g := .}}<button type="button" class="tab-trigger" role="tab" id="inv-tab-{{.Key}}" aria-controls="inv-{{.Key}}" aria-selected="{{eq $i 0}}"{{if $i}} tabindex="-1"{{end}}{{with .Hint}} title="{{.}}"{{end}}>{{.Title}}<span class="badge inv-count" data-variant="secondary">{{add (len .Items) .More}}</span></button>{{end}}</div></div>
-      {{range $i, $g := .}}<div class="tab-content" role="tabpanel" id="inv-{{.Key}}" aria-labelledby="inv-tab-{{.Key}}" tabindex="0"{{if $i}} hidden{{end}}>
-        <div class="relative"><div class="scroll-area inv-scroll"><ul>{{range $it := .Items}}<li class="inv-item" data-path="{{.File}}"{{with .OldHead}} data-old-head="{{.}}" data-head="{{$it.Head}}"{{end}}>
-          <div class="inv-row"><a href="#{{.ID}}" class="inv-name">{{.Name}}</a><span class="inv-path">{{.Path}}</span>{{if or .NPlus .NMinus}}<span class="inv-n">{{with .NPlus}}<ins>+{{.}}</ins>{{end}}{{with .NMinus}}<del>−{{.}}</del>{{end}}</span>{{end}}</div>
-          {{if .OldID}}<p class="inv-move">{{icon "arrow-right-left" ""}}<span>{{if .Was}}renamed from{{else}}moved from{{end}}</span><a href="#{{.OldID}}" title="Where it was">{{with .Was}}<del>{{.}}</del>{{end}}{{if or .From (not .Was)}}<span>{{with .From}}{{.}}:{{else}}line {{end}}{{.OldLine}}</span>{{end}}</a></p>{{end}}
-          {{if .Commit}}<p class="inv-sub" title="The commit that added it: {{.Why}}">{{icon "git-commit-horizontal" ""}}<span>{{.Why}}</span></p>{{else if .Doc}}<p class="inv-sub" title="{{.Doc}}"><span>{{.Doc}}</span></p>{{else if .Why}}<p class="inv-sub" title="A small model's reading of its code: {{.Why}}">{{icon "sparkles" ""}}<span>{{.Why}}</span></p>{{end}}
-          {{if and .OldHead (not .OldID)}}<div class="inv-lines scroll-area"><code class="del">{{.OldHead}}</code><code class="add">{{.Head}}</code></div>{{end}}
-          {{if or .Plus .Minus}}<div class="inv-lines scroll-area">{{range .Minus}}<code class="del">{{.}}</code>{{end}}{{range .Plus}}<code class="add">{{.}}</code>{{end}}</div>{{end}}
-        </li>{{end}}</ul></div><button type="button" class="btn inv-down" data-variant="outline" data-size="icon" aria-label="Scroll the list down">{{icon "arrow-down" ""}}</button></div>
-        {{with .More}}<p class="inv-hint mt-2">and {{.}} more in the diff</p>{{end}}
-      </div>{{end}}
+  {{with .API}}<details class="box" id="happened">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">The API, before and after</span><span class="api-legend"><span><b class="am-add">+</b> new</span><span><b class="am-chg">~</b> changed</span><span><b class="am-mv">→</b> moved</span><span><b class="am-del">−</b> removed</span></span></summary>
+    <div class="bb api">{{range .}}
+      <p class="apkg">{{.Pkg}}</p>
+      {{range $r := .Items}}<details class="arow" data-path="{{.File}}"{{with .OldHead}} data-old-head="{{.}}" data-head="{{$r.Head}}"{{end}}>
+        <summary class="as{{if eq .Mark "−"}} as-del{{end}}"><span class="am" data-mark="{{.Word}}" role="img" aria-label="{{.Word}}">{{.Mark}}</span><code class="asig" data-name="{{.Name}}">{{.Sig}}</code><span class="ainfo">
+          {{- range .Info}}<span>{{.}}</span>{{end}}
+          {{- with .Sev}}<span class="chip" data-sev="{{.Sev}}">{{.Text}}</span>{{end}}
+          {{- with .Outside}}<button type="button" class="alink" data-uses="{{$r.Name}}" data-path="{{$r.File}}">{{plural . "use" "uses"}} outside</button>{{end}}
+          {{- if and .Why (not .Commit) (not .Doc)}}<span class="chip" data-dash>AI</span>{{end}}</span></summary>
+        <div class="ab">{{if .Commit}}<span>{{.Why}}</span><a class="chip font-mono" href="{{$.Forge.PRCommit}}{{.SHA}}" target="_blank" rel="noopener" title="The commit that added it">commit {{short .SHA}}</a>{{else if .Doc}}<span>{{.Doc}}</span>{{else if .Why}}<span>{{.Why}}</span><span class="chip" data-dash title="A small model's reading of its code">AI · read from the code</span>{{end}}
+          {{- with .OldID}}<a class="aloc" href="#{{.}}">was {{with $r.From}}{{base .}}:{{else}}line {{end}}{{$r.OldLine}}</a>{{end}}<a class="aloc" href="#{{.ID}}">{{base .File}}{{with .Line}}:{{.}}{{end}}</a></div>
+        {{if and .OldHead (not .OldID)}}<div class="inv-lines scroll-area"><code class="del">{{.OldHead}}</code><code class="add">{{.Head}}</code></div>{{end}}
+        {{if or .Plus .Minus}}<div class="inv-lines scroll-area">{{range .Minus}}<code class="del">{{.}}</code>{{end}}{{range .Plus}}<code class="add">{{.}}</code>{{end}}</div>{{end}}
+      </details>{{end}}{{end}}
+      {{with $.APIMore}}<p class="inv-hint mt-2">and {{.}} more in the diff</p>{{end}}
     </div>
-  </details>{{end}}
-  {{with .Deps}}<details class="box">
-    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">Dependencies between {{len .Dirs}} changed directories</span>{{with .Cycles}}<span class="bs-note text-destructive">{{.}} {{if eq . 1}}cycle{{else}}cycles{{end}}</span>{{end}}</summary>
-    <div class="bb">{{with .Top}}<p class="mb-2 text-[13px] text-muted-foreground">Most used: {{range $i, $t := .}}{{if $i}}, {{end}}<span class="font-mono text-foreground">{{$t}}</span>{{end}}.</p>{{end}}<p class="mb-3 text-[13px] text-muted-foreground">A row's changed code calls or names a column's, the number how many declarations; hover a cell for which. What uses comes before what it uses, so the numbers sit right of the diagonal. A red one left of it is a cycle: those directories use each other.</p><div class="deps-wrap scroll-area"><table class="deps">
-      <thead><tr><th></th>{{range $i, $d := .Dirs}}<th scope="col" title="{{$d.Label}}">{{inc $i}}</th>{{end}}</tr></thead>
-      <tbody>{{range $d := .Dirs}}<tr><th scope="row"><a href="{{$d.Href}}" title="{{$d.Label}}"><span class="deps-no"></span><span class="truncate">{{$d.Label}}</span></a></th>{{range $c := $d.Cells}}<td{{if .Self}} class="d-self"{{else if .Back}} class="d-back"{{else if .N}} class="d-use" style="--n: {{.N}}"{{end}}{{if .N}} data-n="{{.N}}" data-names="{{.Names}}"{{end}}>{{if .N}}{{.N}}{{end}}</td>{{end}}</tr>{{end}}</tbody>
-    </table></div><p class="deps-say"></p></div>
   </details>{{end}}
   {{with .Affected}}<details class="box">
     <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">What the change reaches outside the PR</span><span class="bs-note">{{plural (len .) "declaration" "declarations"}} called or named by code outside the diff</span></summary>
@@ -125,6 +120,11 @@
       <ul>{{range .Refs}}<li><a href="{{$.Forge.Blob}}{{.Path}}#L{{.Line}}" target="_blank" rel="noopener">{{.Path}}:{{.Line}}</a>{{with .In}}<span class="shrink-0 text-muted-foreground">in {{.}}</span>{{end}}<code data-path="{{.Path}}">{{.Text}}</code></li>{{end}}
         <li><button type="button" class="btn" data-variant="link" data-size="xs" data-uses="{{.Name}}" data-path="{{.Path}}">Every use</button></li></ul>
     </details>{{end}}</div>
+  </details>{{end}}
+  {{with .Deps}}<details class="box">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">{{if .New}}New uses between directories{{else}}Uses between the changed directories{{end}}</span>{{with .Cycles}}<span class="bs-note text-destructive">{{plural . "cycle" "cycles"}}</span>{{end}}</summary>
+    <div class="bb">{{with .New}}<ul class="dl">{{range .}}<li><b class="am-add" role="img" aria-label="new">+</b><code>{{.From}} → {{.To}}</code><span>{{.Why}}</span>{{if .Cycle}}<span class="chip" data-sev="critical">new cycle</span>{{end}}</li>{{end}}</ul>{{end}}
+      {{with .Old}}<p class="deps-old">Between declarations that were there before: {{join .}}.</p>{{end}}</div>
   </details>{{end}}
   {{with .Diagram}}<details class="box">
     <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">How the parts talk</span></summary>

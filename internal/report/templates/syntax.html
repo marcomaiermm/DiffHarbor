@@ -148,15 +148,6 @@ const paint = async table => {
 // that names it. Built with textContent, never markup: the repo's text is the PR author's.
 const syms = JSON.parse(document.getElementById("symbols").textContent) || {};
 const pop = document.getElementById("sym"), sheet = document.getElementById("uses");
-// the inventory's lists: which edge has more past it, for the fade
-for (const sc of document.querySelectorAll(".inv-scroll")) {
-  const edges = () => Object.assign(sc.dataset, { above: sc.scrollTop > 1, below: sc.scrollTop + sc.clientHeight < sc.scrollHeight - 1 });
-  sc.addEventListener("scroll", edges, { passive: true });
-  new ResizeObserver(edges).observe(sc); // a hidden tab's list measures once it shows
-  sc.nextElementSibling.addEventListener("click", () => sc.scrollBy({ top: sc.clientHeight * 0.8 }));
-}
-// the inventory's names show the same card; a click still goes to the diff
-for (const a of document.querySelectorAll(".inv-name")) if (Object.hasOwn(syms, a.textContent)) { a.classList.add("sym"); a.dataset.sym = a.textContent; }
 const el = (tag, cls, ...kids) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -211,12 +202,21 @@ const code = async (sig, path) => el("pre", "sym-sig scroll-area", ...(await col
   ...(i ? ["\n"] : []),
   ...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; }),
 ]));
-// code lines outside the diff, the inventory's and the reach list's, colored like it
-for (const c of document.querySelectorAll(".inv-lines code, .reach-item li > code")) {
-  const path = c.closest("[data-path]")?.dataset.path;
-  if (path && lang(path)) colored(c.textContent, path).then(([ts = []]) =>
-    c.replaceChildren(...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; })));
-}
+// code lines outside the diff, the API's and the reach list's, colored like it once their box opens: a hundred
+// signatures colored at load hold the page up; a signature's name shows the card
+const tint = box => {
+  for (const c of box.querySelectorAll(".inv-lines code, .reach-item li > code, .asig")) {
+    const path = c.closest("[data-path]")?.dataset.path;
+    if (path && lang(path)) colored(c.textContent, path).then(([ts = []]) => {
+      c.replaceChildren(...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; }));
+      const name = c.dataset.name, s = Object.hasOwn(syms, name ?? "") && [...c.children].find(s => s.textContent.trim() === name);
+      if (s) { s.classList.add("sym"); s.dataset.sym = name; }
+    });
+  }
+};
+for (const box of document.querySelectorAll("#explore details.box"))
+  if (box.open) tint(box); // opened before the colors loaded
+  else box.addEventListener("toggle", () => tint(box), { once: true });
 // the colored tokens of ts between two offsets of their text, split where those fall
 const cut = (ts, a, b) => {
   const out = [];
@@ -288,10 +288,9 @@ const show = async span => {
   if (anchor === span) return;
   anchor = span;
   const name = span.dataset.sym, list = pick(span, syms[name]);
-  const item = span.closest(".inv-item"), turn = item?.dataset.oldHead; // an inventory row's: what it was
+  const item = span.closest(".arow"), turn = item?.dataset.oldHead; // an API row's: what it was
   const cards = await Promise.all(list.map(async (s, i) => {
     const card = el("div", "sym-card", head(s, name), i || !turn ? await code(s.sig, s.path) : await morph(turn, item.dataset.head, s.path));
-    if (!i && item?.querySelector(".inv-move")) card.append(item.querySelector(".inv-move").cloneNode(true));
     if (s.doc) card.append(el("p", "sym-doc", doc(s)));
     return card;
   }));
@@ -364,28 +363,9 @@ document.addEventListener("sym:uses", e => {
 });
 document.addEventListener("click", e => {
   const b = e.target.closest("[data-uses]");
+  if (b?.closest("summary")) e.preventDefault(); // the sheet, not the row
   if (b) document.dispatchEvent(new CustomEvent("sym:uses", { detail: { name: b.dataset.uses, path: b.dataset.path } }));
 });
-// the matrix: a cell lights its row and column and says who uses whom with which names
-for (const t of document.querySelectorAll(".deps")) {
-  const say = t.closest(".bb").querySelector(".deps-say"), rows = [...t.rows], label = i => rows[i].cells[0].textContent.replace(/^\d+/, "");
-  const idle = "Hover a number for the names, click a directory to go to its first file.";
-  say.textContent = idle;
-  t.addEventListener("mouseover", e => {
-    const td = e.target.closest("td");
-    for (const x of t.querySelectorAll(".hl, .at")) x.classList.remove("hl", "at");
-    if (!td) return void (say.textContent = idle);
-    const r = td.parentElement.rowIndex, c = td.cellIndex;
-    for (const row of rows) row.cells[c].classList.add("hl");
-    for (const x of rows[r].cells) x.classList.add("hl");
-    if (!td.dataset.n) return void (say.textContent = idle);
-    td.classList.add("at");
-    const from = label(r), to = label(c);
-    say.replaceChildren(el("b", "", from), from === to ? " within itself: " : td.classList.contains("d-back") ? " uses, in a cycle, " : " uses ",
-      ...(from === to ? [] : [el("b", "", to), ": "]), td.dataset.names);
-  });
-  t.addEventListener("mouseleave", () => { for (const x of t.querySelectorAll(".hl, .at")) x.classList.remove("hl", "at"); say.textContent = idle; });
-}
 sheet.addEventListener("click", e => { if (e.target === sheet || e.target.closest("[data-sheet-close]")) sheet.close(); });
 document.addEventListener("mouseover", e => {
   const s = e.target.closest?.(".sym");
@@ -395,6 +375,7 @@ document.addEventListener("mouseover", e => {
 });
 document.addEventListener("click", e => {
   const s = e.target.closest(".sym");
+  if (s?.closest("summary")) e.preventDefault(); // the sheet, not the row
   if (s && !s.closest("a")) open(s);
   else if (!pop.contains(e.target)) hide();
 });

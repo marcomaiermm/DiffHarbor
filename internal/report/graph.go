@@ -11,8 +11,8 @@ import (
 
 // maxExternal is the changed declarations of other steps a step's graph shows; past it, none. Past maxStep
 // declarations a step's graph is too large to read even zoomed, past maxDirs directories the PR's matrix: none.
-// maxAffected is the changed declarations "outside the PR" lists, maxPairs the names a matrix cell spells out.
-const maxExternal, maxStep, maxDirs, maxAffected, maxPairs = 12, 60, 40, 30, 8
+// maxAffected is the changed declarations "outside the PR" lists.
+const maxExternal, maxStep, maxDirs, maxAffected = 12, 60, 40, 30
 
 // flow is a graph for the page's cytoscape: a box per file, in it the changed declarations, an edge from one to
 // each it names.
@@ -141,37 +141,32 @@ func build(all []changed, used map[int]bool, edges []edge, i int) *flow {
 	return g
 }
 
-// deps is which changed directories use which: a row's changed code calls or names a column's. Ordered so that a
-// use is right of the diagonal; one left of it is a cycle's.
+// deps is which changed directories use which: a directory's changed code calls or names another's.
 type deps struct {
-	Dirs   []dep
+	New    []newDep
+	Old    []string // "a → b": every such use joins declarations that were there before the PR
 	Cycles int      // groups of directories that use each other
-	Top    []string // the heaviest uses between two: "a → b (n)"
 }
 
-type dep struct {
-	Label, Href string // Href: its first changed file
-	Cells       []cell
-}
-
-type cell struct {
-	N     int    // the row's changed declarations' uses of the column's
-	Self  bool   // the diagonal: uses within the directory
-	Back  bool   // left of the diagonal: the column uses the row too, through others maybe
-	Names string // the first few "a → b"
+// newDep is a use between two directories that only declarations the PR adds make: new to the PR's code, maybe
+// not to the directories, whose other code the index doesn't read here.
+type newDep struct {
+	From, To string
+	Why      string // "Handle uses Save", and how many more
+	Cycle    bool   // To uses From back, through others maybe
 }
 
 // matrix is the PR's changed directories and their uses of each other; nil without codegraph's index, with no use
-// between two of them or past maxDirs: 40 columns is what a page holds.
+// between two of them or past maxDirs.
 func matrix(steps []step, syms map[string][]Symbol) *deps {
 	all, byDecl := decls(steps)
 	edges, _ := arrows(all, byDecl, syms, -1)
 	dirOf := func(f *file) string { return path.Dir(f.Short) }
 	var dirs []string
-	first := map[string]*file{}
+	seen := map[string]bool{}
 	for _, d := range all {
-		if k := dirOf(d.f); first[k] == nil {
-			first[k], dirs = d.f, append(dirs, k)
+		if k := dirOf(d.f); !seen[k] {
+			seen[k], dirs = true, append(dirs, k)
 		}
 	}
 	slices.Sort(dirs)
@@ -183,21 +178,24 @@ func matrix(steps []step, syms map[string][]Symbol) *deps {
 		at[d] = k
 	}
 	n := len(dirs)
-	w, pairs := make([][]int, n), make([][][]string, n)
+	w, fresh, pairs := make([][]int, n), make([][]int, n), make([][][]string, n)
 	for r := range n {
-		w[r], pairs[r] = make([]int, n), make([][]string, n)
+		w[r], fresh[r], pairs[r] = make([]int, n), make([]int, n), make([][]string, n)
 	}
 	cross := false
 	for _, e := range edges {
 		a, b := at[dirOf(all[e.a].f)], at[dirOf(all[e.b].f)]
 		w[a][b]++
-		pairs[a][b] = append(pairs[a][b], all[e.a].c.Name+" → "+all[e.b].c.Name)
+		if all[e.a].c.State == "new" || all[e.b].c.State == "new" {
+			fresh[a][b]++
+		}
+		pairs[a][b] = append(pairs[a][b], all[e.a].c.Name+" uses "+all[e.b].c.Name)
 		cross = cross || a != b
 	}
 	if !cross {
 		return nil
 	}
-	ord, reach := order(w)
+	_, reach := order(w)
 	m := &deps{}
 	counted := make([]bool, n) // a cycle is counted by its first directory
 	for i := range n {
@@ -211,30 +209,20 @@ func matrix(steps []step, syms map[string][]Symbol) *deps {
 			m.Cycles++
 		}
 	}
-	type use struct{ a, b, n int }
-	var top []use
 	for a := range n {
 		for b := range n {
-			if a != b && w[a][b] > 0 {
-				top = append(top, use{a, b, w[a][b]})
+			switch {
+			case a == b || w[a][b] == 0:
+			case fresh[a][b] == w[a][b]:
+				why := pairs[a][b][0]
+				if k := len(pairs[a][b]) - 1; k > 0 {
+					why += fmt.Sprintf(" and %d more", k)
+				}
+				m.New = append(m.New, newDep{dirs[a], dirs[b], why, reach[b][a]})
+			default:
+				m.Old = append(m.Old, dirs[a]+" → "+dirs[b])
 			}
 		}
-	}
-	slices.SortStableFunc(top, func(x, y use) int { return cmp.Compare(y.n, x.n) })
-	for _, u := range top[:min(len(top), 3)] {
-		m.Top = append(m.Top, fmt.Sprintf("%s → %s (%d)", dirs[u.a], dirs[u.b], u.n))
-	}
-	for ri, r := range ord {
-		row := dep{Label: dirs[r], Href: "#" + first[dirs[r]].Path}
-		for ci, c := range ord {
-			ps := pairs[r][c]
-			names := strings.Join(ps[:min(len(ps), maxPairs)], ", ")
-			if len(ps) > maxPairs {
-				names += fmt.Sprintf(" +%d", len(ps)-maxPairs)
-			}
-			row.Cells = append(row.Cells, cell{N: w[r][c], Self: r == c, Back: w[r][c] > 0 && ci < ri, Names: names})
-		}
-		m.Dirs = append(m.Dirs, row)
 	}
 	return m
 }
