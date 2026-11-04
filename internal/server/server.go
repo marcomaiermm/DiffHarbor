@@ -87,8 +87,13 @@ func work(queue chan *forge.Event) {
 		running.Lock()
 		running.key, running.review, running.cancel = e.Key(), e.Kind == "pull_request", cancel
 		running.Unlock()
-		if err == nil {
+		switch {
+		case err == nil:
 			err = run(ctx)
+		case e.Kind == "pull_request" && !closing(e): // stays pending (done keeps it): the next push or a restart retries
+			if p, err := f.Open(e); err == nil {
+				p.Status(e.PullRequest.Head.SHA, "error", "Review not started: cleanup failed, retried on the next push")
+			}
 		}
 		if err != nil {
 			log.Println(e.Key(), err)
