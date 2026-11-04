@@ -79,7 +79,7 @@ func TestStack(t *testing.T) {
 
 func TestVerdicts(t *testing.T) {
 	cs := []Comment{{Path: "a.go", Line: 3, Body: "b", Prompt: "In a.go around line 3, fix"}, {Path: "b.go", Line: 9}}
-	kept, dropped, fixed, ok := verdicts(cs, []int{2, 4}, `{"verdicts":[{"i":0,"keep":true,"path":"c.go","line":5,"evidence":"e"},{"i":0,"keep":true},{"i":1,"keep":false,"evidence":"handled in b.go:3"},{"i":7,"keep":true}],"fixed":[4,4,3]}`)
+	kept, dropped, fixed, ok := verdicts(cs, []int{2, 4}, `{"verdicts":[{"i":0,"keep":true,"path":"c.go","line":5,"evidence":"e"},{"i":0,"keep":true},{"i":1,"keep":false,"evidence":"handled in b.go:3"},{"i":7,"keep":true}],"fixed":[4,4,3]}`, nil)
 	if !ok || len(kept) != 1 || kept[0].Path != "c.go" || kept[0].Line != 5 || kept[0].Prompt != "In c.go around line 5, fix" || kept[0].Body != "b\n\n_Verified:_ e" {
 		t.Fatalf("%+v", kept)
 	}
@@ -89,13 +89,18 @@ func TestVerdicts(t *testing.T) {
 	if len(dropped) != 1 || dropped[0].Path != "b.go" || dropped[0].Evidence != "handled in b.go:3" {
 		t.Fatalf("dropped: %+v", dropped)
 	}
-	if _, _, _, ok := verdicts(cs, nil, "no json"); ok {
+	// c.go is another part's: the finding stays where its part put it
+	other := func(path string, _ int) bool { return path != "c.go" }
+	if kept, _, _, _ := verdicts(cs, nil, `{"verdicts":[{"i":0,"keep":true,"path":"c.go","line":5},{"i":1,"keep":false}]}`, other); len(kept) != 1 || kept[0].Path != "a.go" || kept[0].Line != 3 {
+		t.Fatalf("moved to another part: %+v", kept)
+	}
+	if _, _, _, ok := verdicts(cs, nil, "no json", nil); ok {
 		t.Fatal("no json accepted")
 	}
-	if _, _, _, ok := verdicts(cs, nil, `{"verdicts":[{"i":0,"keep":true}]}`); ok {
+	if _, _, _, ok := verdicts(cs, nil, `{"verdicts":[{"i":0,"keep":true}]}`, nil); ok {
 		t.Fatal("a finding without a verdict accepted")
 	}
-	if kept, _, _, ok := verdicts([]Comment{{Existing: "a", Fix: "b"}}, nil, `{"verdicts":[{"i":0,"keep":true,"fix":false}]}`); !ok || kept[0].Fix != "" {
+	if kept, _, _, ok := verdicts([]Comment{{Existing: "a", Fix: "b"}}, nil, `{"verdicts":[{"i":0,"keep":true,"fix":false}]}`, nil); !ok || kept[0].Fix != "" {
 		t.Fatalf("fix=false kept the fix: %+v", kept)
 	}
 }

@@ -6,7 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -19,10 +22,10 @@ const Max = 60_000
 var (
 	// Skip matches lockfiles, generated, vendored and binary files: never reviewed.
 	Skip = regexp.MustCompile(`(^|/)(pnpm-lock\.yaml|package-lock\.json|npm-shrinkwrap\.json|[^/]+\.lock(b|file)?|go\.sum|packages\.lock\.json|Package\.resolved|\.terraform\.lock\.hcl)$|\.(min\.(js|css)|map|snap|svg|png|jpe?g|gif|webp|ico|pdf|woff2?)$|(^|/)(dist|build|vendor|third_party|node_modules|__generated__)/|(^|/)zz_generated[^/]*\.go$|\.(pb|sql)\.go$|_pb2(_grpc)?\.py$|_pb\.(js|ts)$|\.(g|freezed)\.dart$|_gen\.go$|\.(gen|generated)\.[a-z]+$`)
-	// generated matches a file diff whose first lines start a comment saying it is: "Code generated … DO NOT EDIT.",
-	// "@generated" and the like. A changed file's first lines are in its diff only when a hunk starts there; Skip names
-	// the rest.
-	generated = regexp.MustCompile(`(?mi)^@@ -\d+(?:,\d+)? \+1(?:,\d+)? @@.*\n(?:[^@\n].*\n){0,4}[+ ]\s*(?://+|#+|/?\*+|<!--|--|;+)\s*(?:(?:this (?:file|code) (?:is|was|has been) )?(?:(?:auto-?)?generated|code generated)\b.*\bdo not (?:edit|modify)\b|@generated\b)`)
+	// generated matches a file diff whose first lines, a license comment first, start a comment saying it is:
+	// "Code generated … DO NOT EDIT.", "@generated" and the like. A changed file's first lines are in its diff only
+	// when a hunk starts there; generatedAt reads the others.
+	generated = regexp.MustCompile(`(?mi)^@@ -\d+(?:,\d+)? \+1(?:,\d+)? @@.*\n(?:[^@\n].*\n){0,20}[+ ]\s*(?://+|#+|/?\*+|<!--|--|;+)\s*(?:(?:this (?:file|code) (?:is|was|has been) )?(?:(?:auto-?)?generated|code generated)\b.*\bdo not (?:edit|modify)\b|@generated\b)`)
 	// Fill order for the budget: code, then tests, data and bulk code (stylesheets, notebooks, translations,
 	// seeds), docs. #490: one 38k-char doc took most of it; on #34 a 48k-char stylesheet took a part while code was
 	// left out.
@@ -105,7 +108,11 @@ func split(f string) []string {
 			title = cmp.Or(m[5], "\n")
 			continue
 		}
-		if cur.Len()+hunk.Len() > 0 && len(head)+cur.Len()+hunk.Len()+len(l)+len(title)+40 > Max { // 40: "@@ -o,n +o,n @@"
+		if l == "" { // after the last newline
+			continue
+		}
+		// 40: "@@ -o,n +o,n @@", 40 more: a "\ No newline at end of file" after the line, never cut off from it
+		if cur.Len()+hunk.Len() > 0 && !strings.HasPrefix(l, "\\") && len(head)+cur.Len()+hunk.Len()+len(l)+len(title)+80 > Max {
 			end()
 			pieces = append(pieces, head+cur.String())
 			cur.Reset()
@@ -124,19 +131,19 @@ func split(f string) []string {
 	return append(pieces, head+cur.String())
 }
 
-// Filter drops lockfiles, generated/binary files (Skip, generated) and what ignore matches; only (nil = all) limits
-// to these paths. It packs files into at most n parts of up to Max each, a file past Max in pieces (split), code
+// Filter drops lockfiles, generated/binary files (Skip, generated, generatedAt in root; "" reads no file) and what
+// ignore matches; only (nil = all) limits to these paths. It packs files into at most n parts of up to Max each, a file past Max in pieces (split), code
 // before tests, data, bulk code and docs, a file next to others of its directory; in a part they keep the diff's
 // order. The last part names the omitted files, also returned (a file with a piece left out too), and with only nil
 // the deleted files: their diffs are no use, what still relies on them is.
-func Filter(diff string, only map[string]bool, ignore *regexp.Regexp, n int) ([]string, []string) {
+func Filter(diff, root string, only map[string]bool, ignore *regexp.Regexp, n int) ([]string, []string) {
 	type file struct {
 		i          int
 		path, diff string
 	}
 	var files []file
 	EachFile(diff, func(p, f string) {
-		if !Skip.MatchString(p) && !generated.MatchString(f) && (only == nil || only[p]) && (ignore == nil || !ignore.MatchString(p)) {
+		if !Skip.MatchString(p) && !generated.MatchString(f) && (only == nil || only[p]) && (ignore == nil || !ignore.MatchString(p)) && !generatedAt(root, p) {
 			for _, s := range split(f) {
 				files = append(files, file{len(files), p, s})
 			}
@@ -192,6 +199,26 @@ func Filter(diff string, only map[string]bool, ignore *regexp.Regexp, n int) ([]
 		note("\n# %d file(s) deleted: %s. Check that nothing still uses them.\n", gone)
 	}
 	return parts, left
+}
+
+// generatedAt tells whether the file p in root starts with a generated header, its diff aside: a change lower in
+// the file has no hunk at its first lines.
+func generatedAt(root, p string) bool {
+	if root == "" {
+		return false
+	}
+	fp := filepath.Join(root, p)
+	if fi, err := os.Lstat(fp); err != nil || !fi.Mode().IsRegular() { // a link may name a FIFO or a file outside
+		return false
+	}
+	f, err := os.Open(fp) //nolint:gosec // a path of the diff, in its checkout
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	b := make([]byte, 4096)
+	n, _ := io.ReadFull(f, b)
+	return generated.MatchString("@@ -1 +1 @@\n " + strings.ReplaceAll(string(b[:n]), "\n", "\n "))
 }
 
 // Docs returns the changed docs and API specs of diff.

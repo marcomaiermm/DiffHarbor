@@ -315,11 +315,14 @@ func runPart(ctx context.Context, in Input, name, prompt, block, m, vm string) p
 	r.Fixed = slices.DeleteFunc(slices.Compact(r.Fixed), func(i int) bool { return i < 0 || i >= len(in.Prior) })
 	mine, all := diff.Paths(block), diff.Paths(strings.Join(in.Parts, ""))
 	here, every := diff.RightLines(block, true), diff.RightLines(strings.Join(in.Parts, ""), true)
+	// another part's file, or lines of a file in pieces, are its reviewer's: two parts reported one finding at two
+	// lines otherwise
+	owns := func(path string, line int) bool {
+		at := fmt.Sprintf("%s:%d", path, line)
+		return (slices.Contains(mine, path) || !slices.Contains(all, path)) && (here[at] || !every[at])
+	}
 	r.Comments = slices.DeleteFunc(r.Comments, func(c Comment) bool { // before verify: it costs
-		// another part's file, or lines of a file in pieces, are its reviewer's: two parts reported one finding at
-		// two lines otherwise
-		at := fmt.Sprintf("%s:%d", c.Path, c.Line)
-		if !slices.Contains(mine, c.Path) && slices.Contains(all, c.Path) || every[at] && !here[at] {
+		if !owns(c.Path, c.Line) {
 			log.Printf("review%s dropped %s:%d %s: another part's file", name, c.Path, c.Line, c.Title)
 			return true
 		}
@@ -341,11 +344,11 @@ func runPart(ctx context.Context, in Input, name, prompt, block, m, vm string) p
 	}
 	out, err := in.Agent.Run(ctx, in.Dir, "verify"+name, verifySystem+in.Trusted, task+block,
 		"Verify these findings. End with the JSON verdicts.", vm)
-	kept, dropped, fixed, ok := verdicts(r.Comments, r.Fixed, out)
+	kept, dropped, fixed, ok := verdicts(r.Comments, r.Fixed, out, owns)
 	if err == nil && !ok {
 		out, err = in.Agent.Continue(ctx, in.Dir, "verify"+name, verifySystem+in.Trusted, verifyRepair, vm)
 		if err == nil {
-			kept, dropped, fixed, ok = verdicts(r.Comments, r.Fixed, out)
+			kept, dropped, fixed, ok = verdicts(r.Comments, r.Fixed, out, owns)
 		}
 	}
 	if err != nil || !ok {
@@ -463,9 +466,9 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string) (Result, 
 	return r, nil
 }
 
-// verdicts keeps the findings the verifier confirmed, with its path and line fix and evidence, the others with its
-// reason to drop them, and the fix claims it confirmed (only those in claimed).
-func verdicts(cs []Comment, claimed []int, text string) (kept, dropped []Comment, _ []int, _ bool) {
+// verdicts keeps the findings the verifier confirmed, with its path and line fix where owns them (nil: anywhere)
+// and evidence, the others with its reason to drop them, and the fix claims it confirmed (only those in claimed).
+func verdicts(cs []Comment, claimed []int, text string, owns func(path string, line int) bool) (kept, dropped []Comment, _ []int, _ bool) {
 	var v struct {
 		Verdicts *[]struct {
 			I        int    `json:"i"`
@@ -497,6 +500,10 @@ func verdicts(cs []Comment, claimed []int, text string) (kept, dropped []Comment
 		}
 		seen[d.I] = true
 		c := cs[d.I]
+		if owns != nil && !owns(cmp.Or(d.Path, c.Path), cmp.Or(d.Line, c.Line)) {
+			// another part's: it may have reported it there too, and merge joins only one line; it stays here
+			d.Path, d.Line = "", 0
+		}
 		if d.Path != "" && d.Path != c.Path { // #61: the cause sat in another file than the symptom
 			c.Prompt = strings.ReplaceAll(c.Prompt, c.Path, d.Path)
 			c.Path = d.Path
