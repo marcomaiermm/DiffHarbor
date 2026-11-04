@@ -30,6 +30,13 @@ func TestFormat(t *testing.T) {
 	if allPrompts([]Finding{{Comment: review.Comment{Body: "x"}}}) != "" || !strings.Contains(allPrompts([]Finding{c, c}), "use ```x```\n\nIn a.go") {
 		t.Fatalf("allPrompts: %q", allPrompts([]Finding{c, c}))
 	}
+	c.Body += "\n\n" + review.Verified + "the map is nil on line 3\n"
+	if p := Parse(Format(c, "suggestion")); p.Severity != "major" || p.Title != "t" || !strings.HasPrefix(p.Body, "b\n") || p.Evidence != "the map is nil on line 3" {
+		t.Fatalf("parse: %+v", p)
+	}
+	if p := Parse("by hand"); p.Severity != "" || p.Body != "by hand" || p.Evidence != "" {
+		t.Fatalf("parse plain: %+v", p)
+	}
 }
 
 func TestSticky(t *testing.T) {

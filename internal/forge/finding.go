@@ -40,6 +40,28 @@ func Format(c Finding, suggestion string) string {
 	return s
 }
 
+// Parse reads severity, title and the verifier's evidence back from a finding Format posted. A body Format
+// did not write comes back as the body alone.
+func Parse(body string) review.Comment {
+	c := review.Comment{Body: body}
+	for sev, b := range badge {
+		if rest, ok := strings.CutPrefix(body, "_"+b+"_"); ok {
+			c.Severity, c.Body = sev, rest
+			if t, ok := strings.CutPrefix(rest, " · **"); ok {
+				if title, after, ok := strings.Cut(t, "**"); ok {
+					c.Title, c.Body = title, after
+				}
+			}
+			break
+		}
+	}
+	c.Body = strings.TrimSpace(c.Body)
+	if _, e, ok := strings.Cut(c.Body, review.Verified); ok {
+		c.Evidence, _, _ = strings.Cut(e, "\n")
+	}
+	return c
+}
+
 // Place finds the lines c.Existing quotes in the diff, nearest to c.Line and at most 10 lines from it, and sets
 // c.Start and c.End to them. No match leaves 0: the fix then shows as a plain code block.
 func Place(c *Finding, lines map[string]string) {

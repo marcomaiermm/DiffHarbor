@@ -419,7 +419,9 @@ func openFindings(threads, open []forge.Thread, r review.Result) []review.Commen
 	var cs []review.Comment
 	for _, t := range threads {
 		if !t.Resolved && !fixed[t.ID] {
-			cs = append(cs, review.Comment{Path: t.Path, Line: t.Line, Body: forge.Clean(t.Body)})
+			c := forge.Parse(forge.Clean(t.Body))
+			c.Path, c.Line = t.Path, t.Line
+			cs = append(cs, c)
 		}
 	}
 	return append(cs, r.Comments...)

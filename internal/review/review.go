@@ -87,6 +87,9 @@ const (
 	verifyRepair = "Your last message ended without the required JSON. Do not call tools. Output the JSON verdicts now, using the evidence you already gathered. No prose outside the JSON."
 )
 
+// Verified opens the verifier's evidence in a posted finding's body.
+const Verified = "_Verified:_ "
+
 // Comment is a finding, inline on a line of the diff.
 type Comment struct {
 	Path     string `json:"path"`
@@ -99,6 +102,9 @@ type Comment struct {
 	// suggestion. Quoted code instead of line numbers: models miscount lines.
 	Existing string `json:"existing,omitempty"`
 	Fix      string `json:"fix,omitempty"`
+	// Evidence is the verifier's reason to keep it, empty when no verify pass confirmed it. Not read from the
+	// review model's JSON: it must not vouch for itself.
+	Evidence string `json:"-"`
 }
 
 // Result is a review: the walkthrough, the findings and the earlier ones now fixed.
@@ -452,8 +458,9 @@ func verdicts(cs []Comment, claimed []int, text string) ([]Comment, []int, bool)
 			c.Prompt = strings.ReplaceAll(c.Prompt, fmt.Sprintf("line %d", c.Line), fmt.Sprintf("line %d", d.Line))
 			c.Line = d.Line
 		}
+		c.Evidence = cmp.Or(d.Evidence, "kept by the verifier")
 		if d.Evidence != "" {
-			c.Body += "\n\n_Verified:_ " + d.Evidence
+			c.Body += "\n\n" + Verified + d.Evidence
 		}
 		if d.Fix != nil && !*d.Fix {
 			c.Existing, c.Fix = "", ""
