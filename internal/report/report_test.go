@@ -1,6 +1,7 @@
 package report
 
 import (
+	"diffharbor/internal/checks"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
 	"fmt"
@@ -81,7 +82,7 @@ func TestRender(t *testing.T) {
 		"What only a person can settle", "Should a failed save retry?",
 		"Storage first", `id="store/store.go"`, "Then the handler", `id="api/handler.go"`, `id="finding-1"`, "major · Error dropped",
 		`id="tests"`, "api/handler_test.go: TestHandle", `id="api/handler_test.go"`, `id="other"`, `id="README.md"`,
-		`id="deleted"`, `id="gone.go"`, `id="explore"`, "Look closer", "How the parts talk", `id="commits"`, "work in progress", "/merge_requests/7/diffs?commit_id=aaaaaaaaaa", "Only this commit",
+		`id="deleted"`, `id="gone.go"`, `id="explore"`, "Look closer", "How the parts talk", `id="commits"`, "Work in progress", "/merge_requests/7/diffs?commit_id=aaaaaaaaaa", "Only this commit",
 		`id="finish"`, "Request changes", "Review for !7</span>",
 		"Error dropped (handler.go:2).", "Questions:\n1. Should a failed save retry?", "Minor:\n- other.go  elsewhere", "Open the draft on GitLab",
 	}
@@ -120,7 +121,7 @@ func TestRender(t *testing.T) {
 func TestStory(t *testing.T) {
 	cs := []review.Commit{{Subject: "feat: add Save"}, {Subject: "fix(api): handle a nil store"}, {Subject: "test: cover Save"}, {Subject: "fixup! feat: add Save"}}
 	b, _, _ := Render(Data{Repo: "a/b", Commits: cs})
-	if !strings.Contains(string(b), "each one a step") { // 1 of 4 is wip: still a story
+	if !strings.Contains(string(b), "Each one a step") { // 1 of 4 is wip: still a story
 		t.Error("conventional commits read as a story")
 	}
 }
@@ -683,14 +684,17 @@ func TestSince(t *testing.T) {
 	d.SHA, d.Prev = "2222222bbb", &prev
 	d.Diff = file("a.go", "one") + file("c.go", "three") // b.go dropped, c.go new, a.go the same
 	d.Findings = []review.Comment{{Path: "c.go", Line: 1, Title: "leak"}}
-	b, now, _ := Render(d)
+	b, now, err := Render(d)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := prepare(d).Since
 	if len(s.Files) != 1 || s.Files[0].Path != "c.go" || !slices.Equal(s.Back, []string{"b.go"}) ||
 		!slices.Equal(s.New, []string{"c.go: leak"}) || !slices.Equal(s.Fixed, []string{"a.go: nil map"}) || now.SHA != d.SHA {
 		t.Fatalf("%+v", s)
 	}
 	page := string(b)
-	for _, want := range []string{`id="since"`, `id="c.go" open data-changed`, "no longer in the PR", `data-filter="changed"`, "Changed since 1111111", "changed since 1111111</span>"} {
+	for _, want := range []string{`id="since"`, `id="c.go" open data-changed`, `No longer in the PR: <s title="b.go">b.go</s>`, `1 finding fixed, 1 new: <span data-sev="" title="c.go: leak">c.go: leak</span>`, "1 fixed</", "a.go: nil map</s> · fixed in 2222222", `data-filter="changed"`, "Changed since 1111111", "changed since 1111111</span>"} {
 		if !strings.Contains(page, want) {
 			t.Error("missing", want)
 		}
@@ -865,5 +869,63 @@ func TestImported(t *testing.T) {
 	}
 	if got := imported([]line{{Class: "add", Text: "use std::io;"}}); got != "use std::io in" {
 		t.Errorf("imported %q", got)
+	}
+}
+
+// The places a model's text names become links into the diff, the forge's for a file outside it; a test the
+// page names says how it ran, at the head and at the last review.
+func TestPlaces(t *testing.T) {
+	d := Data{
+		Repo: "a/b", SHA: "2222222bbb", Forge: Forge{Blob: "https://f/blob/"},
+		Diff:      "diff --git a/pkg/a.go b/pkg/a.go\n--- a/pkg/a.go\n+++ b/pkg/a.go\n@@ -1 +1 @@\n-x\n+y\n",
+		Summary:   "Total takes tax after it (a.go:42), and other.go:7 caps it.",
+		Decisions: []review.Decision{{Text: "Reject?", At: "pkg/a.go:3"}},
+		Story:     review.Story{Before: "old", After: "new", Proof: "TestTotal/with discount"},
+		Commits:   []review.Commit{{SHA: "2222222bbb", Author: "Kim", Subject: "s"}},
+		Tests:     checks.Tests{Ran: map[string]string{"TestTotal/with_discount": "pass"}, Broken: []string{"pkg/b"}},
+		Prev:      &Version{SHA: "1111111aaa", Tests: map[string]string{"TestTotal/with_discount": "none"}},
+	}
+	v := prepare(d)
+	rs := v.Refs(d.Summary)
+	if len(rs) != 3 || rs[0].Text != "Total takes tax after it " || rs[0].Href != "#pkg/a.go:42" ||
+		rs[1].Text != ", and " || rs[1].Href != "https://f/blob/other.go#L7" || !rs[1].Out || rs[2].Text != " caps it." {
+		t.Fatalf("%+v", rs)
+	}
+	if r := v.Run("TestTotal/with discount"); r.State != "pass" || r.Text != "not run on 1111111, passed on 2222222" {
+		t.Errorf("%+v", r)
+	}
+	if r := v.Run("TestOther"); r.State != "none" || r.Text != "not run on 2222222" {
+		t.Errorf("%+v", r)
+	}
+	if v.now.Tests["TestTotal/with_discount"] != "pass" || !v.now.Broken {
+		t.Errorf("%+v", v.now)
+	}
+	b, _, err := Render(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{`<p class="meta"><span>Kim</span>`, `href="#pkg/a.go:42"`, `title="other.go:7, not in the diff"`,
+		`TestTotal/with discount · not run on 1111111, passed on 2222222`, `href="#pkg/a.go:3"`, ">does not build<", "1 by Kim"} {
+		if !strings.Contains(string(b), w) {
+			t.Errorf("%q missing", w)
+		}
+	}
+	d.Tests = checks.Tests{}
+	d.Prev = nil
+	if r := prepare(d).Run("TestTotal"); r != (testRun{}) {
+		t.Errorf("no test ran, yet %+v", r)
+	}
+}
+
+// A test deleted with the declaration it is named after leaves the findings for the line under them.
+func TestRetire(t *testing.T) {
+	files := map[string]*file{
+		"a.go": {Kind: "code", Changes: []change{{Name: "totalNet", State: "gone"}, {Name: "Total", State: "gone"}}},
+		"b.go": {Kind: "code", Changes: []change{{Name: "Total", State: "new"}}},
+		"x.go": {Kind: "test", Changes: []change{{Name: "helper", State: "gone"}}},
+	}
+	got := retire([]string{"a_test.go: TestTotalNet", "a_test.go: TestTotalNetRounding", "a_test.go: TestTotal", "a_test.go: TestTotalnetwork", "x_test.go: TestHelper"}, files)
+	if !reflect.DeepEqual(got, []retired{{Names: []string{"TestTotalNet", "TestTotalNetRounding"}, With: "totalNet"}}) {
+		t.Fatalf("%+v", got)
 	}
 }

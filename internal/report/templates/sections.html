@@ -81,10 +81,11 @@
 {{define "commits"}}
 {{if .Commits}}<section id="commits" class="mt-10">
   <details class="box">
-    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">Commits</span><span class="bs-note">{{plural (len .Commits) "commit" "commits"}} · newest last · {{if .Stepwise}}each one a step: review them one by one{{else}}work in progress, not steps: follow the reading order{{end}}</span></summary>
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">Commits</span><span class="bs-note" title="{{if .Stepwise}}Each one a step: review them one by one{{else}}Work in progress, not steps: follow the reading order{{end}}">{{len .Commits}}{{with .Authors}} by {{join .}}{{end}} · newest last</span></summary>
     <ol class="bb commits">{{range .Commits}}
       <li><a href="{{$.Forge.Commit}}{{.SHA}}" class="font-mono" target="_blank" rel="noopener">{{short .SHA}}</a><span class="commit-s{{if wip .Subject}} text-muted-foreground{{end}}">{{.Subject}}</span>
-        {{- if $.Prev}}{{if eq $.Prev.SHA .SHA}}<span class="chip">last review</span>{{end}}{{end}}
+        {{- if $.Prev}}{{if eq $.Prev.SHA .SHA}}<span class="chip">last review</span>{{if $.Prev.Broken}}<span class="chip" data-sev="critical">does not build</span>{{end}}{{end}}{{end}}
+        {{- if and (eq .SHA $.SHA) $.Data.Tests.Broken}}<span class="chip" data-sev="critical" title="go test: {{join $.Data.Tests.Broken}} did not build">does not build</span>{{end}}
         <span class="font-mono commit-n">{{plural .Files "file" "files"}} · <span class="text-diff-add">+{{.Add}}</span> <span class="text-diff-del">−{{.Del}}</span></span><a href="{{$.Forge.PRCommit}}{{.SHA}}" class="commit-only">Only this commit</a></li>{{end}}
     </ol>
   </details>

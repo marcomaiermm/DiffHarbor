@@ -169,7 +169,10 @@
     if (t) t.setAttribute("aria-expanded", t.closest("tbody").classList.toggle("open"));
   });
   const reveal = () => {
-    const el = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    const h = decodeURIComponent(location.hash.slice(1)), m = /^(.+):(\d+)$/.exec(h);
+    // "#path:line": the line of the file, by its new number, else its old one; the file when the diff doesn't show it
+    const lineOf = f => f && ([...f.querySelectorAll("tr.add, tr.ctx")].find(r => r.cells[0].textContent === m[2]) || f.querySelector(`tr[data-old="${m[2]}"]`) || f);
+    const el = document.getElementById(h) || (m && lineOf(document.getElementById(m[1])));
     if (!el) return;
     const tab = el.closest("[role=tabpanel][hidden]");
     if (tab) document.getElementById(tab.getAttribute("aria-labelledby")).click();

@@ -65,8 +65,17 @@ func judge(v *view, found []*finding) {
 	for _, f := range v.Deleted {
 		where[f.Path] = "deleted"
 	}
+	gone := map[string]bool{}
+	for _, r := range v.Retired {
+		for _, n := range r.Names {
+			gone[n] = true
+		}
+	}
 	for _, w := range v.Outline.Weakened {
 		p, rest, _ := strings.Cut(w.At, ":")
+		if w.What == "test deleted" && gone[strings.TrimSpace(rest)] {
+			continue // with the code it tested: see Retired
+		}
 		fd := &finding{Comment: review.Comment{Path: p, Severity: "major", Title: w.What}, Proof: "In the diff", Shown: true}
 		fd.Loc = path.Base(p)
 		if rest != "" {

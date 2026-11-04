@@ -2,25 +2,22 @@
 {{define "overview"}}
 <section id="overview" class="rise">
   <div class="space-y-6"><div>
-    {{if or .Commits .Code .NTests .Moved .Effort}}<p class="meta">{{$sep := ""}}
-      {{- with .Commits}}<span>{{plural (len .) "commit" "commits"}}</span>{{$sep = " · "}}{{end}}
+    {{if or .Authors .Commits .Code .NTests .Moved .Effort}}<p class="meta">{{$sep := ""}}
+      {{- with .Authors}}<span>{{join .}}</span>{{$sep = " · "}}{{end}}
+      {{- with .Commits}}{{$sep}}<span>{{plural (len .) "commit" "commits"}}</span>{{$sep = " · "}}{{end}}
       {{- with .Code}}{{$sep}}<span>{{plural . "code file" "code files"}}{{if $.Flow}}{{if eq $.InSteps .}} in {{plural $.NSteps "step" "steps"}}{{else}}, {{$.InSteps}} in {{plural $.NSteps "step" "steps"}}{{end}}{{end}}</span>{{$sep = " · "}}{{end}}
       {{- with .NTests}}{{$sep}}<span>{{plural . "test file" "test files"}}</span>{{$sep = " · "}}{{end}}
       {{- if .Moved}}{{$sep}}<span title="{{.Moved}} of {{.Added}} added lines only moved: folded in the diff">{{percent .Moved .Added}} of the lines only moved</span>{{$sep = " · "}}{{end}}
       {{- with .Effort}}{{$sep}}<span title="{{.}} of 5">{{if le . 2}}low{{else if eq . 3}}medium{{else}}high{{end}} review effort</span>{{end}}</p>{{end}}
     <h1 class="text-[28px] leading-tight font-semibold tracking-[-0.03em] text-balance">{{.Title}}</h1>
     {{with .Story.Problem}}<p class="lead">{{.}}</p>{{end}}
-    {{with .Summary}}<p class="summary"{{if $.Story.Problem}} data-under{{end}}>{{.}}</p>{{end}}
+    {{with .Summary}}<p class="summary"{{if $.Story.Problem}} data-under{{end}}>{{range $.Refs .}}{{.Text}}{{if .Path}}{{template "ref" .}}{{end}}{{end}}</p>{{end}}
     {{with .Story}}{{if and .Before .After}}<div class="@container mt-5"><div class="story" role="note" aria-label="One case, before and after">
-      <div data-side="before"><b><span aria-hidden="true">−</span>Before</b><p>{{.Before}}</p></div>
-      <div data-side="after"><b><span aria-hidden="true">+</span>After</b><p>{{.After}}</p></div>
+      <div data-side="before"><b><span aria-hidden="true">−</span>Before</b><p>{{.Before}}</p>
+        <p class="story-at">{{with $.Ref .BeforeAt}}{{template "ref" .}}{{else}}<span class="chip loc" data-dash title="No line of the diff shows this: the reviewer's model inferred it">not in the diff</span>{{end}}</p></div>
+      <div data-side="after"><b><span aria-hidden="true">+</span>After</b><p>{{.After}}</p>
+        {{if or .Proof ($.Ref .AfterAt)}}<p class="story-at">{{with .Proof}}{{$r := $.Run .}}<a href="#tests" class="chip loc"{{template "run-attr" $r.State}} title="The test that shows it{{with $r.Text}}: {{.}}{{end}}">{{template "run-mark" $r.State}}{{.}}{{with $r.Text}} · {{.}}{{end}}</a>{{end}}{{with $.Ref .AfterAt}}{{template "ref" .}}{{end}}</p>{{end}}</div>
     </div></div>{{end}}{{end}}
-  </div>
-  <div class="overflow-hidden rounded-lg border">
-    <dl class="stats -mr-px -mb-px flex flex-wrap">
-      {{with .Findings}}<div class="statistic flex-1 basis-28 border-r max-sm:basis-2/5 border-b px-3.5 py-3"><dt class="statistic-title">Open findings</dt><dd class="statistic-value tabular-nums{{if not $.Verdict.OK}} text-destructive{{end}}">{{len .}}</dd></div>{{end}}
-      <div class="statistic flex-1 basis-28 border-r max-sm:basis-2/5 border-b px-3.5 py-3"{{with .NOther}} title="and {{.}} data and doc files"{{end}}><dt class="statistic-title">To read</dt><dd class="statistic-value tabular-nums whitespace-nowrap">{{.Code}}<span class="stat-unit">code</span>{{with .NTests}} · {{.}}<span class="stat-unit">tests</span>{{end}}</dd></div>
-    </dl>
   </div></div>
   <section class="card focus mt-10" id="focus" aria-labelledby="verdict-h">
     <div class="verdict">
@@ -28,15 +25,12 @@
       <h2 id="verdict-h">{{.Verdict.Title}}</h2>
       <p>{{.Verdict.Body}} <a href="#finish" class="whitespace-nowrap">Finish the review {{icon "arrow-right" "inline size-3.5"}}</a></p>
     </div>
-    {{with .Since}}<div class="since" id="since">
-      <div class="since-head"><p class="tab-hint">Since the review of <code>{{short .Prev.SHA}}</code>, <time class="since-time" datetime="{{.Prev.At.Format "2006-01-02T15:04:05Z07:00"}}"></time>.</p>
-</div>
-    {{if or .Files .Back .New .Fixed .Risen .Eased}}<dl class="since-rows">
-      {{if or .Files .Back}}<dt>Files</dt><dd class="since-list">{{range .Files}}<a href="#{{.Path}}" title="{{.Path}}">{{base .Path}}{{if not (index $.Since.Prev.Files .Path)}}<small>new</small>{{end}}</a>{{end}}{{range .Back}}<s title="{{.}}: no longer in the PR"><span class="sr-only">no longer in the PR: </span>{{base .}}</s>{{end}}</dd>{{end}}
-      {{if or .New .Fixed}}<dt{{if .New}} data-warn{{end}}>Findings</dt><dd><ul>{{range .New}}<li title="{{.}}">{{finding .}}</li>{{end}}{{range .Fixed}}<li title="fixed: {{.}}"><s><span class="sr-only">fixed: </span>{{finding .}}</s></li>{{end}}</ul></dd>{{end}}
-      {{if or .Risen .Eased}}<dt>Merge risks</dt><dd class="since-list">{{range .Risen}}<span title="{{.}}">{{base .}}</span>{{end}}{{range .Eased}}<s title="{{.}}"><span class="sr-only">no longer: </span>{{base .}}</s>{{end}}</dd>{{end}}
-    </dl>{{else}}<p class="since-same">The diff is the same as at the last review: a rebase or a new base, nothing to read again.</p>{{end}}
-    </div>{{end}}
+    {{with .Since}}<p class="since" id="since"><span>Since your review of <code>{{short .Prev.SHA}}</code>, <time class="since-time" datetime="{{.Prev.At.Format "2006-01-02T15:04:05Z07:00"}}"></time>
+      {{- with .Files}}: {{range $i, $f := .}}{{sep $i (len $.Since.Files)}}{{if not (index $.Since.Prev.Files .Path)}}the new {{end}}<a href="#{{.Path}}" title="{{.Path}}">{{base .Path}}</a>{{end}}{{end}}.</span>
+      {{- with .Back}}<span>No longer in the PR: {{range $i, $p := .}}{{sep $i (len $.Since.Back)}}<s title="{{.}}">{{base .}}</s>{{end}}.</span>{{end}}
+      {{- if or .Fixed .New}}<span>{{.Say}}{{with .New}}: {{range $i, $k := .}}{{sep $i (len $.Since.New)}}<span data-sev="{{$.Since.Sev .}}" title="{{.}}">{{finding .}}</span>{{end}}{{end}}.</span>{{end}}
+      {{- if or .Risen .Eased}}<span>Merge risks{{with .Risen}}, new: {{range $i, $p := .}}{{sep $i (len $.Since.Risen)}}<code title="{{.}}">{{base .}}</code>{{end}}{{end}}{{with .Eased}}, gone: {{range $i, $p := .}}{{sep $i (len $.Since.Eased)}}<s title="{{.}}">{{base .}}</s>{{end}}{{end}}.</span>{{end}}
+      {{- if not (or .Files .Back .New .Fixed .Risen .Eased)}}<span>The diff is the same: a rebase or a new base, nothing to read again.</span>{{end}}</p>{{end}}
     <div class="scroll-area"><div class="tab-list inv-tabs" data-variant="line" role="tablist" aria-label="Before you approve">
       {{template "tab" (tab "findings" "Findings" .NFound (not .Verdict.OK) "findings")}}
       {{with .Decisions}}{{template "tab" (tab "decide" "Decisions" (len .) false "findings")}}{{end}}
@@ -57,10 +51,16 @@
       </a></li>{{end}}</ul>{{end}}{{end}}
       {{with .Outside}}<h3 class="fgrp">Outside the diff <b>· {{len .}}</b></h3>
       {{range .}}{{template "finding" .}}{{end}}{{end}}
+      {{with .Settled}}<details class="settled">
+        <summary>{{icon "chevron-right" "box-chev"}}{{.}}</summary>
+        <ul>{{with $.Since}}{{range .Fixed}}<li><s data-fixed title="{{.}}">{{with $.Since.Sev .}}{{.}} · {{end}}{{finding .}}</s> · fixed in {{short $.SHA}}</li>{{end}}{{end}}
+          {{- range $.Dropped}}<li><s title="{{.Path}}">{{.Severity}} · {{or .Title .Body}}</s> · dropped{{with .Evidence}}: {{.}}{{end}}</li>{{end}}
+          {{- range $.Retired}}<li class="font-mono text-xs">{{join .Names}} · removed with {{.With}}</li>{{end}}</ul>
+      </details>{{end}}
     </div>
     {{with .Decisions}}<div class="tab-content" role="tabpanel" id="decide" aria-labelledby="tab-decide" tabindex="0" hidden>
       <p class="tab-hint">What only a person can settle: product, architecture or risk. The draft review asks them as questions.</p>
-      <ol class="list-decimal space-y-2 pl-5 text-sm">{{range .}}<li>{{.Text}}</li>{{end}}</ol>
+      <ol class="list-decimal space-y-2 pl-5 text-sm">{{range .}}<li>{{.Text}}{{with $.Ref .At}} <a class="dloc"{{with .Href}} href="{{.}}"{{end}}{{if .Out}} target="_blank" rel="noopener"{{end}} title="{{.Path}}:{{.Line}}">{{base .Path}}:{{.Line}}</a>{{end}}</li>{{end}}</ol>
     </div>{{end}}
     {{if .MergeN}}<div class="tab-content" role="tabpanel" id="merge" aria-labelledby="tab-merge" tabindex="0" hidden>
       <p class="tab-hint">Before you merge: what merging alone doesn't finish, read from the diff and the base as of this review.</p>
@@ -85,6 +85,10 @@
   </section>
 </section>
 {{end}}
+{{/* A place a model's text names, see view.Refs; a test's mark by how it ran, see view.Run. */}}
+{{define "ref"}}<a class="chip loc"{{with .Href}} href="{{.}}"{{end}}{{if .Out}} target="_blank" rel="noopener"{{end}} title="{{.Path}}:{{.Line}}{{if .Out}}, not in the diff{{end}}">{{icon "code" ""}}{{base .Path}}:{{.Line}}</a>{{end}}
+{{define "run-mark"}}{{if eq . "pass"}}{{icon "check" ""}}{{else if eq . "fail"}}{{icon "circle-x" ""}}{{else}}{{icon "circle-dashed" ""}}{{end}}{{end}}
+{{define "run-attr"}}{{if eq . "pass"}} data-shown{{else if eq . "fail"}} data-sev="critical"{{else}} data-dash{{end}}{{end}}
 {{/* Look closer: what the steps don't show, after them and closed until asked. */}}
 {{define "explore"}}{{if or .Inventory .Deps .Affected .Diagram}}
 <section id="explore" class="mt-16 border-t pt-10" aria-labelledby="explore-h">

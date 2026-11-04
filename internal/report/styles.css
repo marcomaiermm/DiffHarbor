@@ -304,9 +304,13 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
 .vd[data-ok] { background: color-mix(in oklab, var(--verified) 12%, transparent); color: var(--verified); }
 .vd svg { @apply size-3.5; }
 header .vd { @apply max-sm:px-1.5; }
-.since { @apply mx-6 mb-4 rounded-lg border px-3 py-2.5 text-[13px]; }
-.since .since-head { @apply mb-0; }
-.since .since-rows { @apply mt-2.5; }
+/* since the last version, as a sentence: what to read again, the findings it fixed and added */
+.since { @apply mx-6 mb-4 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 rounded-lg border px-3 py-2 text-[13px] text-muted-foreground max-sm:mx-4; }
+.since :is(code, a) { @apply font-mono text-xs text-foreground; }
+.since a { @apply hover:underline; }
+.since s { @apply font-mono text-xs decoration-muted-foreground/60; }
+.since [data-sev="critical"] { @apply text-destructive; }
+.since [data-sev="major"] { @apply text-major; }
 .legend { @apply mt-3.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[12.5px] text-muted-foreground; }
 .chip { @apply inline-flex h-5 items-center gap-1 rounded-md border px-2 text-xs leading-none font-medium whitespace-nowrap text-muted-foreground; }
 .chip[data-dash] { @apply border-dashed; border-color: color-mix(in oklab, var(--foreground) 35%, transparent); }
@@ -316,6 +320,20 @@ header .vd { @apply max-sm:px-1.5; }
 .chip[data-new] { color: var(--diff-add); border-color: color-mix(in oklab, var(--diff-add) 40%, transparent); }
 .chip[data-del] { color: var(--diff-del); border-color: color-mix(in oklab, var(--diff-del) 40%, transparent); }
 .chip.changed { color: var(--ring); border-color: color-mix(in oklab, var(--ring) 45%, transparent); }
+/* a place a model's text names: the code at that line, in the diff or on the forge */
+.chip.loc { @apply h-5 rounded px-1.5 align-[1px] font-mono text-[11.5px] font-normal no-underline hover:text-foreground; }
+.chip.loc:not([data-dash], [data-shown], [data-sev]) { @apply text-foreground; }
+.chip svg { @apply size-3 shrink-0; }
+.summary .chip.loc { @apply mx-0.5; }
+.story-at { @apply mt-2.5 flex flex-wrap gap-1.5; }
+.dloc { @apply font-mono text-xs whitespace-nowrap no-underline hover:underline; color: var(--ring); }
+/* what left the findings: fixed, dropped by the cross-check, deleted with the code it tested */
+.settled { @apply mt-3; }
+.settled > summary { @apply flex cursor-pointer list-none items-center gap-2 text-[13px] text-muted-foreground; }
+.settled > summary::-webkit-details-marker { display: none; }
+.settled[open] > summary .box-chev { @apply rotate-90; }
+.settled ul { @apply mt-2 ml-[21px] flex flex-col gap-1.5 text-[13px] text-muted-foreground; }
+.settled s[data-fixed] { text-decoration-color: var(--verified); }
 .chip[data-major] { @apply border-transparent; background: color-mix(in oklab, var(--major) 12%, transparent); color: var(--major); }
 .fgrp { @apply mt-5 text-[12.5px] font-medium text-muted-foreground; }
 .fgrp b { @apply font-medium opacity-80; }
@@ -347,20 +365,6 @@ a.frow[href]:hover .ftitle { @apply underline; }
 #tab-merge .inv-count[data-warn] { @apply bg-major/10 text-major; }
 .tab-hint { @apply mb-4 max-w-[80ch] text-[13px] text-muted-foreground; }
 .tab-hint code { @apply font-mono text-foreground; }
-.since-head .tab-hint { @apply mb-0; }
-/* since the last version: one line per kind, gone or fixed struck through as in a diff */
-.since-head { @apply mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2; }
-.since-rows { @apply grid grid-cols-[5.5rem_1fr] items-baseline gap-x-4 gap-y-2 text-xs; }
-.since-rows dt { @apply text-muted-foreground; }
-.since-rows dt[data-warn] { @apply text-destructive; }
-.since-rows dd { @apply min-w-0; }
-.since-rows li { @apply truncate; }
-.since-rows li + li { @apply mt-1; }
-.since-list { @apply flex flex-wrap gap-x-3 gap-y-1 font-mono; }
-.since-list a { @apply hover:underline; }
-.since-list small { @apply ml-1 font-sans text-[11px]; color: var(--ring); }
-.since-rows s { @apply text-muted-foreground decoration-muted-foreground/60; }
-.since-same { @apply text-[13px] text-muted-foreground; }
 .badge.changed { color: var(--ring); border-color: color-mix(in oklab, var(--ring) 35%, transparent); }
 .nav-file[data-changed]::after { content: ""; @apply ml-auto size-1.5 shrink-0 rounded-full; background: var(--ring); }
 .tree-leaf.nav-file[data-changed]::after { @apply ml-1.5; }
@@ -461,10 +465,6 @@ dialog.sheet > .sheet-content { min-height: 100%; }
 .use > code { @apply min-w-0 flex-1 truncate whitespace-pre; }
 .use > code mark { @apply rounded-sm bg-transparent; color: inherit; box-shadow: inset 0 -2px 0 color-mix(in oklab, #f59e0b 70%, transparent); }
 .use > .in { @apply shrink-0 font-sans text-[11px]; color: var(--diff-muted); }
-/* shadcn's statistic, sized for a row of eight */
-.stats .statistic-title { @apply text-xs; }
-.stats .statistic-value { @apply text-xl font-semibold; }
-.stat-unit { @apply ml-1 text-sm font-normal tracking-normal text-muted-foreground; }
 /* the commits: shadcn's timeline, a dot filled for a step, hollow for work in progress */
 .box { @apply rounded-[10px] border bg-card; }
 .box > summary { @apply list-none; }
@@ -482,7 +482,7 @@ dialog.sheet > .sheet-content { min-height: 100%; }
 .commit-only { @apply text-xs text-muted-foreground hover:text-foreground hover:underline; }
 /* one case told twice, as a diff tells it: what happened before, what happens now */
 .lead { @apply mt-3 max-w-[60ch] text-[17px] leading-snug font-medium tracking-[-0.01em] text-pretty; }
-.summary { @apply mt-3 max-w-[68ch] text-[15px] text-pretty text-muted-foreground; }
+.summary { @apply mt-3 max-w-[68ch] text-[15px] leading-[1.9] text-pretty text-muted-foreground; }
 .summary[data-under] { @apply mt-2 text-sm; }
 .meta { @apply mb-2.5 font-mono text-xs tabular-nums text-muted-foreground; }
 /* a step: its number, title, weight and how much of it is viewed; the tests that reach it; how its code connects */

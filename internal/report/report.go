@@ -141,9 +141,12 @@ func compile(dir string) (string, error) {
 var tmpl = template.Must(parseTemplates(nil))
 
 var funcs = template.FuncMap{
-	"short":    short,
-	"plural":   plural,
-	"join":     join,
+	"short":  short,
+	"plural": plural,
+	"join":   join,
+	"sep": func(i, n int) string { // before the i-th of n in a list: "", ", ", " and "
+		return map[bool]string{true: "", false: map[bool]string{true: " and ", false: ", "}[i == n-1]}[i == 0]
+	},
 	"inc":      func(i int) int { return i + 1 },
 	"add":      func(a, b int) int { return a + b },
 	"icon":     icon,
@@ -303,9 +306,12 @@ type view struct {
 	Outside              []*finding      // on a file the diff doesn't show: in full under the list
 	Verdict              verdict
 	Draft                draft
-	MergeN               int     // rows of the merge risks: Risks, BaseMoved, Conflicts, Others
-	MergeWarn            bool    // one of them is sure trouble
-	now                  Version // what the next version compares with
+	MergeN               int       // rows of the merge risks: Risks, BaseMoved, Conflicts, Others
+	MergeWarn            bool      // one of them is sure trouble
+	Authors              []string  // of the commits, first one first
+	Retired              []retired // deleted tests with the code they tested: no finding
+	now                  Version   // what the next version compares with
+	files                map[string]*file
 }
 
 // node is a directory of the side bar's file tree, or a file when File is set.
@@ -354,10 +360,10 @@ func Asks(d Data) (keys, texts []string) {
 
 // prepare is the page's view of d.
 func prepare(d Data) view {
-	v := view{Data: d}
+	v := view{Data: d, files: map[string]*file{}}
 	v.Themes.Light = cmp.Or(v.Themes.Light, "tokyo-night-day") // the page carries this one: Shiki has only the dark
 	v.Themes.Dark = cmp.Or(v.Themes.Dark, "tokyo-night")
-	files := map[string]*file{}
+	files := v.files
 	var order []string
 	ids := diff.PatchIDs(d.Diff)
 	diff.EachFile(d.Diff, func(p, f string) {
@@ -515,8 +521,200 @@ func prepare(d Data) view {
 		}
 	}
 	v.Stepwise = len(d.Commits) > 1 && messy*3 < len(d.Commits) // under a third wip
+	for _, c := range d.Commits {
+		if c.Author != "" && !slices.Contains(v.Authors, c.Author) {
+			v.Authors = append(v.Authors, c.Author)
+		}
+	}
+	v.Retired = retire(d.Outline.Removed, files)
 	judge(&v, found)
+	if len(d.Tests.Ran) > 0 || len(d.Tests.Broken) > 0 {
+		v.now.Tests = map[string]string{}
+		names := []string{d.Story.Proof}
+		for _, s := range v.Steps {
+			for _, t := range s.Tests {
+				_, n, _ := strings.Cut(t, " ")
+				names = append(names, n)
+			}
+		}
+		for _, c := range d.Outline.Added {
+			_, n, _ := strings.Cut(c, ": ")
+			names = append(names, n)
+		}
+		for _, n := range names {
+			if n != "" {
+				v.now.Tests[testKey(n)] = cmp.Or(ranOf(d.Tests.Ran, n), "none")
+			}
+		}
+	}
 	return v
+}
+
+// Settled is the line over what left the findings: fixed since the last review, dropped by the cross-check,
+// tests deleted with their code; "" for none.
+func (v view) Settled() string {
+	var p []string
+	if v.Since != nil && len(v.Since.Fixed) > 0 {
+		p = append(p, strconv.Itoa(len(v.Since.Fixed))+" fixed")
+	}
+	if n := len(v.Dropped); n > 0 {
+		p = append(p, strconv.Itoa(n)+" dropped by the cross-check")
+	}
+	n := 0
+	for _, r := range v.Retired {
+		n += len(r.Names)
+	}
+	if n > 0 {
+		p = append(p, plural(n, "test", "tests")+" removed with their code")
+	}
+	return strings.Join(p, " · ")
+}
+
+// retired is the tests the PR deletes with the declaration they are named after: nothing is left to test.
+type retired struct {
+	Names []string // "TestTotalNet"
+	With  string   // "totalNet"
+}
+
+// retire is those of the deleted cases ("path: TestTotalNet") whose name, past "Test", starts with a declaration
+// the PR deletes and adds nowhere: TestTotalNet and TestTotalNetRounding with totalNet.
+func retire(removed []string, files map[string]*file) []retired {
+	gone, kept := map[string]bool{}, map[string]bool{}
+	for _, f := range files {
+		if f.Kind != "code" {
+			continue
+		}
+		for _, c := range f.Changes {
+			if c.State == "gone" {
+				gone[c.Name] = true
+			} else {
+				kept[c.Name] = true
+			}
+		}
+	}
+	var out []retired
+	for _, rc := range removed {
+		_, n, _ := strings.Cut(rc, ": ")
+		rest, ok := strings.CutPrefix(n, "Test")
+		if !ok {
+			continue
+		}
+		for g := range gone {
+			if kept[g] || len(g) < 3 || len(rest) < len(g) || !strings.EqualFold(rest[:len(g)], g) {
+				continue
+			}
+			if r := rest[len(g):]; r != "" && !(r[0] == '_' || r[0] >= 'A' && r[0] <= 'Z') { // TestTotalNet is no test of Total's
+				continue
+			}
+			i := slices.IndexFunc(out, func(r retired) bool { return r.With == g })
+			if i < 0 {
+				i, out = len(out), append(out, retired{With: g})
+			}
+			out[i].Names = append(out[i].Names, n)
+			break
+		}
+	}
+	return out
+}
+
+// ref is a stretch of a model's text and the place it names after it: "invoice.go:42", "(a/invoice.go:42)".
+type ref struct {
+	Text, Path, Href string // Path "": the text after the last place
+	Line             int
+	Out              bool // Href is the forge's: the file is not in the diff
+}
+
+var place = regexp.MustCompile(`\(([\w./-]+\.[A-Za-z]\w*):(\d+)\)|\b([\w./-]+\.[A-Za-z]\w*):(\d+)\b`)
+
+// Refs is s cut at the places it names, each one resolved to a file of the diff when one ends in it.
+func (v view) Refs(s string) []ref {
+	var out []ref
+	last := 0
+	for _, m := range place.FindAllStringSubmatchIndex(s, -1) {
+		g := 2
+		if m[2] < 0 {
+			g = 6
+		}
+		n, _ := strconv.Atoi(s[m[g+2]:m[g+3]])
+		r := v.place(s[m[g]:m[g+1]], n)
+		r.Text, last = s[last:m[0]], m[1]
+		out = append(out, r)
+	}
+	return append(out, ref{Text: s[last:]})
+}
+
+// Ref is the place at names, "path:line"; nil when it names none.
+func (v view) Ref(at string) *ref {
+	if rs := v.Refs(at); len(rs) > 1 {
+		return &rs[0]
+	}
+	return nil
+}
+
+func (v view) place(p string, line int) ref {
+	if v.files[p] == nil {
+		var hit []string
+		for q := range v.files {
+			if strings.HasSuffix(q, "/"+p) {
+				hit = append(hit, q)
+			}
+		}
+		if len(hit) == 1 {
+			p = hit[0]
+		}
+	}
+	r := ref{Path: p, Line: line}
+	if v.files[p] != nil {
+		r.Href = "#" + p + ":" + strconv.Itoa(line) // the script finds the line
+	} else if v.Forge.Blob != "" {
+		r.Href, r.Out = v.Forge.Blob+p+"#L"+strconv.Itoa(line), true
+	}
+	return r
+}
+
+// testRun is how a test fared at the head and at the last review: State the head's, for its mark.
+type testRun struct{ State, Text string }
+
+// Run is test name's run, its spaces as go test writes them; none when no test ran at either version.
+func (v view) Run(name string) testRun {
+	say := map[string]string{"pass": "passed", "fail": "failed", "skip": "skipped", "none": "not run"}
+	var r testRun
+	var parts []string
+	if v.Prev != nil && v.Prev.Tests != nil {
+		if st := v.Prev.Tests[testKey(name)]; st != "" {
+			parts = append(parts, say[st]+" on "+short(v.Prev.SHA))
+		}
+	}
+	if t := v.Data.Tests; len(t.Ran) > 0 || len(t.Broken) > 0 {
+		r.State = cmp.Or(ranOf(t.Ran, name), "none")
+		now := say[r.State] + " on " + short(v.SHA)
+		if len(parts) > 0 && strings.HasPrefix(parts[0], say[r.State]+" ") {
+			parts = nil // the same as at the last review
+		}
+		parts = append(parts, now)
+	}
+	r.Text = strings.Join(parts, ", ")
+	return r
+}
+
+func testKey(name string) string { return strings.ReplaceAll(name, " ", "_") }
+
+// ranOf is name's outcome in ran: by its full name, or as the one subtest of that name.
+func ranOf(ran map[string]string, name string) string {
+	n := testKey(name)
+	if st, ok := ran[n]; ok {
+		return st
+	}
+	st := ""
+	for k, s := range ran {
+		if strings.HasSuffix(k, "/"+n) {
+			if st != "" {
+				return "" // two of that name: no telling which
+			}
+			st = s
+		}
+	}
+	return st
 }
 
 // trim cuts a deleted file to its first maxGone lines and what moved out of it, which the other side links to.
