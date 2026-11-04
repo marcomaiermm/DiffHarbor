@@ -54,8 +54,8 @@ The server listens on `:3000`. Expose `POST /webhook/github` and/or `POST /webho
 ## How a review works
 
 1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, vendored and generated code (by name or a "Code generated … DO NOT EDIT" header) and binaries stay out. A pass gets up to 60k characters, code first, then tests, data, stylesheets and docs; larger PRs can be reviewed [in parts](#large-prs).
-2. **Context.** The checks above, plus codegraph, co-change from git history, the repo's rules and skills from the base branch, learnings, and optionally the linked ticket.
-3. **Review.** The agent returns up to 10 findings per pass.
+2. **Context.** The checks above, plus codegraph, co-change from git history, the PR's commit messages, the repo's rules and skills from the base branch, learnings, and optionally the linked ticket.
+3. **Review.** The agent returns up to 10 findings, then looks at the diff again for what it missed: the same session without tools, up to 10 more at about a tenth of the cost. With [`passes`](#passes), up to two more finders review the diff too.
 4. **Verify.** A cheaper model checks each finding in the code.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
@@ -119,11 +119,11 @@ Models are `provider/id[:level]` as Pi names them. Without settings the server p
 
 | Provider (in this order) | Credentials | Review | Verify |
 |---|---|---|---|
-| OpenAI | `OPENAI_API_KEY` | `openai/gpt-6.1-terra:high` | `openai/gpt-6-luna:low` |
+| OpenAI | `OPENAI_API_KEY` | `openai/gpt-6.1-terra:high` | `openai/gpt-6-luna:high` |
 | Anthropic | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet-5-5:high` | `anthropic/claude-haiku-5-5:low` |
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek/deepseek-flash:high` | `deepseek/deepseek-flash:off` |
 | AWS Bedrock | `AWS_REGION` and `AWS_BEARER_TOKEN_BEDROCK`, or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | `amazon-bedrock/global.anthropic.claude-sonnet-5-5:high` | `amazon-bedrock/global.anthropic.claude-haiku-5-5:low` |
-| Azure OpenAI | `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_BASE_URL` | `azure/gpt-6.1-sol:high` | `azure/gpt-6-luna:low` |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_BASE_URL` | `azure/gpt-6.1-sol:high` | `azure/gpt-6-luna:high` |
 
 | Variable | |
 |---|---|
@@ -189,6 +189,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
   "verify_model": "anthropic/claude-haiku-5-5:low",
   "large_pr": "all",
   "max_parts": 4,
+  "passes": [{}, {"max_lines": 1500}],
   "report": "auto",
   "tickets": ["ABC"],
   "install_scripts": false,
@@ -208,6 +209,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
 | `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. |
 | `review_model`, `verify_model` | Apply where the server sets none; the provider's key must be on the server. |
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
+| `passes` | Finders per part, at most 3. See [Passes](#passes). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
 | `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
 | `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
@@ -231,6 +233,22 @@ A diff over 60k characters can be reviewed in parts: the files of a folder stay 
 | `off` | Never. |
 
 `max_parts`: default 4, at most 8.
+
+### Passes
+
+Each pass is a finder with tools, followed by its second look; one verify pass checks the findings of all of them. Without `passes` there is one, the review model's.
+
+```json
+"passes": [{}, {"max_lines": 1500}]
+```
+
+| Key | |
+|---|---|
+| `model` | Unset: the second model of the review model's provider, e.g. `openai/gpt-6-luna:high`. A server that sets `REVIEW_MODEL` sets this one too. |
+| `again` | `false`: no second look. |
+| `min_lines`, `max_lines` | Run only on PRs with that many changed lines in the reviewed files. |
+
+The first entry is the review model's and always runs: it takes `again` only. A further pass reads the files in reverse order. The verify pass drops a finding that another pass reported too. On four PRs of this repo, a second pass with `openai/gpt-6-luna:high` found about 1.5 more of 41 known defects per run for 14% more cost, one with `openai/gpt-6.1-terra:medium` about 3 more for 80% more: mostly the same defects the first pass found.
 
 ### Monorepos
 

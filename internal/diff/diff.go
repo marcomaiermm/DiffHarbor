@@ -221,6 +221,40 @@ func generatedAt(root, p string) bool {
 	return generated.MatchString("@@ -1 +1 @@\n " + strings.ReplaceAll(string(b[:n]), "\n", "\n "))
 }
 
+// Reverse puts diff's files in reverse order: a second reader starts where the first ended.
+func Reverse(diff string) string {
+	idx := fileStart.FindAllStringIndex(diff, -1)
+	if len(idx) < 2 {
+		return diff
+	}
+	var b strings.Builder
+	b.WriteString(diff[:idx[0][0]])
+	for k := len(idx) - 1; k >= 0; k-- {
+		end := len(diff)
+		if k+1 < len(idx) {
+			end = idx[k+1][0]
+		}
+		b.WriteString(diff[idx[k][0]:end])
+	}
+	return b.String()
+}
+
+// Changed counts the lines diff adds and removes, headers aside.
+func Changed(diff string) int {
+	n, hunk := 0, false
+	for _, l := range strings.Split(diff, "\n") {
+		switch {
+		case strings.HasPrefix(l, "diff --git "):
+			hunk = false
+		case strings.HasPrefix(l, "@@"):
+			hunk = true
+		case hunk && (strings.HasPrefix(l, "+") || strings.HasPrefix(l, "-")):
+			n++
+		}
+	}
+	return n
+}
+
 // Docs returns the changed docs and API specs of diff.
 func Docs(diff string) string {
 	var b strings.Builder

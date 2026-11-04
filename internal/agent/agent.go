@@ -26,24 +26,25 @@ import (
 // maxTools is the tool calls a pass gets (review-guard.js): every call re-reads the context, so calls are most of the cost.
 const maxTools = 15
 
-// Matrix is the default review and verify model per provider, in order of preference, and what its passes
+// Matrix is the default review, verify and further-pass model per provider, in order of preference, and what its passes
 // authenticate with. Without REVIEW_MODEL or review.json the first provider with credentials reviews and the next
 // one is the fallback. A review model's provider here also sets its verify model unless VERIFY_MODEL or review.json
 // name one. A provider not listed authenticates with KeyEnv alone.
 var Matrix = []Provider{
-	{Name: "openai", Review: "openai/gpt-6.1-terra:high", Verify: "openai/gpt-6-luna:low", Login: true, Proxy: true},
-	{Name: "anthropic", Review: "anthropic/claude-sonnet-5-5:high", Verify: "anthropic/claude-haiku-5-5:low", Proxy: true},
-	{Name: "deepseek", Review: "deepseek/deepseek-flash:high", Verify: "deepseek/deepseek-flash:off", Proxy: true}, // off: low's recall, cheaper
+	{Name: "openai", Review: "openai/gpt-6.1-terra:high", Verify: "openai/gpt-6-luna:high", Second: "openai/gpt-6-luna:high", Login: true, Proxy: true}, // verify at high: low dropped 7% of valid findings, high 1%
+	{Name: "anthropic", Review: "anthropic/claude-sonnet-5-5:high", Verify: "anthropic/claude-haiku-5-5:low", Second: "anthropic/claude-haiku-5-5:high", Proxy: true},
+	{Name: "deepseek", Review: "deepseek/deepseek-flash:high", Verify: "deepseek/deepseek-flash:off", Second: "deepseek/deepseek-flash:high", Proxy: true}, // off: low's recall, cheaper
 	// Claude and GPT hosted by a cloud. global.: any region serves; eu./us. (REVIEW_MODEL) keep data in one.
 	// Bedrock signs with AWS credentials or a Bedrock API key.
 	{
 		Name: "amazon-bedrock", Review: "amazon-bedrock/global.anthropic.claude-sonnet-5-5:high", Verify: "amazon-bedrock/global.anthropic.claude-haiku-5-5:low",
-		Need: [][]string{{"AWS_REGION", "AWS_BEARER_TOKEN_BEDROCK"}, {"AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}},
+		Second: "amazon-bedrock/global.anthropic.claude-haiku-5-5:high",
+		Need:   [][]string{{"AWS_REGION", "AWS_BEARER_TOKEN_BEDROCK"}, {"AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}},
 	},
 	// Azure has no gpt-6.1-terra. It needs its endpoint and maps model IDs to the deployment names
 	// (AZURE_OPENAI_DEPLOYMENT_NAME_MAP="gpt-6.1-sol=review,gpt-6-luna=verify"; unset = deployments named like the models).
 	{
-		Name: "azure", Review: "azure/gpt-6.1-sol:high", Verify: "azure/gpt-6-luna:low",
+		Name: "azure", Review: "azure/gpt-6.1-sol:high", Verify: "azure/gpt-6-luna:high", Second: "azure/gpt-6-luna:high",
 		Need: [][]string{{"AZURE_OPENAI_API_KEY", "AZURE_OPENAI_BASE_URL"}}, Opt: []string{"AZURE_OPENAI_DEPLOYMENT_NAME_MAP"},
 	},
 }
@@ -51,6 +52,7 @@ var Matrix = []Provider{
 // Provider is a Matrix row.
 type Provider struct {
 	Name, Review, Verify string
+	Second               string     // review.json's further passes that name no model: another model finds other defects
 	Need                 [][]string // the env a pass needs: all of one set; nil = KeyEnv
 	Opt                  []string   // the env a pass also gets when set
 	Login                bool       // the ChatGPT login (`diffharbor login`) stands in for the key
@@ -282,14 +284,10 @@ func Default() string {
 }
 
 // VerifyFor is the verify model to pair with review: the cheap one of its provider, "" = review verifies.
-func VerifyFor(review string) string {
-	for _, r := range Matrix {
-		if r.Name == providerOf(review) {
-			return r.Verify
-		}
-	}
-	return ""
-}
+func VerifyFor(review string) string { return providerFor(providerOf(review)).Verify }
+
+// SecondFor is the model of a further pass beside review: its provider's Second, for a provider not listed review.
+func SecondFor(review string) string { return cmp.Or(providerFor(providerOf(review)).Second, review) }
 
 // FallbackFor is the model that takes over the pass called name from model: FALLBACK_MODEL, else the first other
 // provider in Matrix with credentials. "" = none.

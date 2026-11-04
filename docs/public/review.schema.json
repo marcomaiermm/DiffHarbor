@@ -41,6 +41,20 @@
     "verify_model": { "$ref": "#/definitions/model" },
     "large_pr": { "enum": ["ask", "all", "off"] },
     "max_parts": { "type": "integer", "minimum": 1, "maximum": 8, "description": "Default 4." },
+    "passes": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "properties": {
+          "model": { "$ref": "#/definitions/model" },
+          "again": { "type": "boolean", "description": "false: no second look." },
+          "min_lines": { "type": "integer", "minimum": 0 },
+          "max_lines": { "type": "integer", "minimum": 0, "description": "0: any." }
+        }
+      },
+      "description": "Finders per part, each with its second look. The first is review_model's and takes again only; a further one without model takes the provider's second model."
+    },
     "report": { "enum": ["auto", "always", "off"] },
     "syntax_theme": {
       "type": "object",

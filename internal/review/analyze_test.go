@@ -34,11 +34,19 @@ func (f *fakeAgent) Run(_ context.Context, _, name, _, _, _, _ string) (string, 
 	return f.reply(name)
 }
 
-func (f *fakeAgent) Continue(_ context.Context, _, name, _, _, _ string) (string, error) {
+// Continue answers a second look from name+" again", with nothing more found when none is queued.
+func (f *fakeAgent) Continue(_ context.Context, _, name, _, task, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, name+" repair")
-	return f.reply(name)
+	if task != againTask {
+		f.calls = append(f.calls, name+" repair")
+		return f.reply(name)
+	}
+	f.calls = append(f.calls, name+" again")
+	if len(f.replies[name+" again"]) == 0 {
+		return `{"summary":"","comments":[]}`, nil
+	}
+	return f.reply(name + " again")
 }
 
 func TestAnalyze(t *testing.T) {
@@ -71,30 +79,58 @@ func TestAnalyze(t *testing.T) {
 	r, stats, calls := run(map[string][]string{"review": {finding}, "verify": {keep}}, Settings{})
 	if len(r.Comments) != 1 || r.Comments[0].Line != 2 || r.Comments[0].Prompt != "fix line 2" ||
 		!strings.Contains(r.Comments[0].Body, "_Verified:_ seen") || r.Comments[0].Evidence != "seen" || !strings.HasSuffix(stats, "1/1 verified") ||
-		strings.Join(calls, ",") != "review,verify" {
+		strings.Join(calls, ",") != "review,review again,verify" {
 		t.Fatalf("kept: %+v %q %v", r.Comments, stats, calls)
 	}
 
 	r, stats, calls = run(map[string][]string{"review": {"still exploring", finding}, "verify": {drop}}, Settings{})
-	if len(r.Comments) != 0 || !strings.HasSuffix(stats, "0/1 verified") || strings.Join(calls, ",") != "review,review repair,verify" {
+	if len(r.Comments) != 0 || !strings.HasSuffix(stats, "0/1 verified") || strings.Join(calls, ",") != "review,review repair,review again,verify" {
 		t.Fatalf("repaired, dropped: %+v %q %v", r.Comments, stats, calls)
 	}
 
 	r, stats, calls = run(map[string][]string{"review": {finding}, "verify": {"no", "still no"}}, Settings{})
-	if len(r.Comments) != 1 || r.Comments[0].Evidence != "" || !strings.HasSuffix(stats, "unverified") || strings.Join(calls, ",") != "review,verify,verify repair" {
+	if len(r.Comments) != 1 || r.Comments[0].Evidence != "" || !strings.HasSuffix(stats, "unverified") || strings.Join(calls, ",") != "review,review again,verify,verify repair" {
 		t.Fatalf("unverified: %+v %q %v", r.Comments, stats, calls)
 	}
 
 	r, _, calls = run(map[string][]string{"review": {finding}}, Settings{pkgSettings: pkgSettings{MinSeverity: "critical"}})
-	if len(r.Comments) != 0 || strings.Join(calls, ",") != "review" {
+	if len(r.Comments) != 0 || strings.Join(calls, ",") != "review,review again" {
 		t.Fatalf("below min_severity skips verify: %+v %v", r.Comments, calls)
 	}
 
-	// In parts: one review and verify pass each, findings merged most severe first, one per line, a failed part named.
+	// The second look's findings are verified with the first's, one per line, most severe first.
+	r, _, calls = run(map[string][]string{
+		"review":       {finding},
+		"review again": {`{"summary":"","comments":[{"path":"a.md","line":2,"severity":"critical","title":"c","body":"b"},{"path":"a.md","line":1,"severity":"minor","title":"m","body":"b"}]}`},
+		"verify":       {`{"verdicts":[{"i":0,"keep":true},{"i":1,"keep":true},{"i":2,"keep":true}]}`},
+	}, Settings{})
+	if len(r.Comments) != 2 || r.Comments[0].Severity != "critical" || r.Comments[1].Severity != "major" || strings.Join(calls, ",") != "review,review again,verify" {
+		t.Fatalf("second look: %+v %v", r.Comments, calls)
+	}
+
+	// A further finder, without a second look: its findings verified with the first's, the first's summary. A failed
+	// first one leaves the other standing.
+	no := false
+	r, _, calls = run(map[string][]string{
+		"review": {finding}, "review.2": {`{"summary":"x","comments":[{"path":"a.md","line":2,"severity":"minor","title":"m","body":"b"}]}`},
+		"verify": {`{"verdicts":[{"i":0,"keep":true},{"i":1,"keep":true}]}`},
+	}, Settings{Passes: []Pass{{}, {Again: &no}}})
+	slices.Sort(calls)
+	if len(r.Comments) != 2 || r.Summary != "s" || strings.Join(calls, ",") != "review,review again,review.2,verify" {
+		t.Fatalf("passes: %+v %q %v", r.Comments, r.Summary, calls)
+	}
+	r, _, calls = run(map[string][]string{"review": {"x", "y"}, "review.2": {finding}, "verify": {keep}}, Settings{Passes: []Pass{{}, {}}})
+	slices.Sort(calls)
+	if len(r.Comments) != 1 || strings.Join(calls, ",") != "review,review repair,review.2,review.2 again,verify" {
+		t.Fatalf("first pass failed: %+v %v", r.Comments, calls)
+	}
+
+	// In parts: a review pass, a second look and a verify pass each, findings merged most severe first, a failed part
+	// named. A second look without JSON leaves its part's first pass standing.
 	other := `{"summary":"o","comments":[{"path":"a.md","line":1,"severity":"critical","title":"c","body":"b"},{"path":"b.md","line":5,"severity":"minor","title":"m","body":"b"}]}`
 	r, stats, calls = run(map[string][]string{
 		"review1": {finding}, "verify1": {keep},
-		"review2": {other}, "verify2": {`{"verdicts":[{"i":0,"keep":true},{"i":1,"keep":true}]}`}, "review3": {"x", "y"},
+		"review2": {other}, "review2 again": {"x"}, "verify2": {`{"verdicts":[{"i":0,"keep":true},{"i":1,"keep":true}]}`}, "review3": {"x", "y"},
 	}, Settings{}, md, md, md)
 	slices.Sort(calls)
 	var got []string
@@ -103,7 +139,7 @@ func TestAnalyze(t *testing.T) {
 	}
 	if strings.Join(got, ", ") != "a.md:1 critical, a.md:2 major, b.md:5 minor" || r.Summary != "s o" ||
 		!strings.HasSuffix(stats, " · 3 parts · 3/3 verified · part 3 failed") || !slices.Equal(r.Failed, []string{"a.md"}) ||
-		strings.Join(calls, ",") != "review1,review2,review3,review3 repair,verify1,verify2" {
+		strings.Join(calls, ",") != "review1,review1 again,review2,review2 again,review2 repair,review3,review3 repair,verify1,verify2" {
 		t.Fatalf("parts: %v %q %q %v %v", got, r.Summary, stats, calls, r.Failed)
 	}
 
@@ -119,7 +155,7 @@ func TestAnalyze(t *testing.T) {
 	piece2 := "diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -9 +10,2 @@\n x\n+z\n"
 	r, _, calls = run(map[string][]string{"review1": {at11}, "review2": {at11}, "verify2": {`{"verdicts":[{"i":0,"keep":true}]}`}}, Settings{}, md, piece2)
 	slices.Sort(calls)
-	if len(r.Comments) != 1 || strings.Join(calls, ",") != "review1,review2,verify2" {
+	if len(r.Comments) != 1 || strings.Join(calls, ",") != "review1,review1 again,review2,review2 again,verify2" {
 		t.Fatalf("a file in pieces: %+v %v", r.Comments, calls)
 	}
 
