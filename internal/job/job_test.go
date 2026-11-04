@@ -11,6 +11,40 @@ import (
 	"testing"
 )
 
+type skipForge struct {
+	forge.Forge
+	pr *skipPR
+}
+
+func (skipForge) Bot() string                           { return "bot" }
+func (f skipForge) Open(*forge.Event) (forge.PR, error) { return f.pr, nil }
+
+// The PR methods the base-branch skip reaches; anything past it panics on the nil forge.PR.
+type skipPR struct {
+	forge.PR
+	notes  []string
+	status string
+}
+
+func (*skipPR) Refresh() error                          { return nil }
+func (*skipPR) File(string, ...string) string           { return `{"base_branches":["release/*"]}` }
+func (*skipPR) Notes() ([]forge.Note, error)            { return nil, nil }
+func (p *skipPR) Status(_, state, desc string)          { p.status = state + " " + desc }
+func (p *skipPR) Note(_ int64, b string) (int64, error) { p.notes = append(p.notes, b); return 1, nil }
+
+// A PR into a branch neither the default nor in base_branches gets no review, but a green status.
+func TestReviewSkipsBaseBranch(t *testing.T) {
+	pr := &skipPR{}
+	f := skipForge{pr: pr}
+	e := &forge.Event{Action: "opened"}
+	e.Repository.DefaultBranch = "main"
+	e.PullRequest.State, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", strings.Repeat("a", 40), "prod"
+	if err := Review(t.Context(), f, e); err != nil || pr.status != "success Skipped: base branch" || len(pr.notes) != 1 ||
+		!strings.Contains(pr.notes[0], "Review skipped:** base branch `prod`") {
+		t.Fatalf("%v %q %q", err, pr.status, pr.notes)
+	}
+}
+
 func TestLearnings(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	for i := range maxLearnings + 2 {

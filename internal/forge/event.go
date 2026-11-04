@@ -19,6 +19,8 @@ type Event struct {
 		ID       int64  `json:"id"`
 		FullName string `json:"full_name"` // GitLab: path_with_namespace, may have subgroups
 		CloneURL string `json:"clone_url"`
+		// "" in events queued before it was read: then any base branch gets reviewed
+		DefaultBranch string `json:"default_branch"`
 	} `json:"repository"`
 	PullRequest struct {
 		Number  int    `json:"number"`

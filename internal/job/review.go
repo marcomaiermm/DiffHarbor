@@ -57,6 +57,13 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	if s.State.SHA == sha && !manual {
 		return nil // reviewed already, e.g. a redelivered event; `@app review` forces one
 	}
+	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
+	// Like a bot author: green, and `@app review` still reviews. A broken review.json reviews, its note says why.
+	if !manual && cfgErr == nil && !cfg.Reviews(pr.Base.Ref, e.Repository.DefaultBranch) {
+		s.Write(fmt.Sprintf("⏭️ **Review skipped:** base branch `%s` is not the default branch or in `base_branches`. Comment `@%s review` for one.", pr.Base.Ref, f.Bot()), "")
+		p.Status(sha, "success", "Skipped: base branch")
+		return nil
+	}
 	// Dependency bumps and release PRs get no review unless asked for. Green, so a required check passes.
 	// A self-hosted Renovate on a user token is a User, so its PRs get reviewed.
 	if pr.User.Type == "Bot" && !manual {
@@ -114,7 +121,6 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 			}
 		}
 	}
-	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
 	outline := diff.Analyze(raw)
 	s.Outline = &outline
 	guide := ReportURL != "" && cfg.Reports(len(prFiles)) // a large PR: a reading order and a report

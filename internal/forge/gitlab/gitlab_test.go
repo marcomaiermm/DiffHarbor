@@ -37,11 +37,11 @@ func TestParse(t *testing.T) {
 	if _, err := h.Parse(http.Header{"X-Gitlab-Token": {"x"}}, []byte(`{}`)); !errors.Is(err, forge.ErrSignature) {
 		t.Fatal("token not checked")
 	}
-	push := `{"object_kind":"merge_request","project":{"id":5,"path_with_namespace":"g/s/p","git_http_url":"https://gl/g/s/p.git"},
+	push := `{"object_kind":"merge_request","project":{"id":5,"path_with_namespace":"g/s/p","git_http_url":"https://gl/g/s/p.git","default_branch":"main"},
 "object_attributes":{"iid":3,"state":"opened","action":"update","oldrev":"a","last_commit":{"id":"abc"},"source_branch":"f","target_branch":"main","source_project_id":5}}`
 	e, err := h.Parse(hd, []byte(push))
 	if err != nil || e.Kind != "pull_request" || e.Action != "synchronize" || e.Key() != "gitlab/g/s/p#3" || e.PullRequest.Head.SHA != "abc" ||
-		e.PullRequest.State != "open" || e.PullRequest.Base.Ref != "main" || e.Owner() != "gitlab/g" {
+		e.PullRequest.State != "open" || e.PullRequest.Base.Ref != "main" || e.Repository.DefaultBranch != "main" || e.Owner() != "gitlab/g" {
 		t.Fatalf("push: %+v %v", e, err)
 	}
 	if e, _ := h.Parse(hd, []byte(strings.Replace(push, `"oldrev":"a"`, `"title":"x"`, 1))); e != nil {
