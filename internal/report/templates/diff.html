@@ -34,7 +34,7 @@
 
 {{define "finding"}}<div class="fnote"{{with .ID}} id="{{.}}"{{end}} role="note">
   <div class="fnote-h">{{template "sev" .Severity}}{{with .Proof}}<span class="chip" data-{{if $.Shown}}shown{{else}}dash{{end}}{{with $.Evidence}} title="Verified: {{.}}"{{end}}>{{.}}</span>{{end}}{{with .Title}}<span class="fnote-t">{{.}}</span>{{end}}</div>
-  <p class="fnote-b">{{.Body}}</p>
+  {{with .Body}}<p class="fnote-b">{{.}}</p>{{end}}
   {{with .Blob}}<p class="fnote-at"><a href="{{.}}" class="chip loc" target="_blank" rel="noopener">{{icon "code" ""}}{{$.Loc}} at the head ↗</a></p>{{end}}
 </div>{{end}}
 
