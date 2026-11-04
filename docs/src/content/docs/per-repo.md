@@ -22,7 +22,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
   "tests": true,
   "review_model": "openai/gpt-6.1-sol",
   "verify_model": "anthropic/claude-haiku-5-5:low",
-  "large_pr": "ask",
+  "large_pr": "all",
   "max_parts": 4,
   "report": "auto",
   "tickets": ["ABC"],
@@ -62,8 +62,8 @@ A diff over 60k characters can be reviewed in parts: the files of a folder stay 
 
 | `large_pr` | |
 |---|---|
-| `ask` (default) | Code up to 60k first. On GitHub the walkthrough offers a checkbox to review all files in parts; on both forges `@<bot> review all` does the same. Later pushes keep reviewing in parts. |
-| `all` | Always in parts. |
+| `all` (default) | Always in parts. |
+| `ask` | Code up to 60k first. On GitHub the walkthrough offers a checkbox to review all files in parts; on both forges `@<bot> review all` does the same. Later pushes keep reviewing in parts. |
 | `off` | Never. |
 
 `max_parts`: default 4, at most 8.
