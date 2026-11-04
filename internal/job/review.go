@@ -126,7 +126,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	guide := ReportURL != "" && cfg.Reports(len(prFiles)) // a large PR: a reading order and a report
 	// A diff past diff.Max: in parts once someone asked for them on this PR, else code first up to diff.Max.
 	s.State.Large = s.State.Large || e.Action == "large"
-	parts, omitted := diff.Filter(raw, only, cfg.IgnoreRe, cfg.Parts(s.State.Large))
+	parts, omitted := diff.Filter(raw, filepath.Join(dir, "repo"), only, cfg.IgnoreRe, cfg.Parts(s.State.Large))
 	d := strings.Join(parts, "")
 	if strings.TrimSpace(d) == "" {
 		log.Println(key, "nothing to review")
@@ -199,11 +199,13 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		rm, _ := cfg.Models()
 		kind += " · fallback " + agent.FallbackFor(rm, "review")
 	}
-	if omitted > 0 { // the rest only by name: findings cover part of the PR
-		inline := len(diff.Paths(d))
-		kind += fmt.Sprintf(" · ⚠️ inline %d of %d files", inline, inline+omitted)
-		if all, _ := diff.Filter(raw, only, cfg.IgnoreRe, cfg.Parts(true)); cfg.Asks() && len(all) > len(parts) {
-			s.Ask = forge.AskLarge(len(diff.Paths(strings.Join(all, ""))), inline+omitted, len(all), f.Boxes(), f.Bot())
+	if len(omitted) > 0 { // the rest only by name: findings cover part of the PR
+		inline := len(slices.DeleteFunc(diff.Paths(d), func(f string) bool { return slices.Contains(omitted, f) }))
+		kind += fmt.Sprintf(" · ⚠️ inline %d of %d files", inline, inline+len(omitted))
+		if all, rest := diff.Filter(raw, filepath.Join(dir, "repo"), only, cfg.IgnoreRe, cfg.Parts(true)); cfg.Asks() && len(all) > len(parts) {
+			// a file with a piece still left out isn't one "review all" reviews
+			full := slices.DeleteFunc(diff.Paths(strings.Join(all, "")), func(f string) bool { return slices.Contains(rest, f) })
+			s.Ask = forge.AskLarge(len(full), inline+len(omitted), len(all), f.Boxes(), f.Bot())
 		}
 	}
 	if tid != "" {
@@ -230,7 +232,10 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	}
 	log.Printf("%s %s %s %s: %s", key, sha[:7], kind, stats, desc)
 	s.State = s.State.Update(r, sha, prFiles, only == nil)
-	s.State.Patches = reviewedPatches(s.State.Patches, patches, slices.DeleteFunc(diff.Paths(d), func(f string) bool { return slices.Contains(r.Failed, f) }))
+	// a file with a piece left out isn't reviewed: the next push reviews it again
+	s.State.Patches = reviewedPatches(s.State.Patches, patches, slices.DeleteFunc(diff.Paths(d), func(f string) bool {
+		return slices.Contains(r.Failed, f) || slices.Contains(omitted, f)
+	}))
 	if guide {
 		repo := filepath.Join(dir, "repo")
 		st := s.State
@@ -241,7 +246,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(repo, raw), Themes: cfg.SyntaxTheme,
 			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, repo),
 			Conflicts: pr.Mergeable != nil && !*pr.Mergeable, Forge: p.Links(),
-			Dropped: r.Dropped, Failed: r.Failed, Tests: r.Tests, Sources: report.Sources(repo, raw),
+			Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(repo, raw),
 		}
 		// what the new code is for, where no doc comment or commit says: one call, the provider's small model
 		if keys, texts := report.Asks(d); len(keys) > 0 {

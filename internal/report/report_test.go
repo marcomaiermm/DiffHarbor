@@ -1131,4 +1131,12 @@ func TestFailedNotClean(t *testing.T) {
 	if strings.Contains(page, "Nothing blocks the merge") || strings.Contains(page, "A second model checked") {
 		t.Error("a clean verdict or a verifier that did not run")
 	}
+	// a file the review left out, all of it or a piece, isn't clean either
+	b, _, err = Render(Data{Repo: "o/r", Number: 1, SHA: "abc", Diff: d, Omitted: []string{"a.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page = string(b); !strings.Contains(page, "1 file not fully reviewed") || !strings.Contains(page, "in the files reviewed") || strings.Contains(page, "Nothing blocks the merge") {
+		t.Error("omitted: a clean verdict")
+	}
 }
