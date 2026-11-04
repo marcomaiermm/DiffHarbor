@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.3.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.2.0...v0.3.0) (2026-11-04)
+
+
+### Features
+
+* **agent:** dry prints tokens and cost per pass ([#37](https://github.com/marcomaiermm/DiffHarbor/issues/37)) ([8dcfa4f](https://github.com/marcomaiermm/DiffHarbor/commit/8dcfa4f66094fba69f5fafefc59e8be029613372))
+* **checks:** read npm installs from private registries through the vault ([#27](https://github.com/marcomaiermm/DiffHarbor/issues/27)) ([8e81805](https://github.com/marcomaiermm/DiffHarbor/commit/8e81805824455720e5d19aa611582189d5f43873))
+* **diff:** cut a file past 60k at hunks, skip generated code by its header ([#39](https://github.com/marcomaiermm/DiffHarbor/issues/39)) ([e3a912b](https://github.com/marcomaiermm/DiffHarbor/commit/e3a912bd0b6389a150c2c5655cbc9c46d4659eab))
+* **report:** the PR report as the design draws it ([#34](https://github.com/marcomaiermm/DiffHarbor/issues/34)) ([6104ebe](https://github.com/marcomaiermm/DiffHarbor/commit/6104ebeef50a64baf84a6900cec995b288a258b3))
+* **review:** auto-review only PRs into the default branch or base_branches ([#30](https://github.com/marcomaiermm/DiffHarbor/issues/30)) ([58c5ceb](https://github.com/marcomaiermm/DiffHarbor/commit/58c5ceba14f6292ccc4936c486fd169b3428f89e))
+* **review:** every defect a pass can point to, a second look in the same session, verify at high ([#40](https://github.com/marcomaiermm/DiffHarbor/issues/40)) ([01f9412](https://github.com/marcomaiermm/DiffHarbor/commit/01f9412ac3596ce20ba5329833c2b1f194c1af23))
+* **review:** large PRs in parts by default, closer to CodeRabbit's recall ([#36](https://github.com/marcomaiermm/DiffHarbor/issues/36)) ([4248c08](https://github.com/marcomaiermm/DiffHarbor/commit/4248c080f6c4e926423f6a810fd6fa6b203599dd))
+
+
+### Bug Fixes
+
+* **agent:** send Anthropic effort in output_config behind a gateway ([#32](https://github.com/marcomaiermm/DiffHarbor/issues/32)) ([f07ca6d](https://github.com/marcomaiermm/DiffHarbor/commit/f07ca6d866702abfda33d002755eb594cb2a1dab))
+* **forge:** match PR comments to the design ([#33](https://github.com/marcomaiermm/DiffHarbor/issues/33)) ([0c05269](https://github.com/marcomaiermm/DiffHarbor/commit/0c052690f429fa5ab4d23c5d71ce9678ddc48881))
+* **proc:** bound reads of PR-controlled files ([#28](https://github.com/marcomaiermm/DiffHarbor/issues/28)) ([cf196d7](https://github.com/marcomaiermm/DiffHarbor/commit/cf196d7b27a78b0d316b4e199d6a8ef546b00b32))
+* **report:** a finding without a body shows no empty paragraph under its title ([#35](https://github.com/marcomaiermm/DiffHarbor/issues/35)) ([2cf022b](https://github.com/marcomaiermm/DiffHarbor/commit/2cf022b9088d9e5464ba4f525556ab0177a8179b))
+
+
+### Performance Improvements
+
+* **diff:** pack stylesheets after code and tests ([#38](https://github.com/marcomaiermm/DiffHarbor/issues/38)) ([23997e0](https://github.com/marcomaiermm/DiffHarbor/commit/23997e08b67bee54f577c8f826fa90fb34978288))
+
 ## [0.2.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.1.1...v0.2.0) (2026-11-04)
 
 
