@@ -1,5 +1,5 @@
 # cp compose.example.yml compose.yml, put the values in .env next to it, docker compose up -d.
-# Only POST /webhook/github and /webhook/gitlab need to be reachable from the forge; with REPORT_URL, put /r/ behind your SSO.
+# Only POST /webhook/github and /webhook/gitlab need to be reachable from the forge; with REPORT_URL, /r/ too, best behind your SSO.
 services:
   diffharbor:
     # Or build: . to build it yourself.
@@ -51,7 +51,7 @@ services:
       ITSAPLAN_API_KEY: ${ITSAPLAN_API_KEY:-}
       LINEAR_API_KEY: ${LINEAR_API_KEY:-}
       TICKET_PROVIDER: ${TICKET_PROVIDER:-}
-      # Optional: PR reports under /r/. They hold the PR's code: serve them only behind your SSO. Empty = no reports.
+      # Optional: PR reports under /r/, at links only the PR's comment has. They hold the PR's code: an SSO in front is still best. Empty = no reports.
       REPORT_URL: ${REPORT_URL:-}
       # Optional: the reports in an S3 bucket instead of /data, https://host[:port]/bucket[/prefix] (README: Configuration).
       # With the seaweedfs service below: http://seaweedfs:8333/reports, and any key and secret you pick.

@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"diffharbor/internal/agent"
 	"diffharbor/internal/checks"
 	"diffharbor/internal/diff"
@@ -24,6 +25,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -236,7 +238,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 				d.Whys[keys[i]] = w
 			}
 		}
-		s.State.Report = writeReport(e, d)
+		s.State.Secret = reportSecret(s.State.Secret)
+		s.State.Report = writeReport(e, s.State.Secret, d)
 	}
 	banner := ""
 	if n == 0 {
@@ -246,17 +249,30 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	return nil
 }
 
-// ReportURL is where the server serves reports (REPORT_URL, behind SSO); "" = no reports.
+// ReportURL is where the server serves reports (REPORT_URL); "" = no reports.
 var ReportURL string
 
 // maxVersions is the reports a PR keeps, one per reviewed head: the newest.
 const maxVersions = 10
 
-// reportPath is a PR's reports under /r/ and in Reports: its forge's host, the repository, the number.
-// A version is {sha}.html in it, versions.json lists them newest first.
+// reportPath is a PR's folder in Reports: its forge's host, the repository, the number. Its reports are in {secret}/
+// of it, as under /r/: a version is {sha}.html.gz, versions.json lists them newest first. Reports from before the
+// secret, right in the folder, no longer resolve and go with the PR.
 func reportPath(e *forge.Event) string {
 	host, _, _ := strings.Cut(strings.TrimPrefix(e.PullRequest.HTMLURL, "https://"), "/")
 	return cmp.Or(host, "github.com") + "/" + e.Repository.FullName + "/" + strconv.Itoa(e.PullRequest.Number)
+}
+
+// Secret is a report folder's secret, rand.Text's: 130 bits, URL-safe. Without it a report's URL is its PR's, which
+// anyone guesses, and the app has no login: an exposed port or PR code on localhost read every report.
+var Secret = regexp.MustCompile(`^[A-Z2-7]{26}$`)
+
+// reportSecret is the PR's secret: the one its walkthrough holds, a new one for its first report or one edited by hand.
+func reportSecret(s string) string {
+	if Secret.MatchString(s) {
+		return s
+	}
+	return rand.Text()
 }
 
 // ReportS3 holds the reports instead of DATA_DIR when set (REPORT_S3_URL).
@@ -291,8 +307,8 @@ func DeleteReports(e *forge.Event) error {
 	return err
 }
 
-// Versions is a PR's reports, newest first, by its reportPath; none when it has no list. Any other error is one:
-// taken as none, the next report would drop the list.
+// Versions is a PR's reports, newest first, by their folder (reportPath/secret); none when it has no list. Any other
+// error is one: taken as none, the next report would drop the list.
 func Versions(path string) ([]report.Version, error) {
 	b, err := Reports().Get(path + "/versions.json")
 	if errors.Is(err, fs.ErrNotExist) {
@@ -305,12 +321,12 @@ func Versions(path string) ([]report.Version, error) {
 	return vs, json.Unmarshal(b, &vs)
 }
 
-// writeReport renders the PR's report as the version of its head, against the newest of another head, and returns
-// its URL; "" when that fails, the review stands without it. d.Routine is this review's: an incremental one has
-// none, and the last full one's line numbers may be stale.
+// writeReport renders the PR's report into its secret's folder as the version of its head, against the newest of
+// another head, and returns its URL; "" when that fails, the review stands without it. d.Routine is this review's: an
+// incremental one has none, and the last full one's line numbers may be stale.
 // ponytail: two reviews of a PR finishing at once can drop one's entry from versions.json; a lock per PR if it shows.
-func writeReport(e *forge.Event, d report.Data) string {
-	dir, s := reportPath(e), Reports()
+func writeReport(e *forge.Event, secret string, d report.Data) string {
+	dir, s := reportPath(e)+"/"+secret, Reports()
 	vs, err := Versions(dir)
 	if err != nil {
 		log.Println(e.Key(), "report:", err)

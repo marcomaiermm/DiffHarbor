@@ -28,6 +28,9 @@ type State struct {
 	Decisions []string      `json:"decisions,omitempty"`
 	Story     review.Story  `json:"story,omitzero"`
 	Report    string        `json:"report,omitempty"` // the report's URL, "" = none
+	// The report folder's secret in its URL. Here, as only who can read the PR sees this comment; kept across pushes,
+	// restarts and a close, so a reopened PR's report comes back at its old link.
+	Secret string `json:"secret,omitempty"`
 }
 
 const stickyMark = "<!-- diffharbor:walkthrough -->"
@@ -181,7 +184,7 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 	if footer != "" {
 		b.WriteString("<sub>" + footer + "</sub>\n")
 	}
-	j, _ := json.Marshal(st)
+	j, _ := json.Marshal(st) //nolint:gosec // the report's secret is for who reads the PR, as this comment
 	b.WriteString("<!-- diffharbor:state " + base64.StdEncoding.EncodeToString(j) + " -->")
 	return b.String()
 }
