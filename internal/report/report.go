@@ -678,6 +678,13 @@ func retire(removed []string, files map[string]*file) []retired {
 			if r := rest[len(g):]; r != "" && !(r[0] == '_' || r[0] >= 'A' && r[0] <= 'Z') { // TestTotalNet is no test of Total's
 				continue
 			}
+			left, r := false, strings.TrimPrefix(rest[len(g):], "_")
+			for k := range kept { // TestTotalNet with Net left: it may test what stays
+				left = left || len(k) >= 3 && len(r) >= len(k) && strings.EqualFold(r[:len(k)], k)
+			}
+			if left {
+				continue
+			}
 			i := slices.IndexFunc(out, func(r retired) bool { return r.With == g })
 			if i < 0 {
 				i, out = len(out), append(out, retired{With: g})

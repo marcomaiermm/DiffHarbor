@@ -1010,11 +1010,11 @@ func TestPlaces(t *testing.T) {
 // A test deleted with the declaration it is named after leaves the findings for the line under them.
 func TestRetire(t *testing.T) {
 	files := map[string]*file{
-		"a.go": {Kind: "code", Changes: []change{{Name: "totalNet", State: "gone"}, {Name: "Total", State: "gone"}}},
+		"a.go": {Kind: "code", Changes: []change{{Name: "totalNet", State: "gone"}, {Name: "Total", State: "gone"}, {Name: "Sum", State: "gone"}, {Name: "Net", State: "changed"}}},
 		"b.go": {Kind: "code", Changes: []change{{Name: "Total", State: "new"}}},
 		"x.go": {Kind: "test", Changes: []change{{Name: "helper", State: "gone"}}},
 	}
-	got := retire([]string{"a_test.go: TestTotalNet", "a_test.go: TestTotalNetRounding", "a_test.go: TestTotal", "a_test.go: TestTotalnetwork", "x_test.go: TestHelper"}, files)
+	got := retire([]string{"a_test.go: TestTotalNet", "a_test.go: TestTotalNetRounding", "a_test.go: TestTotal", "a_test.go: TestTotalnetwork", "a_test.go: TestSumNet", "x_test.go: TestHelper"}, files)
 	if !reflect.DeepEqual(got, []retired{{Names: []string{"TestTotalNet", "TestTotalNetRounding"}, With: "totalNet"}}) {
 		t.Fatalf("%+v", got)
 	}
