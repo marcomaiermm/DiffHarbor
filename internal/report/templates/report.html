@@ -12,7 +12,12 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.3.0/index.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@5.3.0/index.css">
 {{template "theme" .}}
-<script>if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");</script>
+<script>{
+  const dark = matchMedia("(prefers-color-scheme: dark)");
+  if (dark.matches) document.documentElement.classList.add("dark");
+  // ponytail: the code's and the graphs' colors are drawn for one theme; a reload redraws them, live would recolor every token
+  dark.addEventListener("change", () => location.reload());
+}</script>
 <script src="https://cdn.jsdelivr.net/gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/tabs/tabs.js" defer></script>
 {{template "styles" .}}
 {{block "head" .}}{{end}}
