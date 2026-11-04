@@ -191,7 +191,8 @@ func abs(n int) int { return max(n, -n) }
 // lines that name that one and so on: a call in a macro, through an interface, by reflection is one the index
 // misses. A line in a file no index read, or at a file's top level, may run anything: no claim, as past maxNames
 // names or a name in more than maxMentions lines, as common as "Run". A test: the conventions of codegraph's
-// isTestPath, a marker on or just above the declaration, or below a #[cfg(test)].
+// isTestPath, a marker on or just above the declaration, or below a #[cfg(test)]. ways: how the code reaches it,
+// see ways below.
 const cgTests = `
 const { DatabaseSync } = require("node:sqlite");
 const { execFileSync } = require("child_process");
@@ -202,12 +203,13 @@ const open = dbs.map(d => {
   const db = new DatabaseSync(d.db, { readOnly: true });
   return { prefix: d.prefix, files: new Set(db.prepare("select path from files").all().map(r => r.path)),
     named: db.prepare("select id, start_line line from nodes where file_path = ? and name = ? and kind not in ('file', 'import')"),
-    into: db.prepare("select s.id, s.kind, s.name, s.file_path path, s.start_line line from edges e join nodes s on s.id = e.source" +
+    into: db.prepare("select s.id, s.kind, s.name, s.file_path path, s.start_line line, e.line at from edges e join nodes s on s.id = e.source" +
       " where e.target = ? and e.kind in ('calls', 'references', 'instantiates')"),
     around: db.prepare("select kind, name, start_line line from nodes where file_path = :f and start_line <= :l and end_line >= :l" +
       " and kind != 'file' order by start_line desc, end_line limit 1") };
 }).sort((a, b) => b.prefix.length - a.prefix.length);
 const owner = p => open.find(d => p.startsWith(d.prefix));
+const into = (d, id) => { d.memo ??= new Map(); if (!d.memo.has(id)) d.memo.set(id, d.into.all(id)); return d.memo.get(id) };
 const src = new Map();
 const lines = p => { if (!src.has(p)) { let t = ""; try { t = fs.readFileSync(repo + "/" + p, "utf8") } catch {} src.set(p, t.split("\n")) } return src.get(p) };
 const testPath = p => { // codegraph's isTestPath
@@ -229,12 +231,12 @@ function strict(d, id) {
   const seen = new Set([id]), q = [id], tests = [];
   let partial = false;
   for (let i = 0; i < q.length && !partial; i++) {
-    for (const s of d.into.all(q[i])) {
+    for (const s of into(d, q[i])) {
       if (seen.has(s.id)) continue;
       if (seen.size >= maxNodes) { partial = true; break }
       seen.add(s.id);
       const p = d.prefix + s.path;
-      if (!isTest(p, s.line) || d.into.all(s.id).length) { q.push(s.id); continue } // a test helper, an interface's: on to the test
+      if (!isTest(p, s.line) || into(d, s.id).length) { q.push(s.id); continue } // a test helper, an interface's: on to the test
       const t = s.kind === "file" ? base(p) : base(p) + " " + s.name;
       if (!tests.includes(t)) tests.push(t);
     }
@@ -289,19 +291,85 @@ function untested(name) {
   return true;
 }
 
+// a call that registers a route: its name, the method maybe in the path ("GET /x", Go's), the path
+const verbs = /^(?:get|post|put|patch|delete|head|options|all|handle\w*|route|\w*mapping)$/i;
+const reg = /\b(\w+)\s*\(\s*["'\x60](?:(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+)?(\/[^"'\x60\s]*)["'\x60]/g;
+// routeAt is the route registered on line at of p, or by a line around it, a closure's: from is where its declaration starts
+function routeAt(p, from, at) {
+  const ls = lines(p), ind = l => l.length - l.trimStart().length;
+  let min = Infinity;
+  for (let i = at - 1; i >= Math.max(from - 1, 0); i--) {
+    const l = ls[i] || "";
+    if (!l.trim() || ind(l) >= min) continue; // a statement beside it, not around it
+    min = ind(l);
+    for (const m of l.matchAll(reg)) {
+      if (!verbs.test(m[1])) continue;
+      const by = /^(get|post|put|patch|delete|head|options)/i.exec(m[1]);
+      return { method: m[2] || (by ? by[1].toUpperCase() : "ANY"), route: m[3], line: i + 1 };
+    }
+  }
+  return null;
+}
+
+// ways is how the code reaches start: up its callers, tests aside, to a route that runs one or to a declaration
+// nothing calls, the nearest first. A way's chain runs from the first it runs down to start, each hop with the line
+// of the one before that names it (in, at). Past maxWalk callers or maxDepth hops, no more.
+const maxWays = 4, maxWalk = 400, maxDepth = 8;
+function ways(d, start, name, path, line) {
+  const info = new Map([[start, { name, path, line }]]), next = new Map([[start, null]]), depth = new Map([[start, 0]]);
+  const q = [start], out = [], seen = new Set();
+  const chain = (id, inn, at) => {
+    const c = [];
+    for (; id != null; ) {
+      const { name, path, line } = info.get(id);
+      c.push({ name, path, line, in: inn, at });
+      const n = next.get(id);
+      if (!n) break;
+      [id, inn, at] = [n.to, info.get(id).path, n.at];
+    }
+    return c;
+  };
+  for (let i = 0; i < q.length && out.length < maxWays; i++) {
+    const id = q[i], callers = into(d, id).filter(s => !isTest(d.prefix + s.path, s.line));
+    if (!callers.length) {
+      const top = info.get(id);
+      // a function or a file's top level: a method nothing calls is an interface's, a variable runs nothing itself
+      if (i && !seen.has(id) && (top.kind === "function" || top.kind === "file"))
+        out.push({ method: "CALL", route: top.name, path: top.path, line: top.line, chain: chain(id, "", 0).slice(1) });
+      seen.add(id);
+      continue;
+    }
+    if (depth.get(id) >= maxDepth) continue;
+    for (const s of callers) {
+      const p = d.prefix + s.path, r = s.at && routeAt(p, s.line, s.at);
+      if (r) {
+        const k = r.method + " " + r.route + " " + p;
+        if (!seen.has(k) && out.length < maxWays) seen.add(k), out.push({ ...r, path: p, chain: chain(id, p, s.at) });
+        continue;
+      }
+      if (next.has(s.id) || next.size >= maxWalk) continue;
+      info.set(s.id, { name: s.kind === "file" ? base(p) : s.name, path: p, line: s.line, kind: s.kind });
+      next.set(s.id, { to: id, at: s.at || 0 });
+      depth.set(s.id, depth.get(id) + 1);
+      q.push(s.id);
+    }
+  }
+  return out;
+}
+
 const out = [], known = new Map();
 for (const { path, name } of starts) {
   const d = owner(path);
   if (!d) continue;
   for (const n of d.named.all(path.slice(d.prefix.length), name)) {
     if (!known.has(name)) { try { known.set(name, untested(name)) } catch { known.set(name, false) } }
-    out.push({ path, name, line: n.line, ...strict(d, n.id), untested: known.get(name) });
+    out.push({ path, name, line: n.line, ...strict(d, n.id), untested: known.get(name), ways: ways(d, n.id, name, path, n.line) });
   }
 }
 process.stdout.write(JSON.stringify(out));
 `
 
-// tests sets the Tests, Partial and Untested of the diff's declarations in the index: see cgTests. Without git or
+// tests sets the Tests, Partial, Untested and Ways of the diff's declarations in the index: see cgTests. Without git or
 // node, or past a minute, none: no test listed, and no claim that none reaches.
 func (idx *cgIndex) tests(repo string, changed map[string]bool, syms map[string][]Symbol) {
 	type start struct {
@@ -321,6 +389,7 @@ func (idx *cgIndex) tests(repo string, changed map[string]bool, syms map[string]
 		Line              int
 		Tests             []string
 		Partial, Untested bool
+		Ways              []Way
 	}
 	if len(starts) == 0 || !runNode(cgTests, map[string]any{"repo": repo, "dbs": idx.dbs, "starts": starts}, &got) {
 		return
@@ -336,8 +405,9 @@ func (idx *cgIndex) tests(repo string, changed map[string]bool, syms map[string]
 		switch {
 		case best == nil:
 		case !set[best]:
-			set[best], best.Tests, best.Partial, best.Untested = true, g.Tests, g.Partial, g.Untested
+			set[best], best.Tests, best.Partial, best.Untested, best.Ways = true, g.Tests, g.Partial, g.Untested, g.Ways
 		default:
+			best.Ways = append(best.Ways, g.Ways...)
 			for _, t := range g.Tests {
 				if !slices.Contains(best.Tests, t) {
 					best.Tests = append(best.Tests, t)

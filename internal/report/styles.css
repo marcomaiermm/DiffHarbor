@@ -502,6 +502,54 @@ html:not([data-diff="split"]) .split-legend { display: none; }
 .step-graph > .graph { @apply mt-0; }
 .ct-cyc { @apply mb-3.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b pb-3 text-[12.5px] text-muted-foreground; }
 .ct-cyc code { @apply font-mono text-[13px] text-foreground; }
+.way-h { @apply mb-2.5 flex items-center gap-2 text-[13px] text-muted-foreground; }
+/* where it runs: a tab per way in, its calls down to the change as a tree, the guides drawn as the design's */
+.ctabs { @apply mb-3.5 flex flex-wrap items-center gap-2; }
+/* the tabs are shadcn's outline toggles, pressed in the ring's color as the design's; Replay its outline button */
+.ctabs > .toggle { @apply h-[34px] gap-2 pr-3 pl-1.5 font-mono text-[13px] font-normal; }
+.ctabs > .toggle[aria-pressed="true"] { @apply border-ring text-foreground; background: color-mix(in oklab, var(--ring) 10%, var(--card)); }
+.ctabs > .btn { @apply ml-auto; }
+/* a method: GET, POST, CALL; a chip in its color */
+.chip[data-m] { @apply h-5 rounded border-transparent px-1.5 font-mono text-[11px] font-semibold tracking-[0.04em]; --c: var(--muted-foreground); background: color-mix(in oklab, var(--c) 18%, transparent); color: var(--c); }
+.chip[data-m="GET"], .chip[data-m="HEAD"] { --c: var(--ring); }
+.chip[data-m="POST"], .chip[data-m="PUT"], .chip[data-m="PATCH"] { --c: var(--verified); }
+.chip[data-m="DELETE"] { --c: var(--destructive); }
+.ct-dot { @apply size-[7px] rounded-full bg-major; }
+.ct-dot[data-sev="critical"] { @apply bg-destructive; }
+.ct { @apply m-0 grid list-none grid-cols-[minmax(100%,max-content)] overflow-x-auto rounded-[10px] border bg-background py-2.5 font-mono text-[13px]; --gl: color-mix(in oklab, var(--muted-foreground) 45%, transparent); }
+.ct li { @apply relative flex min-h-9 items-center gap-2.5 px-3.5 whitespace-nowrap hover:bg-muted/60; }
+.ct-g { @apply flex self-stretch empty:hidden; color: var(--gl); }
+.gc { @apply relative w-6 flex-none; }
+.gc[data-g="pipe"]::before, .gc[data-g="tee"]::before { @apply absolute inset-y-0 left-[11px] w-px bg-current content-['']; }
+.gc[data-g="tee"]::after { @apply absolute top-1/2 left-[11px] h-px w-[23px] bg-current content-['']; }
+.gc[data-g="end"]::before { @apply absolute top-0 left-[11px] h-1/2 w-3 rounded-bl-md border-b border-l border-current content-['']; }
+.gc[data-g="end"]::after { @apply absolute top-1/2 left-[23px] h-px w-[11px] bg-current content-['']; }
+.ct li[data-kids]::after { @apply absolute bottom-0 left-[25px] w-px content-['']; top: calc(50% + 13px); background: var(--gl); }
+.ct li.ct-entry[data-kids]::after { top: calc(50% + 10px); }
+.ct li[data-d="1"][data-kids]::after { left: 49px; }
+.ct li[data-d="2"][data-kids]::after { left: 73px; }
+.ct li[data-d="3"][data-kids]::after { left: 97px; }
+.ct li[data-d="4"][data-kids]::after { left: 121px; }
+.ct li[data-d="5"][data-kids]::after { left: 145px; }
+.ct li[data-d="6"][data-kids]::after { left: 169px; }
+.ct li[data-d="7"][data-kids]::after { left: 193px; }
+.ct li[data-d="8"][data-kids]::after { left: 217px; }
+.ct li[data-d="9"][data-kids]::after { left: 241px; }
+.ct-route { @apply font-medium text-foreground; }
+.ct-sub { @apply font-sans text-[13px] text-muted-foreground; }
+.ct-pill { @apply inline-flex min-h-[26px] items-center gap-2 rounded-md border bg-card px-[9px] text-foreground; }
+.ct-pill code { font: inherit; }
+.ct li[data-st="new"] .ct-pill { border-color: color-mix(in oklab, var(--verified) 60%, transparent); }
+.ct li[data-st="chg"] .ct-pill { border-color: color-mix(in oklab, var(--ring) 60%, transparent); }
+.ct li[data-st="major"] .ct-pill { @apply border-major; background: color-mix(in oklab, var(--major) 10%, var(--card)); }
+.ct-end { @apply ml-auto flex items-center gap-3 pl-3 whitespace-nowrap; }
+.ct-tag { @apply font-sans text-[12.5px] text-muted-foreground; }
+.ct li[data-st="new"] .ct-tag { @apply text-verified; }
+.ct li[data-st="chg"] .ct-tag { @apply text-ring; }
+.ct-punch { @apply mt-3 rounded-r-lg border-l-[3px] border-ring px-3.5 py-2.5 text-sm leading-relaxed; background: color-mix(in oklab, var(--ring) 6%, transparent); }
+.ct-punch[data-sev] { @apply border-major; background: color-mix(in oklab, var(--major) 8%, transparent); }
+.ct-punch[data-sev="critical"] { @apply border-destructive; background: color-mix(in oklab, var(--destructive) 8%, transparent); }
+.ct-more { @apply whitespace-nowrap text-major hover:underline; }
 .story { @apply grid overflow-hidden rounded-lg border text-[13.5px] leading-relaxed @2xl:grid-cols-2; }
 .story > div { --c: var(--diff-del); @apply px-3.5 py-2.5; background: var(--diff-del-bg); }
 .story > div + div { @apply border-t border-dashed @2xl:border-t-0 @2xl:border-l; }
@@ -525,5 +573,26 @@ html { scroll-padding-top: 5rem; }
   .diff tbody.fold > tr { transition: opacity 200ms ease, display 200ms allow-discrete; }
   @starting-style { .diff tbody.fold.open > tr { opacity: 0; } }
   .flash > tr, tr.flash, .sl.flash, .flash.collapsible { animation: flash 1.6s ease-out; }
+  /* a run plays a way: its rows come in one by one, a signal runs down the guides, the finding pings */
+  .ctw.run-a li { animation: ct-in-a 400ms cubic-bezier(.2, .7, .2, 1) both; } .ctw.run-b li { animation: ct-in-b 400ms cubic-bezier(.2, .7, .2, 1) both; }
+  .ctw.run-a .ct-g { animation: ct-sig-a 800ms both; } .ctw.run-b .ct-g { animation: ct-sig-b 800ms both; }
+  .ctw li:nth-child(2), .ctw li:nth-child(2) .ct-g { animation-delay: 0.11s; }
+  .ctw li:nth-child(3), .ctw li:nth-child(3) .ct-g { animation-delay: 0.22s; }
+  .ctw li:nth-child(4), .ctw li:nth-child(4) .ct-g { animation-delay: 0.33s; }
+  .ctw li:nth-child(5), .ctw li:nth-child(5) .ct-g { animation-delay: 0.44s; }
+  .ctw li:nth-child(6), .ctw li:nth-child(6) .ct-g { animation-delay: 0.55s; }
+  .ctw li:nth-child(7), .ctw li:nth-child(7) .ct-g { animation-delay: 0.66s; }
+  .ctw li:nth-child(8), .ctw li:nth-child(8) .ct-g { animation-delay: 0.77s; }
+  .ctw li:nth-child(9), .ctw li:nth-child(9) .ct-g { animation-delay: 0.88s; }
+  .ctw li:nth-child(10), .ctw li:nth-child(10) .ct-g { animation-delay: 0.99s; }
+  .ctw li:nth-child(11), .ctw li:nth-child(11) .ct-g { animation-delay: 1.10s; }
+  .ctw li:nth-child(12), .ctw li:nth-child(12) .ct-g { animation-delay: 1.21s; }
+  .ctw.run-a li[data-st="major"] .ct-pill { animation: ct-ping-a 1.1s 750ms 2; } .ctw.run-b li[data-st="major"] .ct-pill { animation: ct-ping-b 1.1s 750ms 2; }
+  .ctw.run-a .ct-punch { animation: ct-in-a 500ms 850ms both; } .ctw.run-b .ct-punch { animation: ct-in-b 500ms 850ms both; }
+  @keyframes ct-in-a { from { opacity: 0; transform: translateX(-10px); } } @keyframes ct-in-b { from { opacity: 0; transform: translateX(-10px); } }
+  @keyframes ct-sig-a { 45% { color: var(--ring); filter: drop-shadow(0 0 3px var(--ring)); } }
+  @keyframes ct-sig-b { 45% { color: var(--ring); filter: drop-shadow(0 0 3px var(--ring)); } }
+  @keyframes ct-ping-a { 40% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--major) 30%, transparent); } }
+  @keyframes ct-ping-b { 40% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--major) 30%, transparent); } }
   @keyframes flash { from { background-color: rgb(82 168 255 / 0.3); } }
 }

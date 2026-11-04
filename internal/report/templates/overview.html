@@ -25,7 +25,7 @@
       <h2 id="verdict-h">{{.Verdict.Title}}</h2>
       <p>{{.Verdict.Body}} <a href="#finish" class="whitespace-nowrap">Finish the review {{icon "arrow-right" "inline size-3.5"}}</a></p>
     </div>
-    {{with .Since}}<p class="since" id="since"><span>Since your review of <code>{{short .Prev.SHA}}</code>, <time class="since-time" datetime="{{.Prev.At.Format "2006-01-02T15:04:05Z07:00"}}"></time>
+    {{with .Since}}<p class="since" id="since"><span>Since your review of <code>{{short .Prev.SHA}}</code>{{if not .Prev.At.IsZero}}, <time class="since-time" datetime="{{.Prev.At.Format "2006-01-02T15:04:05Z07:00"}}"></time>{{end}}
       {{- with .Files}}: {{range $i, $f := .}}{{sep $i (len $.Since.Files)}}{{if not (index $.Since.Prev.Files .Path)}}the new {{end}}<a href="#{{.Path}}" title="{{.Path}}">{{base .Path}}</a>{{end}}{{end}}.</span>
       {{- with .Back}}<span>No longer in the PR: {{range $i, $p := .}}{{sep $i (len $.Since.Back)}}<s title="{{.}}">{{base .}}</s>{{end}}.</span>{{end}}
       {{- if or .Fixed .New}}<span>{{.Say}}{{with .New}}: {{range $i, $k := .}}{{sep $i (len $.Since.New)}}<span data-sev="{{$.Since.Sev .}}" title="{{.}}">{{finding .}}</span>{{end}}{{end}}.</span>{{end}}
@@ -90,10 +90,20 @@
 {{define "run-mark"}}<span class="run" data-mark="{{.Mark}}"{{if .When}} data-stale{{end}} role="img" aria-label="{{if eq .Mark "pass"}}passed{{else if eq .Mark "fail"}}failed{{else if eq .Mark "skip"}}skipped{{else}}not run{{end}}{{with .When}} {{.}}{{end}}">
   {{- if eq .Mark "pass"}}{{icon "check" ""}}{{else if eq .Mark "fail"}}{{icon "x" ""}}{{else if eq .Mark "skip"}}{{icon "minus" ""}}{{else}}{{icon "circle-dashed" ""}}{{end}}</span>{{end}}
 {{/* Look closer: what the steps don't show, after them and closed until asked. */}}
-{{define "explore"}}{{if or .Inventory .Deps .Affected .Diagram}}
+{{define "way"}}<ol class="ct" aria-label="{{.Label}}">
+  <li class="ct-entry"{{if .Rows}} data-kids{{end}}><span class="chip" data-m="{{.Method}}">{{.Method}}</span><span class="ct-route">{{.Route}}</span>{{with .Sub}}<span class="ct-sub">{{.}}</span>{{end}}<span class="ct-end">{{template "way-at" .At}}</span></li>
+  {{- range .Rows}}
+  <li data-d="{{.D}}"{{with .St}} data-st="{{.}}"{{end}}{{if .Kids}} data-kids{{end}}><span class="ct-g" aria-hidden="true">{{range .Cols}}<span class="gc" data-g="{{.}}"></span>{{end}}</span><span class="ct-pill"><code{{if .St}} class="sym" data-sym="{{.Name}}" data-path="{{.Path}}"{{end}}>{{.Name}}</code></span><span class="ct-end">{{with .Sev}}<span class="chip" data-sev="{{.Sev}}">{{.Text}}</span>{{else}}{{with .Tag}}<span class="ct-tag">{{.}}</span>{{end}}{{end}}{{template "way-at" .At}}</span></li>
+  {{- end}}
+</ol>
+<p class="ct-punch"{{with .Sev}} data-sev="{{.}}"{{end}}>{{.Says}}{{with .Finding}} <a href="{{.}}" class="ct-more">See the finding →</a>{{end}}</p>{{end}}
+
+{{define "way-at"}}{{if .Line}}<a class="aloc"{{with .Href}} href="{{.}}"{{end}}{{if .Out}} target="_blank" rel="noopener"{{end}} title="{{.Path}}:{{.Line}}{{if .Out}}, not in the diff{{end}}">{{base .Path}}:{{.Line}}</a>{{end}}{{end}}
+
+{{define "explore"}}{{if or .Inventory .Deps .Affected .Ways .Diagram}}
 <section id="explore" class="mt-16 border-t pt-10" aria-labelledby="explore-h">
   <h2 id="explore-h" class="text-xl font-semibold tracking-tight">Look closer</h2>
-  <p class="mt-1 mb-5 text-muted-foreground">Optional, after the steps: the declarations as a diff, what the change reaches outside the PR, and how the changed directories use each other. A dashed AI means the reason was read from the code, not from a commit.</p>
+  <p class="mt-1 mb-5 text-muted-foreground">Optional, after the steps: the declarations as a diff, where the code runs into the change, and how the changed directories use each other. A dashed AI means the reason was read from the code, not from a commit.</p>
   <div class="space-y-2.5">
   {{with .API}}<details class="box" id="happened">
     <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">The API, before and after</span><span class="api-legend"><span><b class="am-add">+</b> new</span><span><b class="am-chg">~</b> changed</span><span><b class="am-mv">→</b> moved</span><span><b class="am-del">−</b> removed</span></span></summary>
@@ -113,14 +123,22 @@
       {{with $.APIMore}}<p class="inv-hint mt-2">and {{.}} more in the diff</p>{{end}}
     </div>
   </details>{{end}}
-  {{with .Affected}}<details class="box">
+  {{with .Ways}}<details class="box" id="ways">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">Where it runs</span><span class="bs-note">{{$.WaysSay}}</span></summary>
+    <div class="bb">
+      <div class="ctabs" role="group" aria-label="Ways into the change">{{range $i, $w := .}}<button type="button" class="toggle" data-variant="outline" data-way="{{$i}}" aria-pressed="{{if eq $i 0}}true{{else}}false{{end}}"><span class="chip" data-m="{{.Method}}">{{.Method}}</span><span>{{.Route}}</span>{{if .Sev}}<span class="ct-dot" data-sev="{{.Sev}}" role="img" aria-label="has a {{if eq .Sev "critical"}}blocker{{else}}major finding{{end}}"></span>{{end}}</button>{{end}}
+        <button type="button" class="btn" data-variant="outline" data-size="xs" data-replay>{{icon "rotate-ccw" ""}}Replay</button></div>
+      {{range $i, $w := .}}<div class="ctw" data-way="{{$i}}"{{if $i}} hidden{{end}}>{{template "way" .}}</div>{{end}}
+    </div>
+  </details>{{end}}
+  {{if not .Ways}}{{with .Affected}}<details class="box">
     <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">What the change reaches outside the PR</span><span class="bs-note">{{plural (len .) "declaration" "declarations"}} called or named by code outside the diff</span></summary>
     <div class="bb accordion">{{range .}}<details class="accordion-item reach-item">
       <summary class="accordion-trigger"><a href="#{{.ID}}">{{.Name}}</a>{{with .Why}}<span class="badge" data-variant="outline">{{.}}</span>{{end}}<span class="reach-path">{{.Path}}</span><span class="reach-n">{{.N}} {{if eq .N 1}}place{{else}}places{{end}}</span>{{icon "chevron-down" "accordion-chevron size-4"}}</summary>
       <ul>{{range .Refs}}<li><a href="{{$.Forge.Blob}}{{.Path}}#L{{.Line}}" target="_blank" rel="noopener">{{.Path}}:{{.Line}}</a>{{with .In}}<span class="shrink-0 text-muted-foreground">in {{.}}</span>{{end}}<code data-path="{{.Path}}">{{.Text}}</code></li>{{end}}
         <li><button type="button" class="btn" data-variant="link" data-size="xs" data-uses="{{.Name}}" data-path="{{.Path}}">Every use</button></li></ul>
     </details>{{end}}</div>
-  </details>{{end}}
+  </details>{{end}}{{end}}
   {{with .Deps}}<details class="box">
     <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">{{if .New}}New uses between directories{{else}}Uses between the changed directories{{end}}</span>{{with .Cycles}}<span class="bs-note text-destructive">{{plural . "cycle" "cycles"}}</span>{{end}}</summary>
     <div class="bb">{{with .New}}<ul class="dl">{{range .}}<li><b class="am-add" role="img" aria-label="new">+</b><code>{{.From}} → {{.To}}</code><span>{{.Why}}</span>{{if .Cycle}}<span class="chip" data-sev="critical">new cycle</span>{{end}}</li>{{end}}</ul>{{end}}

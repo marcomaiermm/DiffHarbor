@@ -281,6 +281,7 @@ type step struct {
 	Partial    bool     // at least: a walk stopped short
 	Untested   bool     // no test reaches what it changes: see tested
 	Cycles     []cycle  // directories its changes make use each other
+	Way        *way     // a way into the change that reaches a major finding in its files
 	bare       []string // what it changes that no test calls
 }
 
@@ -321,6 +322,7 @@ type view struct {
 	Inventory            []bucket        // what the PR did to its declarations
 	Deps                 *deps           // which changed directories use which
 	Affected             []affected      // changed code the rest of the repo uses
+	Ways                 []way           // how the code reaches the change: routes, declarations nothing calls
 	Graphs               bool            // a graph to draw: the page loads cytoscape
 	Risks                []risk          // what a merge doesn't finish
 	BaseMoved            []review.Commit // of Behind, those that change the PR's files
@@ -564,6 +566,7 @@ func prepare(d Data) view {
 	}
 	v.Retired = retire(d.Outline.Removed, files)
 	judge(&v, found)
+	v.Ways = ways(&v, d.Symbols)
 	if len(d.Tests.Ran) > 0 || len(d.Tests.Broken) > 0 {
 		v.now.Tests = map[string]string{}
 		names := []string{d.Story.Proof}

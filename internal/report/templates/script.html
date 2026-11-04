@@ -280,6 +280,24 @@
     if (el) current(el);
   }, { rootMargin: "-15% 0px -75% 0px" });
   document.querySelectorAll("main section[id], main [id^='step-'], .file").forEach(el => spy.observe(el));
+  // where it runs: a tab shows its way; a run plays it when the box first opens, on a pick and on Replay
+  const ways = document.getElementById("ways");
+  if (ways) {
+    let runs = 0;
+    const run = () => {
+      for (const w of ways.querySelectorAll(".ctw")) w.classList.remove("run-a", "run-b");
+      ways.querySelector(".ctw:not([hidden])")?.classList.add(++runs % 2 ? "run-a" : "run-b");
+    };
+    ways.addEventListener("toggle", () => { if (ways.open && !runs) run(); });
+    ways.addEventListener("click", e => {
+      const t = e.target.closest("[data-way]");
+      if (t) {
+        for (const b of ways.querySelectorAll(".ctabs [data-way]")) b.setAttribute("aria-pressed", b === t);
+        for (const w of ways.querySelectorAll(".ctw")) w.hidden = w.dataset.way !== t.dataset.way;
+        run();
+      } else if (e.target.closest("[data-replay]")) run();
+    });
+  }
 })();
 </script>
 {{end}}

@@ -392,6 +392,43 @@ func TestGraph(t *testing.T) {
 	}
 }
 
+// a way in runs the PR's declarations as a tree below it: routes first, the finding on it, the step it shows in
+func TestWays(t *testing.T) {
+	store := &file{Path: "store.go", Changes: []change{{Name: "Save", State: "new", Sev: "major"}},
+		Findings: []*finding{{Comment: review.Comment{Severity: "major"}, Href: "#store.go:9"}}}
+	api := &file{Path: "api.go", Changes: []change{{Name: "Handle", sig: true}}}
+	v := view{Steps: []step{{Files: []*file{store}}, {Files: []*file{api}}}, files: map[string]*file{"store.go": store, "api.go": api}}
+	syms := map[string][]Symbol{
+		"Save": {{Path: "store.go", Exact: true, Ways: []Way{
+			{Method: "CALL", Route: "main", Path: "main.go", Line: 1, Chain: []Hop{{Name: "Save", Path: "store.go", Line: 5, In: "main.go", At: 2}}},
+			{Method: "GET", Route: "/x", Path: "server.go", Line: 3, Chain: []Hop{{Name: "Handle", Path: "api.go", Line: 10, In: "server.go", At: 3}, {Name: "Save", Path: "store.go", Line: 5, In: "api.go", At: 12}}},
+		}}},
+		"Handle": {{Path: "api.go", Exact: true, Ways: []Way{{Method: "GET", Route: "/x", Path: "server.go", Line: 3, Chain: []Hop{{Name: "Handle", Path: "api.go", Line: 10, In: "server.go", At: 3}}}}}},
+	}
+	ws := ways(&v, syms)
+	if len(ws) != 2 || ws[0].Method != "GET" || ws[1].Route != "main" || ws[1].Sub != "outside the PR" {
+		t.Fatalf("ways %+v", ws)
+	}
+	g := ws[0]
+	var rows []string
+	for _, r := range g.Rows {
+		rows = append(rows, fmt.Sprintf("%d %s %v %v %s %s %s:%d %s", r.D, r.Name, r.Cols, r.Kids, r.Tag, r.St, r.At.Path, r.At.Line, r.At.Href))
+	}
+	if want := []string{"1 Handle [end] true signature chg server.go:3 ", "2 Save [blank end] false new major api.go:12 #api.go:12"}; !slices.Equal(rows, want) {
+		t.Errorf("rows\n%q\nwant\n%q", rows, want)
+	}
+	if g.Reach != 2 || g.New != 1 || g.Sev != "major" || g.Finding != "#store.go:9" || g.Step != 1 || v.Steps[0].Way != &ws[0] {
+		t.Errorf("way %+v", g)
+	}
+	if got := g.Says(); got != "Runs 2 declarations the PR changes, 1 of them new. A major finding is on the way." {
+		t.Errorf("says %q", got)
+	}
+	v.Ways = ws
+	if got := v.WaysSay(); got != "2 ways in · the GET /x path is in step 01" {
+		t.Errorf("ways say %q", got)
+	}
+}
+
 func TestOrder(t *testing.T) {
 	// 0 and 1 use each other, 2 uses 1: 2 first, as nothing reaches it; then the cycle
 	if got, _ := order([][]int{{0, 1, 0}, {1, 0, 0}, {0, 1, 0}}); !slices.Equal(got, []int{2, 0, 1}) {

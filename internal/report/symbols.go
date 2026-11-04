@@ -40,6 +40,21 @@ type Symbol struct {
 	Tests             []string `json:"-"`
 	Partial, Untested bool     `json:"-"`
 	From, To          int      `json:"-"` // exact: its lines by the index, from a decorator or a doc maybe
+	Ways              []Way    `json:"-"` // exact, in the diff's files: how the code reaches it, see cgTests
+}
+
+// Way is how the code reaches a declaration: from a route it registers ("GET", "/x/{id}", where), or from a
+// declaration nothing calls but a runner ("CALL", its name, where), down a chain of calls.
+type Way struct {
+	Method, Route, Path string
+	Line                int
+	Chain               []Hop // the first it runs first, the declaration last
+}
+
+// Hop is a declaration on a way, and the line of the one before that names it (In, At; 0 when unknown).
+type Hop struct {
+	Name, Path, In string
+	Line, At       int
 }
 
 // Ref is a line that names a symbol, and the declaration it sits in.
