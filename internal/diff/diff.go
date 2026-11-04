@@ -18,7 +18,9 @@ const Max = 60_000
 var (
 	// Skip matches lockfiles, generated and binary files: never reviewed.
 	Skip = regexp.MustCompile(`(^|/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|Cargo\.lock|go\.sum|composer\.lock|poetry\.lock|uv\.lock|Gemfile\.lock|Pipfile\.lock|mix\.lock|pubspec\.lock|packages\.lock\.json|Package\.resolved|\.terraform\.lock\.hcl)$|\.(min\.(js|css)|map|snap|svg|png|jpe?g|gif|webp|ico|pdf|woff2?)$|(^|/)(dist|build|vendor|node_modules|__generated__)/|\.pb\.go$|_pb2\.py$|_gen\.go$|\.(gen|generated)\.[a-z]+$`)
-	// Fill order for the budget: code, then tests, data, docs. #490: one 38k-char doc took most of it.
+	// Fill order for the budget: code, then tests, data and stylesheets, docs. #490: one 38k-char doc took most of
+	// it; on #34 a 48k-char stylesheet took a part while code was left out.
+	styleFile = regexp.MustCompile(`\.(css|scss|sass|less|styl)$`)
 	testFile  = regexp.MustCompile(`(^|/)(tests?|__tests__|e2e)/|[._-](test|spec)\.[a-z]+$|_test\.go$|(^|/)test_[^/]+\.py$`)
 	dataFile  = regexp.MustCompile(`\.(json|ya?ml|toml|csv|xml)$`)
 	docFile   = regexp.MustCompile(`(?i)\.(md|mdx|rst|txt|adoc)$|(^|/)docs?/`)
@@ -48,10 +50,15 @@ func each(diff string, path *regexp.Regexp, fn func(path, f string)) {
 	}
 }
 
-func rank(path string) int { return map[string]int{"test": 1, "data": 2, "doc": 3}[Kind(path)] }
+func rank(path string) int {
+	if styleFile.MatchString(path) && Kind(path) == "code" {
+		return 2
+	}
+	return map[string]int{"test": 1, "data": 2, "doc": 3}[Kind(path)]
+}
 
 // Filter drops lockfiles, generated/binary files (Skip) and what ignore matches; only (nil = all) limits to these
-// paths. It packs whole files into at most n parts of up to Max each, code before tests, data and docs, a file next to
+// paths. It packs whole files into at most n parts of up to Max each, code before tests, data, stylesheets and docs, a file next to
 // others of its directory; in a part they keep the diff's order. The last part names the omitted files, their count
 // returns, and with only nil the deleted files: their diffs are no use, what still relies on them is.
 func Filter(diff string, only map[string]bool, ignore *regexp.Regexp, n int) ([]string, int) {

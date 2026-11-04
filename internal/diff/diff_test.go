@@ -66,10 +66,10 @@ func TestSkipAndOmitted(t *testing.T) {
 	if got, n := Filter(file("a.ts")+file("b.ts")+file("c.ts"), nil, nil, 1); n != 2 || !strings.HasSuffix(got[0], "read them in the repo: b.ts, c.ts\n") {
 		t.Fatalf("omitted: %q", got[0][max(0, len(got[0])-100):])
 	}
-	// code fills the budget first, docs last: the input order doesn't matter
-	all := file("docs/a.md") + file("tests/c.test.ts") + file("drizzle/s.json") + file("src/b.ts")
+	// code fills the budget first, stylesheets with data, docs last: the input order doesn't matter
+	all := file("docs/a.md") + file("web/a.css") + file("tests/c.test.ts") + file("drizzle/s.json") + file("src/b.ts")
 	got, _ := Filter(all, nil, nil, 1)
-	if !strings.HasPrefix(got[0], "diff --git a/src/b.ts") || !strings.HasSuffix(got[0], "read them in the repo: tests/c.test.ts, drizzle/s.json, docs/a.md\n") {
+	if !strings.HasPrefix(got[0], "diff --git a/src/b.ts") || !strings.HasSuffix(got[0], "read them in the repo: tests/c.test.ts, web/a.css, drizzle/s.json, docs/a.md\n") {
 		t.Fatalf("order: %q … %q", got[0][:40], got[0][max(0, len(got[0])-100):])
 	}
 	// In parts nothing is left out, files of one directory share a part, each part keeps the diff's order.
