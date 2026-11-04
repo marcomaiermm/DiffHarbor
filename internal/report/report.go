@@ -466,6 +466,8 @@ func prepare(d Data) view {
 	}
 	for _, s := range v.Steps {
 		v.Code += len(s.Files)
+		// a file with a finding that blocks the merge goes first in its step: what to fix is what to read first
+		slices.SortStableFunc(s.Files, func(a, b *file) int { return cmp.Compare(rank(b), rank(a)) })
 	}
 	v.NTests, v.NOther = len(v.Tests), len(v.Other)
 	pre := shared(order) // the side bar drops the directory all files share
@@ -641,4 +643,21 @@ func changes(f *file, runs map[int]run) []change {
 		}
 	}
 	return cs
+}
+
+// rank is 1 for a file with a finding that blocks the merge, 0 for the others.
+func rank(f *file) int {
+	for _, fd := range f.Findings {
+		if fd.Severity == "critical" {
+			return 1
+		}
+	}
+	for _, l := range f.Lines {
+		for _, fd := range l.Findings {
+			if fd.Severity == "critical" {
+				return 1
+			}
+		}
+	}
+	return 0
 }

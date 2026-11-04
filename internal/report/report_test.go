@@ -686,4 +686,10 @@ func TestJudge(t *testing.T) {
 	if !v.Verdict.OK || v.Verdict.Short != "No blockers" || v.Draft.Event != "Comment" || v.Draft.Comments != 0 {
 		t.Errorf("minor only: %+v %+v", v.Verdict, v.Draft)
 	}
+	// in its step, the file with the blocker comes first
+	two := d + strings.ReplaceAll(d, "a.go", "b.go")
+	v = prepare(Data{Diff: two, Flow: []review.Step{{Title: "s", Files: []string{"a.go", "b.go"}}}, Findings: []review.Comment{{Path: "b.go", Line: 2, Severity: "critical", Title: "x"}}})
+	if fs := v.Steps[0].Files; fs[0].Path != "b.go" || fs[1].Path != "a.go" {
+		t.Errorf("blocker first: %s, %s", fs[0].Path, fs[1].Path)
+	}
 }
