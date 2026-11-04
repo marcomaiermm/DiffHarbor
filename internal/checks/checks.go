@@ -1,4 +1,4 @@
-// Package checks runs linters, scanners and tests on the changed files, as node in the PR checkout. Their output goes to
+// Package checks runs linters, scanners and tests on the changed files, as the repo's user in the PR checkout. Their output goes to
 // the model as hints (exit codes don't matter); tools that find something cost no tokens to find it.
 package checks
 
@@ -108,15 +108,29 @@ const (
 	timeout  = 10 * time.Minute
 )
 
+// noScripts is an install command without lifecycle scripts. Yarn classic wants the flag, Berry rejects it and wants
+// --mode=skip-build (YARN_ENABLE_SCRIPTS=false still runs the root's and a dependenciesMeta "built" one's): told
+// apart by the yarn that runs (version, its last line after corepack's), not the PR's lockfile. Anything but a Berry
+// version gets the flag: Berry fails, never runs scripts. The CLI flags beat a PR's .npmrc and .yarnrc.yml.
+func noScripts(cmd []string, yarnVersion string) []string {
+	v := strings.TrimSpace(yarnVersion)
+	v = v[strings.LastIndex(v, "\n")+1:]
+	if major, _, _ := strings.Cut(v, "."); cmd[0] != "yarn" || major < "2" || len(major) != 1 {
+		return append(cmd, "--ignore-scripts")
+	}
+	return append(cmd, "--mode=skip-build")
+}
+
 // Script is a repo's own check: Name its path in the repo, File the copy that runs (from the base branch).
 type Script struct{ Name, File string }
 
 // Run runs the built-in checks for files, then the repo's own scripts with the files after "--". patch is
 // the diff under review as a file. JS and Go checks run per package (nearest package.json or go.mod), so a
-// monorepo's apps get theirs; tests(file) says whether the tests of file's package run.
+// monorepo's apps get theirs; tests(file) says whether the tests of file's package run. Installs skip lifecycle
+// scripts unless installScripts: a dependency's postinstall would run as the repo's user next to the PR's code.
 //
 //nolint:gocognit,gocyclo // the checks step by step, each step a few lines
-func Run(ctx context.Context, repo string, scripts []Script, patch string, files []string, tests func(string) bool) string {
+func Run(ctx context.Context, repo string, scripts []Script, patch string, files []string, tests func(string) bool, installScripts bool) string {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	started := time.Now()
@@ -192,6 +206,13 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 				"yarn.lock":         {"yarn", "install", "--immutable", "--silent"},
 				"package-lock.json": {"npm", "ci", "--no-audit", "--no-fund", "--loglevel=error"},
 			}[filepath.Base(lock)]
+			if !installScripts {
+				v := ""
+				if cmd[0] == "yarn" {
+					v = in(filepath.Dir(lock))("yarn", "--version")
+				}
+				cmd = noScripts(cmd, v)
+			}
 			section("install"+titled(filepath.Dir(lock)), in(filepath.Dir(lock))(cmd[0], cmd[1:]...), -20)
 		}
 		// bin finds a tool in the package's node_modules/.bin or a parent's (workspaces hoist them); "" = none.

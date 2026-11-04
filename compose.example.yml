@@ -1,5 +1,5 @@
 # cp compose.example.yml compose.yml, put the values in .env next to it, docker compose up -d.
-# Only POST /webhook/github and /webhook/gitlab need to be reachable from the forge; with REPORT_URL, put /r/ behind your SSO.
+# Only POST /webhook/github and /webhook/gitlab need to be reachable from the forge; with REPORT_URL, /r/ too, best behind your SSO.
 services:
   diffharbor:
     # Or build: . to build it yourself.
@@ -9,6 +9,11 @@ services:
     mem_limit: 3g
     cpus: 2
     restart: unless-stopped
+    pids_limit: 4096 # a fork bomb in the PR's tests
+    security_opt: [no-new-privileges:true] # no setuid binary takes node back to root
+    # Root needs these to make the repos' users' work dirs, drop to them, kill their leftovers and clean up after them.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID]
     ports: ["3000:3000"]
     environment:
       # GitHub App (README, GitHub). Leave empty for GitLab only.
@@ -32,7 +37,7 @@ services:
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
-      # Claude on AWS Bedrock: region plus a Bedrock API key or IAM keys.
+      # Claude on AWS Bedrock: region plus a Bedrock API key (stays in the server) or IAM keys (Pi gets them, see README, Security).
       AWS_REGION: ${AWS_REGION:-}
       AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
@@ -46,7 +51,7 @@ services:
       ITSAPLAN_API_KEY: ${ITSAPLAN_API_KEY:-}
       LINEAR_API_KEY: ${LINEAR_API_KEY:-}
       TICKET_PROVIDER: ${TICKET_PROVIDER:-}
-      # Optional: PR reports under /r/. They hold the PR's code: serve them only behind your SSO. Empty = no reports.
+      # Optional: PR reports under /r/, at links only the PR's comment has. They hold the PR's code: an SSO in front is still best. Empty = no reports.
       REPORT_URL: ${REPORT_URL:-}
       # Optional: the reports in an S3 bucket instead of /data, https://host[:port]/bucket[/prefix] (README: Configuration).
       # With the seaweedfs service below: http://seaweedfs:8333/reports, and any key and secret you pick.
@@ -57,10 +62,10 @@ services:
       # Optional: your logo, colors and templates for the report (README: Branding the report), with the volume below.
       # TEMPLATE_DIR: /branding
       DOCKER_HOST: tcp://dind:2375 # testcontainers in the checks; drop with the dind service if you don't need them
-    # Root serves and holds the forge keys; git, checks and Pi run as node (uid 1000) and can't read root's environ.
+    # Root serves and holds the forge keys; git, checks and Pi run as a uid per repo and can't read root's environ.
     volumes:
-      - diffharbor-data:/data # learnings, pending reviews, reports, Pi's ChatGPT login
-      - diffharbor-cache:/cache # package stores, Go modules, work dirs
+      - diffharbor-data:/data # learnings, pending reviews, reports, Pi's ChatGPT login, the repos' uids
+      - diffharbor-cache:/cache # per repo: package stores, Go modules; work dirs
       # - ./branding:/branding:ro
     # depends_on: [seaweedfs] # with the seaweedfs service: S3 is up when the server moves the reports on start
 

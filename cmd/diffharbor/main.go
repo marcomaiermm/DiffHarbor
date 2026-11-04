@@ -19,6 +19,7 @@ import (
 	"diffharbor/internal/server"
 	"diffharbor/internal/store"
 	"diffharbor/internal/ticket"
+	"diffharbor/internal/vault"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -32,7 +33,7 @@ import (
 var version = "dev"
 
 func dry() error {
-	dir, err := proc.Workspace()
+	dir, err := agent.Workspace("")
 	if err != nil {
 		return err
 	}
@@ -65,7 +66,7 @@ func login() error {
 }
 
 // configure reads the server's settings from the env, the one place that does. Model keys and
-// <PROVIDER>_BASE_URL stay in the env: Pi's passes take them by name (agent.Matrix, agent.Proxies).
+// <PROVIDER>_BASE_URL stay in the env: Pi's passes take them by name (agent.Matrix, agent.Workspace).
 func configure() server.Config {
 	proc.DataDir = cmp.Or(os.Getenv("DATA_DIR"), proc.DataDir)
 	proc.CacheDir = cmp.Or(os.Getenv("CACHE_DIR"), proc.CacheDir)
@@ -96,8 +97,10 @@ func configure() server.Config {
 func main() {
 	log.Printf("diffharbor %s", version)
 	cfg := configure()
-	if err := agent.Proxies(); err != nil {
-		log.Fatal(err)
+	if proc.AsPi { // git and Pi run as a repo's user, next to the PR's code: they get the vault's tokens, not the keys
+		if err := vault.Start(); err != nil {
+			log.Fatal(err)
+		}
 	}
 	if _, err := ticket.Active(); err != nil {
 		log.Fatal(err)

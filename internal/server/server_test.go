@@ -87,7 +87,8 @@ func TestDrop(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "closed"}
 	e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = "o/r", 7, "https://github.com/o/r/pull/7"
-	job.Reports().Put("github.com/o/r/7/versions.json", []byte("[]"))
+	dir := "github.com/o/r/7/" + secret
+	job.Reports().Put(dir+"/versions.json", []byte(`[{"sha":"a"}]`))
 	latest.Lock()
 	save(deletingFile(e.Key()), e)
 	latest.Unlock()
@@ -100,22 +101,26 @@ func TestDrop(t *testing.T) {
 	q <- r
 	close(q)
 	work(q)
-	if vs, err := job.Versions("github.com/o/r/7"); err != nil || len(vs) != 0 {
+	if vs, err := job.Versions(dir); err != nil || len(vs) != 0 {
 		t.Fatal("kept its reports:", vs, err)
 	}
 	if retryDrops(q); len(q) != 0 {
 		t.Fatal("retries a done delete")
 	}
-	job.Reports().Put("github.com/o/r/7/versions.json", []byte(`[{"sha":"a"}]`)) // reopened, reviewed again
+	job.Reports().Put(dir+"/versions.json", []byte(`[{"sha":"a"}]`)) // reopened, reviewed again
 	if err := drop(r); err != nil {
 		t.Fatal(err)
 	}
-	if vs, _ := job.Versions("github.com/o/r/7"); len(vs) != 1 {
+	if vs, _ := job.Versions(dir); len(vs) != 1 {
 		t.Fatal("a stale close deleted the reopened PR's report")
 	}
 }
 
-// /r/ serves a PR's newest report, a version by its SHA, and their list; nothing outside a PR's folder.
+// A report folder's secret, as job makes them.
+const secret = "S5Z7AW3ODLIRWVDOPHJJLO772I"
+
+// /r/ serves a PR's newest report, a version by its SHA, and their list, under its secret; nothing outside its
+// folder, nothing without the secret or with another, nothing at a path from before the secret.
 func TestServeReport(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	sha := func(i int) string { return fmt.Sprintf("%040x", i) }
@@ -132,9 +137,12 @@ func TestServeReport(t *testing.T) {
 		b, _ := json.Marshal(vs)
 		job.Reports().Put(dir+"/versions.json", b)
 	}
-	put("github.com/o/r/7", sha(5), sha(3))
-	job.Reports().Put("gitlab.example.com/g/s/p/3/"+sha(1)+".html", []byte(`<html data-sha="`+sha(1)+`">`)) // from before .html.gz
-	job.Reports().Put("gitlab.example.com/g/s/p/3/versions.json", []byte(`[{"sha":"`+sha(1)+`"}]`))         // a project in a subgroup
+	gh, gl := "/github.com/o/r/7/"+secret, "/gitlab.example.com/g/s/p/3/"+secret
+	put(gh[1:], sha(5), sha(3))
+	job.Reports().Put(gl[1:]+"/"+sha(1)+".html", []byte(`<html data-sha="`+sha(1)+`">`)) // from before .html.gz
+	job.Reports().Put(gl[1:]+"/versions.json", []byte(`[{"sha":"`+sha(1)+`"}]`))         // a project in a subgroup
+	put("github.com/o/r/7", sha(4))                                                      // from before the secret
+	put("github.com/o/123/45", sha(4))                                                   // the same, in a repository named like a number
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /r/{path...}", serveReport)
 	get := func(p string) *httptest.ResponseRecorder {
@@ -142,11 +150,11 @@ func TestServeReport(t *testing.T) {
 		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, p, nil))
 		return w
 	}
-	if w := get("/r/github.com/o/r/7"); w.Code != 200 || !strings.Contains(w.Body.String(), `data-sha="`+sha(5)) ||
-		!strings.Contains(w.Header().Get("Content-Security-Policy"), "connect-src 'self'") {
+	if w := get("/r" + gh); w.Code != 200 || !strings.Contains(w.Body.String(), `data-sha="`+sha(5)) ||
+		!strings.Contains(w.Header().Get("Content-Security-Policy"), "connect-src 'self'") || w.Header().Get("Referrer-Policy") != "no-referrer" {
 		t.Fatal(w.Code, w.Header())
 	}
-	if w := get("/r/github.com/o/r/7/" + sha(3)); w.Code != 200 || !strings.Contains(w.Body.String(), `data-sha="`+sha(3)) {
+	if w := get("/r" + gh + "/" + sha(3)); w.Code != 200 || !strings.Contains(w.Body.String(), `data-sha="`+sha(3)) {
 		t.Fatal("a version:", w.Code)
 	}
 	gzipped := func(p, want string) {
@@ -161,21 +169,48 @@ func TestServeReport(t *testing.T) {
 			t.Fatal("gzip:", p, string(b))
 		}
 	}
-	gzipped("/r/github.com/o/r/7", sha(5))           // as stored
-	gzipped("/r/gitlab.example.com/g/s/p/3", sha(1)) // compressed on the way
-	if w := get("/r/github.com/o/r/7/versions"); w.Code != 200 || strings.Count(w.Body.String(), `"sha"`) != 2 {
+	gzipped("/r"+gh, sha(5)) // as stored
+	gzipped("/r"+gl, sha(1)) // compressed on the way
+	if w := get("/r" + gh + "/versions"); w.Code != 200 || strings.Count(w.Body.String(), `"sha"`) != 2 {
 		t.Fatal("list:", w.Code, w.Body)
 	}
-	for _, p := range []string{"/r/github.com/o/r/7/" + sha(0), "/r/o/r/7", "/r/github.com/o/r/8", "/r/github.com/o/r/0", "/r/github.com/o/r/7/" + sha(5) + "/x"} {
-		if w := get(p); w.Code != 404 {
-			t.Fatal(p, w.Code)
+	if w := get("/r" + gh + "/" + sha(0)); w.Code != 404 {
+		t.Fatal("a version not kept:", w.Code)
+	}
+	missing := get("/r/github.com/o/r/8/" + secret)
+	other := "/r/github.com/o/r/7/" + strings.Repeat("A", len(secret))
+	for _, p := range []string{
+		"/r/o/r/7/" + secret, "/r/github.com/o/r/0/" + secret, "/r" + gh + "/" + sha(5) + "/x",
+		other, other + "/versions", other + "/" + sha(5), "/r/github.com/o/r/" + secret, // another secret, none
+		"/r/github.com/o/r/7", "/r/github.com/o/r/7/versions", "/r/github.com/o/r/7/" + sha(4), "/r/github.com/o/123/45", // before the secret
+	} {
+		if w := get(p); w.Code != 404 || w.Body.String() != missing.Body.String() || fmt.Sprint(w.Header()) != fmt.Sprint(missing.Header()) {
+			t.Fatal(p, w.Code, w.Header())
 		}
 	}
-	if w := get("/r/gitlab.example.com/g/s/p/3/" + sha(1)); w.Code != 200 || !strings.Contains(w.Body.String(), `data-sha="`+sha(1)) {
+	if missing.Code != 404 {
+		t.Fatal("missing:", missing.Code)
+	}
+	if w := get("/r" + gl + "/" + sha(1)); w.Code != 200 || !strings.Contains(w.Body.String(), `data-sha="`+sha(1)) {
 		t.Fatal("gitlab:", w.Code)
 	}
-	job.Reports().Put("github.com/o/r/9/versions.json", []byte("{")) // unreadable is no "none"
-	if w := get("/r/github.com/o/r/9"); w.Code != http.StatusBadGateway {
+	job.Reports().Put("github.com/o/r/9/"+secret+"/versions.json", []byte("{")) // unreadable is no "none"
+	if w := get("/r/github.com/o/r/9/" + secret); w.Code != http.StatusBadGateway {
 		t.Fatal("unreadable list:", w.Code)
+	}
+}
+
+// A secret ends the reports' folder: before it the PR's, whatever repository path it sits in.
+func TestReportRoute(t *testing.T) {
+	for p, want := range map[string]string{
+		"gitlab.example.com/g/s/p/3/" + secret + "/versions": "gitlab.example.com/g/s/p/3/" + secret + " versions",
+		"github.com/o/r/7/" + secret + "/":                   "github.com/o/r/7/" + secret + " ",
+		"github.com/o/r/7/../7/" + secret:                    "!",
+		"github.com/o/r/x/" + secret:                         "!",
+	} {
+		dir, sha, ok := reportRoute(p)
+		if got := dir + " " + sha; !ok && want != "!" || ok && got != want {
+			t.Error(p, got, ok)
+		}
 	}
 }

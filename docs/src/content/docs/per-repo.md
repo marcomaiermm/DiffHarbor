@@ -26,6 +26,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
   "max_parts": 4,
   "report": "auto",
   "tickets": ["ABC"],
+  "install_scripts": false,
   "checks": [".review/checks.sh"],
   "packages": {
     "apps/web": {"min_severity": "major"},
@@ -43,6 +44,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
 | `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
+| `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part; the longest glob wins. |

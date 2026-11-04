@@ -3,6 +3,7 @@ package forge
 import (
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -59,8 +60,21 @@ func TestSticky(t *testing.T) {
 	if got := parseState(body); got.SHA != "bbbbbbb" || got.Files["b.go"] != "new" {
 		t.Fatalf("parseState: %+v", got)
 	}
+	st.Secret = "S"
+	if got := parseState(st.Update(review.Result{}, "c", nil, true).render("", "", "", nil)); got.Secret != "S" {
+		t.Fatal("a review lost the report's secret:", got.Secret)
+	}
 	if Clean(body) == body || strings.Contains(Clean(body), "diffharbor:state") {
 		t.Fatal("clean")
+	}
+	if got := Clean("[report](https://x/r/github.com/o/r/1/ABCDEFGHIJKLMNOPQRSTUVWXYZ/versions)"); strings.Contains(got, "ABCDEF") {
+		t.Fatal("a report's secret reaches the prompt:", got)
+	}
+	if got := Clean("https://x/r/github.com/o/r/1/%41%42CDEFGHIJKLMNOPQRSTUVWXYZ/versions"); strings.Contains(got, "CDEF") {
+		t.Fatal("an encoded report secret reaches the prompt:", got)
+	}
+	if got := Clean("https://x/r/github.com/o/r/1%2FABCDEFGHIJKLMNOPQRSTUVWXYZ/versions"); strings.Contains(got, "ABCDEF") {
+		t.Fatal("a secret after an encoded slash reaches the prompt:", got)
 	}
 }
 
@@ -98,5 +112,28 @@ func TestStickyOutline(t *testing.T) {
 	}
 	if got := parseState(body); len(got.Flow) != 1 || got.Decisions[0] != "Retry on failure?" || got.Story.After != "the fallback reviews" || got.Report == "" {
 		t.Errorf("state: %+v", got)
+	}
+}
+
+type instance string
+
+func (instance) Bot() string                               { return "" }
+func (instance) Parse(http.Header, []byte) (*Event, error) { return nil, nil }
+func (instance) Open(*Event) (PR, error)                   { return nil, nil }
+func (instance) Boxes() bool                               { return false }
+func (i instance) Instance() string                        { return string(i) }
+
+// A repo's id is its forge's instance and its number, never its name; no number is no id.
+func TestRepoID(t *testing.T) {
+	e := &Event{Forge: "gitlab"}
+	e.Repository.FullName = "g/p"
+	if _, err := RepoID(instance("gitlab.com"), e); err == nil {
+		t.Fatal("no repository id: no error")
+	}
+	e.Repository.ID = 5
+	a, _ := RepoID(instance("gitlab.com"), e)
+	b, _ := RepoID(instance("git.example.com"), e)
+	if a != "gitlab:gitlab.com:5" || a == b {
+		t.Fatal(a, b)
 	}
 }

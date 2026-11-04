@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -80,16 +81,29 @@ func work(queue chan *forge.Event) {
 		case e.Kind != "pull_request":
 			run = func(ctx context.Context) error { return job.Chat(ctx, f, mentions[e.Forge], e) }
 		}
-		proc.KillOrphans() // what an earlier job's PR code left running, e.g. listening for this job's token
+		proc.KillLeftovers()   // what an earlier job's PR code left running, e.g. listening for this job's token
+		err := proc.CleanTmp() // and left in the temp dirs all share; home and caches are the job's (proc.Workspace)
 		ctx, cancel := context.WithCancel(context.Background())
 		running.Lock()
 		running.key, running.review, running.cancel = e.Key(), e.Kind == "pull_request", cancel
 		running.Unlock()
-		if err := run(ctx); err != nil {
+		switch {
+		case err == nil:
+			err = run(ctx)
+		case e.Kind == "pull_request" && !closing(e): // stays pending (done keeps it): the next push or a restart retries
+			if p, err := f.Open(e); err == nil {
+				p.Status(e.PullRequest.Head.SHA, "error", "Review not started: cleanup failed, retried on the next push")
+			}
+		case e.Comment.Body != "" && mentions[e.Forge].MatchString(e.Comment.Body): // asked us: a chat isn't kept to retry
+			if p, err := f.Open(e); err == nil {
+				_ = p.Reply("⚠️ Couldn't start: cleaning up after the last job failed. Ask again in a while.\n\n" + forge.Mark)
+			}
+		}
+		if err != nil {
 			log.Println(e.Key(), err)
 		}
-		cancel()
-		proc.KillOrphans()
+		cancel() // revokes the job's vault tokens: git's remote, Pi's keys
+		proc.KillLeftovers()
 		running.Lock()
 		running.key = "" // idle: a later push or close has nothing to stop
 		running.Unlock()
@@ -162,10 +176,7 @@ func Serve(cfg Config) {
 		mentions[name] = mentionOf(f.Bot())
 		log.Printf("%s as @%s on POST /webhook/%s", name, f.Bot(), name)
 	}
-	// Work dirs live next to the pnpm store (hardlinks); leftovers from a crash go.
-	proc.WorkDir = filepath.Join(proc.CacheDir, "work")
-	_ = os.RemoveAll(proc.WorkDir)
-	if err := os.MkdirAll(proc.WorkDir, 0o755); err != nil {
+	if err := proc.Clean(); err != nil { // a crash's work dirs, the cache all repos shared before
 		log.Fatal(err)
 	}
 	queue := make(chan *forge.Event, 100)
@@ -259,26 +270,30 @@ func Serve(cfg Config) {
 			log.Println(err) // not fatal: FALLBACK_MODEL serves until someone logs in
 		}
 	}()
-	log.Fatal((&http.Server{Addr: ":3000", ReadHeaderTimeout: 10 * time.Second}).ListenAndServe())
+	// A client that sends its body slowly or idles holds a connection only so long. No WriteTimeout: a report is big.
+	srv := &http.Server{Addr: ":3000", ReadHeaderTimeout: 10 * time.Second, ReadTimeout: time.Minute, IdleTimeout: 2 * time.Minute}
+	log.Fatal(srv.ListenAndServe())
 }
 
-// serveReport serves a PR's report. Only the proxy's SSO stands in front of it: a report holds the PR's code.
+// serveReport serves a PR's report to who has its link: a report holds the PR's code, and the app has no login, the
+// secret in the path keeps everyone else out. No referrer: the page's links and CDN fetches must not carry it off.
 func serveReport(w http.ResponseWriter, r *http.Request) {
+	h := w.Header() // first: a path without a secret looks like a missing report
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("Cache-Control", "no-cache")
 	dir, sha, ok := reportRoute(r.PathValue("path"))
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
+	pr := path.Dir(dir) // for the log: not the secret
 	vs, err := job.Versions(dir)
 	if err != nil {
-		log.Println(dir, "report:", err)
+		log.Println(pr, "report:", job.Hide(err, path.Base(dir)))
 		http.Error(w, "the reports can't be read now", http.StatusBadGateway)
 		return
 	}
-	h := w.Header()
-	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("Referrer-Policy", "no-referrer")
-	h.Set("Cache-Control", "no-cache")
 	switch {
 	case len(vs) == 0:
 		http.NotFound(w, r)
@@ -308,7 +323,7 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			log.Println(name, "report:", err)
+			log.Println(pr, sha, "report:", job.Hide(err, path.Base(dir)))
 			http.Error(w, "the report can't be read now", http.StatusBadGateway)
 			return
 		}
@@ -328,14 +343,14 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 		case !plain: // a client without gzip, curl
 			zr, err := gzip.NewReader(f)
 			if err != nil {
-				log.Println(name, "report:", err)
+				log.Println(pr, sha, "report:", job.Hide(err, path.Base(dir)))
 				http.Error(w, "the report can't be read now", http.StatusBadGateway)
 				return
 			}
 			in = zr
 		}
 		if _, err := io.Copy(out, in); err != nil {
-			log.Println(name, "report:", err) // the headers are out: the page ends short
+			log.Println(pr, sha, "report:", job.Hide(err, path.Base(dir))) // the headers are out: the page ends short
 		}
 	}
 }
@@ -343,15 +358,18 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 // head is a commit's full SHA: SHA-1's or SHA-256's.
 var head = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
-// reportRoute splits a path under /r/ into the PR's folder ({host}/{repo…}/{n}, see reportPath) and what of it:
-// a version's SHA, "versions" for their list, "" for the newest.
+// reportRoute splits a path under /r/ into the reports' folder ({host}/{repo…}/{n}/{secret}, see job.reportPath) and
+// what of it: a version's SHA, "versions" for their list, "" for the newest. A wrong secret is a folder that isn't
+// there: a 404 like any missing report. A path without one, as before the secret, isn't a route.
 func reportRoute(p string) (dir, sha string, ok bool) {
 	dir = strings.Trim(p, "/")
 	if i := strings.LastIndexByte(dir, '/'); i >= 0 && (dir[i+1:] == "versions" || head.MatchString(dir[i+1:])) {
 		dir, sha = dir[:i], dir[i+1:]
 	}
-	n, err := strconv.Atoi(dir[strings.LastIndexByte(dir, '/')+1:])
-	return dir, sha, err == nil && n > 0 && strings.Count(dir, "/") >= 3 && fs.ValidPath(dir)
+	pr, secret := path.Split(dir)
+	pr = strings.TrimSuffix(pr, "/")
+	n, err := strconv.Atoi(pr[strings.LastIndexByte(pr, '/')+1:])
+	return dir, sha, job.Secret.MatchString(secret) && err == nil && n > 0 && strings.Count(pr, "/") >= 3 && fs.ValidPath(dir)
 }
 
 // A PR's queued review stays on disk until it ran, so a restart (deploy, crash) resumes it: GitHub got its 202.

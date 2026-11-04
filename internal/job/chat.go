@@ -129,7 +129,11 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		}
 	}
 
-	dir, err := proc.Workspace()
+	id, err := forge.RepoID(f, e)
+	if err != nil {
+		return err
+	}
+	dir, err := agent.Workspace(id)
 	if err != nil {
 		return err
 	}
@@ -154,7 +158,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	rm, _ := cfg.Models()
 	m := agent.PassModel(rm, "medium")
 	out, err := agent.Pi{}.Run(ctx, dir, "chat", system,
-		fmt.Sprintf("# %s\n\n%s\n\n%s## Conversation\n\n%s", pr.Title, text.Truncate(pr.Body, 2000), about.String(), convo.String()),
+		fmt.Sprintf("# %s\n\n%s\n\n%s## Conversation\n\n%s", forge.Redact(pr.Title), text.Truncate(forge.Redact(pr.Body), 2000), about.String(), convo.String()),
 		"Reply to the last message. End with the JSON object.", m)
 	if err != nil {
 		return err

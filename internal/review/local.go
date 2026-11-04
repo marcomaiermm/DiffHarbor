@@ -6,6 +6,7 @@ import (
 	"diffharbor/internal/checks"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
+	"diffharbor/internal/vault"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -59,12 +60,20 @@ func Tree(ctx context.Context, cwd, dir, title string, closed []Comment, large b
 
 // Checkout fetches the PR head and base into repo with history but without old file contents (blob:none) for
 // co-change hints, checks out head (a commit) and returns the PR's diff as GitHub shows it:
-// merge-base(base, head)..head, base a ref or commit of the remote. token should only read: the checkout's git
-// runs as node, like the PR's code. It goes in the env (argv is world-readable), never in .git/config.
+// merge-base(base, head)..head, base a ref or commit of the remote. token reads the repo. As root git runs as the repo's user,
+// like the PR's code: it fetches through the vault, whose remote works until ctx is done (blob:none fetches the
+// blobs later commands need) and never holds token. Else token goes in the env (argv is world-readable).
 func Checkout(ctx context.Context, repo, cloneURL, head, base, token string) (string, error) {
-	auth := []string{
+	remote, auth := cloneURL, []string{
 		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader",
 		"GIT_CONFIG_VALUE_0=Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token)),
+	}
+	if vault.URL() != "" {
+		r, err := vault.Git(ctx, cloneURL, token)
+		if err != nil {
+			return "", err
+		}
+		remote, auth = r, nil
 	}
 	git := func(args ...string) (string, error) {
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
@@ -75,11 +84,11 @@ func Checkout(ctx context.Context, repo, cloneURL, head, base, token string) (st
 		}
 		return string(out), nil
 	}
-	if _, err := proc.Run(proc.Command(ctx, filepath.Dir(repo), nil, "git", "init", "-q", repo)); err != nil { // as node, when we're root
+	if _, err := proc.Run(proc.Command(ctx, filepath.Dir(repo), nil, "git", "init", "-q", repo)); err != nil { // as the repo's user, when we're root
 		return "", err
 	}
 	for _, args := range [][]string{
-		{"remote", "add", "origin", cloneURL},
+		{"remote", "add", "origin", remote},
 		{"fetch", "-q", "--filter=blob:none", "--depth=" + historyDepth, "origin", head, base + ":refs/base"},
 		{"checkout", "-q", "--detach", head},
 	} {

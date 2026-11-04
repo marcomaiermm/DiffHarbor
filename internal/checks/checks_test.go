@@ -13,7 +13,7 @@ import (
 func TestChecks(t *testing.T) {
 	bin, repo := t.TempDir(), t.TempDir() // fake tools print how they were called
 	for _, tool := range []string{"gitleaks", "shellcheck", "actionlint", "zizmor", "osv-scanner"} {
-		os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\necho \"$(basename \"$0\") $*\"\n"), 0o755)
+		os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\n[ \"$1\" = --version ] && exec cat .ver\necho \"$(basename \"$0\") $*\"\n"), 0o755)
 	}
 	// squawk prints its flags and how many lines it read in its JSON
 	os.WriteFile(filepath.Join(bin, "squawk"), []byte(`#!/bin/sh
@@ -27,7 +27,7 @@ printf '[{"file":"m.sql","line":0,"rule_name":"%s","message":"%s lines"}]' "$*" 
 		os.MkdirAll(filepath.Join(repo, filepath.Dir(f)), 0o755)
 		os.WriteFile(filepath.Join(repo, f), []byte("echo repo \"$@\"\n"), 0o644)
 	}
-	out := Run(context.Background(), repo, []Script{{".review/a.sh", "repo.sh"}, {"b.sh", "repo.sh"}}, "", []string{".github/workflows/ci.yml", "a.sh", "web/package.json", "gone.go", "m.sql"}, func(string) bool { return true })
+	out := Run(context.Background(), repo, []Script{{".review/a.sh", "repo.sh"}, {"b.sh", "repo.sh"}}, "", []string{".github/workflows/ci.yml", "a.sh", "web/package.json", "gone.go", "m.sql"}, func(string) bool { return true }, false)
 	for _, want := range []string{
 		"gitleaks dir --no-banner --redact --log-level warn -v a.sh", "shellcheck -f gcc a.sh",
 		"actionlint -no-color .github/workflows/ci.yml", "zizmor -q --offline --format github .github/workflows/ci.yml", "osv-scanner scan source --format table web",
@@ -100,12 +100,12 @@ func TestUnlisted(t *testing.T) {
 func TestMonorepoChecks(t *testing.T) {
 	bin, repo := t.TempDir(), t.TempDir() // fake tools print where and how they were called
 	for _, tool := range []string{"gofmt", "go", "staticcheck", "oxlint", "fallow", "pnpm"} {
-		os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\necho \"$(basename \"$0\") @$(basename \"$PWD\") $*\"\n"), 0o755)
+		os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\n[ \"$1\" = --version ] && exec cat .ver\necho \"$(basename \"$0\") @$(basename \"$PWD\") $*\"\n"), 0o755)
 	}
 	// Findings on an added and an old line; the repo's v1 config doesn't load, so the bot's runs.
 	os.WriteFile(filepath.Join(bin, "golangci-lint"), []byte("#!/bin/sh\ncase \"$*\" in *.golangci.yml*) echo \"can't load config\";;\n"+
 		"*) echo \"$PWD/b.go:1:1: golangci $1\"; echo \"$PWD/b.go:2:1: old\";; esac\n"), 0o755)
-	os.WriteFile(filepath.Join(bin, "deadcode"), []byte("#!/bin/sh\necho 'b.go:1:6: unreachable func: x'; echo 'cmd/a.go:1:6: unreachable func: y'\n"), 0o755)
+	os.WriteFile(filepath.Join(bin, "deadcode"), []byte("#!/bin/sh\n[ \"$1\" = --version ] && exec cat .ver\necho 'b.go:1:6: unreachable func: x'; echo 'cmd/a.go:1:6: unreachable func: y'\n"), 0o755)
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	defer func(pi bool) { proc.AsPi = pi }(proc.AsPi)
 	proc.AsPi = false
@@ -119,7 +119,7 @@ func TestMonorepoChecks(t *testing.T) {
 	}
 	patch := filepath.Join(t.TempDir(), "pr.diff")
 	os.WriteFile(patch, []byte("diff --git a/svc/b.go b/svc/b.go\n--- a/svc/b.go\n+++ b/svc/b.go\n@@ -1 +1 @@\n-x\n+package svc\n"), 0o644)
-	out := Run(context.Background(), repo, nil, patch, []string{"svc/cmd/a.go", "svc/b.go", "apps/web/src/a.ts"}, func(f string) bool { return f != "svc/b.go" })
+	out := Run(context.Background(), repo, nil, patch, []string{"svc/cmd/a.go", "svc/b.go", "apps/web/src/a.ts"}, func(f string) bool { return f != "svc/b.go" }, false)
 	for _, want := range []string{
 		"pnpm @" + filepath.Base(repo) + " install", "gofmt @svc -l cmd/a.go b.go", "go @svc vet ./. ./cmd",
 		"go @svc test -json -short -count=1 -timeout=4m ./cmd", "vitest @web related --run --reporter=dot src/a.ts",
@@ -174,6 +174,35 @@ func TestCITests(t *testing.T) {
 	for _, run := range []string{"pnpm run typecheck", "pnpm --filter test-utils build", "pnpm lint"} {
 		if ciTest.MatchString("run: " + run) {
 			t.Error("no tests:", run)
+		}
+	}
+}
+
+func TestInstallScripts(t *testing.T) {
+	bin := t.TempDir() // fake installers print how they were called
+	for _, tool := range []string{"npm", "pnpm", "yarn"} {
+		os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\n[ \"$1\" = --version ] && exec cat .ver\necho \"$(basename \"$0\") $*\"\n"), 0o755)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	defer func(pi bool) { proc.AsPi = pi }(proc.AsPi)
+	proc.AsPi = false
+	for _, c := range []struct{ lock, version, off, on string }{
+		{"package-lock.json", "{}", "npm ci --no-audit --no-fund --loglevel=error --ignore-scripts", "npm ci --no-audit --no-fund --loglevel=error"},
+		{"pnpm-lock.yaml", "", "pnpm install --frozen-lockfile --prefer-offline --reporter=silent --ignore-scripts", "pnpm install --frozen-lockfile --prefer-offline --reporter=silent"},
+		{"yarn.lock", "1.22.22\n", "yarn install --immutable --silent --ignore-scripts", "yarn install --immutable --silent"},
+		{"yarn.lock", "", "yarn install --immutable --silent --ignore-scripts", "yarn install --immutable --silent"}, // unknown: the flag
+		{"yarn.lock", "! Corepack is about to download yarn\n4.9.2\n", "yarn install --immutable --silent --mode=skip-build", "yarn install --immutable --silent"},
+	} {
+		repo := t.TempDir()
+		os.WriteFile(filepath.Join(repo, "package.json"), []byte("{}"), 0o644)
+		os.WriteFile(filepath.Join(repo, "a.ts"), nil, 0o644)
+		os.WriteFile(filepath.Join(repo, c.lock), nil, 0o644)
+		os.WriteFile(filepath.Join(repo, ".ver"), []byte(c.version), 0o644)
+		for scripts, want := range map[bool]string{false: c.off, true: c.on} {
+			out := Run(context.Background(), repo, nil, "", []string{"a.ts"}, func(string) bool { return false }, scripts)
+			if !strings.Contains(out, "\n"+want+"\n") {
+				t.Errorf("%s (%q) with scripts=%v, want %q in:\n%s", c.lock, c.version, scripts, want, out)
+			}
 		}
 	}
 }

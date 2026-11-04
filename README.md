@@ -106,7 +106,7 @@ Add a webhook on the project or group: `https://<host>/webhook/gitlab`, triggers
 |---|---|
 | `GITLAB_URL` | Default `https://gitlab.com`. |
 | `GITLAB_TOKEN` | A bot user's token (or a project/group access token) with scope `api` and at least the Developer role. Its username is the bot: `@<username> review`. |
-| `GITLAB_READ_TOKEN` | Recommended: a token with only `read_repository`, for git. Without it git gets the `api` token next to the MR's code; the server warns on start. |
+| `GITLAB_READ_TOKEN` | Optional: a token with only `read_repository` for git's fetches, else they use the `api` token. Either stays in the server: git fetches through its proxy. |
 | `GITLAB_WEBHOOK_SECRET` | The webhook's secret token. |
 
 Differences to GitHub: findings are diff discussions, fixes `suggestion:-N+0` blocks, and a finding GitLab refuses to place goes into the summary note. Large MRs in parts start with `@<bot> review all` (there is no checkbox). There is no redelivery: GitLab retries a failed webhook only briefly. Maintainers count as members, Developers as collaborators.
@@ -141,7 +141,7 @@ Bedrock in the EU: `amazon-bedrock/eu.anthropic.…`. Each pass gets only its ow
 
 | Variable | |
 |---|---|
-| `REPORT_URL` | An HTML report per PR under `/r/<host>/<repo>/<n>`: reading order, diffs with findings, call graphs, what the change reaches outside the PR, and before you merge, base commits the PR is behind on, conflicts, and open PRs changing the same files or lines. Each reviewed head keeps a version, the newest 10 stay; closing the PR deletes them. **The report contains the PR's code: serve `/r/` only behind your SSO.** |
+| `REPORT_URL` | An HTML report per PR under `/r/<host>/<repo>/<n>/<secret>`, linked in the bot's PR comment: reading order, diffs with findings, call graphs, what the change reaches outside the PR, and before you merge, base commits the PR is behind on, conflicts, and open PRs changing the same files or lines. Each reviewed head keeps a version, the newest 10 stay; closing the PR deletes them. The secret is random per PR (130 bits) and only that comment holds it, so only who can read the PR has the link; any other path is a 404. **The report contains the PR's code: still put `/r/` behind your SSO, links get forwarded and stay in browser histories.** Reports from before the secret no longer open: the next review writes one at the new link, closing the PR deletes the old. |
 | `REPORT_S3_URL`, `REPORT_S3_ACCESS_KEY`, `REPORT_S3_SECRET_KEY`, `REPORT_S3_REGION` | The reports in an S3 bucket instead of `DATA_DIR`: `https://host[:port]/bucket[/prefix]`, path-style, for SeaweedFS, MinIO, Garage, R2 or AWS. `/r/` still serves them, so the bucket stays private. The key needs `GetObject`, `PutObject` and `DeleteObject` on `bucket/prefix/*` and `ListBucket` on the bucket. Leave versioning off on it: there a delete only hides a report, its code stays. The region defaults to `us-east-1`. Only the server holds the key; checks and Pi never get it. On the first start with it, the reports on disk move into the bucket and their folder goes; a failed move retries on the next start. A delete that fails when a PR closes retries every 30 minutes. For your own S3, uncomment the `seaweedfs` service in `compose.example.yml` and set `REPORT_S3_URL=http://seaweedfs:8333/reports` with any key and secret: they become its admin, and the bucket comes with the first report. |
 | `TEMPLATE_DIR` | Your branding for the report, see [Branding the report](#branding-the-report). |
 | `ITSAPLAN_URL`, `ITSAPLAN_API_KEY` | The itsaplan ticket a PR names (`ABC-12` in title, branch or description) goes into the review as what the PR must do. Never for PRs from forks. |
@@ -189,6 +189,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
   "max_parts": 4,
   "report": "auto",
   "tickets": ["ABC"],
+  "install_scripts": false,
   "checks": [".review/checks.sh"],
   "packages": {
     "apps/web": {"min_severity": "major"},
@@ -206,6 +207,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
 | `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
+| `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part; the longest glob wins. |
@@ -237,11 +239,15 @@ Checks run per package (the nearest `package.json` or `go.mod`, at most 5 packag
 
 Within that:
 
-- Root serves and holds the forge keys and Pi's login. git, checks and Pi run as `node`; git gets a read-only token (short-lived on GitHub) by env, not argv.
-- Root reads and writes in the checkout only as `node`: a symlink in the PR can't reach root's files.
-- Processes a job leaves behind are killed before and after each job. Check output is capped.
-- During a Pi run, the PR's code can read Pi's model key from its env (same uid). A gateway that adds the key itself avoids that.
-- Limits: 3 GB RAM and 2 CPUs per container. A Pi run gets 8 minutes; [`extensions/review-guard.js`](extensions/review-guard.js) refuses further tool calls after 6 minutes or at 60% context, so the pass still answers.
+- Root serves and holds the forge keys, the model keys and Pi's login. git, checks and Pi run as a user of the repo's own (one uid per repo) and, but for the cases below, get none of them: git fetches and Pi calls its model through a proxy in the server on `127.0.0.1`, with random tokens that the server revokes when the Pi run (git: the job) ends. A token reaches only its provider's model API or its job's repo (fetches, no push); the proxy adds the key there.
+- Root reads and writes in the checkout only as that user: a symlink in the PR can't reach root's files.
+- All processes of the repos' users are killed before and after each job. Each job gets a fresh home (git config, Pi's config and extensions) and temp dir; the users' files in `/tmp`, `/var/tmp` and `/dev/shm` go before each job. Check output is capped.
+- The checks install dependencies without lifecycle scripts, so a malicious dependency's postinstall doesn't run; `install_scripts` in `review.json` turns them back on per repo.
+- Each repo has its own cache (`/cache/<uid>`: Go build cache, module and pnpm stores) that other repos' users can't read or write, so a PR can't change what another repo's jobs run. It can change what later jobs of its own repo run, its other PRs' too: the cache stays. Still shared: the container's network and its limits below. `diffharbor dry` runs as `node`.
+- A repo's uid is keyed by its forge, the forge's host and the repo's ID in `DATA_DIR/uids.json`, never its name: a renamed repo keeps its uid and cache, a new repo under an old name gets its own. Upgrading from a version that keyed by name: who owned a name-keyed entry can't be told, so it stays in the file to keep its uid taken (never handed out again), and the server drops its cache at startup. Each repo gets a new uid and an empty cache on its next job, so the first installs and builds are cold. The file isn't rewritten, so an interrupted upgrade or a repeated start changes nothing. A broken `uids.json`, or two entries sharing a uid, still stops the server.
+- PR code shares the container's network: it reaches `localhost:3000/r/` (no SSO there, it is in front of the proxy only, but a report opens only by the secret in its link, which only that PR's comment holds) and, on a cloud VM, the metadata endpoint. Block `169.254.169.254` for the container there.
+- During its job the PR's code can use those tokens too (same uid): spend model tokens, fetch the repo it already has. It can't keep a key. Pi still gets the credential itself, readable by the PR's code during the run, for a ChatGPT login (an access token that outlives the run, never the refresh token; Pi sends it only to OpenAI directly), Bedrock with IAM keys (SigV4 signs the host; `AWS_BEARER_TOKEN_BEDROCK` goes through the proxy) and a provider outside the models table. A gateway that adds the key itself avoids that.
+- No new privileges (a setuid binary can't make a repo's user root) and only the capabilities root needs. Limits: 3 GB RAM, 2 CPUs and 4096 processes per container. A Pi run gets 8 minutes; [`extensions/review-guard.js`](extensions/review-guard.js) refuses further tool calls after 6 minutes or at 60% context, so the pass still answers.
 
 ## Development
 

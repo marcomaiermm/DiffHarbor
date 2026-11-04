@@ -1,0 +1,34 @@
+name: Scan
+
+# Known vulnerabilities in the published image's packages (Alpine, npm, Go binaries), into Security > Code scanning.
+# Daily: a new CVE in an unchanged image, and :edge from the day's merges.
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+      security-events: write
+      actions: read # the SARIF upload, in a private repo
+    steps:
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # The image's own osv-scanner reads the saved image; exit 1 = vulnerabilities found, which the upload shows.
+      - env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/diffharbor:edge
+        run: |
+          docker pull "$IMAGE" && docker save "$IMAGE" -o image.tar
+          docker run --rm -v "$PWD:/w" --entrypoint osv-scanner "$IMAGE" scan image --archive /w/image.tar --format sarif --output-file /w/osv.sarif || [ $? -eq 1 ]
+      - uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          sarif_file: osv.sarif
+          category: osv-scanner-image

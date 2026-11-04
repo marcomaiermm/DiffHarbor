@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -31,6 +32,17 @@ type Forge interface {
 	Open(e *Event) (PR, error)
 	// Boxes reports whether a maintainer can tick a box in our comment (AskLarge); GitLab lets only its author.
 	Boxes() bool
+	// Instance is the host the forge's API is on: two GitLabs can each have a project 5.
+	Instance() string
+}
+
+// RepoID names e's repo for good: its forge, the forge's instance and the repo's ID, which survive a rename and
+// differ for a new repo of the old name.
+func RepoID(f Forge, e *Event) (string, error) {
+	if e.Repository.ID == 0 {
+		return "", fmt.Errorf("%s: no repository id", e.Repo())
+	}
+	return fmt.Sprintf("%s:%s:%d", e.Forge, f.Instance(), e.Repository.ID), nil
 }
 
 // PR is one pull or merge request, opened for a job.
@@ -39,7 +51,7 @@ type PR interface {
 	Refresh() error
 	// Status sets the commit status: pending, success or error. Failures only log.
 	Status(sha, state, desc string)
-	// ReadToken only reads the repo: for git, which runs next to the PR's code.
+	// ReadToken reads the repo: what git fetches with, through the vault as root (git runs next to the PR's code).
 	ReadToken() (string, error)
 	// File returns the first of names that exists at ref (the base, so the PR can't change it).
 	File(ref string, names ...string) string
@@ -124,7 +136,14 @@ func Rules(pick map[string]string, read func(string) string) string {
 	return text.Truncate(b.String(), 6000)
 }
 
-// Clean drops our hidden markers and state from a comment before it goes into a prompt.
+// reportSecret is a report link's secret (job.Secret) in a comment, also percent-encoded: /r/ decodes it.
+var reportSecret = regexp.MustCompile(`(?:/|%2[Ff])(?:[A-Z2-7]|%[0-9A-Fa-f]{2}){26}\b`)
+
+// Redact cuts report links' secrets from text for a prompt: they are the PR's readers', not the model's.
+func Redact(s string) string { return reportSecret.ReplaceAllString(s, "/…") }
+
+// Clean drops our hidden markers and state from a comment before it goes into a prompt, and report links' secrets.
 func Clean(s string) string {
+	s = Redact(s)
 	return text.Truncate(strings.TrimSpace(stateTag.ReplaceAllString(strings.NewReplacer(Mark, "", stickyMark, "").Replace(s), "")), 3000)
 }

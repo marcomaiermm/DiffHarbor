@@ -7,10 +7,12 @@ import (
 	"cmp"
 	"context"
 	"diffharbor/internal/proc"
+	"diffharbor/internal/vault"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,7 +54,7 @@ type Provider struct {
 	Need                 [][]string // the env a pass needs: all of one set; nil = KeyEnv
 	Opt                  []string   // the env a pass also gets when set
 	Login                bool       // the ChatGPT login (`diffharbor login`) stands in for the key
-	Proxy                bool       // <NAME>_BASE_URL routes it through a proxy, see Proxies
+	Proxy                bool       // <NAME>_BASE_URL routes it through a proxy, see proxies
 }
 
 // providerFor is name's Matrix row with Need filled in, for a provider not listed KeyEnv alone.
@@ -99,6 +101,56 @@ var keyEnvs = map[string]string{
 	"google": "GEMINI_API_KEY", "google-vertex": "GOOGLE_CLOUD_API_KEY", "azure": "AZURE_OPENAI_API_KEY",
 	"vercel-ai-gateway": "AI_GATEWAY_API_KEY", "opencode-go": "OPENCODE_API_KEY", "moonshotai": "MOONSHOT_API_KEY",
 	"moonshotai-cn": "MOONSHOT_API_KEY", "cloudflare-workers-ai": "CLOUDFLARE_API_KEY", "cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",
+	"amazon-bedrock": "AWS_BEARER_TOKEN_BEDROCK",
+}
+
+// vaulted are the providers whose key can stay in the vault: Pi's upstream for them (pi-ai providers/<name>.js;
+// Azure's is AZURE_OPENAI_BASE_URL, Bedrock's AWS_REGION's) and what a pass posts under it (pi-ai api/*.js).
+var vaulted = map[string]struct {
+	base  string
+	paths []string
+}{
+	"openai":         {"https://api.openai.com/v1", []string{"responses"}},
+	"anthropic":      {"https://api.anthropic.com", []string{"v1/messages"}},
+	"deepseek":       {"https://api.deepseek.com", []string{"chat/completions"}},
+	"azure":          {"", []string{"responses", "chat/completions", "deployments/*/chat/completions"}},
+	"amazon-bedrock": {"", []string{"model/*/converse-stream"}},
+}
+
+// vaultURL is vault.URL; tests that start the vault turn it off for the others, as Start can't be undone.
+var vaultURL = vault.URL
+
+// upstream is the API provider's passes reach through the vault; "" = they get the key itself: no vault (not root),
+// a provider the vault doesn't know, or one that authenticates another way. The ChatGPT login: Pi treats only
+// requests to api.openai.com itself as ChatGPT's (pi-ai api/openai-responses.js isChatGPTSignIn). Bedrock's IAM keys:
+// SigV4 signs the host.
+func upstream(provider string) string {
+	v, ok := vaulted[provider]
+	if !ok || vaultURL() == "" || os.Getenv(KeyEnv(provider)) == "" || !providerFor(provider).keyed() {
+		return ""
+	}
+	switch provider {
+	case "azure":
+		return azureBase(os.Getenv("AZURE_OPENAI_BASE_URL"))
+	case "amazon-bedrock":
+		return "https://bedrock-runtime." + os.Getenv("AWS_REGION") + ".amazonaws.com"
+	}
+	return cmp.Or(os.Getenv(envName(provider)+"_BASE_URL"), v.base) // a gateway's
+}
+
+// azureBase is Pi's Azure endpoint for AZURE_OPENAI_BASE_URL u: an Azure host's bare URL gets /openai/v1
+// (pi-ai api/azure-openai-config.js normalizeAzureBaseUrl).
+func azureBase(u string) string {
+	p, err := url.Parse(strings.TrimRight(strings.TrimSpace(u), "/"))
+	if err != nil {
+		return u // the vault refuses it: the pass fails, rather than Pi getting the key
+	}
+	h := p.Hostname()
+	azure := strings.HasSuffix(h, ".openai.azure.com") || strings.HasSuffix(h, ".cognitiveservices.azure.com") || strings.HasSuffix(h, ".ai.azure.com")
+	if azure && slices.Contains([]string{"", "/openai", "/openai/v1/responses"}, strings.TrimRight(p.Path, "/")) {
+		p.Path, p.RawQuery = "/openai/v1", ""
+	}
+	return strings.TrimRight(p.String(), "/")
 }
 
 // KeyEnv is the env var holding provider's API key. A pass gets only its own provider's key.
@@ -141,9 +193,10 @@ func needs(provider string) string {
 	return strings.Join(sets, " or ")
 }
 
-// passEnv is the env a pass on provider authenticates with: its Need and Opt that are set, without them the
-// ChatGPT login's access token as the key.
-func passEnv(provider string) ([]string, error) {
+// passEnv is the env a pass on provider authenticates with until ctx is done: its Need and Opt that are set, without
+// them the ChatGPT login's access token as the key. Through the vault the key is a token, and the other secrets and
+// the endpoint stay out: models.json points Pi at the vault.
+func passEnv(ctx context.Context, provider string) ([]string, error) {
 	p := providerFor(provider)
 	if !p.keyed() {
 		if !p.Login {
@@ -153,35 +206,60 @@ func passEnv(provider string) ([]string, error) {
 		return []string{KeyEnv(provider) + "=" + token}, err
 	}
 	var env []string
+	up := upstream(provider)
 	ks := slices.Concat(slices.Concat(p.Need...), p.Opt)
 	for i, k := range ks {
-		if v := os.Getenv(k); v != "" && slices.Index(ks, k) == i {
-			env = append(env, k+"="+v)
+		v := os.Getenv(k)
+		if v == "" || slices.Index(ks, k) != i {
+			continue
 		}
+		switch {
+		case up != "" && k == KeyEnv(provider):
+			tok, err := vault.Key(ctx, provider, up, v, vaulted[provider].paths...)
+			if err != nil {
+				return nil, err
+			}
+			v = tok
+		case up != "" && (secretVar.MatchString(k) || strings.HasSuffix(k, "_BASE_URL")):
+			continue
+		}
+		env = append(env, k+"="+v)
+	}
+	if up != "" && provider == "amazon-bedrock" {
+		env = append(env, "AWS_BEDROCK_FORCE_HTTP1=1") // the vault is plain HTTP/1, the SDK's default HTTP/2
 	}
 	return env, nil
 }
 
-// Proxies routes built-in providers through a proxy or gateway (LiteLLM, a company's AI gateway):
-// <PROVIDER>_BASE_URL, e.g. ANTHROPIC_BASE_URL, becomes the provider's baseUrl in Pi's models.json; its models
-// and auth stay Pi's, the key is the proxy's. Only as root, where Pi runs as node: a local run keeps its own Pi config.
-func Proxies() error {
-	if !proc.AsPi {
-		return nil
+// Workspace is proc.Workspace with Pi's models.json in the job's fresh home, see proxies. A local run (not root)
+// keeps its own Pi config.
+func Workspace(repo string) (string, error) {
+	dir, err := proc.Workspace(repo)
+	if err != nil || !proc.AsPi {
+		return dir, err
 	}
-	return proxies("/home/node/.pi/agent/models.json")
+	if err := proxies(filepath.Join(proc.Home(), ".pi", "agent", "models.json")); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, nil
 }
 
-// proxies writes models.json f.
+// proxies writes Pi's models.json f: it routes built-in providers through a proxy or gateway (LiteLLM, a company's
+// AI gateway): <PROVIDER>_BASE_URL, e.g. ANTHROPIC_BASE_URL, becomes the provider's baseUrl; its models and auth stay
+// Pi's, the key is the proxy's. A provider whose key the vault keeps points at the vault, which forwards to the gateway.
 func proxies(f string) error {
 	providers := map[string]any{}
 	for _, r := range Matrix {
-		if u := os.Getenv(envName(r.Name) + "_BASE_URL"); u != "" && r.Proxy {
+		switch u := os.Getenv(envName(r.Name) + "_BASE_URL"); {
+		case upstream(r.Name) != "":
+			providers[r.Name] = map[string]string{"baseUrl": vaultURL() + "/" + r.Name}
+		case u != "" && r.Proxy:
 			providers[r.Name] = map[string]string{"baseUrl": u}
 		}
 	}
 	if len(providers) == 0 {
-		return proc.Remove(f) // as node: Pi's config dir is node's
+		return proc.Remove(f) // as the job's user: Pi's config dir is its
 	}
 	b, _ := json.Marshal(map[string]any{"providers": providers})
 	return proc.WriteFile(f, b)
@@ -302,7 +380,7 @@ func runPiOn(ctx context.Context, dir, name, system, m string, tools bool, promp
 	defer cancel()
 	// Soft deadline (review-guard.js refuses tool calls after it): 2 minutes left for the answer.
 	deadline := fmt.Sprintf("DIFFHARBOR_DEADLINE=%d", time.Now().Add(6*time.Minute).UnixMilli())
-	creds, err := passEnv(providerOf(m))
+	creds, err := passEnv(ctx, providerOf(m)) // a vault token dies with ctx, when this run ends
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", m, err)
 	}
@@ -353,7 +431,7 @@ func Check() error {
 }
 
 // OpenAIToken is a bearer token from the ChatGPT login, valid for 20 more minutes at least.
-// Pi's ChatGPT login lives on the root-only data volume (log in once, see README). Pi runs as node
+// Pi's ChatGPT login lives on the root-only data volume (log in once, see README). Pi runs as the job's user
 // next to PR code, so it only gets an access token that outlives the pass, never the refresh token.
 func OpenAIToken() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
