@@ -178,7 +178,7 @@
     const lines = () => text ??= JSON.parse(src.textContent).replace(/\n$/, "").split("\n");
     const n = +src.dataset.lines, hunks = [...t.querySelectorAll("tr.hunk")];
     const at = h => (/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(h.querySelector(".truncate").textContent) || []).slice(1).map(x => x === undefined ? 1 : +x);
-    const add = (before, lo, hi, shift, up, down) => {
+    const add = (before, lo, hi, shift, upOk, downOk) => {
       if (hi < lo) return;
       const row = document.createElement("tr");
       row.className = "gap";
@@ -194,20 +194,44 @@
         });
         row[where](...rs);
         document.dispatchEvent(new CustomEvent("diff:rows", { detail: { table: t, rows: rs } }));
+        return rs;
       };
+      // the buttons are made once and hidden when they don't fit: the one clicked keeps the focus, else Show N
+      // does, else the first line it showed
       const bar = row.querySelector(".gap-bar"), label = bar.querySelector("span");
+      const btn = act => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "btn";
+        b.dataset.variant = "outline";
+        b.dataset.size = "xs";
+        b.onclick = e => {
+          e.stopPropagation();
+          const had = row.contains(document.activeElement), rs = act();
+          draw();
+          if (had && !row.isConnected) rs[0].tabIndex = -1, rs[0].focus();
+          else if (had && b.hidden) all.focus();
+        };
+        bar.append(b);
+        return b;
+      };
+      const down = btn(() => { const rs = show(g.lo, g.lo + STEP - 1, "before"); g.lo += STEP; return rs; });
+      const up = btn(() => { const rs = show(g.hi - STEP + 1, g.hi, "after"); g.hi -= STEP; return rs; });
+      const all = btn(() => { const rs = show(g.lo, g.hi, "before"); g.lo = g.hi + 1; return rs; });
+      down.textContent = "↓ " + STEP;
+      down.setAttribute("aria-label", "Show " + STEP + " more lines under the change above");
+      up.textContent = "↑ " + STEP;
+      up.setAttribute("aria-label", "Show " + STEP + " more lines over the change below");
       const draw = () => {
         const left = g.hi - g.lo + 1;
         if (left <= 0) return void row.remove();
         label.textContent = left + " unchanged " + (left === 1 ? "line" : "lines");
-        bar.querySelectorAll("button").forEach(b => b.remove());
-        const btn = (text, title, act) => { const b = document.createElement("button"); b.type = "button"; b.className = "gap-btn"; b.textContent = text; if (title) b.setAttribute("aria-label", title); b.onclick = e => { e.stopPropagation(); act(); draw(); }; bar.append(b); };
-        if (left > STEP && down) btn("↓ " + STEP, "Show " + STEP + " more lines under the change above", () => { show(g.lo, g.lo + STEP - 1, "before"); g.lo += STEP; });
-        if (left > STEP && up) btn("↑ " + STEP, "Show " + STEP + " more lines over the change below", () => { show(g.hi - STEP + 1, g.hi, "after"); g.hi -= STEP; });
-        btn(left > STEP ? "All" : "Show " + left, left > STEP ? "Show all " + left + " lines" : "", g.all);
+        down.hidden = !(left > STEP && downOk);
+        up.hidden = !(left > STEP && upOk);
+        all.textContent = left > STEP ? "All" : "Show " + left;
+        all.setAttribute("aria-label", "Show all " + left + " unchanged lines");
       };
-      g.all = () => { show(g.lo, g.hi, "before"); g.lo = g.hi + 1; draw(); };
-      bar.onclick = g.all;
+      bar.onclick = g.all = () => all.click();
       gaps.set(row, g);
       before ? before.before(row) : t.createTBody().append(row);
       draw();

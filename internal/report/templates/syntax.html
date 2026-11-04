@@ -82,6 +82,13 @@ const marks = rows => {
   flush();
   return m;
 };
+// a token's text in its color; a name the repo declares opens its card
+const tok = (text, t) => {
+  const s = el("span", "", text);
+  if (t.color) s.style.color = t.color;
+  if (Object.hasOwn(syms, t.content)) { s.classList.add("sym"); s.dataset.sym = t.content; s.tabIndex = -1; }
+  return s;
+};
 const paint = async table => {
   const rows = [...table.querySelectorAll("tr.del, tr.add, tr.ctx, tr.hunk")];
   const code = rows.filter(r => !r.classList.contains("hunk"));
@@ -130,11 +137,8 @@ const paint = async table => {
       // cut a token where the changed part starts and ends
       for (const [a, b] of [[at, Math.min(from, at + t.content.length)], [Math.max(at, from), Math.min(to, at + t.content.length)], [Math.max(at, to), at + t.content.length]]) {
         if (b <= a) continue;
-        const s = document.createElement("span");
-        s.textContent = t.content.slice(a - at, b - at);
-        if (t.color) s.style.color = t.color;
-        if (a >= from && b <= to && to > from) s.className = "chg";
-        if (Object.hasOwn(syms, t.content)) { s.classList.add("sym"); s.dataset.sym = t.content; s.tabIndex = -1; }
+        const s = tok(t.content.slice(a - at, b - at), t);
+        if (a >= from && b <= to && to > from) s.classList.add("chg");
         spans.push(s);
       }
       at += t.content.length;
@@ -394,6 +398,7 @@ addEventListener("scroll", e => { if (anchor && !pop.contains(e.target)) hide();
 const LH = 20, GW = 40, NS = "http://www.w3.org/2000/svg";
 const splitOn = () => document.documentElement.dataset.diff === "split";
 const lineOf = new WeakMap(); // a row of the table -> what shows it side by side
+let keep = null; // the gap button clicked side by side, to focus again once it is drawn anew
 const clone = node => [...node.childNodes].map(n => n.cloneNode(true));
 const split = table => {
   const box = el("div", "split");
@@ -437,6 +442,7 @@ const split = table => {
       const bar = el("div", "gap-bar split-gap", ...clone(row.querySelector(".gap-bar")));
       bar.addEventListener("click", e => {
         const i = [...bar.querySelectorAll("button")].indexOf(e.target.closest("button"));
+        if (i >= 0) keep = { table, row, i };
         (i < 0 ? row.querySelector(".gap-bar") : row.querySelectorAll("button")[i]).click();
       });
       box.append(bar);
@@ -478,6 +484,11 @@ const split = table => {
   flush();
   table.parentElement.querySelector(":scope > .split")?.remove();
   table.after(box);
+  if (keep?.table === table) {
+    const bs = [...lineOf.get(keep.row)?.querySelectorAll("button") || []];
+    (bs[keep.i]?.hidden ? bs.findLast(b => !b.hidden) : bs[keep.i])?.focus();
+    keep = null;
+  }
 };
 const tables = [...document.querySelectorAll("table[data-path]")];
 const wideEnough = matchMedia("(min-width: 1024px)");
@@ -500,7 +511,7 @@ const seen = new IntersectionObserver(es => {
 // lines a gap showed: colored on their own once the table is (else with it), side by side again
 document.addEventListener("diff:rows", ({ detail: { table, rows } }) => {
   const done = painted.has(table) && lang(table.dataset.path) ? colored(rows.map(r => r.cells[2].textContent).join("\n"), table.dataset.path).then(ls =>
-    rows.forEach((r, i) => r.cells[2].replaceChildren(...(ls[i] || []).map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; })))) : Promise.resolve();
+    rows.forEach((r, i) => r.cells[2].replaceChildren(...(ls[i] || []).map(t => tok(t.content, t))))) : Promise.resolve();
   done.then(() => { if (splitOn()) split(table); });
 });
 document.querySelectorAll(".diff").forEach(d => seen.observe(d));
