@@ -159,7 +159,7 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
 /* a hunk's head: where it is and in what, the lines it folds, Fold at the right edge in view */
 .diff tr.hunk > td { @apply p-0; }
 .hunk-in { @apply sticky left-0 w-[100cqw]; }
-.hunk-in, .split-bar { @apply flex min-h-[30px] items-center gap-x-3 py-[3px] pr-2 pl-4 font-mono text-xs; color: var(--diff-dim); }
+.hunk-in, .split-bar { @apply flex min-h-[30px] items-center gap-x-3 border-t py-[3px] pr-2 pl-4 font-mono text-xs; color: var(--diff-dim); border-color: color-mix(in oklab, var(--diff-fg) 12%, transparent); }
 .hunk-text { @apply min-w-0 flex-1 truncate; }
 .hunk-text > span { @apply ml-3; color: var(--gap-ink); }
 .hunk-folded { @apply shrink-0 empty:hidden; }
