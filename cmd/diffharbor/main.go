@@ -10,6 +10,7 @@ import (
 	"cmp"
 	"context"
 	"diffharbor/internal/agent"
+	"diffharbor/internal/checks"
 	"diffharbor/internal/forge/github"
 	"diffharbor/internal/forge/gitlab"
 	"diffharbor/internal/job"
@@ -103,6 +104,9 @@ func main() {
 		}
 	}
 	if _, err := ticket.Active(); err != nil {
+		log.Fatal(err)
+	}
+	if _, err := checks.Registries(""); err != nil {
 		log.Fatal(err)
 	}
 	if err := report.Load(os.Getenv("TEMPLATE_DIR")); err != nil {

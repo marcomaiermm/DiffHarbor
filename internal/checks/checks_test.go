@@ -27,7 +27,7 @@ printf '[{"file":"m.sql","line":0,"rule_name":"%s","message":"%s lines"}]' "$*" 
 		os.MkdirAll(filepath.Join(repo, filepath.Dir(f)), 0o755)
 		os.WriteFile(filepath.Join(repo, f), []byte("echo repo \"$@\"\n"), 0o644)
 	}
-	out := Run(context.Background(), repo, []Script{{".review/a.sh", "repo.sh"}, {"b.sh", "repo.sh"}}, "", []string{".github/workflows/ci.yml", "a.sh", "web/package.json", "gone.go", "m.sql"}, func(string) bool { return true }, false)
+	out := Run(context.Background(), repo, []Script{{".review/a.sh", "repo.sh"}, {"b.sh", "repo.sh"}}, "", []string{".github/workflows/ci.yml", "a.sh", "web/package.json", "gone.go", "m.sql"}, func(string) bool { return true }, false, nil)
 	for _, want := range []string{
 		"gitleaks dir --no-banner --redact --log-level warn -v a.sh", "shellcheck -f gcc a.sh",
 		"actionlint -no-color .github/workflows/ci.yml", "zizmor -q --offline --format github .github/workflows/ci.yml", "osv-scanner scan source --format table web",
@@ -119,7 +119,7 @@ func TestMonorepoChecks(t *testing.T) {
 	}
 	patch := filepath.Join(t.TempDir(), "pr.diff")
 	os.WriteFile(patch, []byte("diff --git a/svc/b.go b/svc/b.go\n--- a/svc/b.go\n+++ b/svc/b.go\n@@ -1 +1 @@\n-x\n+package svc\n"), 0o644)
-	out := Run(context.Background(), repo, nil, patch, []string{"svc/cmd/a.go", "svc/b.go", "apps/web/src/a.ts"}, func(f string) bool { return f != "svc/b.go" }, false)
+	out := Run(context.Background(), repo, nil, patch, []string{"svc/cmd/a.go", "svc/b.go", "apps/web/src/a.ts"}, func(f string) bool { return f != "svc/b.go" }, false, nil)
 	for _, want := range []string{
 		"pnpm @" + filepath.Base(repo) + " install", "gofmt @svc -l cmd/a.go b.go", "go @svc vet ./. ./cmd",
 		"go @svc test -json -short -count=1 -timeout=4m ./cmd", "vitest @web related --run --reporter=dot src/a.ts",
@@ -199,7 +199,7 @@ func TestInstallScripts(t *testing.T) {
 		os.WriteFile(filepath.Join(repo, c.lock), nil, 0o644)
 		os.WriteFile(filepath.Join(repo, ".ver"), []byte(c.version), 0o644)
 		for scripts, want := range map[bool]string{false: c.off, true: c.on} {
-			out := Run(context.Background(), repo, nil, "", []string{"a.ts"}, func(string) bool { return false }, scripts)
+			out := Run(context.Background(), repo, nil, "", []string{"a.ts"}, func(string) bool { return false }, scripts, nil)
 			if !strings.Contains(out, "\n"+want+"\n") {
 				t.Errorf("%s (%q) with scripts=%v, want %q in:\n%s", c.lock, c.version, scripts, want, out)
 			}
