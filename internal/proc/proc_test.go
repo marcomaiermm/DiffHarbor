@@ -40,25 +40,25 @@ func TestFiles(t *testing.T) {
 	}
 }
 
-// What a job plants in the home goes, the image's files come back.
-func TestResetHome(t *testing.T) {
-	pristine, home := t.TempDir(), t.TempDir()
-	if err := os.MkdirAll(filepath.Join(pristine, ".pi"), 0o755); err != nil {
-		t.Fatal(err)
+// Each repo gets a uid of its own and keeps it; a hand-edited file doesn't make two repos share one, a broken one
+// isn't started over.
+func TestUIDOf(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "data", "uids.json")
+	for _, c := range []struct {
+		repo string
+		uid  uint32
+	}{{"o/a", firstUID}, {"gitlab/g/a", firstUID + 1}, {"o/a", firstUID}} {
+		if uid, err := uidOf(f, c.repo); err != nil || uid != c.uid {
+			t.Fatalf("%s: %d %v, want %d", c.repo, uid, err, c.uid)
+		}
 	}
-	_ = os.WriteFile(filepath.Join(pristine, ".pi", "ext.js"), []byte("ours"), 0o644)
-	tar := filepath.Join(t.TempDir(), "home.tar")
-	if _, err := Run(Command(t.Context(), "/", nil, "tar", "-cf", tar, "-C", pristine, ".")); err != nil {
-		t.Fatal(err)
+	_ = os.WriteFile(f, []byte(`{"o/a":10000,"o/b":10007}`), 0o600)
+	if uid, _ := uidOf(f, "o/c"); uid != 10008 {
+		t.Fatalf("past the highest: %d", uid)
 	}
-	_ = os.MkdirAll(filepath.Join(home, ".pi"), 0o755)
-	_ = os.WriteFile(filepath.Join(home, ".pi", "ext.js"), []byte("theirs"), 0o644)
-	_ = os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[core]\nhooksPath=/x"), 0o644)
-	if err := resetHome(home, tar); err != nil {
-		t.Fatal(err)
-	}
-	if b, _ := os.ReadFile(filepath.Join(home, ".pi", "ext.js")); string(b) != "ours" || Exists(filepath.Join(home, ".gitconfig")) {
-		t.Fatalf("ext.js %q, .gitconfig left: %v", b, Exists(filepath.Join(home, ".gitconfig")))
+	_ = os.WriteFile(f, []byte(`{"o/a":`), 0o600)
+	if _, err := uidOf(f, "o/d"); err == nil {
+		t.Fatal("broken file: no error")
 	}
 }
 

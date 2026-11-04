@@ -54,7 +54,7 @@ type Provider struct {
 	Need                 [][]string // the env a pass needs: all of one set; nil = KeyEnv
 	Opt                  []string   // the env a pass also gets when set
 	Login                bool       // the ChatGPT login (`diffharbor login`) stands in for the key
-	Proxy                bool       // <NAME>_BASE_URL routes it through a proxy, see Proxies
+	Proxy                bool       // <NAME>_BASE_URL routes it through a proxy, see proxies
 }
 
 // providerFor is name's Matrix row with Need filled in, for a provider not listed KeyEnv alone.
@@ -228,18 +228,23 @@ func passEnv(ctx context.Context, provider string) ([]string, error) {
 	return env, nil
 }
 
-// Proxies routes built-in providers through a proxy or gateway (LiteLLM, a company's AI gateway):
-// <PROVIDER>_BASE_URL, e.g. ANTHROPIC_BASE_URL, becomes the provider's baseUrl in Pi's models.json; its models
-// and auth stay Pi's, the key is the proxy's. A provider whose key the vault keeps points at the vault, which forwards
-// to the gateway. Only as root, where Pi runs as node: a local run keeps its own Pi config.
-func Proxies() error {
-	if !proc.AsPi {
-		return nil
+// Workspace is proc.Workspace with Pi's models.json in the job's fresh home, see proxies. A local run (not root)
+// keeps its own Pi config.
+func Workspace(repo string) (string, error) {
+	dir, err := proc.Workspace(repo)
+	if err != nil || !proc.AsPi {
+		return dir, err
 	}
-	return proxies("/home/node/.pi/agent/models.json")
+	if err := proxies(filepath.Join(proc.Home(), ".pi", "agent", "models.json")); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, nil
 }
 
-// proxies writes models.json f.
+// proxies writes Pi's models.json f: it routes built-in providers through a proxy or gateway (LiteLLM, a company's
+// AI gateway): <PROVIDER>_BASE_URL, e.g. ANTHROPIC_BASE_URL, becomes the provider's baseUrl; its models and auth stay
+// Pi's, the key is the proxy's. A provider whose key the vault keeps points at the vault, which forwards to the gateway.
 func proxies(f string) error {
 	providers := map[string]any{}
 	for _, r := range Matrix {
@@ -251,7 +256,7 @@ func proxies(f string) error {
 		}
 	}
 	if len(providers) == 0 {
-		return proc.Remove(f) // as node: Pi's config dir is node's
+		return proc.Remove(f) // as the job's user: Pi's config dir is its
 	}
 	b, _ := json.Marshal(map[string]any{"providers": providers})
 	return proc.WriteFile(f, b)
@@ -423,7 +428,7 @@ func Check() error {
 }
 
 // OpenAIToken is a bearer token from the ChatGPT login, valid for 20 more minutes at least.
-// Pi's ChatGPT login lives on the root-only data volume (log in once, see README). Pi runs as node
+// Pi's ChatGPT login lives on the root-only data volume (log in once, see README). Pi runs as the job's user
 // next to PR code, so it only gets an access token that outlives the pass, never the refresh token.
 func OpenAIToken() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
