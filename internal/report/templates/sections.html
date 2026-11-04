@@ -8,7 +8,7 @@
       {{with .Since}}{{if .Files}}<button type="button" class="toggle" data-filter="changed" aria-pressed="false" title="The files whose change differs from the last review's">Changed since {{short .Prev.SHA}}</button>{{end}}{{end}}
     </div>
   </div>
-  <p class="mt-1.5 text-muted-foreground">{{if not .Flow}}The changed code, in the diff's order.{{else if eq .InSteps .Code}}Every changed code file sits in one of the {{.NSteps}} steps.{{else}}{{.InSteps}} of the {{.Code}} changed code files sit in the {{.NSteps}} steps, the rest after them.{{end}} Hover a name for its card, click it for every use.</p>
+  <p class="mt-1.5 text-muted-foreground">{{if not .Flow}}The changed code, in the diff's order.{{else if eq .InSteps .Code}}Every changed code file sits in one of the {{.NSteps}} steps.{{else}}{{.InSteps}} of the {{.Code}} changed code files sit in the {{.NSteps}} steps, the rest after them.{{end}} Hover a name for its card, click it for every use.<span class="split-legend"> Split: <span class="text-ring">changed</span>, <span class="text-diff-add">added</span>, removed.</span></p>
   <p class="keys mt-2 mb-8"><span><kbd>j</kbd> <kbd>k</kbd> next and previous file</span><span><kbd>n</kbd> next finding</span><span><kbd>v</kbd> viewed</span><span><kbd>Esc</kbd> closes a card</span></p>
   {{range $i, $s := .Steps}}
   <div class="mb-12" id="step-{{inc $i}}">
@@ -19,10 +19,11 @@
       <span class="step-progress" data-progress="step-{{inc $i}}"></span>
     </div>
     {{with $s.Why}}<p class="mt-1.5 ml-8 text-muted-foreground">{{.}}</p>{{end}}
-    {{if or $s.Tests $s.Untested}}<p class="stt" title="Found by following calls from the test files into this step's code. No model involved."><span>Tests that reach it</span>
-      {{- range $s.Tests}}<a href="#tests" class="stt-t" title="{{.}}">{{test .}}</a>{{end}}
+    {{with $s.Check}}<p class="step-check"><span>Check</span> · {{.}}</p>{{end}}
+    {{if or $s.Tests $s.Gap}}<p class="stt" title="Found by following calls from the test files into this step's code. No model involved."><span>Tests that reach it</span>
+      {{- range $s.Tests}}{{$r := $.Run (test .)}}<a href="#tests" class="stt-t" title="{{.}}{{with $r.Text}}: {{.}}{{end}}">{{if $r.Mark}}{{template "run-mark" $r}}{{end}}<span class="font-mono">{{test .}}</span>{{with $r.When}}<span class="text-muted-foreground">{{.}}</span>{{end}}</a>{{end}}
       {{- if $s.Partial}}<span>and more</span>{{else}}{{with $s.More}}<span>and {{.}} more</span>{{end}}{{end}}
-      {{- if $s.Untested}}<span class="stt-gap">none found that reaches what this step changes</span>{{end}}</p>{{end}}
+      {{- with $s.Gap}}<span class="stt-gap">{{.}}</span>{{end}}</p>{{end}}
     {{if or $s.Graph $s.Cycles}}<div class="step-graph" aria-label="How the step's code connects">
       {{range $s.Cycles}}<p class="ct-cyc"><span class="sev" data-sev="major">Cycle</span><code>{{.A}} ⇄ {{.B}}</code><span>this step's changes make them use each other: {{.AB}}, {{.BA}}</span></p>{{end}}
       {{with $s.Graph}}{{template "graph" .}}{{end}}
@@ -38,11 +39,8 @@
 {{define "tests"}}
 {{if or .Tests .Outline.Added .Outline.Weakened}}<section id="tests" class="rest">
   <div class="rest-head"><h3>Tests</h3><span>{{.NTests}}</span><span class="rest-v"></span></div>
-  <p class="rest-intro">Read the cases, not the test code.{{if .Outline.Snapshots}} {{.Outline.Snapshots}} snapshot or golden files updated.{{end}}</p>
-  {{with .Outline.Added}}<div class="mb-4 rounded-lg border">
-    <h3 class="border-b px-4 py-3 text-sm font-medium">{{len .}} new cases</h3>
-    <ul class="gap-x-8 px-4 py-3 font-mono text-xs leading-6 text-muted-foreground sm:columns-2">{{range .}}<li class="break-inside-avoid break-words before:mr-2 before:text-diff-add before:content-['+']">{{.}}</li>{{end}}</ul>
-  </div>{{end}}
+  <p class="rest-intro">{{with .TestsSay}}{{.}} {{end}}Read the cases, not the test code.{{if .Outline.Snapshots}} {{.Outline.Snapshots}} snapshot or golden files updated.{{end}}</p>
+  {{with .Cases}}<ul class="cases">{{range .}}<li>{{if .Run.Mark}}{{template "run-mark" .Run}}{{else}}<span class="run" aria-hidden="true">{{if .Skip}}{{icon "minus" ""}}{{else}}+{{end}}</span>{{end}}<span class="case-n" title="{{.Path}}">{{.Name}}</span><span class="case-s">{{.State}}</span></li>{{end}}</ul>{{end}}
   <div class="space-y-3">{{range .Tests}}{{template "file" .}}{{end}}</div>
 </section>{{end}}
 {{end}}

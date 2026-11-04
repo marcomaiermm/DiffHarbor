@@ -9,6 +9,8 @@
     {{with .Moved}}<span class="chip font-mono">{{.}} moved</span>{{end}}
     {{with .Changed}}<span class="chip changed">changed since {{.}}</span>{{end}}
     {{with .Weight}}<span class="chip" data-sev="{{.Sev}}">{{.Text}}</span>{{end}}
+    {{with .Skipped}}<span class="chip" data-major>{{.}} skipped</span>{{end}}
+    {{with .Placed}}<span class="chip" data-dash title="Why the guide put it in this step">{{icon "link" ""}}{{.}}</span>{{end}}
     {{with .Note}}<span class="min-w-48 flex-1 text-[13px] font-normal text-muted-foreground">{{.}}</span>{{end}}
     </button>
     <label class="viewed"><input type="checkbox" class="checkbox" data-key="{{.Path}}@{{.ID}}" data-path="{{.Path}}"> Viewed</label>

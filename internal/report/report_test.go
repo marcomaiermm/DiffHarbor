@@ -81,7 +81,7 @@ func TestRender(t *testing.T) {
 		`href="https://gitlab.com/acme/shop/-/blob/0123456789abcdef/other.go"`, "other.go at the head",
 		"What only a person can settle", "Should a failed save retry?",
 		"Storage first", `id="store/store.go"`, "Then the handler", `id="api/handler.go"`, `id="finding-1"`, "major · Error dropped",
-		`id="tests"`, "api/handler_test.go: TestHandle", `id="api/handler_test.go"`, `id="other"`, `id="README.md"`,
+		`id="tests"`, `title="api/handler_test.go">TestHandle<`, `id="api/handler_test.go"`, `id="other"`, `id="README.md"`,
 		`id="deleted"`, `id="gone.go"`, `id="explore"`, "Look closer", "How the parts talk", `id="commits"`, "Work in progress", "/merge_requests/7/diffs?commit_id=aaaaaaaaaa", "Only this commit",
 		`id="finish"`, "Request changes", "Review for !7</span>",
 		"Error dropped (handler.go:2).", "Questions:\n1. Should a failed save retry?", "Minor:\n- other.go  elsewhere", "Open the draft on GitLab",
@@ -793,7 +793,7 @@ func TestTested(t *testing.T) {
 		{"nothing changed", &file{Path: "a.go", Kind: "code"}, save(Symbol{Untested: true}), nil, 0, false},
 		{"counted past maxTests", code(), save(Symbol{Tests: many}), many[:maxTests], 2, false},
 	} {
-		tests, more, _, untested := tested(step{Files: []*file{c.f}}, c.syms)
+		tests, more, _, untested, _ := tested(step{Files: []*file{c.f}}, c.syms)
 		if !slices.Equal(tests, c.tests) || more != c.more || untested != c.untested {
 			t.Errorf("%s: %v +%d %v", c.why, tests, more, untested)
 		}
@@ -891,10 +891,10 @@ func TestPlaces(t *testing.T) {
 		rs[1].Text != ", and " || rs[1].Href != "https://f/blob/other.go#L7" || !rs[1].Out || rs[2].Text != " caps it." {
 		t.Fatalf("%+v", rs)
 	}
-	if r := v.Run("TestTotal/with discount"); r.State != "pass" || r.Text != "not run on 1111111, passed on 2222222" {
+	if r := v.Run("TestTotal/with discount"); r.Mark != "pass" || r.Text != "not run on 1111111, passed on 2222222" {
 		t.Errorf("%+v", r)
 	}
-	if r := v.Run("TestOther"); r.State != "none" || r.Text != "not run on 2222222" {
+	if r := v.Run("TestOther"); r.Mark != "none" || r.Text != "not run on 2222222" {
 		t.Errorf("%+v", r)
 	}
 	if v.now.Tests["TestTotal/with_discount"] != "pass" || !v.now.Broken {
@@ -927,5 +927,49 @@ func TestRetire(t *testing.T) {
 	got := retire([]string{"a_test.go: TestTotalNet", "a_test.go: TestTotalNetRounding", "a_test.go: TestTotal", "a_test.go: TestTotalnetwork", "x_test.go: TestHelper"}, files)
 	if !reflect.DeepEqual(got, []retired{{Names: []string{"TestTotalNet", "TestTotalNetRounding"}, With: "totalNet"}}) {
 		t.Fatalf("%+v", got)
+	}
+}
+
+// A step names what to check in it and what no test reaches; the tests list their cases with how they ran.
+func TestStepTests(t *testing.T) {
+	for _, c := range []struct {
+		s    step
+		want string
+	}{
+		{step{Untested: true}, "none found that reaches what this step changes"},
+		{step{Untested: true, bare: []string{"scanLine"}}, "none: scanLine is not called by any test"},
+		{step{Untested: true, bare: []string{"a", "b", "c", "d", "e"}}, "none: a, b, c and 2 more are not called by any test"},
+		{step{Tests: []string{"x_test.go TestX"}, bare: []string{"scanLine"}}, "none reaches scanLine"},
+		{step{Tests: []string{"x_test.go TestX"}, bare: []string{"scanLine"}, Partial: true}, ""},
+	} {
+		if got := c.s.Gap(); got != c.want {
+			t.Errorf("%+v: %q, want %q", c.s, got, c.want)
+		}
+	}
+	file := func(p, body string) string {
+		return fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,0 +1,2 @@\n%s", p, p, p, p, body)
+	}
+	d := Data{
+		Repo: "a/b", SHA: "2222222bbb",
+		Diff: file("a.go", "+func A() {}\n+\n") + file("a_test.go", "+func TestA(t *testing.T) {}\n+func TestB(t *testing.T) { t.Skip(\"later\") }\n"),
+		Flow: []review.Step{{Title: "A", Check: "A returns", Files: []string{"a.go"}, Placed: map[string]string{"a.go": "here because B calls it"}}},
+		Tests: checks.Tests{Ran: map[string]string{"TestA": "pass", "TestB": "skip"}, Broken: []string{"c"}},
+	}
+	d.Outline = diff.Analyze(d.Diff)
+	v := prepare(d)
+	if v.Skipped != 1 || v.files["a_test.go"].Skipped != 1 {
+		t.Fatalf("skipped %d", v.Skipped)
+	}
+	if got := v.TestsSay(); got != "1 of 2 new cases passed on 2222222. c does not build on 2222222, so nothing ran there. 1 test is now skipped or narrowed to one." {
+		t.Error(got)
+	}
+	b, _, err := Render(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{`<span>Check</span> · A returns`, `here because B calls it</span>`, `>1 skipped</span>`, `title="a_test.go">TestA</span><span class="case-s">passed on 2222222</span>`, `data-mark="pass"`} {
+		if !strings.Contains(string(b), w) {
+			t.Errorf("%q missing", w)
+		}
 	}
 }

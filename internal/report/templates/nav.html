@@ -29,7 +29,7 @@
     <details class="sidebar-group" open>
       <summary><span>4 · The rest</span>{{icon "chevron-right" ""}}</summary>
       <nav class="sidebar-nav">
-        {{if or .Tests .Outline.Added .Outline.Weakened}}<a href="#tests" class="sidebar-link" title="Tests">{{icon "flask-conical" ""}}<span>Tests</span><span class="sidebar-badge">{{.NTests}}</span></a>{{end}}
+        {{if or .Tests .Outline.Added .Outline.Weakened}}<a href="#tests" class="sidebar-link" title="Tests">{{icon "flask-conical" ""}}<span>Tests</span><span class="sidebar-badge"{{if .Skipped}} data-warn{{end}}>{{if .Skipped}}{{.Skipped}} skipped{{else}}{{.NTests}}{{end}}</span></a>{{end}}
         {{if .Other}}<a href="#other" class="sidebar-link" title="Data and docs">{{icon "file-text" ""}}<span>Data and docs</span><span class="sidebar-badge">{{.NOther}}</span></a>{{end}}
         {{if .Mechanical}}<a href="#mechanical" class="sidebar-link" title="Mechanical">{{icon "files" ""}}<span>Mechanical</span><span class="sidebar-badge">{{len .Mechanical}}</span></a>{{end}}
         {{if .Deleted}}<a href="#deleted" class="sidebar-link" title="Deleted">{{icon "trash-2" ""}}<span>Deleted</span><span class="sidebar-badge">{{len .Deleted}}</span></a>{{end}}

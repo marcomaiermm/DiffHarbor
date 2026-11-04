@@ -53,6 +53,7 @@ var icons = map[string]string{
 	"link":                  `<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />`,
 	"list":                  `<path d="M3 5h.01" /><path d="M3 12h.01" /><path d="M3 19h.01" /><path d="M8 5h13" /><path d="M8 12h13" /><path d="M8 19h13" />`,
 	"maximize":              `<path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M21 8V5a2 2 0 0 0-2-2h-3" /><path d="M3 16v3a2 2 0 0 0 2 2h3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" />`,
+	"minus":                 `<path d="M5 12h14" />`,
 	"panel-left":            `<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" />`,
 	"rotate-ccw":            `<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" />`,
 	"rows-2":                `<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M3 12h18" />`,

@@ -21,6 +21,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -255,6 +256,8 @@ type file struct {
 	Moves            []change   // the declarations that only moved here, ID their fold
 	Long             bool       // lists Changes above its diff
 	Changed          string     // Prev's short SHA when its change differs from Prev's, or it's new to the PR
+	Placed           string     // why the guide put it in its step, when it isn't plain
+	Skipped          int        // tests it skips or narrows to one (skip, only)
 	New, Gone        bool       // the PR adds or deletes it
 }
 
@@ -268,6 +271,7 @@ type change struct {
 
 type step struct {
 	Title, Why string
+	Check      string // what to check in it, the guide's
 	Files      []*file
 	Graph      *flow    // how its changed declarations name each other, nil when they don't
 	Tests      []string // the tests that reach what it changes, the first maxTests: "a_test.go TestSave"
@@ -275,6 +279,24 @@ type step struct {
 	Partial    bool     // at least: a walk stopped short
 	Untested   bool     // no test reaches what it changes: see tested
 	Cycles     []cycle  // directories its changes make use each other
+	bare       []string // what it changes that no test calls
+}
+
+// Gap is what of the step no test reaches: "none: scanLine is not called by any test"; "" when tests reach all.
+func (s step) Gap() string {
+	b := s.bare
+	if len(b) > 3 {
+		b = append(b[:3:3], plural(len(s.bare)-3, "more", "more"))
+	}
+	switch {
+	case s.Untested && len(b) == 0:
+		return "none found that reaches what this step changes"
+	case s.Untested:
+		return "none: " + join(b) + map[bool]string{true: " is", false: " are"}[len(s.bare) == 1] + " not called by any test"
+	case len(b) > 0 && !s.Partial:
+		return "none reaches " + join(b)
+	}
+	return ""
 }
 
 type group struct {
@@ -309,6 +331,7 @@ type view struct {
 	MergeN               int       // rows of the merge risks: Risks, BaseMoved, Conflicts, Others
 	MergeWarn            bool      // one of them is sure trouble
 	Authors              []string  // of the commits, first one first
+	Skipped              int       // tests the PR skips or narrows to one
 	Retired              []retired // deleted tests with the code they tested: no finding
 	now                  Version   // what the next version compares with
 	files                map[string]*file
@@ -444,6 +467,12 @@ func prepare(d Data) view {
 		v.Added += f.Add
 		v.Moved += f.Moved
 	}
+	for _, w := range d.Outline.Weakened {
+		if p, _, _ := strings.Cut(w.At, ":"); strings.HasPrefix(w.What, "skip/only") && files[p] != nil {
+			files[p].Skipped++
+			v.Skipped++
+		}
+	}
 	skip := d.Outline.Skippable()
 	used := map[string]bool{}
 	for _, g := range d.Outline.Mechanical {
@@ -458,10 +487,11 @@ func prepare(d Data) view {
 		v.Mechanical = append(v.Mechanical, mg)
 	}
 	for _, s := range d.Flow {
-		st := step{Title: s.Title, Why: s.Why}
+		st := step{Title: s.Title, Why: s.Why, Check: s.Check}
 		for _, p := range s.Files {
 			if f := files[p]; f != nil && !used[p] && !skip[p] {
 				f.Open = f.Moved*5 < f.Add*4 // mostly moved: the folds would be all there is
+				f.Placed = s.Placed[p]
 				st.Files, used[p] = append(st.Files, f), true
 			}
 		}
@@ -508,7 +538,7 @@ func prepare(d Data) view {
 	for i := range v.Steps {
 		v.Steps[i].Graph = graph(v.Steps, i, d.Symbols)
 		st := &v.Steps[i]
-		st.Tests, st.More, st.Partial, st.Untested = tested(*st, d.Symbols)
+		st.Tests, st.More, st.Partial, st.Untested, st.bare = tested(*st, d.Symbols)
 		st.Cycles = cycles(v.Steps, i, d.Symbols)
 		v.Graphs = v.Graphs || v.Steps[i].Graph != nil
 	}
@@ -672,29 +702,81 @@ func (v view) place(p string, line int) ref {
 	return r
 }
 
-// testRun is how a test fared at the head and at the last review: State the head's, for its mark.
-type testRun struct{ State, Text string }
+// testRun is how a test fared at the head and at the last review. Mark is what its sign shows: the head's
+// outcome, else the last review's with When saying so ("on 1111111"), none when it ran at neither; "" unknown.
+type testRun struct{ Mark, When, Text string }
 
-// Run is test name's run, its spaces as go test writes them; none when no test ran at either version.
+// Run is test name's run, its spaces as go test writes them; empty when no test ran at either version.
 func (v view) Run(name string) testRun {
 	say := map[string]string{"pass": "passed", "fail": "failed", "skip": "skipped", "none": "not run"}
 	var r testRun
 	var parts []string
+	prev := ""
 	if v.Prev != nil && v.Prev.Tests != nil {
-		if st := v.Prev.Tests[testKey(name)]; st != "" {
-			parts = append(parts, say[st]+" on "+short(v.Prev.SHA))
+		if prev = v.Prev.Tests[testKey(name)]; prev != "" {
+			parts = append(parts, say[prev]+" on "+short(v.Prev.SHA))
 		}
 	}
 	if t := v.Data.Tests; len(t.Ran) > 0 || len(t.Broken) > 0 {
-		r.State = cmp.Or(ranOf(t.Ran, name), "none")
-		now := say[r.State] + " on " + short(v.SHA)
-		if len(parts) > 0 && strings.HasPrefix(parts[0], say[r.State]+" ") {
+		r.Mark = cmp.Or(ranOf(t.Ran, name), "none")
+		if prev == r.Mark {
 			parts = nil // the same as at the last review
 		}
-		parts = append(parts, now)
+		parts = append(parts, say[r.Mark]+" on "+short(v.SHA))
+	}
+	if (r.Mark == "" || r.Mark == "none") && prev != "" && prev != "none" {
+		r.Mark, r.When = prev, "on "+short(v.Prev.SHA)
+	} else if r.Mark == "" && prev == "none" {
+		r.Mark = "none"
 	}
 	r.Text = strings.Join(parts, ", ")
 	return r
+}
+
+// tcase is a test case the PR adds or a test it now skips, and how it ran.
+type tcase struct {
+	Path, Name, State string
+	Skip              bool
+	Run               testRun
+}
+
+// Cases is the new cases, then the skips: a skip by its line, what the diff shows of it.
+func (v view) Cases() []tcase {
+	var cs []tcase
+	for _, c := range v.Outline.Added {
+		p, n, _ := strings.Cut(c, ": ")
+		r := v.Run(n)
+		cs = append(cs, tcase{Path: p, Name: n, State: cmp.Or(r.Text, "new"), Run: r})
+	}
+	for _, w := range v.Outline.Weakened {
+		if code, ok := strings.CutPrefix(w.What, "skip/only: "); ok {
+			cs = append(cs, tcase{Path: w.At, Name: strings.Trim(code, "`"), State: "skipped or narrowed · " + path.Base(w.At), Skip: true})
+		}
+	}
+	return cs
+}
+
+// TestsSay is the line over the cases: how many new ones passed, what did not build, what is skipped now.
+func (v view) TestsSay() string {
+	var p []string
+	if t := v.Data.Tests; len(t.Ran) > 0 || len(t.Broken) > 0 {
+		n := 0
+		for _, c := range v.Outline.Added {
+			if _, name, _ := strings.Cut(c, ": "); ranOf(t.Ran, name) == "pass" {
+				n++
+			}
+		}
+		if of := len(v.Outline.Added); of > 0 {
+			p = append(p, fmt.Sprintf("%d of %d new cases passed on %s.", n, of, short(v.SHA)))
+		}
+		if len(t.Broken) > 0 {
+			p = append(p, join(t.Broken)+map[bool]string{true: " does", false: " do"}[len(t.Broken) == 1]+" not build on "+short(v.SHA)+", so nothing ran there.")
+		}
+	}
+	if v.Skipped > 0 {
+		p = append(p, plural(v.Skipped, "test is", "tests are")+" now skipped or narrowed to one.")
+	}
+	return strings.Join(p, " ")
 }
 
 func testKey(name string) string { return strings.ReplaceAll(name, " ", "_") }

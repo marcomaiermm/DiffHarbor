@@ -491,7 +491,23 @@ dialog.sheet > .sheet-content { min-height: 100%; }
 .step-progress { @apply ml-auto font-mono text-xs text-muted-foreground tabular-nums; }
 .step-progress[data-done] { color: var(--verified); }
 .stt { @apply mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[12.5px] text-muted-foreground sm:ml-8; }
-.stt-t { @apply font-mono text-foreground/80 hover:text-foreground; }
+.stt-t { @apply inline-flex items-center gap-1 text-foreground/80 no-underline hover:text-foreground; }
+html:not([data-diff="split"]) .split-legend { display: none; }
+.step-check { @apply mt-1 ml-8 text-[13px]; }
+.step-check > span { @apply text-muted-foreground; }
+/* how a test ran: passed, failed, skipped, not run; an older version's pass is muted */
+.run { @apply inline-flex shrink-0 items-center text-muted-foreground; }
+.run svg { @apply size-3 stroke-[2.5]; }
+.run[data-mark="pass"] { color: var(--verified); }
+.run[data-mark="pass"][data-stale] { @apply text-muted-foreground; }
+.run[data-mark="fail"] { @apply text-destructive; }
+.run[data-mark="skip"] { @apply text-major; }
+.cases { @apply mb-4 rounded-[10px] border px-3.5 py-1; }
+.cases > li { @apply flex min-h-8 items-center gap-2.5 border-b py-1 text-[13px] last:border-b-0; }
+.cases > li > .run:not(:has(svg)) { @apply w-3 justify-center font-mono text-diff-add; }
+.case-n { @apply min-w-0 font-mono text-[12.5px] break-words; }
+.case-s { @apply ml-auto shrink-0 text-right text-xs text-muted-foreground max-sm:max-w-[45%]; }
+.sidebar-badge[data-warn] { @apply text-major; }
 .stt-gap { @apply inline-flex h-[22px] items-center rounded-md border border-dashed px-2 text-foreground/80; }
 .step-graph { @apply mt-4 rounded-[10px] border bg-card px-5 py-4 max-sm:px-3 sm:ml-8; }
 .step-graph > .graph { @apply mt-0; }

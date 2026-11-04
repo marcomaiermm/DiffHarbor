@@ -327,11 +327,14 @@ const maxTests = 8
 // the index puts its changed lines in, and those Changes names. untested, that no test was found, only when every
 // file is code and shown whole, nothing is removed (the base's tests aren't the head's), every changed line is in a
 // declaration of the index or runs nothing (inert), and not even a guess by name finds a test: see cgTests.
-func tested(st step, syms map[string][]Symbol) (tests []string, more int, partial, untested bool) {
+func tested(st step, syms map[string][]Symbol) (tests []string, more int, partial, untested bool, bare []string) {
 	in := map[string][]*Symbol{} // the index's declarations by file
+	names := map[*Symbol]string{}
 	for name := range syms {
 		for i := range syms[name] {
-			if s := &syms[name][i]; s.Exact && s.To > 0 {
+			s := &syms[name][i]
+			names[s] = name
+			if s.Exact && s.To > 0 {
 				in[s.Path] = append(in[s.Path], s)
 			}
 		}
@@ -400,10 +403,15 @@ func tested(st step, syms map[string][]Symbol) (tests []string, more int, partia
 		}
 	}
 	untested = untested && len(touched) > 0 && len(tests) == 0 && !slices.ContainsFunc(touched, func(s *Symbol) bool { return !s.Untested })
+	for _, s := range touched {
+		if s.Untested && len(s.Tests) == 0 && !slices.Contains(bare, names[s]) {
+			bare = append(bare, names[s])
+		}
+	}
 	if len(tests) > maxTests {
 		more, tests = len(tests)-maxTests, tests[:maxTests]
 	}
-	return tests, more, partial, untested
+	return tests, more, partial, untested, bare
 }
 
 // cycle is two directories the PR's changed declarations make use each other, one use each way: "Validate →

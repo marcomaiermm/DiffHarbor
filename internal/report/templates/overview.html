@@ -16,7 +16,7 @@
       <div data-side="before"><b><span aria-hidden="true">−</span>Before</b><p>{{.Before}}</p>
         <p class="story-at">{{with $.Ref .BeforeAt}}{{template "ref" .}}{{else}}<span class="chip loc" data-dash title="No line of the diff shows this: the reviewer's model inferred it">not in the diff</span>{{end}}</p></div>
       <div data-side="after"><b><span aria-hidden="true">+</span>After</b><p>{{.After}}</p>
-        {{if or .Proof ($.Ref .AfterAt)}}<p class="story-at">{{with .Proof}}{{$r := $.Run .}}<a href="#tests" class="chip loc"{{template "run-attr" $r.State}} title="The test that shows it{{with $r.Text}}: {{.}}{{end}}">{{template "run-mark" $r.State}}{{.}}{{with $r.Text}} · {{.}}{{end}}</a>{{end}}{{with $.Ref .AfterAt}}{{template "ref" .}}{{end}}</p>{{end}}</div>
+        {{if or .Proof ($.Ref .AfterAt)}}<p class="story-at">{{with .Proof}}{{$r := $.Run .}}<a href="#tests" class="chip loc"{{if and (eq $r.Mark "pass") (not $r.When)}} data-shown{{else if eq $r.Mark "fail"}} data-sev="critical"{{else}} data-dash{{end}} title="The test that shows it{{with $r.Text}}: {{.}}{{end}}">{{template "run-mark" $r}}{{.}}{{with $r.Text}} · {{.}}{{end}}</a>{{end}}{{with $.Ref .AfterAt}}{{template "ref" .}}{{end}}</p>{{end}}</div>
     </div></div>{{end}}{{end}}
   </div></div>
   <section class="card focus mt-10" id="focus" aria-labelledby="verdict-h">
@@ -87,8 +87,8 @@
 {{end}}
 {{/* A place a model's text names, see view.Refs; a test's mark by how it ran, see view.Run. */}}
 {{define "ref"}}<a class="chip loc"{{with .Href}} href="{{.}}"{{end}}{{if .Out}} target="_blank" rel="noopener"{{end}} title="{{.Path}}:{{.Line}}{{if .Out}}, not in the diff{{end}}">{{icon "code" ""}}{{base .Path}}:{{.Line}}</a>{{end}}
-{{define "run-mark"}}{{if eq . "pass"}}{{icon "check" ""}}{{else if eq . "fail"}}{{icon "circle-x" ""}}{{else}}{{icon "circle-dashed" ""}}{{end}}{{end}}
-{{define "run-attr"}}{{if eq . "pass"}} data-shown{{else if eq . "fail"}} data-sev="critical"{{else}} data-dash{{end}}{{end}}
+{{define "run-mark"}}<span class="run" data-mark="{{.Mark}}"{{if .When}} data-stale{{end}} role="img" aria-label="{{if eq .Mark "pass"}}passed{{else if eq .Mark "fail"}}failed{{else if eq .Mark "skip"}}skipped{{else}}not run{{end}}{{with .When}} {{.}}{{end}}">
+  {{- if eq .Mark "pass"}}{{icon "check" ""}}{{else if eq .Mark "fail"}}{{icon "x" ""}}{{else if eq .Mark "skip"}}{{icon "minus" ""}}{{else}}{{icon "circle-dashed" ""}}{{end}}</span>{{end}}
 {{/* Look closer: what the steps don't show, after them and closed until asked. */}}
 {{define "explore"}}{{if or .Inventory .Deps .Affected .Diagram}}
 <section id="explore" class="mt-16 border-t pt-10" aria-labelledby="explore-h">
