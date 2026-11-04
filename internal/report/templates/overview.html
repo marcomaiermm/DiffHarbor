@@ -131,14 +131,14 @@
       {{range $i, $w := .}}<div class="ctw" id="way-{{$i}}" data-way="{{$i}}"{{if $i}} hidden{{end}}>{{template "way" .}}</div>{{end}}
     </div>
   </details>{{end}}
-  {{if not .Ways}}{{with .Affected}}<details class="box">
+  {{with .Affected}}<details class="box">
     <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">What the change reaches outside the PR</span><span class="bs-note">{{plural (len .) "declaration" "declarations"}} called or named by code outside the diff</span></summary>
     <div class="bb accordion">{{range .}}<details class="accordion-item reach-item">
       <summary class="accordion-trigger"><a href="#{{.ID}}">{{.Name}}</a>{{with .Why}}<span class="badge" data-variant="outline">{{.}}</span>{{end}}<span class="reach-path">{{.Path}}</span><span class="reach-n">{{.N}} {{if eq .N 1}}place{{else}}places{{end}}</span>{{icon "chevron-down" "accordion-chevron size-4"}}</summary>
       <ul>{{range .Refs}}<li><a href="{{$.Forge.Blob}}{{.Path}}#L{{.Line}}" target="_blank" rel="noopener">{{.Path}}:{{.Line}}</a>{{with .In}}<span class="shrink-0 text-muted-foreground">in {{.}}</span>{{end}}<code data-path="{{.Path}}">{{.Text}}</code></li>{{end}}
         <li><button type="button" class="btn" data-variant="link" data-size="xs" data-uses="{{.Name}}" data-path="{{.Path}}">Every use</button></li></ul>
     </details>{{end}}</div>
-  </details>{{end}}{{end}}
+  </details>{{end}}
   {{with .Deps}}<details class="box">
     <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">{{if .New}}New uses between directories{{else}}Uses between the changed directories{{end}}</span>{{with .Cycles}}<span class="bs-note text-destructive">{{plural . "cycle" "cycles"}}</span>{{end}}</summary>
     <div class="bb">{{with .New}}<ul class="dl">{{range .}}<li><b class="am-add" role="img" aria-label="new">+</b><code>{{.From}} → {{.To}}</code><span>{{.Why}}</span>{{if .Cycle}}<span class="chip" data-sev="critical">new cycle</span>{{end}}</li>{{end}}</ul>{{end}}
