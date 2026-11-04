@@ -39,6 +39,15 @@ func TestDiff(t *testing.T) {
 	}
 }
 
+func TestMap(t *testing.T) {
+	d := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -3,3 +3,4 @@ func f() {\n ctx\n+func g(x int) error {\n+\tfuncs := 1\n" +
+		"@@ -9 +10 @@ func f() {\n-a\n+b\n" +
+		"diff --git a/t.html b/t.html\n--- a/t.html\n+++ b/t.html\n@@ -1 +1,2 @@\n+{{define \"card\"}}\n+x\n"
+	if got, want := Map(d), "a.go\n  func f() {\n  func g(x int) error\n"+"t.html\n  {{define \"card\"}}\n"; got != want {
+		t.Fatalf("map:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestPatchIDs(t *testing.T) {
 	reviewed := "diff --git a/a.go b/a.go\nindex 1..2 100644\n--- a/a.go\n+++ b/a.go\n@@ -3,3 +3,3 @@ func f() {\n ctx\n-old\n+new\n ctx\n" +
 		"diff --git a/b.go b/b.go\nindex 3..4 100644\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-x\n+y\n"

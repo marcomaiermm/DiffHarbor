@@ -3,6 +3,7 @@ package diff
 
 import (
 	"crypto/sha256"
+	"diffharbor/internal/text"
 	"encoding/hex"
 	"fmt"
 	"path"
@@ -29,6 +30,8 @@ var (
 	newPath   = regexp.MustCompile(`(?m)^\+\+\+ b/(.+)$`)
 	deleted   = regexp.MustCompile(`(?m)^--- a/(.+)\n\+\+\+ /dev/null$`)
 	hunkStart = regexp.MustCompile(`\+(\d+)`)
+	// declLine is an added line that declares something another file can name: a function, type, class, template.
+	declLine = regexp.MustCompile(`^\+\s*(?:func |type |(?:export )?(?:async )?function |class |def |{{-? ?define )`)
 )
 
 // EachFile calls fn with each file's new path and its part of the diff. Deletions have no new path.
@@ -128,6 +131,32 @@ func Docs(diff string) string {
 	EachFile(diff, func(p, f string) {
 		if docFile.MatchString(p) || specFile.MatchString(p) {
 			b.WriteString(f)
+		}
+	})
+	return b.String()
+}
+
+// Map lists per file of diff the declarations its hunks sit in and those they add, one line each, at most 25:
+// what a part changes, for the reviewer of another.
+func Map(diff string) string {
+	var b strings.Builder
+	EachFile(diff, func(p, f string) {
+		var ds []string
+		for l := range strings.SplitSeq(f, "\n") {
+			var d string
+			switch {
+			case strings.HasPrefix(l, "@@"):
+				d = strings.TrimSpace(l[strings.LastIndex(l, "@@")+2:])
+			case declLine.MatchString(l):
+				d = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(l[1:]), "{"))
+			}
+			if d != "" && !slices.Contains(ds, d) && len(ds) < 25 {
+				ds = append(ds, d)
+			}
+		}
+		fmt.Fprintf(&b, "%s\n", p)
+		for _, d := range ds {
+			fmt.Fprintf(&b, "  %s\n", text.OneLine(d, 140))
 		}
 	})
 	return b.String()

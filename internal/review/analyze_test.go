@@ -90,10 +90,12 @@ func TestAnalyze(t *testing.T) {
 		t.Fatalf("below min_severity skips verify: %+v %v", r.Comments, calls)
 	}
 
-	// In parts: one review and verify pass each, findings merged most severe first, one per line, a failed part named.
+	// In parts: a review and a lens pass each, their findings verified in one pass, merged most severe first, one per
+	// line, a failed part named. A lens without JSON leaves its part's first pass standing.
 	other := `{"summary":"o","comments":[{"path":"a.md","line":1,"severity":"critical","title":"c","body":"b"},{"path":"b.md","line":5,"severity":"minor","title":"m","body":"b"}]}`
 	r, stats, calls = run(map[string][]string{
-		"review1": {finding}, "verify1": {keep},
+		"review1": {finding}, "lens1": {`{"summary":"l","comments":[{"path":"b.md","line":7,"severity":"minor","title":"l","body":"b"}]}`},
+		"verify1": {`{"verdicts":[{"i":0,"keep":true,"line":2,"evidence":"seen"},{"i":1,"keep":true}]}`},
 		"review2": {other}, "verify2": {`{"verdicts":[{"i":0,"keep":true},{"i":1,"keep":true}]}`}, "review3": {"x", "y"},
 	}, Settings{}, md, md, md)
 	slices.Sort(calls)
@@ -101,9 +103,9 @@ func TestAnalyze(t *testing.T) {
 	for _, c := range r.Comments {
 		got = append(got, fmt.Sprintf("%s:%d %s", c.Path, c.Line, c.Severity))
 	}
-	if strings.Join(got, ", ") != "a.md:1 critical, a.md:2 major, b.md:5 minor" || r.Summary != "s o" ||
-		!strings.HasSuffix(stats, " · 3 parts · 3/3 verified · part 3 failed") || !slices.Equal(r.Failed, []string{"a.md"}) ||
-		strings.Join(calls, ",") != "review1,review2,review3,review3 repair,verify1,verify2" {
+	if strings.Join(got, ", ") != "a.md:1 critical, a.md:2 major, b.md:7 minor, b.md:5 minor" || r.Summary != "s o" ||
+		!strings.HasSuffix(stats, " · 3 parts · 4/4 verified · part 3 failed") || !slices.Equal(r.Failed, []string{"a.md"}) ||
+		strings.Join(calls, ",") != "lens1,lens2,lens2 repair,review1,review2,review3,review3 repair,verify1,verify2" {
 		t.Fatalf("parts: %v %q %q %v %v", got, r.Summary, stats, calls, r.Failed)
 	}
 
