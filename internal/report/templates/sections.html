@@ -21,7 +21,7 @@
     {{with $s.Why}}<p class="mt-1.5 ml-8 text-muted-foreground">{{.}}</p>{{end}}
     {{with $s.Check}}<p class="step-check"><span>Check</span> · {{.}}</p>{{end}}
     {{if or $s.Tests $s.Gap}}<p class="stt" title="Found by following calls from the test files into this step's code. No model involved."><span>Tests that reach it</span>
-      {{- range $s.Tests}}{{$r := $.Run (test .)}}<a href="#tests" class="stt-t" title="{{.}}{{with $r.Text}}: {{.}}{{end}}">{{if $r.Mark}}{{template "run-mark" $r}}{{end}}<span class="font-mono">{{test .}}</span>{{with $r.When}}<span class="text-muted-foreground">{{.}}</span>{{end}}</a>{{end}}
+      {{- range $s.Tests}}{{$r := $.Run (test .)}}<a{{if or $.Tests $.Outline.Added $.Outline.Weakened}} href="#tests"{{end}} class="stt-t" title="{{.}}{{with $r.Text}}: {{.}}{{end}}">{{if $r.Mark}}{{template "run-mark" $r}}{{end}}<span class="font-mono">{{test .}}</span>{{with $r.When}}<span class="text-muted-foreground">{{.}}</span>{{end}}</a>{{end}}
       {{- if $s.Partial}}<span>and more</span>{{else}}{{with $s.More}}<span>and {{.}} more</span>{{end}}{{end}}
       {{- with $s.Gap}}<span class="stt-gap">{{.}}</span>{{end}}</p>{{end}}
     {{if or $s.Graph $s.Cycles $s.Way}}<div class="step-graph" aria-label="How the step's code connects">
