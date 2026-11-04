@@ -769,6 +769,11 @@ func TestSince(t *testing.T) {
 	d.SHA, d.Prev = "2222222bbb", &prev
 	d.Diff = file("a.go", "one") + file("c.go", "three") // b.go dropped, c.go new, a.go the same
 	d.Findings = []review.Comment{{Path: "c.go", Line: 1, Title: "leak"}}
+	d.Outline.Weakened = []diff.Flag{{At: "c_test.go:4", What: "test deleted"}}
+	if _, v, _ := Render(d); !slices.Contains(v.Findings, "c_test.go: test deleted") || v.Weights["c_test.go: test deleted"] != "major" {
+		t.Errorf("a weakened test is no finding of the version: %+v", v)
+	}
+	d.Outline.Weakened = nil
 	b, now, err := Render(d)
 	if err != nil {
 		t.Fatal(err)

@@ -475,7 +475,6 @@ func prepare(d Data) view {
 		v.MergeWarn = v.MergeWarn || len(o.Clash) > 0
 	}
 	v.now = stamp(v, ids)
-	v.Since = compare(d.Prev, v.now, files)
 	var ss []*span
 	for _, p := range slices.Concat(order, gone) {
 		f := files[p]
@@ -576,7 +575,8 @@ func prepare(d Data) view {
 		}
 	}
 	v.Retired = retire(d.Outline.Removed, files)
-	judge(&v, found)
+	judge(&v, found) // adds the weakened tests' findings to v.now
+	v.Since = compare(d.Prev, v.now, files)
 	chs, _ := decls(v.Steps)
 	for _, c := range chs { // the popover says what the PR did to it
 		for i, s := range d.Symbols[c.c.Name] {

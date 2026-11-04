@@ -88,6 +88,7 @@ func judge(v *view, found []*finding) {
 			fd.Href = "#" + p
 		}
 		found = append(found, fd)
+		v.now.Findings, v.now.Weights[p+": "+w.What] = append(v.now.Findings, p+": "+w.What), fd.Severity // the next review sees it come and go
 	}
 	v.Groups = []fgroup{{Title: "Blocks the merge"}, {Title: "Fix before merging"}, {Title: "Minor"}}
 	for _, fd := range found {
