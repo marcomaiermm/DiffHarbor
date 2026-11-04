@@ -259,6 +259,8 @@ type file struct {
 	Placed           string     // why the guide put it in its step, when it isn't plain
 	Skipped          int        // tests it skips or narrows to one (skip, only)
 	New, Gone        bool       // the PR adds or deletes it
+	Src              string     // its text at the head, for the lines between hunks: Data.Sources
+	SrcN             int        // its lines
 }
 
 // change is a declaration a file's diff touches: State "new", "gone" or "" (changed), ID its first changed line.
@@ -392,6 +394,10 @@ func prepare(d Data) view {
 	diff.EachFile(d.Diff, func(p, f string) {
 		files[p] = parse(p, f, d.Walkthrough[p])
 		files[p].ID = ids[p]
+		if fl := files[p]; !fl.New && fl.Cut == 0 && d.Sources[p] != "" {
+			fl.Src = d.Sources[p]
+			fl.SrcN = strings.Count(strings.TrimSuffix(fl.Src, "\n"), "\n") + 1
+		}
 		order = append(order, p)
 	})
 	var gone []string
@@ -985,7 +991,7 @@ func rank(f *file) int {
 
 // maxSource and maxSources are the bytes of one changed file and of all that a report carries for the lines
 // between hunks: past them a file shows its hunks only.
-const maxSource, maxSources = 256 << 10, 4 << 20
+const maxSource, maxSources = 256 << 10, 2 << 20 // ponytail: the page carries them whole; per gap if pages grow
 
 // Sources is the text at the checkout repo of the files diffText changes and keeps, for the unchanged lines
 // between and around hunks; a file too big, unreadable or not text stays out.

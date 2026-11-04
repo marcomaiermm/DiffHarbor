@@ -24,6 +24,7 @@
   {{range .Lines}}{{template "line" .}}{{end}}</tbody>
   {{else}}<tbody>{{range .Lines}}{{template "line" .}}{{end}}</tbody>{{end}}{{end}}
   </table></div>
+  {{with .Src}}<script type="application/json" class="file-src" data-lines="{{$.SrcN}}">{{.}}</script>{{end}}
   {{if .Cut}}<div class="border-t px-4 py-2 text-sm text-muted-foreground">{{.Cut}} more lines on the pull request's page.</div>{{end}}
   </div>
 </div>{{end}}

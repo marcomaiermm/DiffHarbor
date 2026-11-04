@@ -1012,3 +1012,28 @@ func TestStepTests(t *testing.T) {
 		}
 	}
 }
+
+// The text of a changed file goes with it for the lines between hunks, once and quoted; a new file has none to show.
+func TestSources(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n\n// </script> stays text\nfunc A() {}\n"), 0o644)
+	d := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -4 +4 @@\n-func A() { }\n+func A() {}\n" +
+		"diff --git a/b.go b/b.go\nnew file mode 100644\n--- /dev/null\n+++ b/b.go\n@@ -0,0 +1 @@\n+package a\n"
+	os.WriteFile(filepath.Join(dir, "b.go"), []byte("package a\n"), 0o644)
+	src := Sources(dir, d)
+	if len(src) != 2 {
+		t.Fatalf("sources %v", src)
+	}
+	b, _, err := Render(Data{Repo: "o/r", Number: 1, SHA: "abc", Diff: d, Sources: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(b)
+	if n := strings.Count(page, `class="file-src"`); n != 1 {
+		t.Errorf("%d sources on the page, want a.go's only", n)
+	}
+	if !strings.Contains(page, `data-lines="4">"package a\n\n// \u003c/script\u003e stays text\nfunc A() {}\n"</script>`) {
+		i := strings.Index(page, `class="file-src"`)
+		t.Errorf("a.go's source: %q", page[i:min(len(page), i+120)])
+	}
+}

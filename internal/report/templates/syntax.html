@@ -432,6 +432,15 @@ const split = table => {
       lineOf.set(row, b);
     } else if (row.matches("tr.gone") || fold && !fold.classList.contains("open")) {
       continue;
+    } else if (row.matches("tr.gap")) { // its buttons click the table's
+      flush();
+      const bar = el("div", "gap-bar split-gap", ...clone(row.querySelector(".gap-bar")));
+      bar.addEventListener("click", e => {
+        const i = [...bar.querySelectorAll("button")].indexOf(e.target.closest("button"));
+        (i < 0 ? row.querySelector(".gap-bar") : row.querySelectorAll("button")[i]).click();
+      });
+      box.append(bar);
+      lineOf.set(row, bar);
     } else if (row.matches("tr.hunk")) {
       flush();
       const orig = row.querySelector(".hunk-seen"), b = el("button", "hunk-seen", ...clone(orig));
@@ -484,9 +493,16 @@ if (splitOn()) {
   if (location.hash) dispatchEvent(new HashChangeEvent("hashchange")); // the jump on load hit the hidden table
 }
 
+const painted = new WeakSet();
 const seen = new IntersectionObserver(es => {
-  for (const e of es) if (e.isIntersecting) { seen.unobserve(e.target); paint(e.target.querySelector("table")); }
+  for (const e of es) if (e.isIntersecting) { seen.unobserve(e.target); painted.add(e.target.querySelector("table")); paint(e.target.querySelector("table")); }
 }, { rootMargin: "800px" });
+// lines a gap showed: colored on their own once the table is (else with it), side by side again
+document.addEventListener("diff:rows", ({ detail: { table, rows } }) => {
+  const done = painted.has(table) && lang(table.dataset.path) ? colored(rows.map(r => r.cells[2].textContent).join("\n"), table.dataset.path).then(ls =>
+    rows.forEach((r, i) => r.cells[2].replaceChildren(...(ls[i] || []).map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; })))) : Promise.resolve();
+  done.then(() => { if (splitOn()) split(table); });
+});
 document.querySelectorAll(".diff").forEach(d => seen.observe(d));
 </script>
 {{end}}

@@ -147,7 +147,7 @@
     b.setAttribute("aria-pressed", on);
     b.lastChild.textContent = on ? "Unfold" : "Fold";
     const rows = [...h.closest("table").rows];
-    for (let i = rows.indexOf(h) + 1; i < rows.length && !rows[i].matches("tr.hunk"); i++) rows[i].classList.toggle("gone", on);
+    for (let i = rows.indexOf(h) + 1; i < rows.length && !rows[i].matches("tr.hunk, tr.gap"); i++) rows[i].classList.toggle("gone", on);
     set(hunkKey(h), on);
   };
   for (const h of document.querySelectorAll("tr.hunk")) if (get(hunkKey(h))) seeHunk(h, true);
@@ -168,10 +168,66 @@
     const t = e.target.closest(".fold-toggle");
     if (t) t.setAttribute("aria-expanded", t.closest("tbody").classList.toggle("open"));
   });
+  // the unchanged lines between and around hunks, from the file's text at the head: read once a gap opens. A gap
+  // shows 20 more under the change above or over the one below, or all of it; a small one all at once.
+  const STEP = 20, gaps = new WeakMap(); // a gap's row -> its lines not shown yet, new numbers lo..hi
+  for (const t of document.querySelectorAll("table[data-path]")) {
+    const src = t.closest(".collapsible-content").querySelector(":scope > .file-src");
+    if (!src) continue;
+    let text;
+    const lines = () => text ??= JSON.parse(src.textContent).replace(/\n$/, "").split("\n");
+    const n = +src.dataset.lines, hunks = [...t.querySelectorAll("tr.hunk")];
+    const at = h => (/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(h.querySelector(".truncate").textContent) || []).slice(1).map(x => x === undefined ? 1 : +x);
+    const add = (before, lo, hi, shift, up, down) => {
+      if (hi < lo) return;
+      const row = document.createElement("tr");
+      row.className = "gap";
+      row.innerHTML = '<td colspan="3"><div class="gap-bar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg><span></span></div></td>';
+      const g = { lo, hi, row };
+      const show = (a, b, where) => { // new lines a..b, before or after the gap's row
+        const rs = lines().slice(a - 1, b).map((l, i) => {
+          const r = document.createElement("tr");
+          r.className = "ctx more";
+          r.dataset.old = a + i + shift;
+          for (const c of [a + i, "", l]) r.insertCell().textContent = c;
+          return r;
+        });
+        row[where](...rs);
+        document.dispatchEvent(new CustomEvent("diff:rows", { detail: { table: t, rows: rs } }));
+      };
+      const bar = row.querySelector(".gap-bar"), label = bar.querySelector("span");
+      const draw = () => {
+        const left = g.hi - g.lo + 1;
+        if (left <= 0) return void row.remove();
+        label.textContent = left + " unchanged " + (left === 1 ? "line" : "lines");
+        bar.querySelectorAll("button").forEach(b => b.remove());
+        const btn = (text, title, act) => { const b = document.createElement("button"); b.type = "button"; b.className = "gap-btn"; b.textContent = text; if (title) b.setAttribute("aria-label", title); b.onclick = e => { e.stopPropagation(); act(); draw(); }; bar.append(b); };
+        if (left > STEP && down) btn("↓ " + STEP, "Show " + STEP + " more lines under the change above", () => { show(g.lo, g.lo + STEP - 1, "before"); g.lo += STEP; });
+        if (left > STEP && up) btn("↑ " + STEP, "Show " + STEP + " more lines over the change below", () => { show(g.hi - STEP + 1, g.hi, "after"); g.hi -= STEP; });
+        btn(left > STEP ? "All" : "Show " + left, left > STEP ? "Show all " + left + " lines" : "", g.all);
+      };
+      g.all = () => { show(g.lo, g.hi, "before"); g.lo = g.hi + 1; draw(); };
+      bar.onclick = g.all;
+      gaps.set(row, g);
+      before ? before.before(row) : t.createTBody().append(row);
+      draw();
+    };
+    let end = 0; // the last new line the hunks above show
+    for (const h of hunks) {
+      const [a, , c, d] = at(h);
+      if (c === undefined) continue;
+      add(h, end + 1, c - 1, a - c, true, end > 0);
+      end = c + d - 1;
+    }
+    const last = hunks.length ? at(hunks[hunks.length - 1]) : [];
+    if (n && last.length) add(null, end + 1, n, last[0] + last[1] - last[2] - last[3], false, true);
+  }
   const reveal = () => {
     const h = decodeURIComponent(location.hash.slice(1)), m = /^(.+):(\d+)$/.exec(h);
-    // "#path:line": the line of the file, by its new number, else its old one; the file when the diff doesn't show it
-    const lineOf = f => f && ([...f.querySelectorAll("tr.add, tr.ctx")].find(r => r.cells[0].textContent === m[2]) || f.querySelector(`tr[data-old="${m[2]}"]`) || f);
+    // "#path:line": the line of the file, by its new number, else its old one; one in a gap opens it; the file when
+    // the diff doesn't show it
+    const find = f => [...f.querySelectorAll("tr.add, tr.ctx")].find(r => r.cells[0].textContent === m[2]) || f.querySelector(`tr[data-old="${m[2]}"]`);
+    const lineOf = f => f && (find(f) || ([...f.querySelectorAll("tr.gap")].map(r => gaps.get(r)).find(g => g.lo <= +m[2] && +m[2] <= g.hi)?.all(), find(f)) || f);
     const el = document.getElementById(h) || (m && lineOf(document.getElementById(m[1])));
     if (!el) return;
     const tab = el.closest("[role=tabpanel][hidden]");

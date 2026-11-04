@@ -143,6 +143,14 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
 .diff tbody.fold:not(.open) > tr:not(.fold-head) { display: none; }
 /* a hunk read: its lines go, its header stays to bring them back */
 .diff tr.gone { display: none; }
+/* the unchanged lines between hunks: a bar that shows them */
+.diff tr.gap > td { @apply p-0; }
+.gap-bar { @apply flex min-h-[30px] cursor-pointer items-center gap-2 border-t py-[3px] pr-2 pl-4 font-mono text-xs; color: var(--diff-muted); border-color: color-mix(in oklab, var(--diff-fg) 12%, transparent); }
+.gap-bar:hover { background: var(--diff-hover); }
+.gap-bar > svg { @apply size-3.5 shrink-0 fill-none stroke-current stroke-2; stroke-linecap: round; stroke-linejoin: round; }
+/* a phone scrolls the table: the buttons stay by their label, not at its far end */
+.gap-btn { @apply h-[22px] cursor-pointer rounded-md border px-2 font-sans text-[11.5px] font-medium sm:first-of-type:ml-auto; border-color: color-mix(in oklab, var(--diff-fg) 22%, transparent); }
+.gap-bar:hover .gap-btn, .gap-btn:hover { color: var(--diff-fg); border-color: color-mix(in oklab, var(--diff-fg) 45%, transparent); }
 .hunk-seen { @apply -ml-2 flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 font-sans text-[11px]; color: var(--diff-muted); }
 .hunk-seen:hover { color: var(--diff-fg); background: var(--diff-hover); }
 .hunk-seen > svg { @apply opacity-40; }
