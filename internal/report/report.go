@@ -1011,13 +1011,13 @@ func changes(f *file, runs map[int]run) (cs, moves []change) {
 // rank is 1 for a file with a finding that blocks the merge, 0 for the others.
 func rank(f *file) int {
 	for _, fd := range f.Findings {
-		if fd.Severity == "critical" {
+		if fd.Severity == "critical" || fd.Severity == "major" {
 			return 1
 		}
 	}
 	for _, l := range f.Lines {
 		for _, fd := range l.Findings {
-			if fd.Severity == "critical" {
+			if fd.Severity == "critical" || fd.Severity == "major" {
 				return 1
 			}
 		}
