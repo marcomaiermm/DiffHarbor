@@ -60,6 +60,10 @@ func TestUIDOf(t *testing.T) {
 	if _, err := uidOf(f, "o/d"); err == nil {
 		t.Fatal("broken file: no error")
 	}
+	_ = os.WriteFile(f, []byte(`{"o/a":10000,"o/b":10000}`), 0o600)
+	if _, err := uidOf(f, "o/a"); err == nil {
+		t.Fatal("two repos share a uid: no error")
+	}
 }
 
 // A child gets PATH, HOME and what is passed, never the server's secrets.

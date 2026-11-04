@@ -236,6 +236,13 @@ func uids(f string) (map[string]uint32, error) {
 	if err != nil { // never start over: the next repo would get a uid that is another's
 		return nil, fmt.Errorf("repo uids: %w", err)
 	}
+	seen := map[uint32]string{} // a hand edit's slip: two repos would share a cache and each other's kills
+	for r, u := range m {
+		if o, ok := seen[u]; ok {
+			return nil, fmt.Errorf("repo uids: %s and %s share uid %d", o, r, u)
+		}
+		seen[u] = r
+	}
 	return m, nil
 }
 
