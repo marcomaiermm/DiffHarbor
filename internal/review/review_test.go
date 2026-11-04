@@ -153,8 +153,9 @@ func TestSettings(t *testing.T) {
 	}
 	all, _ := LoadSettings(`{"large_pr":"all","max_parts":6}`)
 	off, _ := LoadSettings(`{"large_pr":"off"}`)
-	if (Settings{}).Parts(false) != 1 || (Settings{}).Parts(true) != 4 || !(Settings{}).Asks() || all.Parts(false) != 6 || all.Asks() ||
-		off.Parts(true) != 1 || off.Asks() {
+	ask, _ := LoadSettings(`{"large_pr":"ask"}`)
+	if (Settings{}).Parts(false) != 4 || (Settings{}).Asks() || all.Parts(false) != 6 || all.Asks() ||
+		off.Parts(true) != 1 || off.Asks() || ask.Parts(false) != 1 || ask.Parts(true) != 4 || !ask.Asks() {
 		t.Error("large_pr parts")
 	}
 	if _, err := LoadSettings(`{"review_model":"--tools=bash"}`); err == nil {
