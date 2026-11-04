@@ -4,8 +4,8 @@
 // The graphs of changed code: cytoscape draws, ELK lays out in layers with the files as boxes. Hovering a box
 // lights what it uses and what uses it, a click goes to the code, a right-click opens the rest; boxes drag.
 // Drawn when it scrolls into view.
-import cytoscape from "https://cdn.jsdelivr.net/npm/cytoscape@3/dist/cytoscape.esm.min.mjs";
-import elk from "https://cdn.jsdelivr.net/npm/cytoscape-elk@2/+esm";
+import cytoscape from "https://cdn.jsdelivr.net/npm/cytoscape@3.34.4/dist/cytoscape.esm.min.mjs";
+import elk from "https://cdn.jsdelivr.net/npm/cytoscape-elk@2.3.0/+esm";
 cytoscape.use(elk);
 // a canvas takes no CSS variables: Geist's grays and the page's accents
 const c = document.documentElement.classList.contains("dark")

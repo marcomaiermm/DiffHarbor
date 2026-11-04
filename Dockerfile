@@ -33,10 +33,11 @@ COPY --from=build /go/bin/staticcheck /go/bin/gitleaks /go/bin/golangci-lint /go
 COPY --from=build /home/node/diffharbor /usr/local/bin/diffharbor
 RUN fallow --version && squawk --version && oxlint --version && tailwindcss --help > /dev/null
 # extensions/review-guard.js refuses tool calls past the soft deadline or 60% context, so a pass still answers.
+# node-home.tar: the server restores node's home from it before each job (proc.ResetHome).
 COPY extensions/review-guard.js extensions/review-guard.test.mjs /opt/
 RUN echo '{"type":"module"}' > /opt/package.json && node --test /opt/review-guard.test.mjs \
     && mkdir -p /home/node/.pi/agent/extensions && cp /opt/review-guard.js /home/node/.pi/agent/extensions/ \
-    && chown -R node:node /home/node/.pi/agent/extensions
+    && chown -R node:node /home/node/.pi/agent/extensions && tar -C /home/node -cf /opt/node-home.tar .
 ENV PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DATA_DIR=/data CACHE_DIR=/cache
 EXPOSE 3000
 CMD ["diffharbor"]

@@ -80,12 +80,19 @@ func work(queue chan *forge.Event) {
 		case e.Kind != "pull_request":
 			run = func(ctx context.Context) error { return job.Chat(ctx, f, mentions[e.Forge], e) }
 		}
-		proc.KillOrphans() // what an earlier job's PR code left running, e.g. listening for this job's token
+		proc.KillOrphans()      // what an earlier job's PR code left running, e.g. listening for this job's token
+		err := proc.ResetHome() // and what it left in node's home, e.g. a git hook for this job's token
+		if err == nil {
+			err = agent.Proxies() // Pi's models.json went with the reset
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		running.Lock()
 		running.key, running.review, running.cancel = e.Key(), e.Kind == "pull_request", cancel
 		running.Unlock()
-		if err := run(ctx); err != nil {
+		if err == nil {
+			err = run(ctx)
+		}
+		if err != nil {
 			log.Println(e.Key(), err)
 		}
 		cancel()
@@ -259,7 +266,9 @@ func Serve(cfg Config) {
 			log.Println(err) // not fatal: FALLBACK_MODEL serves until someone logs in
 		}
 	}()
-	log.Fatal((&http.Server{Addr: ":3000", ReadHeaderTimeout: 10 * time.Second}).ListenAndServe())
+	// A client that sends its body slowly or idles holds a connection only so long. No WriteTimeout: a report is big.
+	srv := &http.Server{Addr: ":3000", ReadHeaderTimeout: 10 * time.Second, ReadTimeout: time.Minute, IdleTimeout: 2 * time.Minute}
+	log.Fatal(srv.ListenAndServe())
 }
 
 // serveReport serves a PR's report. Only the proxy's SSO stands in front of it: a report holds the PR's code.

@@ -1,6 +1,7 @@
 package proc
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -36,6 +37,28 @@ func TestFiles(t *testing.T) {
 	}
 	if Exists(f) {
 		t.Fatal("still there")
+	}
+}
+
+// What a job plants in the home goes, the image's files come back.
+func TestResetHome(t *testing.T) {
+	pristine, home := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(pristine, ".pi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(pristine, ".pi", "ext.js"), []byte("ours"), 0o644)
+	tar := filepath.Join(t.TempDir(), "home.tar")
+	if _, err := Run(Command(t.Context(), "/", nil, "tar", "-cf", tar, "-C", pristine, ".")); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.MkdirAll(filepath.Join(home, ".pi"), 0o755)
+	_ = os.WriteFile(filepath.Join(home, ".pi", "ext.js"), []byte("theirs"), 0o644)
+	_ = os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[core]\nhooksPath=/x"), 0o644)
+	if err := resetHome(home, tar); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(home, ".pi", "ext.js")); string(b) != "ours" || Exists(filepath.Join(home, ".gitconfig")) {
+		t.Fatalf("ext.js %q, .gitconfig left: %v", b, Exists(filepath.Join(home, ".gitconfig")))
 	}
 }
 

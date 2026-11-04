@@ -143,6 +143,35 @@ func Remove(p string) error {
 	return err
 }
 
+// ResetHome restores node's home from the image's copy and drops node's files in the temp dirs, before each job:
+// PR code can write there, and the next job's git, checks and Pi read it (a ~/.gitconfig hook that gets that job's
+// git token, Pi's models.json or extensions, `go env -w GOFLAGS=-toolexec=…`).
+func ResetHome() error {
+	if !AsPi {
+		return nil
+	}
+	return resetHome("/home/node", "/opt/node-home.tar", "/tmp", "/dev/shm")
+}
+
+func resetHome(home, tar string, tmp ...string) error {
+	for _, dir := range append(tmp, home) {
+		ds, _ := os.ReadDir(dir)
+		for _, d := range ds {
+			p := filepath.Join(dir, d.Name())
+			fi, err := os.Lstat(p)
+			if err != nil || dir != home && fi.Sys().(*syscall.Stat_t).Uid != 1000 {
+				continue
+			}
+			if err := os.RemoveAll(p); err != nil { // as root: past node's chmod 000, and never through a symlink
+				return err
+			}
+		}
+	}
+	// As node: the files are node's again, and a symlink in the tar can't make root write.
+	_, err := Run(Command(context.Background(), "/", nil, "tar", "-xf", tar, "-C", home))
+	return err
+}
+
 // KillOrphans kills what PR code left running as node (a daemon from an install script that could read the next
 // job's git token or keys): node processes whose chain of node parents ends at init, i.e. outlived the process
 // that started them. A dry run in another docker exec keeps its processes: their chain ends at a root process.

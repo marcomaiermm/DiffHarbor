@@ -9,6 +9,11 @@ services:
     mem_limit: 3g
     cpus: 2
     restart: unless-stopped
+    pids_limit: 4096 # a fork bomb in the PR's tests
+    security_opt: [no-new-privileges:true] # no setuid binary takes node back to root
+    # Root needs these to make node's work dirs, drop to node, kill its leftovers and clean up after it.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID]
     ports: ["3000:3000"]
     environment:
       # GitHub App (README, GitHub). Leave empty for GitLab only.
