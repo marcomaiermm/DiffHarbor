@@ -109,13 +109,13 @@ const (
 )
 
 // noScripts is an install command without lifecycle scripts. Yarn classic wants the flag, Berry rejects it and
-// wants YARN_ENABLE_SCRIPTS=false (classic ignores that, Berry rejects YARN_IGNORE_SCRIPTS): told apart by the
-// lockfile's header. The CLI flags beat a PR's .npmrc.
-func noScripts(repo, lock string, cmd []string) []string {
-	if cmd[0] != "yarn" {
-		return append(cmd, "--ignore-scripts")
-	}
-	if b, _ := proc.ReadFile(filepath.Join(repo, lock)); bytes.Contains(b, []byte("# yarn lockfile v1")) {
+// wants YARN_ENABLE_SCRIPTS=false (classic ignores that): told apart by the yarn that runs (version, its last line
+// after corepack's), not the PR's lockfile. Anything but a Berry version gets the flag: Berry fails, never runs
+// scripts. The CLI flags beat a PR's .npmrc.
+func noScripts(cmd []string, yarnVersion string) []string {
+	v := strings.TrimSpace(yarnVersion)
+	v = v[strings.LastIndex(v, "\n")+1:]
+	if major, _, _ := strings.Cut(v, "."); cmd[0] != "yarn" || major < "2" || len(major) != 1 {
 		return append(cmd, "--ignore-scripts")
 	}
 	return append([]string{"env", "YARN_ENABLE_SCRIPTS=false"}, cmd...)
@@ -207,7 +207,11 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 				"package-lock.json": {"npm", "ci", "--no-audit", "--no-fund", "--loglevel=error"},
 			}[filepath.Base(lock)]
 			if !installScripts {
-				cmd = noScripts(repo, lock, cmd)
+				v := ""
+				if cmd[0] == "yarn" {
+					v = in(filepath.Dir(lock))("yarn", "--version")
+				}
+				cmd = noScripts(cmd, v)
 			}
 			section("install"+titled(filepath.Dir(lock)), in(filepath.Dir(lock))(cmd[0], cmd[1:]...), -20)
 		}
