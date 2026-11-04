@@ -246,7 +246,6 @@ func TestSaid(t *testing.T) {
 	}
 }
 
-// a generated file's one huge line cuts the file there: what follows it is cut too, not shown out of order
 // A deleted file keeps its first maxGone lines and what moved out of it: the other side links there.
 func TestTrim(t *testing.T) {
 	f := &file{Lines: make([]line, maxGone+10)}
@@ -257,6 +256,7 @@ func TestTrim(t *testing.T) {
 	}
 }
 
+// a generated file's one huge line cuts the file there: what follows it is cut too, not shown out of order
 func TestCut(t *testing.T) {
 	f := parse("a.json", "--- a/a.json\n+++ b/a.json\n@@ -0,0 +1,3 @@\n+{\n+"+strings.Repeat("x", maxBytes)+"\n+}\n", "")
 	if len(f.Lines) != 2 || f.Cut != 2 {
