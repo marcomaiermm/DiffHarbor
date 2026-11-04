@@ -199,11 +199,11 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		rm, _ := cfg.Models()
 		kind += " · fallback " + agent.FallbackFor(rm, "review")
 	}
-	if omitted > 0 { // the rest only by name: findings cover part of the PR
-		inline := len(diff.Paths(d))
-		kind += fmt.Sprintf(" · ⚠️ inline %d of %d files", inline, inline+omitted)
+	if len(omitted) > 0 { // the rest only by name: findings cover part of the PR
+		inline := len(slices.DeleteFunc(diff.Paths(d), func(f string) bool { return slices.Contains(omitted, f) }))
+		kind += fmt.Sprintf(" · ⚠️ inline %d of %d files", inline, inline+len(omitted))
 		if all, _ := diff.Filter(raw, only, cfg.IgnoreRe, cfg.Parts(true)); cfg.Asks() && len(all) > len(parts) {
-			s.Ask = forge.AskLarge(len(diff.Paths(strings.Join(all, ""))), inline+omitted, len(all), f.Boxes(), f.Bot())
+			s.Ask = forge.AskLarge(len(diff.Paths(strings.Join(all, ""))), inline+len(omitted), len(all), f.Boxes(), f.Bot())
 		}
 	}
 	if tid != "" {
@@ -230,7 +230,10 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	}
 	log.Printf("%s %s %s %s: %s", key, sha[:7], kind, stats, desc)
 	s.State = s.State.Update(r, sha, prFiles, only == nil)
-	s.State.Patches = reviewedPatches(s.State.Patches, patches, slices.DeleteFunc(diff.Paths(d), func(f string) bool { return slices.Contains(r.Failed, f) }))
+	// a file with a piece left out isn't reviewed: the next push reviews it again
+	s.State.Patches = reviewedPatches(s.State.Patches, patches, slices.DeleteFunc(diff.Paths(d), func(f string) bool {
+		return slices.Contains(r.Failed, f) || slices.Contains(omitted, f)
+	}))
 	if guide {
 		repo := filepath.Join(dir, "repo")
 		st := s.State
