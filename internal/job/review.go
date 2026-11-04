@@ -180,7 +180,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		regs, _ = checks.Registries(e.Owner()) // main checked them
 	}
 	r, stats, err := review.Analyze(ctx, review.Input{
-		Agent: agent.Pi{}, Dir: dir, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Ticket: tk, Parts: parts,
+		Agent: agent.Pi{}, Dir: dir, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: forge.Redact(review.Messages(ctx, filepath.Join(dir, "repo"))), Ticket: tk, Parts: parts,
 		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo())), Checks: scripts, Registries: regs, Prior: prior, Closed: closed, Settings: cfg,
 		Guide: guide && only == nil, // an incremental review sees a few files: the last full one's reading order stays
 	})

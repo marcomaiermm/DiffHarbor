@@ -161,6 +161,24 @@ func TestSettings(t *testing.T) {
 	if _, err := LoadSettings(`{"review_model":"--tools=bash"}`); err == nil {
 		t.Error("flag as model accepted")
 	}
+	for _, bad := range []string{`{"passes":[{},{},{},{}]}`, `{"passes":[{"max_lines":10}]}`, `{"passes":[{"model":"x/y"}]}`,
+		`{"passes":[{},{"model":"--tools=bash"}]}`, `{"passes":[{},{"min_lines":10,"max_lines":5}]}`} {
+		if _, err := LoadSettings(bad); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+	cfg, err = LoadSettings(`{"review_model":"openai/gpt-6.1-sol","passes":[{"again":false},{"max_lines":100},{"model":"anthropic/claude-haiku-5-5:high","min_lines":50}]}`)
+	finders := func(lines int) string {
+		var ms []string
+		for _, p := range cfg.Finders(lines) {
+			ms = append(ms, p.Model)
+		}
+		return strings.Join(ms, ",")
+	}
+	if err != nil || finders(10) != "openai/gpt-6.1-sol,openai/gpt-6-luna:high" || finders(500) != "openai/gpt-6.1-sol,anthropic/claude-haiku-5-5:high" ||
+		len(cfg.Finders(75)) != 3 || *cfg.Finders(0)[0].Again || len((Settings{}).Finders(0)) != 1 {
+		t.Errorf("passes: %v %q %q", err, finders(10), finders(500))
+	}
 	cfg, err = LoadSettings(`{"review_model":"openai/gpt-6.1-sol","verify_model":"anthropic/claude-haiku-4-5:low"}`)
 	if r, v := cfg.Models(); err != nil || r != "openai/gpt-6.1-sol" || v != "anthropic/claude-haiku-4-5:low" {
 		t.Errorf("models from review.json: %v %q %q", err, r, v)
@@ -169,6 +187,10 @@ func TestSettings(t *testing.T) {
 	agent.Model = "deepseek/x" // REVIEW_MODEL pins the review model, verify still from review.json
 	if r, v := cfg.Models(); r != "deepseek/x" || v != "anthropic/claude-haiku-4-5:low" {
 		t.Errorf("env over review.json: %q %q", r, v)
+	}
+	pinned, _ := LoadSettings(`{"passes":[{},{"model":"anthropic/claude-haiku-5-5:high"}]}`)
+	if fs := pinned.Finders(0); fs[0].Model != "deepseek/x" || fs[1].Model != "deepseek/deepseek-flash:high" {
+		t.Errorf("REVIEW_MODEL pins the passes too: %+v", fs)
 	}
 	agent.Model = ""
 	t.Setenv("OPENAI_API_KEY", "k")

@@ -133,6 +133,17 @@ func Commits(ctx context.Context, repo string) []Commit {
 	return parseCommits(string(out))
 }
 
+// Messages is the PR's commit messages oldest first, from a Checkout, merges aside. "" when git fails.
+func Messages(ctx context.Context, repo string) string {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	out, err := proc.Run(proc.Command(ctx, repo, nil, "git", "log", "--reverse", "--no-merges", "--format=- %B", "refs/base..HEAD"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // Behind lists the base's commits the PR doesn't have yet, newest first, from a Checkout: what moved on under it.
 // nil when git fails.
 func Behind(ctx context.Context, repo string) []Commit {

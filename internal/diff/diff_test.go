@@ -37,6 +37,13 @@ func TestDiff(t *testing.T) {
 	if got := Paths(src); len(got) != 1 || got[0] != "src/a.ts" {
 		t.Fatalf("paths: %v", got)
 	}
+	if got := Changed(diff); got != 6 { // 3 in src/a.ts, 2 in the lockfile, gone.ts's 1: not its "--- a/" header
+		t.Fatalf("changed: %d", got)
+	}
+	lock := file("pnpm-lock.yaml", "@@ -1 +1 @@\n-a\n+b\n")
+	if got := Reverse(src + lock); got != lock+src || Reverse(src) != src {
+		t.Fatalf("reverse: %q", got)
+	}
 }
 
 func TestPatchIDs(t *testing.T) {
