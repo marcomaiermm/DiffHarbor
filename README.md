@@ -53,13 +53,13 @@ The server listens on `:3000`. Expose `POST /webhook/github` and/or `POST /webho
 
 ## How a review works
 
-1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, PRs into a branch other than the default branch (see `base_branches`), lockfiles, build output, generated code and binaries stay out. A pass gets up to 60k characters, code first, then tests, data and docs; larger PRs can be reviewed [in parts](#large-prs).
+1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, generated code and binaries stay out. A pass gets up to 60k characters, code first, then tests, data and docs; larger PRs can be reviewed [in parts](#large-prs).
 2. **Context.** The checks above, plus codegraph, co-change from git history, the repo's rules and skills from the base branch, learnings, and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings per pass.
 4. **Verify.** A cheaper model checks each finding in the code.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
-PRs from bots (Dependabot, Renovate) are skipped with a green status unless someone asks for a review.
+Two kinds of PRs are skipped with a green status unless someone asks for a review: PRs from bots (Dependabot, Renovate), and PRs into a branch other than the default branch or one in [`base_branches`](#per-repo-settings).
 
 ### Talking to the bot
 
@@ -148,6 +148,7 @@ Bedrock in the EU: `amazon-bedrock/eu.anthropic.…`. Each pass gets only its ow
 | `LINEAR_API_KEY` | The same for Linear: a personal API key (read-only is enough). The ticket (`ENG-12`) is fetched by its identifier. |
 | `TICKET_PROVIDER` | `itsaplan` or `linear`. Required when both are configured (the server doesn't start otherwise); with one configured it is that one. |
 | `NPM_REGISTRIES` | The npm registries the checks' installs read from, such as your Artifactory's pull-through cache and internal repos: entries `<owner> [@scope] <url> <token>`, split by commas or newlines. `<owner>` is the repo's owner (GitLab: `gitlab/<group>`) or `*` for all; an owner's own entry beats `*` for its scope. The entry without a scope replaces the default registry (npmjs, also in lockfiles), one with `@corp` serves that scope. A token with a colon is `user:password`. Example: `* https://art.corp/artifactory/api/npm/npm-virtual/ <token>, team-a @team-a https://art.corp/artifactory/api/npm/team-a/ <token>`. As root (the image) the tokens stay in the server: installs read through its proxy (GETs only, no publish); lockfile URLs point at it during the install. Run as another user (`diffharbor dry`), the tokens go in the installs' env. Never for PRs from forks. Yarn Berry gets the default registry only, its scopes come from `.yarnrc.yml`. Use read-only tokens. |
+| `DATA_DIR`, `CACHE_DIR` | Where the data (learnings, pending reviews, reports, logins, the repos' uids) and the per-repo caches live. `/data` and `/cache` in the image; keep both on volumes, apart. |
 | `DOCKER_HOST` | With the `dind` service: Docker for testcontainers in the checks, isolated with [Sysbox](https://github.com/nestybox/sysbox) (install it on the host). Drop both if your tests don't need Docker. |
 
 ### Branding the report
