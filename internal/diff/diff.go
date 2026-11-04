@@ -58,9 +58,9 @@ func rank(path string) int {
 }
 
 // Filter drops lockfiles, generated/binary files (Skip) and what ignore matches; only (nil = all) limits to these
-// paths. It packs whole files into at most n parts of up to Max each, code before tests, data, stylesheets and docs, a file next to
-// others of its directory; in a part they keep the diff's order. The last part names the omitted files, their count
-// returns, and with only nil the deleted files: their diffs are no use, what still relies on them is.
+// paths. It packs whole files into at most n parts of up to Max each, code before tests, data, stylesheets and docs, a
+// file next to others of its directory; in a part they keep the diff's order. The last part names the omitted files,
+// their count returns, and with only nil the deleted files: their diffs are no use, what still relies on them is.
 func Filter(diff string, only map[string]bool, ignore *regexp.Regexp, n int) ([]string, int) {
 	type file struct {
 		i          int
