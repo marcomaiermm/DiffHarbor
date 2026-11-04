@@ -40,8 +40,8 @@
     <div class="tab-content" role="tabpanel" id="findings" aria-labelledby="tab-findings" tabindex="0">
       <p class="legend"><span class="chip" data-shown>green</span>shown without a model: the diff, the imports or a search<span class="chip" data-dash>dashed</span>a second model agreed, which is no proof</p>
       {{if not .NFound}}<div class="empty">
-        <h3>No findings on {{short .SHA}}</h3>
-        <p>A second model read the change and kept nothing it could point to in the code. That is no proof{{if or .Decisions .MergeN}}, so the decisions and merge risks still need you{{end}}.</p>
+        <h3>No findings on {{short .SHA}}{{if .Failed}} in the files reviewed{{end}}</h3>
+        <p>{{with .Dropped}}A second model checked {{plural (len .) "finding" "findings"}} against the code and kept none.{{else}}The review found nothing it could point to in the code.{{end}} That is no proof{{if or .Decisions .MergeN}}, so the decisions and merge risks still need you{{end}}.</p>
       </div>{{end}}
       {{range .Groups}}{{if .Items}}<h3 class="fgrp">{{.Title}} <b>· {{len .Items}}</b></h3>
       <ul class="flist">{{range .Items}}<li><a class="frow"{{with .Href}} href="{{.}}"{{end}}>

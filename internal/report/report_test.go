@@ -1105,3 +1105,22 @@ func TestCallAt(t *testing.T) {
 		}
 	}
 }
+
+// A part whose review failed leaves its files unread: the verdict says so instead of clean, and an empty list
+// credits the verifier only when it dropped something.
+func TestFailedNotClean(t *testing.T) {
+	d := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-package a\n+package b\n"
+	b, _, err := Render(Data{Repo: "o/r", Number: 1, SHA: "abc", Diff: d, Failed: []string{"a.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(b)
+	for _, w := range []string{"Not fully reviewed", "1 file not reviewed", "The review of a.go failed", "The review found nothing"} {
+		if !strings.Contains(page, w) {
+			t.Errorf("%q missing", w)
+		}
+	}
+	if strings.Contains(page, "Nothing blocks the merge") || strings.Contains(page, "A second model checked") {
+		t.Error("a clean verdict or a verifier that did not run")
+	}
+}

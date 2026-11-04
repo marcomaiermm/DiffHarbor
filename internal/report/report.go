@@ -57,6 +57,7 @@ type Data struct {
 	Forge       Forge
 	Prev        *Version          // the version before: the report marks what changed since; nil for the first
 	Dropped     []review.Comment  // what the verifier dropped, its reason in Evidence
+	Failed      []string          // files whose review part failed: not reviewed
 	Tests       checks.Tests      // what the checks' test runs report at SHA; empty when none ran
 	Sources     map[string]string // the head's text of changed files, for the lines between hunks (see Sources)
 }

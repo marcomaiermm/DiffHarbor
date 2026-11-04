@@ -148,6 +148,17 @@ func verdictOf(v *view) verdict {
 		}
 		return verdict{Short: "Not ready to merge", Title: "Fix first: " + top.Title, Body: body}
 	}
+	if n := len(v.Failed); n > 0 { // not read is not clean
+		names := append([]string{}, v.Failed[:min(n, 3)]...)
+		if n > 3 {
+			names = append(names, plural(n-3, "more file", "more files"))
+		}
+		body := "The review of " + join(names) + " failed: the next push or a new review reads them."
+		if len(need) > 0 {
+			body += " " + strings.ToUpper(join(need)[:1]) + join(need)[1:] + " also need you."
+		}
+		return verdict{Short: "Not fully reviewed", Title: plural(n, "file", "files") + " not reviewed", Body: body}
+	}
 	vd := verdict{OK: true, Short: "No findings", Title: "Nothing blocks the merge", Body: "No finding on " + short(v.SHA) + "."}
 	if minor > 0 {
 		vd.Short, vd.Body = "No blockers", plural(minor, "minor finding", "minor findings")+", none that blocks."
