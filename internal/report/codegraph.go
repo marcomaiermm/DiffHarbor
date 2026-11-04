@@ -44,6 +44,7 @@ process.stdout.write(JSON.stringify(out));
 `
 
 type cgIndex struct {
+	dbs   []cgDB
 	Nodes []struct {
 		Name, Path string
 		Line       int
@@ -60,11 +61,7 @@ type cgIndex struct {
 // codegraph is the indexes of the checkout at repo, the root's and those of the directories above paths, for the
 // wanted names; nil without one.
 func codegraph(repo string, wanted map[string]bool, paths []string) *cgIndex {
-	type db struct {
-		DB     string `json:"db"`
-		Prefix string `json:"prefix"`
-	}
-	var dbs []db
+	var dbs []cgDB
 	seen := map[string]bool{}
 	for _, p := range paths {
 		for d := p; d != "."; {
@@ -75,24 +72,34 @@ func codegraph(repo string, wanted map[string]bool, paths []string) *cgIndex {
 			}
 			seen[d] = true
 			if _, err := os.Stat(f); err == nil {
-				dbs = append(dbs, db{f, strings.TrimPrefix(d+"/", "./")})
+				dbs = append(dbs, cgDB{f, strings.TrimPrefix(d+"/", "./")})
 			}
 		}
 	}
 	if len(dbs) == 0 {
 		return nil
 	}
-	in, _ := json.Marshal(map[string]any{"names": slices.Collect(maps.Keys(wanted)), "dbs": dbs})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "node", "-e", cgQuery)
-	cmd.Stdin = bytes.NewReader(in)
-	out, err := cmd.Output()
-	var idx cgIndex
-	if err != nil || json.Unmarshal(out, &idx) != nil {
+	idx := cgIndex{dbs: dbs}
+	if !runNode(cgQuery, map[string]any{"names": slices.Collect(maps.Keys(wanted)), "dbs": dbs}, &idx) {
 		return nil
 	}
 	return &idx
+}
+
+type cgDB struct {
+	DB     string `json:"db"`
+	Prefix string `json:"prefix"`
+}
+
+// runNode runs script with in as its stdin, its stdout into out; false when it fails or takes past a minute.
+func runNode(script string, in, out any) bool {
+	b, _ := json.Marshal(in)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "node", "-e", script)
+	cmd.Stdin = bytes.NewReader(b)
+	got, err := cmd.Output()
+	return err == nil && json.Unmarshal(got, out) == nil
 }
 
 // exact replaces what the name scan guessed with the index's resolved edges, for the declarations the index knows:
@@ -176,6 +183,169 @@ func (idx *cgIndex) exact(repo string, changed map[string]bool, syms map[string]
 }
 
 func abs(n int) int { return max(n, -n) }
+
+// cgTests is which tests reach each of the starts, the diff's declarations an index knows. tests: by the index's
+// resolved uses, its callers' and theirs, nearest first, test code nothing calls: the runner does; partial past maxNodes. untested: not even a guess reaches a
+// test. That guess is every line of the checkout that names it (git grep), what declaration that line is in, the
+// lines that name that one and so on: a call in a macro, through an interface, by reflection is one the index
+// misses. A line in a file no index read, or at a file's top level, may run anything: no claim, as past maxNames
+// names or a name in more than maxMentions lines, as common as "Run". A test: the conventions of codegraph's
+// isTestPath, a marker on or just above the declaration, or below a #[cfg(test)].
+const cgTests = `
+const { DatabaseSync } = require("node:sqlite");
+const { execFileSync } = require("child_process");
+const fs = require("fs"), base = require("path").basename;
+const { repo, dbs, starts } = JSON.parse(fs.readFileSync(0, "utf8"));
+const maxNodes = 5000, maxNames = 2000, maxMentions = 1000, maxLines = 50000;
+const open = dbs.map(d => {
+  const db = new DatabaseSync(d.db, { readOnly: true });
+  return { prefix: d.prefix, files: new Set(db.prepare("select path from files").all().map(r => r.path)),
+    named: db.prepare("select id, start_line line from nodes where file_path = ? and name = ? and kind not in ('file', 'import')"),
+    into: db.prepare("select s.id, s.kind, s.name, s.file_path path, s.start_line line from edges e join nodes s on s.id = e.source" +
+      " where e.target = ? and e.kind in ('calls', 'references', 'instantiates')"),
+    around: db.prepare("select kind, name, start_line line from nodes where file_path = :f and start_line <= :l and end_line >= :l" +
+      " and kind != 'file' order by start_line desc, end_line limit 1") };
+}).sort((a, b) => b.prefix.length - a.prefix.length);
+const owner = p => open.find(d => p.startsWith(d.prefix));
+const src = new Map();
+const lines = p => { if (!src.has(p)) { let t = ""; try { t = fs.readFileSync(repo + "/" + p, "utf8") } catch {} src.set(p, t.split("\n")) } return src.get(p) };
+const testPath = p => { // codegraph's isTestPath
+  const lower = p.toLowerCase(), name = base(p), ln = name.toLowerCase();
+  return ln.startsWith("test_") || ln.startsWith("test.") || /[._-](test|tests|spec|specs)\.[a-z0-9]+$/.test(ln) ||
+    /(?:Test|Tests|TestCase|Tester|Spec|Specs)\.[A-Za-z0-9]+$/.test(name) ||
+    ["/tests/", "/test/", "/__tests__/", "/spec/", "/specs/", "/testlib/", "/testing/", "/e2e/"].some(d => lower.includes(d)) ||
+    ["test/", "tests/", "spec/", "specs/", "e2e/"].some(d => lower.startsWith(d)) ||
+    /(?:^|\/)[A-Za-z0-9]*(?:Test|Tests|Spec)\//.test(p) ||
+    /(?:^|\/)(?:[\w.]+[-_]test(?:s|ing)?|testdata|testutils?|test[-_]utils?|fakes?|mocks?|__mocks__|stubs)\//.test(lower);
+};
+const mark = /#\[\s*(?:[\w:]+::)?(?:test|rstest|test_case|quickcheck)\b|\[\s*(?:Fact|Theory|Test|TestMethod|DataTestMethod|TestCase\w*)\b|@(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate|pytest\.mark\.\w+)\b/;
+const cfgTest = /#\[\s*cfg\s*\(\s*test\s*\)\s*\]/;
+const isTest = (p, line) => { const ls = lines(p); return testPath(p) || mark.test(ls.slice(Math.max(line - 4, 0), line).join("\n")) || ls.slice(0, line).some(l => cfgTest.test(l)) };
+const comment = /^\s*(?:\/\/|\/\*|\*|--|;|%|<!--|"""|'''|#(?![\[!]|\s*(?:include|define|if|ifdef|ifndef|pragma|import)\b))/;
+const doc = p => /\.(?:md|mdx|markdown|txt|rst|adoc|org)$/i.test(p) || /(?:^|\/)(?:docs?|LICENSE[^/]*|CHANGELOG[^/]*)(?:\/|$)/i.test(p);
+
+function strict(d, id) {
+  const seen = new Set([id]), q = [id], tests = [];
+  let partial = false;
+  for (let i = 0; i < q.length && !partial; i++) {
+    for (const s of d.into.all(q[i])) {
+      if (seen.has(s.id)) continue;
+      if (seen.size >= maxNodes) { partial = true; break }
+      seen.add(s.id);
+      const p = d.prefix + s.path;
+      if (!isTest(p, s.line) || d.into.all(s.id).length) { q.push(s.id); continue } // a test helper, an interface's: on to the test
+      const t = s.kind === "file" ? base(p) : base(p) + " " + s.name;
+      if (!tests.includes(t)) tests.push(t);
+    }
+  }
+  return { tests, partial };
+}
+
+const mentions = new Map(); // name -> [path, line][], null: in too many
+function grep(names) {
+  const want = new Set(names.filter(n => !mentions.has(n)));
+  if (!want.size) return;
+  for (const n of want) mentions.set(n, []);
+  let out = "";
+  try {
+    out = execFileSync("git", ["-C", repo, "grep", "-n", "-z", "-w", "-F", "-I", "-f", "-"], { input: [...want].join("\n"), maxBuffer: 1 << 28, encoding: "utf8" });
+  } catch (e) { if (e.status !== 1) throw e } // 1: no line
+  for (const row of out.split("\n")) {
+    const [p, line, text] = row.split("\0");
+    if (text === undefined) continue;
+    for (const w of new Set(text.match(/[A-Za-z0-9_$]+/g))) {
+      const ms = mentions.get(w);
+      if (!want.has(w) || !ms) continue;
+      if (ms.push([p, +line]) > maxMentions) mentions.set(w, null);
+    }
+  }
+}
+
+function untested(name) {
+  const seen = new Set([name]);
+  let level = [name], n = 0;
+  while (level.length) {
+    grep(level);
+    const next = [];
+    for (const w of level) {
+      const ms = mentions.get(w);
+      if (!ms || (n += ms.length) > maxLines) return false;
+      for (const [p, line] of ms) {
+        const d = owner(p), f = d && p.slice(d.prefix.length);
+        if (!d || !d.files.has(f)) { if (doc(p)) continue; return false }
+        const at = d.around.get({ f, l: line });
+        if (!at) { if (comment.test(lines(p)[line - 1] || "")) continue; return false }
+        if (at.kind === "import") continue;
+        if (isTest(p, at.line)) return false;
+        if (seen.has(at.name)) continue;
+        if (seen.size >= maxNames) return false;
+        seen.add(at.name);
+        next.push(at.name);
+      }
+    }
+    level = next;
+  }
+  return true;
+}
+
+const out = [], known = new Map();
+for (const { path, name } of starts) {
+  const d = owner(path);
+  if (!d) continue;
+  for (const n of d.named.all(path.slice(d.prefix.length), name)) {
+    if (!known.has(name)) { try { known.set(name, untested(name)) } catch { known.set(name, false) } }
+    out.push({ path, name, line: n.line, ...strict(d, n.id), untested: known.get(name) });
+  }
+}
+process.stdout.write(JSON.stringify(out));
+`
+
+// tests sets the Tests, Partial and Untested of the diff's declarations in the index: see cgTests. Without git or
+// node, or past a minute, none: no test listed, and no claim that none reaches.
+func (idx *cgIndex) tests(repo string, changed map[string]bool, syms map[string][]Symbol) {
+	type start struct {
+		Path string `json:"path"`
+		Name string `json:"name"`
+	}
+	var starts []start
+	for name, ss := range syms {
+		for _, s := range ss {
+			if s.Exact && changed[s.Path] && !slices.Contains(starts, start{s.Path, name}) {
+				starts = append(starts, start{s.Path, name})
+			}
+		}
+	}
+	var got []struct {
+		Path, Name        string
+		Line              int
+		Tests             []string
+		Partial, Untested bool
+	}
+	if len(starts) == 0 || !runNode(cgTests, map[string]any{"repo": repo, "dbs": idx.dbs, "starts": starts}, &got) {
+		return
+	}
+	set := map[*Symbol]bool{} // two of the index's, one of ours: what reaches either reaches it
+	for _, g := range got {
+		var best *Symbol
+		for i, s := range syms[g.Name] {
+			if s.Path == g.Path && (best == nil || abs(s.Line-g.Line) < abs(best.Line-g.Line)) {
+				best = &syms[g.Name][i]
+			}
+		}
+		switch {
+		case best == nil:
+		case !set[best]:
+			set[best], best.Tests, best.Partial, best.Untested = true, g.Tests, g.Partial, g.Untested
+		default:
+			for _, t := range g.Tests {
+				if !slices.Contains(best.Tests, t) {
+					best.Tests = append(best.Tests, t)
+				}
+			}
+			best.Partial, best.Untested = best.Partial || g.Partial, best.Untested && g.Untested
+		}
+	}
+}
 
 // files is the checkout's files by line, read when first asked.
 type files struct {

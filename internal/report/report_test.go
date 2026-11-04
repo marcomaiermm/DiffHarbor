@@ -696,22 +696,103 @@ func TestJudge(t *testing.T) {
 
 // A step names the tests that call what it changes; it says none does only when codegraph knows every use.
 func TestTested(t *testing.T) {
-	st := step{Files: []*file{{Path: "a.go", Changes: []change{{Name: "Save"}}}}}
-	call := Ref{Path: "a_test.go", Line: 3, In: "TestSave"}
-	other := Ref{Path: "b.go", Line: 9, In: "Use"}
+	code := func(names ...string) *file {
+		f := &file{Path: "a.go", Kind: "code"}
+		for _, n := range names {
+			f.Changes = append(f.Changes, change{Name: n})
+		}
+		return f
+	}
+	many := make([]string, 10)
+	for i := range many {
+		many[i] = fmt.Sprintf("a_test.go Test%d", i)
+	}
 	for _, c := range []struct {
-		s        Symbol
+		why      string
+		f        *file
+		syms     map[string][]Symbol
+		tests    []string
+		more     int
+		untested bool
+	}{
+		{"a test reaches it", code("Save"), map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Tests: []string{"a_test.go TestSave"}}}}, []string{"a_test.go TestSave"}, 0, false},
+		{"none does", code("Save"), map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Untested: true}}}, nil, 0, true},
+		{"a guess does", code("Save"), map[string][]Symbol{"Save": {{Path: "a.go", Exact: true}}}, nil, 0, false},
+		{"not the index's", code("Save"), map[string][]Symbol{"Save": {{Path: "a.go", Untested: true}}}, nil, 0, false},
+		{"another file's", code("Save"), map[string][]Symbol{"Save": {{Path: "b.go", Exact: true, Untested: true}}}, nil, 0, false},
+		{"a change it doesn't know", code("Save", "Load"), map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Untested: true}}}, nil, 0, false},
+		{"a removed one reaches nothing", &file{Path: "a.go", Kind: "code", Changes: []change{{Name: "Save"}, {Name: "Old", State: "gone"}}},
+			map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Untested: true}}}, nil, 0, true},
+		{"a line outside", &file{Path: "a.go", Kind: "code", Stray: true, Changes: []change{{Name: "Save"}}},
+			map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Untested: true}}}, nil, 0, false},
+		{"not code", &file{Path: "a.go", Kind: "config", Changes: []change{{Name: "Save"}}},
+			map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Untested: true}}}, nil, 0, false},
+		{"nothing changed", code(), nil, nil, 0, false},
+		{"counted past maxTests", code("Save"), map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, Tests: many}}}, many[:maxTests], 2, false},
+	} {
+		tests, more, _, untested := tested(step{Files: []*file{c.f}}, c.syms)
+		if !slices.Equal(tests, c.tests) || more != c.more || untested != c.untested {
+			t.Errorf("%s: %v +%d %v", c.why, tests, more, untested)
+		}
+	}
+}
+
+// TestWalk walks a checkout by codegraph's tables and git grep: a test through a caller, a call codegraph can't see
+// in a Rust macro, a use in a template, and a function only a doc and a comment name.
+func TestWalk(t *testing.T) {
+	for _, tool := range []string{"node", "git"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip("no " + tool)
+		}
+	}
+	dir := t.TempDir()
+	for p, src := range map[string]string{
+		"a.go":      "package a\n\nfunc Save() { helper() }\n\nfunc helper() {}\n\nfunc Lonely() {}\n\nfunc Hidden() {}\n",
+		"a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestSave(t *testing.T) { Save() }\n",
+		"b.go":      "package a\n\n// Lonely is alone.\n",
+		"lib.rs":    "pub fn wrap() -> i32 { 1 }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn wraps() { assert_eq!(super::wrap(), 1); }\n}\n",
+		"page.html": "{{Hidden}}\n",
+		"README.md": "Call Lonely.\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, p), []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db := `const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(process.argv[1]);
+db.exec("create table nodes (id text, kind text, name text, file_path text, start_line int, end_line int);" +
+  "create table edges (source text, target text, kind text, line int); create table files (path text);" +
+  "insert into files values ('a.go'), ('a_test.go'), ('b.go'), ('lib.rs');" +
+  "insert into nodes values ('s', 'function', 'Save', 'a.go', 3, 3), ('h', 'function', 'helper', 'a.go', 5, 5)," +
+  " ('l', 'function', 'Lonely', 'a.go', 7, 7), ('x', 'function', 'Hidden', 'a.go', 9, 9), ('i', 'import', 'testing', 'a_test.go', 3, 3)," +
+  " ('t', 'function', 'TestSave', 'a_test.go', 5, 5), ('w', 'function', 'wrap', 'lib.rs', 1, 1), ('ws', 'function', 'wraps', 'lib.rs', 6, 6);" +
+  "insert into edges values ('s', 'h', 'calls', 3), ('t', 's', 'calls', 5);")`
+	if err := os.MkdirAll(filepath.Join(dir, ".codegraph"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("node", "-e", db, filepath.Join(dir, ".codegraph", "codegraph.db")).CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "."}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatal(err, string(out))
+		}
+	}
+	s := Symbols(dir, "+++ b/a.go\n+func Save() { helper() }\n+func helper() {}\n+func Lonely() {}\n+func Hidden() {}\n+++ b/lib.rs\n+pub fn wrap() -> i32 { 1 }\n")
+	for name, want := range map[string]struct {
 		tests    []string
 		untested bool
 	}{
-		{Symbol{Path: "a.go", Exact: true, Refs: []Ref{other, call}, Uses: 2}, []string{"a_test.go TestSave"}, false},
-		{Symbol{Path: "a.go", Exact: true, Refs: []Ref{other}, Uses: 1}, nil, true},
-		{Symbol{Path: "a.go", Exact: true, Refs: []Ref{other}, Uses: 30}, nil, false}, // more uses than listed
-		{Symbol{Path: "a.go", Refs: []Ref{call}, Uses: 1}, nil, false},                 // by name only
+		"Save":   {[]string{"a_test.go TestSave"}, false},
+		"helper": {[]string{"a_test.go TestSave"}, false}, // through Save
+		"Lonely": {nil, true},                             // a doc and a comment name it
+		"Hidden": {nil, false},                            // a template may call it
+		"wrap":   {nil, false},                            // a test below #[cfg(test)], in a macro the index can't see
 	} {
-		tests, untested := tested(st, map[string][]Symbol{"Save": {c.s}})
-		if !slices.Equal(tests, c.tests) || untested != c.untested {
-			t.Errorf("%+v: %v %v", c.s, tests, untested)
+		if len(s[name]) != 1 {
+			t.Fatalf("%s: %+v", name, s[name])
+		}
+		if got := s[name][0]; !slices.Equal(got.Tests, want.tests) || got.Untested != want.untested {
+			t.Errorf("%s: tests %v, untested %v", name, got.Tests, got.Untested)
 		}
 	}
 }

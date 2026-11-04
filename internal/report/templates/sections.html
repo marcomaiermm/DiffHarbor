@@ -15,7 +15,7 @@
       <h3 class="text-lg font-semibold tracking-tight">{{$s.Title}}</h3>
     </div>
     {{with $s.Why}}<p class="mt-1 ml-8 text-muted-foreground">{{.}}</p>{{end}}
-    {{with $s.Tests}}<p class="step-tests">Tests that reach it: {{range $i, $t := .}}{{if $i}}, {{end}}<code>{{$t}}</code>{{end}}</p>{{else}}{{if $s.Untested}}<p class="step-tests" data-gap>No test reaches what this step changes.</p>{{end}}{{end}}
+    {{with $s.Tests}}<p class="step-tests">Tests that reach it: {{range $i, $t := .}}{{if $i}}, {{end}}<code>{{$t}}</code>{{end}}{{if $s.Partial}} and more{{else}}{{with $s.More}} and {{.}} more{{end}}{{end}}</p>{{else}}{{if $s.Untested}}<p class="step-tests" data-gap>No test reaches what this step changes.</p>{{end}}{{end}}
     {{with $s.Graph}}<details class="trace-collapsible mt-3 ml-8">
       <summary><span class="trace-line"><span class="trace-icon">{{icon "workflow" ""}}</span><span class="trace-title">How the changed code connects</span><span class="trace-icon trace-chevron">{{icon "chevron-right" ""}}</span></span></summary>
       {{template "graph" .}}

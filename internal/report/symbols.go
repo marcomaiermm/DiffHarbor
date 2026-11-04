@@ -22,7 +22,7 @@ type Symbol struct {
 	Kind  string   `json:"kind"`           // function, method, type, constant, variable, "field of T", "method of T"
 	Pkg   string   `json:"pkg,omitempty"`  // the unit it is declared in, to tell pkg.Name apart; known for Go only
 	Unit  string   `json:"unit,omitempty"` // what the language calls Pkg: "package"
-	Sig   string   `json:"sig"`           // the declaration without its body
+	Sig   string   `json:"sig"`            // the declaration without its body
 	Doc   string   `json:"doc,omitempty"`
 	Path  string   `json:"path"`
 	Line  int      `json:"line"`
@@ -35,6 +35,10 @@ type Symbol struct {
 	// exact: the first maxRefs places outside the diff's files that name it, and how many: what the change reaches
 	Outside  []Ref `json:"-"`
 	NOutside int   `json:"-"`
+	// exact, in the diff's files: the tests that reach it through the index's uses, nearest first: "a_test.go
+	// TestSave"; Partial, past what a walk reads. Untested: no test reaches it, not even by name: see cgTests.
+	Tests             []string `json:"-"`
+	Partial, Untested bool     `json:"-"`
 }
 
 // Ref is a line that names a symbol, and the declaration it sits in.
@@ -138,6 +142,7 @@ func Symbols(repo, diffText string) map[string][]Symbol {
 			changed[p] = true
 		}
 		idx.exact(repo, changed, syms)
+		idx.tests(repo, changed, syms)
 	}
 	return syms
 }

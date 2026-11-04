@@ -243,6 +243,7 @@ type file struct {
 	Changes          []change   // the declarations it changes
 	Long             bool       // lists Changes above its diff
 	Changed          bool       // its change differs from Prev's, or it's new to the PR
+	Stray            bool       // a line it changes is in none of Changes: a step's tests can't tell what it does
 }
 
 // change is a declaration a file's diff touches: State "new", "gone" or "" (changed), ID its first changed line.
@@ -256,8 +257,10 @@ type step struct {
 	Title, Why string
 	Files      []*file
 	Graph      *flow    // how its changed declarations name each other, nil when they don't
-	Tests      []string // the tests that call what it changes: "a_test.go TestSave"
-	Untested   bool     // codegraph knows every use of what it changes, and none is in a test
+	Tests      []string // the tests that reach what it changes, the first maxTests: "a_test.go TestSave"
+	More       int      // past those
+	Partial    bool     // at least: a walk stopped short
+	Untested   bool     // no test reaches what it changes: see tested
 }
 
 type group struct {
@@ -479,7 +482,8 @@ func prepare(d Data) view {
 	v.Tree = tree(files)
 	for i := range v.Steps {
 		v.Steps[i].Graph = graph(v.Steps, i, d.Symbols)
-		v.Steps[i].Tests, v.Steps[i].Untested = tested(v.Steps[i], d.Symbols)
+		st := &v.Steps[i]
+		st.Tests, st.More, st.Partial, st.Untested = tested(*st, d.Symbols)
 		v.Graphs = v.Graphs || v.Steps[i].Graph != nil
 	}
 	v.Inventory = inventory(ss, d.Symbols, d.Commits, d.Title, d.Whys)
@@ -588,6 +592,9 @@ func tree(files map[string]*file) []*node {
 	return root.Kids
 }
 
+// inert is a changed line outside a declaration that runs nothing: blank, a comment, an import, an import block's.
+var inert = regexp.MustCompile(`^\s*(?:$|//|/\*|\*|#(?:\s|$)|--|import\b|from\s|use\s|using\s|package\s|#include\b|"[^"]*"\s*[,;]?\s*$|\w+\s+"[^"]*"\s*$|[()]\s*$)`)
+
 // minChanges is the lines a file shows before it lists the declarations it changes.
 const minChanges = 60
 
@@ -625,6 +632,7 @@ func changes(f *file, runs map[int]run) []change {
 			}
 		}
 		if cur == "" || l.Class == "ctx" || runs[l.Run].Where != "" { // moved code is no change
+			f.Stray = f.Stray || cur == "" && l.Class != "ctx" && runs[l.Run].Where == "" && !inert.MatchString(l.Text)
 			continue
 		}
 		k, ok := at[cur]

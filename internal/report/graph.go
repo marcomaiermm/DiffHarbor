@@ -2,7 +2,6 @@ package report
 
 import (
 	"cmp"
-	"diffharbor/internal/diff"
 	"fmt"
 	"path"
 	"slices"
@@ -319,28 +318,41 @@ func reach(steps []step, syms map[string][]Symbol) []affected {
 	return out[:min(len(out), maxAffected)]
 }
 
-// tested is the tests whose code uses a declaration the step changes, by codegraph's uses: by name, a common name
-// would be in every test. untested is true only when codegraph listed every use of them all and none is in a test.
-func tested(st step, syms map[string][]Symbol) (tests []string, untested bool) {
-	all, n := true, 0
+// maxTests is the tests a step names; past them, how many more.
+const maxTests = 8
+
+// tested is the tests that reach what the step changes through codegraph's uses, its callers' and theirs, nearest
+// first; more past maxTests, partial when a walk stopped short: at least that many. untested only when every file
+// is code, every changed line in a declaration codegraph knows, and not even a guess by name reaches a test from
+// one: see cgTests. Removed ones reach nothing.
+func tested(st step, syms map[string][]Symbol) (tests []string, more int, partial, untested bool) {
+	untested = true
+	n := 0
 	for _, f := range st.Files {
+		untested = untested && f.Kind == "code" && !f.Stray && f.Cut == 0
 		for _, c := range f.Changes {
 			if c.State == "gone" {
 				continue
 			}
+			n++
+			known := false
 			for _, s := range syms[c.Name] {
-				if s.Path != f.Path {
+				if s.Path != f.Path || !s.Exact {
 					continue
 				}
-				n++
-				all = all && s.Exact && len(s.Refs) == s.Uses
-				for _, r := range s.Refs {
-					if t := strings.TrimSpace(path.Base(r.Path) + " " + r.In); s.Exact && diff.Kind(r.Path) == "test" && !slices.Contains(tests, t) {
+				known, untested, partial = true, untested && s.Untested, partial || s.Partial
+				for _, t := range s.Tests {
+					if !slices.Contains(tests, t) {
 						tests = append(tests, t)
 					}
 				}
 			}
+			untested = untested && known
 		}
 	}
-	return tests, n > 0 && all && len(tests) == 0
+	untested = untested && n > 0 && len(tests) == 0
+	if len(tests) > maxTests {
+		more, tests = len(tests)-maxTests, tests[:maxTests]
+	}
+	return tests, more, partial, untested
 }
