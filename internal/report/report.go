@@ -245,6 +245,7 @@ type file struct {
 	Cut              int        // lines left out past maxLines
 	Findings         []*finding // on the file but no line it shows
 	Changes          []change   // the declarations it changes
+	Moves            []change   // the declarations that only moved here, ID their fold
 	Long             bool       // lists Changes above its diff
 	Changed          string     // Prev's short SHA when its change differs from Prev's, or it's new to the PR
 	New, Gone        bool       // the PR adds or deletes it
@@ -426,7 +427,7 @@ func prepare(d Data) view {
 	var ss []*span
 	for _, p := range slices.Concat(order, gone) {
 		f := files[p]
-		f.Changes = changes(f, runs)
+		f.Changes, f.Moves = changes(f, runs)
 		ss = append(ss, spans(f, runs)...) // before parts: it marks the lines it jumps to
 		f.Long = len(f.Lines) >= minChanges
 		f.Parts = parts(f.Lines, runs)
@@ -615,12 +616,11 @@ var inert = regexp.MustCompile(`^\s*(?:$|//|/\*|\*|#(?:\s|$)|--|import\b|from\s|
 const minChanges = 60
 
 // changes lists the declarations whose lines the diff adds or removes, past folded runs: the one a hunk's header
-// names, then each one a line of the hunk declares.
-func changes(f *file, runs map[int]run) []change {
+// names, then each one a line of the hunk declares. moves is those whose head only moved here.
+func changes(f *file, runs map[int]run) (cs, moves []change) {
 	if f.Kind != "code" && f.Kind != "test" {
-		return nil
+		return nil, nil
 	}
-	var cs []change
 	at := map[string]int{}
 	heads := map[string]*[2]string{} // name -> its signature before and now, the first the diff shows of each
 	sev := map[string]string{}
@@ -653,6 +653,9 @@ func changes(f *file, runs map[int]run) []change {
 				sev[cur] = fd.Severity
 			}
 		}
+		if head && l.Class == "add" && runs[l.Run].Where != "" && !slices.ContainsFunc(moves, func(c change) bool { return c.Name == cur }) {
+			moves = append(moves, change{Name: cur, ID: "fold-" + strconv.Itoa(l.Run), State: "moved"})
+		}
 		if cur == "" || l.Class == "ctx" || runs[l.Run].Where != "" { // moved code is no change
 			continue
 		}
@@ -675,7 +678,8 @@ func changes(f *file, runs map[int]run) []change {
 			cs[i].sig = h[0] != "" && h[1] != "" && !same(h[0], h[1])
 		}
 	}
-	return cs
+	moves = slices.DeleteFunc(moves, func(m change) bool { _, ok := at[m.Name]; return ok }) // moved and changed is a change
+	return cs, moves
 }
 
 // rank is 1 for a file with a finding that blocks the merge, 0 for the others.

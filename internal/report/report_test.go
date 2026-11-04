@@ -179,6 +179,24 @@ diff --git a/new.go b/new.go
 	if files["new.go"].Moved != 4 {
 		t.Errorf("moved %d", files["new.go"].Moved)
 	}
+	// Save moved and changed: a change, not a move; Load only moved: a move, its link the fold
+	if cs, mv := changes(files["new.go"], runs); !slices.ContainsFunc(cs, func(c change) bool { return c.Name == "Save" }) || len(mv) != 0 {
+		t.Errorf("changes %+v, moves %+v", cs, mv)
+	}
+	body := "\tload(a)\n\tload(b)\n\tload(c)\n}\n"
+	d = "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,5 +1,0 @@\n" + pre("-", "func Load() {\n"+body) +
+		"diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1,0 +1,5 @@\n" + pre("+", "func Load() {\n"+body)
+	files, order = map[string]*file{}, nil
+	diff.EachFile(d, func(p, f string) { files[p], order = parse(p, f, ""), append(order, p) })
+	runs = fold(order, files, nil)
+	if cs, mv := changes(files["b.go"], runs); len(cs) != 0 || len(mv) != 1 || mv[0].Name != "Load" || !strings.HasPrefix(mv[0].ID, "fold-") {
+		t.Errorf("changes %+v, moves %+v", cs, mv)
+	}
+}
+
+// pre puts p before each line of s.
+func pre(p, s string) string {
+	return p + strings.ReplaceAll(strings.TrimSuffix(s, "\n"), "\n", "\n"+p) + "\n"
 }
 
 func TestIcons(t *testing.T) {
@@ -244,7 +262,7 @@ func TestOutline(t *testing.T) {
 	if !slices.Equal(got, []string{"60 in Save"}) { // the type's fields stay, Small is too short
 		t.Errorf("folds %q", got)
 	}
-	if cs := changes(files["n.go"], runs); len(cs) != 3 || cs[1].Name != "Save" || cs[1].State != "new" || cs[1].ID == "" {
+	if cs, _ := changes(files["n.go"], runs); len(cs) != 3 || cs[1].Name != "Save" || cs[1].State != "new" || cs[1].ID == "" {
 		t.Errorf("changes %+v", cs)
 	}
 }
@@ -467,7 +485,8 @@ func TestSignatures(t *testing.T) {
 	}
 	f := parse("a.ts", d.Diff, "")
 	sig := map[string]bool{}
-	for _, c := range changes(f, map[int]run{}) {
+	cs, _ := changes(f, map[int]run{})
+	for _, c := range cs {
 		sig[c.Name] = c.sig
 	}
 	if want := map[string]bool{"resolveItemByName": true, "search": true, "protectedProcedure": false, "reflowed": false}; !maps.Equal(sig, want) {

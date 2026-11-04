@@ -377,12 +377,14 @@ html[data-filter="unviewed"] .sidebar-files li:has(.done) { display: none; }
 .gmenu > button:focus { @apply bg-accent; }
 .gmenu > button > svg { @apply size-3.5 shrink-0 text-muted-foreground; }
 .gmenu > button > kbd { @apply ml-auto; }
-/* the declarations a long file changes, each a jump to its first changed line */
+/* the declarations a file changes, each a jump to its first changed line, and those it only moved in */
 .cnav { @apply flex flex-wrap items-center gap-1.5 border-b px-3 py-2 text-xs text-muted-foreground; }
 .cnav > span { @apply mr-1; }
 .change { @apply font-mono hover:bg-accent hover:text-foreground; }
 .change[data-state="new"]::before { content: "+"; @apply text-diff-add; }
 .change[data-state="gone"] { @apply line-through decoration-diff-del/60; }
+.change[data-state="moved"] { color: var(--diff-link); border-color: color-mix(in oklab, var(--diff-link) 45%, transparent); }
+.change[data-state="moved"]::before { content: "→ "; }
 /* a name in the diff the repo declares: hover for what it is, click for every place that names it */
 .diff .sym { cursor: pointer; text-decoration: underline dotted color-mix(in oklab, currentColor 40%, transparent); text-underline-offset: 3px; }
 .diff .sym:hover { text-decoration-color: currentColor; }
