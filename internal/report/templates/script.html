@@ -189,7 +189,7 @@
     let text;
     const lines = () => text ??= JSON.parse(src.textContent).replace(/\n$/, "").split("\n");
     const n = +src.dataset.lines, hunks = [...t.querySelectorAll("tr.hunk")];
-    const at = h => (/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(h.querySelector(".truncate").textContent) || []).slice(1).map(x => x === undefined ? 1 : +x);
+    const at = h => (/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(h.querySelector(".hunk-text").textContent) || []).slice(1).map(x => x === undefined ? 1 : +x);
     const add = (before, lo, hi, shift, upOk, downOk) => {
       if (hi < lo) return;
       const row = document.createElement("tr");
