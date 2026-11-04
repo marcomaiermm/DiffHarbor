@@ -133,7 +133,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		desc = "Nothing to review"
 		s.State = s.State.Update(review.Result{}, sha, prFiles, false)
 		s.State.Patches = reviewedPatches(s.State.Patches, patches, nil)
-		s.Write("", footer(fmt.Sprintf("Reviewed up to `%s`, nothing to review", sha[:7])))
+		s.Write("", footer(fmt.Sprintf("Reviewed up to `%s` · nothing to review", sha[:7])))
 		return nil
 	}
 
@@ -221,12 +221,12 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 			return err
 		}
 	}
-	desc = fmt.Sprintf("%d findings", n)
+	desc = text.Count(n, "finding")
 	if len(r.Fixed) > 0 {
 		desc += fmt.Sprintf(", %d fixed", len(r.Fixed))
 	}
 	if len(r.Failed) > 0 { // their part failed: not green, the next push or `@app review` reviews them
-		desc, state = fmt.Sprintf("%s, %d files not reviewed", desc, len(r.Failed)), "error"
+		desc, state = desc+", "+text.Count(len(r.Failed), "file")+" not reviewed", "error"
 	}
 	log.Printf("%s %s %s %s: %s", key, sha[:7], kind, stats, desc)
 	s.State = s.State.Update(r, sha, prFiles, only == nil)
@@ -255,7 +255,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	}
 	banner := ""
 	if n == 0 {
-		banner = "No actionable comments were generated in the recent review."
+		banner = "No actionable comments were generated in the latest review."
 	}
 	s.Write(banner, footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc)))
 	return nil

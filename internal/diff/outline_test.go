@@ -109,9 +109,12 @@ new file mode 100644
 	for _, g := range o.Mechanical {
 		groups[strings.Fields(g.What)[0]] = g.Files
 	}
-	if !slices.Equal(groups["same"], []string{"pkg0/x.go", "pkg1/x.go", "pkg2/x.go"}) || !slices.Equal(groups["moved"], []string{"a.go → b.go"}) ||
-		!slices.Equal(groups["whitespace"], []string{"fmt.go"}) || !slices.Equal(groups["lockfiles"], []string{"go.sum"}) {
+	if !slices.Equal(groups["Same"], []string{"pkg0/x.go", "pkg1/x.go", "pkg2/x.go"}) || !slices.Equal(groups["Moved"], []string{"a.go → b.go"}) ||
+		!slices.Equal(groups["Whitespace"], []string{"fmt.go"}) || !slices.Equal(groups["Lockfiles"], []string{"go.sum"}) {
 		t.Errorf("mechanical %v", o.Mechanical)
+	}
+	if w := "`import \"old/log\"` → `import \"new/log\"`"; !strings.Contains(o.Mechanical[0].What, w) {
+		t.Errorf("same edit %q lacks %q", o.Mechanical[0].What, w)
 	}
 	if s := o.Skippable(); !s["b.go"] || !s["pkg1/x.go"] || s["auth_test.go"] {
 		t.Errorf("skippable %v", s)
