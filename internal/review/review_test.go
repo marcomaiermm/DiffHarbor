@@ -172,7 +172,7 @@ func TestSettings(t *testing.T) {
 	}
 	agent.Model = ""
 	t.Setenv("OPENAI_API_KEY", "k")
-	if r, v := (Settings{}).Models(); r != "openai/gpt-6.1-terra:high" || v != "openai/gpt-6-luna:low" {
+	if r, v := (Settings{}).Models(); r != "openai/gpt-6.1-terra:high" || v != "openai/gpt-6-luna:high" {
 		t.Errorf("defaults: %q %q", r, v)
 	}
 	cfg, _ = LoadSettings(`{"review_model":"anthropic/claude-sonnet-5-5"}`)

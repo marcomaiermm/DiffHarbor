@@ -103,7 +103,7 @@ func TestCloudProviders(t *testing.T) {
 		t.Fatal("azure without endpoint")
 	}
 	t.Setenv("AZURE_OPENAI_BASE_URL", "https://x.openai.azure.com/openai/v1")
-	if env, err := passEnv(context.Background(), "azure"); err != nil || len(env) != 2 || VerifyFor("azure/gpt-6.1-sol") != "azure/gpt-6-luna:low" {
+	if env, err := passEnv(context.Background(), "azure"); err != nil || len(env) != 2 || VerifyFor("azure/gpt-6.1-sol") != "azure/gpt-6-luna:high" {
 		t.Fatalf("azure: %v %v", env, err)
 	}
 }

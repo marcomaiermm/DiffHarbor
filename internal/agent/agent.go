@@ -31,7 +31,7 @@ const maxTools = 15
 // one is the fallback. A review model's provider here also sets its verify model unless VERIFY_MODEL or review.json
 // name one. A provider not listed authenticates with KeyEnv alone.
 var Matrix = []Provider{
-	{Name: "openai", Review: "openai/gpt-6.1-terra:high", Verify: "openai/gpt-6-luna:low", Login: true, Proxy: true},
+	{Name: "openai", Review: "openai/gpt-6.1-terra:high", Verify: "openai/gpt-6-luna:high", Login: true, Proxy: true}, // high: low dropped 7% of valid findings, high 1%
 	{Name: "anthropic", Review: "anthropic/claude-sonnet-5-5:high", Verify: "anthropic/claude-haiku-5-5:low", Proxy: true},
 	{Name: "deepseek", Review: "deepseek/deepseek-flash:high", Verify: "deepseek/deepseek-flash:off", Proxy: true}, // off: low's recall, cheaper
 	// Claude and GPT hosted by a cloud. global.: any region serves; eu./us. (REVIEW_MODEL) keep data in one.
@@ -43,7 +43,7 @@ var Matrix = []Provider{
 	// Azure has no gpt-6.1-terra. It needs its endpoint and maps model IDs to the deployment names
 	// (AZURE_OPENAI_DEPLOYMENT_NAME_MAP="gpt-6.1-sol=review,gpt-6-luna=verify"; unset = deployments named like the models).
 	{
-		Name: "azure", Review: "azure/gpt-6.1-sol:high", Verify: "azure/gpt-6-luna:low",
+		Name: "azure", Review: "azure/gpt-6.1-sol:high", Verify: "azure/gpt-6-luna:high",
 		Need: [][]string{{"AZURE_OPENAI_API_KEY", "AZURE_OPENAI_BASE_URL"}}, Opt: []string{"AZURE_OPENAI_DEPLOYMENT_NAME_MAP"},
 	},
 }
