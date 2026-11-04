@@ -66,7 +66,7 @@ func TestRender(t *testing.T) {
 		},
 		Commits:  []review.Commit{{SHA: "aaaaaaaaaa", Subject: "Add Save", Files: 1, Add: 1, Del: 1}, {SHA: "bbbbbbbbbb", Subject: "wip", Files: 1}},
 		Outline:  diff.Analyze(prDiff),
-		Findings: []review.Comment{{Path: "api/handler.go", Line: 2, Severity: "major", Title: "Error dropped"}, {Path: "other.go", Body: "elsewhere"}},
+		Findings: []review.Comment{{Path: "api/handler.go", Line: 2, Severity: "major", Title: "Error dropped", Body: " \n"}, {Path: "other.go", Body: "elsewhere"}},
 		Diff:     prDiff,
 	})
 	if err != nil {
@@ -103,6 +103,9 @@ func TestRender(t *testing.T) {
 	}
 	if strings.Contains(s, "<script>alert(1)") || strings.Contains(s, "Save <orders>") {
 		t.Error("PR text reaches the page unescaped")
+	}
+	if n := strings.Count(s, `class="fnote-b"`); n != 1 { // only "elsewhere" has a body
+		t.Errorf("%d finding bodies, want 1", n)
 	}
 	if strings.Contains(s, `id="missing.go"`) {
 		t.Error("a flow file outside the diff got a block")

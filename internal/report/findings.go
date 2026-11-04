@@ -99,6 +99,7 @@ func judge(v *view, found []*finding) {
 			}
 		}
 		fd.Where = fd.Loc + " · " + cmp.Or(where[fd.Path], "not in the diff")
+		fd.Body = strings.TrimSpace(fd.Body) // a verified finding without a body is "\n\n_Verified:_ …"
 		if fd.Title == "" {
 			fd.Title = text.OneLine(fd.Body, 120)
 		} else {
