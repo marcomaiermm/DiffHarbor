@@ -46,7 +46,7 @@ func Start() error {
 		return err
 	}
 	base = "http://" + ln.Addr().String()
-	srv := &http.Server{Handler: http.HandlerFunc(serve), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: http.HandlerFunc(serve), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: time.Minute, IdleTimeout: time.Minute}
 	go func() { log.Fatal(srv.Serve(ln)) }()
 	return nil
 }
@@ -122,6 +122,12 @@ func serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not through the vault", http.StatusForbidden)
 		return
 	}
+	// A revoked token also ends its streams: one held open would carry the key past its job.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	defer context.AfterFunc(l.ctx, cancel)()
+	r = r.WithContext(ctx)
+	r.Header.Del("Upgrade") // no upstream path upgrades: never a raw tunnel through the vault
 	for _, h := range authHeaders {
 		r.Header.Del(h)
 	}

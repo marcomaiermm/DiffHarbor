@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/base64"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -154,5 +155,32 @@ func TestStream(t *testing.T) {
 	defer res.Body.Close()
 	if l, err := bufio.NewReader(res.Body).ReadString('\n'); l != "data: 1\n" {
 		t.Fatalf("the first event waits for the stream's end: %q %v", l, err)
+	}
+}
+
+// Revoking a token cuts its open streams: one held open would carry the key past its job.
+func TestRevokeStream(t *testing.T) {
+	start(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("data: 1\n\n"))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer s.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	tok, _ := Key(ctx, "deepseek", s.URL, "k", "chat/completions")
+	req, _ := http.NewRequest("POST", base+"/deepseek/chat/completions", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	r := bufio.NewReader(res.Body)
+	r.ReadString('\n')
+	cancel()
+	at := time.Now()
+	if _, err := io.ReadAll(r); err == nil || time.Since(at) > 5*time.Second { // not the client's timeout
+		t.Fatal("the stream outlived its token")
 	}
 }

@@ -275,6 +275,9 @@ func reportSecret(s string) string {
 	return rand.Text()
 }
 
+// Hide is err's text without the report secret: the stores' errors name the key.
+func Hide(err error, secret string) string { return strings.ReplaceAll(err.Error(), secret, "…") }
+
 // ReportS3 holds the reports instead of DATA_DIR when set (REPORT_S3_URL).
 var ReportS3 *store.S3
 
@@ -329,7 +332,7 @@ func writeReport(e *forge.Event, secret string, d report.Data) string {
 	dir, s := reportPath(e)+"/"+secret, Reports()
 	vs, err := Versions(dir)
 	if err != nil {
-		log.Println(e.Key(), "report:", err)
+		log.Println(e.Key(), "report:", Hide(err, secret))
 		return ""
 	}
 	vs = slices.DeleteFunc(vs, func(v report.Version) bool { return v.SHA == d.SHA })
@@ -355,7 +358,7 @@ func writeReport(e *forge.Event, secret string, d report.Data) string {
 		err = s.Put(dir+"/versions.json", b)
 	}
 	if err != nil {
-		log.Println(e.Key(), "report:", err)
+		log.Println(e.Key(), "report:", Hide(err, secret))
 		return ""
 	}
 	for _, v := range vs[len(keep):] {

@@ -287,7 +287,7 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 	pr := path.Dir(dir) // for the log: not the secret
 	vs, err := job.Versions(dir)
 	if err != nil {
-		log.Println(pr, "report:", err)
+		log.Println(pr, "report:", job.Hide(err, path.Base(dir)))
 		http.Error(w, "the reports can't be read now", http.StatusBadGateway)
 		return
 	}
@@ -320,7 +320,7 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			log.Println(pr, sha, "report:", err)
+			log.Println(pr, sha, "report:", job.Hide(err, path.Base(dir)))
 			http.Error(w, "the report can't be read now", http.StatusBadGateway)
 			return
 		}
@@ -340,14 +340,14 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 		case !plain: // a client without gzip, curl
 			zr, err := gzip.NewReader(f)
 			if err != nil {
-				log.Println(pr, sha, "report:", err)
+				log.Println(pr, sha, "report:", job.Hide(err, path.Base(dir)))
 				http.Error(w, "the report can't be read now", http.StatusBadGateway)
 				return
 			}
 			in = zr
 		}
 		if _, err := io.Copy(out, in); err != nil {
-			log.Println(pr, sha, "report:", err) // the headers are out: the page ends short
+			log.Println(pr, sha, "report:", job.Hide(err, path.Base(dir))) // the headers are out: the page ends short
 		}
 	}
 }
