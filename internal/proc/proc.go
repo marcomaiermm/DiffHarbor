@@ -242,11 +242,17 @@ func uids(f string) (map[string]uint32, error) {
 	} else if errors.Is(err, os.ErrNotExist) {
 		err = nil
 	}
+	if err == nil && m == nil {
+		err = errors.New("null")
+	}
 	if err != nil { // never start over: the next repo would get a uid that is another's
 		return nil, fmt.Errorf("repo uids: %w", err)
 	}
-	seen := map[uint32]string{} // a hand edit's slip: two repos would share a cache and each other's kills
+	seen := map[uint32]string{} // a hand edit's slips: two repos would share a cache and each other's kills, 0 is root
 	for r, u := range m {
+		if u < firstUID {
+			return nil, fmt.Errorf("repo uids: %s has uid %d, below %d", r, u, firstUID)
+		}
 		if o, ok := seen[u]; ok {
 			return nil, fmt.Errorf("repo uids: %s and %s share uid %d", o, r, u)
 		}
@@ -296,7 +302,7 @@ func Clean() error {
 		return os.RemoveAll(workDir())
 	}
 	// Clean takes CacheDir over and empties it: never a dir with other things in it, e.g. DataDir, also by a symlink.
-	if rel, err := filepath.Rel(resolved(CacheDir), resolved(DataDir)); err != nil || rel == "." || !strings.HasPrefix(rel, "..") {
+	if rel, err := filepath.Rel(resolved(CacheDir), resolved(DataDir)); err != nil || rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("CACHE_DIR %s holds DATA_DIR %s: give each its own dir", CacheDir, DataDir)
 	}
 	// CacheDir was node's: root's now, or a repo's user could swap another's cache dir for a symlink.

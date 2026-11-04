@@ -64,6 +64,12 @@ func TestUIDOf(t *testing.T) {
 	if _, err := uidOf(f, "o/a"); err == nil {
 		t.Fatal("two repos share a uid: no error")
 	}
+	for _, bad := range []string{`null`, `{"o/a":0}`} {
+		_ = os.WriteFile(f, []byte(bad), 0o600)
+		if _, err := uidOf(f, "o/e"); err == nil {
+			t.Fatal("no error for", bad)
+		}
+	}
 }
 
 // After the upgrade a repo is its id: a rename keeps its uid, a new repo of an old name (a legacy entry's) gets a uid
@@ -113,7 +119,7 @@ func TestCleanOverlap(t *testing.T) {
 	if err := os.Symlink(CacheDir, link); err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range []string{CacheDir, filepath.Join(CacheDir, "diffharbor"), filepath.Join(link, "not", "yet")} {
+	for _, d := range []string{CacheDir, filepath.Join(CacheDir, "diffharbor"), filepath.Join(CacheDir, "..data"), filepath.Join(link, "not", "yet")} {
 		if DataDir = d; Clean() == nil || !strings.Contains(Clean().Error(), "holds DATA_DIR") { // not root's chown failing
 			t.Error("cleaned a CACHE_DIR holding DATA_DIR", d)
 		}

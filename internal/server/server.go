@@ -94,6 +94,10 @@ func work(queue chan *forge.Event) {
 			if p, err := f.Open(e); err == nil {
 				p.Status(e.PullRequest.Head.SHA, "error", "Review not started: cleanup failed, retried on the next push")
 			}
+		case e.Comment.Body != "" && mentions[e.Forge].MatchString(e.Comment.Body): // asked us: a chat isn't kept to retry
+			if p, err := f.Open(e); err == nil {
+				_ = p.Reply("⚠️ Couldn't start: cleaning up after the last job failed. Ask again in a while.\n\n" + forge.Mark)
+			}
 		}
 		if err != nil {
 			log.Println(e.Key(), err)

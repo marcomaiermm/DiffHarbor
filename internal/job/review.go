@@ -172,7 +172,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		tid, tk = ticket.Lookup(ctx, cfg.Tickets, pr.Title, pr.Head.Ref, pr.Body)
 	}
 	r, stats, err := review.Analyze(ctx, review.Input{
-		Agent: agent.Pi{}, Dir: dir, Title: pr.Title, Body: forge.Redact(pr.Body), Ticket: tk, Parts: parts,
+		Agent: agent.Pi{}, Dir: dir, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Ticket: tk, Parts: parts,
 		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo())), Checks: scripts, Prior: prior, Closed: closed, Settings: cfg,
 		Guide: guide && only == nil, // an incremental review sees a few files: the last full one's reading order stays
 	})
@@ -238,7 +238,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		if keys, texts := report.Asks(d); len(keys) > 0 {
 			rm, vm := cfg.Models()
 			d.Whys = map[string]string{}
-			for i, w := range review.Explain(ctx, agent.Pi{}, dir, cmp.Or(agent.VerifyFor(rm), vm, rm), pr.Title, texts) {
+			for i, w := range review.Explain(ctx, agent.Pi{}, dir, cmp.Or(agent.VerifyFor(rm), vm, rm), forge.Redact(pr.Title), texts) {
 				d.Whys[keys[i]] = w
 			}
 		}
