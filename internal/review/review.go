@@ -180,7 +180,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	}
 	var hints strings.Builder
 	fmt.Fprintf(&hints, "## Check results (lint, types, tests, secrets, vulnerabilities; may include issues the change didn't cause)\n\n```\n%s\n```\n\n",
-		checks.Run(ctx, repo, in.Checks, patch, files, in.Settings.RunsTests))
+		checks.Run(ctx, repo, in.Checks, patch, files, in.Settings.RunsTests, in.Settings.InstallScripts))
 	gctx, cancel := context.WithTimeout(ctx, time.Minute)
 	gitLog, err := proc.Run(proc.Command(gctx, repo, nil, "git", "log", "-n", historyDepth, "--format=%x00", "--name-only", "--no-renames"))
 	cancel()

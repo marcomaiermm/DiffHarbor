@@ -108,15 +108,29 @@ const (
 	timeout  = 10 * time.Minute
 )
 
+// noScripts is an install command without lifecycle scripts. Yarn classic wants the flag, Berry rejects it and
+// wants YARN_ENABLE_SCRIPTS=false (classic ignores that, Berry rejects YARN_IGNORE_SCRIPTS): told apart by the
+// lockfile's header. The CLI flags beat a PR's .npmrc.
+func noScripts(repo, lock string, cmd []string) []string {
+	if cmd[0] != "yarn" {
+		return append(cmd, "--ignore-scripts")
+	}
+	if b, _ := proc.ReadFile(filepath.Join(repo, lock)); bytes.Contains(b, []byte("# yarn lockfile v1")) {
+		return append(cmd, "--ignore-scripts")
+	}
+	return append([]string{"env", "YARN_ENABLE_SCRIPTS=false"}, cmd...)
+}
+
 // Script is a repo's own check: Name its path in the repo, File the copy that runs (from the base branch).
 type Script struct{ Name, File string }
 
 // Run runs the built-in checks for files, then the repo's own scripts with the files after "--". patch is
 // the diff under review as a file. JS and Go checks run per package (nearest package.json or go.mod), so a
-// monorepo's apps get theirs; tests(file) says whether the tests of file's package run.
+// monorepo's apps get theirs; tests(file) says whether the tests of file's package run. Installs skip lifecycle
+// scripts unless installScripts: a dependency's postinstall would run as node next to the PR's code.
 //
 //nolint:gocognit,gocyclo // the checks step by step, each step a few lines
-func Run(ctx context.Context, repo string, scripts []Script, patch string, files []string, tests func(string) bool) string {
+func Run(ctx context.Context, repo string, scripts []Script, patch string, files []string, tests func(string) bool, installScripts bool) string {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	started := time.Now()
@@ -192,6 +206,9 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 				"yarn.lock":         {"yarn", "install", "--immutable", "--silent"},
 				"package-lock.json": {"npm", "ci", "--no-audit", "--no-fund", "--loglevel=error"},
 			}[filepath.Base(lock)]
+			if !installScripts {
+				cmd = noScripts(repo, lock, cmd)
+			}
 			section("install"+titled(filepath.Dir(lock)), in(filepath.Dir(lock))(cmd[0], cmd[1:]...), -20)
 		}
 		// bin finds a tool in the package's node_modules/.bin or a parent's (workspaces hoist them); "" = none.

@@ -172,6 +172,9 @@ func TestSettings(t *testing.T) {
 	if cfg, err := LoadSettings(""); err != nil || cfg.IgnoreRe != nil || !cfg.RunsTests("a.go") {
 		t.Error("empty")
 	}
+	if on, _ := LoadSettings(`{"install_scripts":true}`); !on.InstallScripts || cfg.InstallScripts {
+		t.Error("install_scripts: off unless review.json turns it on")
+	}
 	ci, _ := LoadSettings(`{"packages":{"svc/":{"tests":true}}}`)
 	if ci.CITests = "ci.yml"; ci.RunsTests("a.go") || !ci.RunsTests("svc/a.go") || !ci.LeftToCI("a.go") || ci.LeftToCI("svc/a.go") {
 		t.Error("tests in CI: off unless review.json turns them on")
