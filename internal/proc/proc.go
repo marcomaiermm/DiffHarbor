@@ -261,14 +261,25 @@ func uids(f string) (map[string]uint32, error) {
 	return m, nil
 }
 
-// ReadFile reads p. ReadFile, WriteFile and Remove touch the checkout and work dir as the job's user when we're root:
+// maxRead bounds what ReadFile reads: the PR picks what is there.
+const maxRead = 64 << 20
+
+// ReadFile reads p, a regular file of at most maxRead bytes: a symlink to /dev/zero or a FIFO would never end or fill
+// the server's memory. ReadFile, WriteFile and Remove touch the checkout and work dir as the job's user when we're root:
 // PR code controls what is there, and a symlink to a root-only file (the server's /proc/1/environ, the ChatGPT login) must not resolve with
 // root's rights.
-func ReadFile(p string) ([]byte, error) {
-	if !AsPi {
-		return os.ReadFile(p) //nolint:gosec // not root: the OS checks access
+func ReadFile(ctx context.Context, p string) ([]byte, error) {
+	if fi, err := os.Lstat(p); err != nil {
+		return nil, err
+	} else if !fi.Mode().IsRegular() || fi.Size() > maxRead {
+		return nil, fmt.Errorf("%s: no regular file of at most %d bytes", p, maxRead)
 	}
-	return Run(Command(context.Background(), "/", nil, "cat", "--", p))
+	// p may change after Lstat: head reads it bounded, under ctx
+	b, err := Run(Command(ctx, "/", nil, "head", "-c", strconv.Itoa(maxRead+1), "--", p))
+	if err == nil && len(b) > maxRead {
+		return nil, fmt.Errorf("%s: over %d bytes", p, maxRead)
+	}
+	return b, err
 }
 
 // WriteFile writes b to p, as the job's user when we're root.

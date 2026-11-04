@@ -189,7 +189,7 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 		}
 		return p
 	}
-	pd, _ := proc.ReadFile(patch)
+	pd, _ := proc.ReadFile(ctx, patch)
 	added := diff.RightLines(string(pd), false)
 
 	if len(changed) > 0 {
@@ -253,10 +253,10 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 			}, rel...)...), func(l string) bool {
 				m := atLine.FindStringSubmatch(l)
 				return m != nil && addedHere[m[1]+":"+m[2]] &&
-					(!strings.Contains(l, "no-floating-promises") || !fireAndForget.MatchString(lineOf(repo, filepath.Join(dir, m[1]), m[2])))
+					(!strings.Contains(l, "no-floating-promises") || !fireAndForget.MatchString(lineOf(ctx, repo, filepath.Join(dir, m[1]), m[2])))
 			}), 40)
 		}
-		if pkg, _ := proc.ReadFile(filepath.Join(repo, dir, "package.json")); bytes.Contains(pkg, []byte(`"drizzle-orm"`)) {
+		if pkg, _ := proc.ReadFile(ctx, filepath.Join(repo, dir, "package.json")); bytes.Contains(pkg, []byte(`"drizzle-orm"`)) {
 			if src := slices.DeleteFunc(slices.Clone(rel), testFile.MatchString); len(src) > 0 {
 				rules := config("drizzle-rules.yml", drizzleRules+"---\n"+strings.ReplaceAll(drizzleRules, "language: TypeScript", "language: Tsx"))
 				section("ast-grep (Drizzle)"+where, run("ast-grep", append([]string{"scan", "-r", rules, "--format", "github"}, src...)...), 40)
@@ -264,7 +264,7 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 			if kit := bin("drizzle-kit"); kit != "" && slices.ContainsFunc(js, drizzlePath.MatchString) {
 				cfgs, _ := filepath.Glob(filepath.Join(repo, dir, "drizzle*.config.*"))
 				for _, c := range cfgs {
-					if s := drizzleDrift(repo, kit, filepath.Base(c), run); s != "" {
+					if s := drizzleDrift(ctx, repo, kit, filepath.Base(c), run); s != "" {
 						section("drizzle-kit ("+filepath.Join(dir, filepath.Base(c))+")", s, 40)
 					}
 				}
@@ -351,7 +351,7 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 	if sql := match(sqlFile); len(sql) > 0 {
 		var b strings.Builder
 		for _, f := range sql {
-			src, err := proc.ReadFile(filepath.Join(repo, f))
+			src, err := proc.ReadFile(ctx, filepath.Join(repo, f))
 			if err != nil {
 				continue
 			}
@@ -395,7 +395,7 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 			"osv-scanner", append([]string{"scan", "source", "--format", "table"}, slices.Compact(dirs)...)...)
 	}
 
-	if s := unlisted(repo, added, files, output); s != "" {
+	if s := unlisted(ctx, repo, added, files, output); s != "" {
 		section("names the change added beside existing ones, missing where those are listed elsewhere (do these lists need it?)", s, 10)
 	}
 
@@ -459,7 +459,7 @@ var testFrame = regexp.MustCompile(`(?m)^\s*--- FAIL: .*$|^\s*\S+\.go:\d+: `)
 // drizzleDrift runs drizzle-kit (kit) generate with cfg in the package output runs in: files it writes are a
 // migration the schema change lacks, and get removed again. Without a TTY a rename question fails, which means
 // the same. Then drizzle-kit check. git status names files from the repo root, wherever it runs.
-func drizzleDrift(repo, kit, cfg string, output func(string, ...string) string) string {
+func drizzleDrift(ctx context.Context, repo, kit, cfg string, output func(string, ...string) string) string {
 	clean := func(s string) string { return grep(s, func(l string) bool { return !drizzleNoise.MatchString(l) }) }
 	before := strings.Split(output("git", "status", "--porcelain", "-uall"), "\n")
 	gen := output(kit, "generate", "--config="+cfg)
@@ -472,7 +472,7 @@ func drizzleDrift(repo, kit, cfg string, output func(string, ...string) string) 
 		f := l[3:]
 		made = append(made, f)
 		if strings.HasSuffix(f, ".sql") {
-			b, _ := proc.ReadFile(filepath.Join(repo, f))
+			b, _ := proc.ReadFile(ctx, filepath.Join(repo, f))
 			sql += string(b)
 		}
 		if l[:2] == "??" {
@@ -546,13 +546,13 @@ func fallowSecurity(out string, added map[string]bool) string {
 // unlisted finds the lists a change extended without their copies: an added line naming a new constant (no file
 // outside the change has it) beside two or more existing ones, and the files that name two of those but not the
 // new one, at their line naming the most: a key added to a workflow but not to the catalog or docs listing them.
-func unlisted(repo string, added map[string]bool, files []string, output func(string, ...string) string) string {
+func unlisted(ctx context.Context, repo string, added map[string]bool, files []string, output func(string, ...string) string) string {
 	var out []string
 	seen := map[string]bool{}
 	tried := 0
 	for _, k := range slices.Sorted(maps.Keys(added)) {
 		i := strings.LastIndexByte(k, ':')
-		names := slices.Compact(slices.Sorted(slices.Values(constName.FindAllString(lineOf(repo, k[:i], k[i+1:]), -1))))
+		names := slices.Compact(slices.Sorted(slices.Values(constName.FindAllString(lineOf(ctx, repo, k[:i], k[i+1:]), -1))))
 		if len(names) < 3 {
 			continue
 		}
@@ -611,8 +611,8 @@ func unlisted(repo string, added map[string]bool, files []string, output func(st
 }
 
 // lineOf returns line n (1-based, as text) of the repo's file f.
-func lineOf(repo, f, n string) string {
-	b, _ := proc.ReadFile(filepath.Join(repo, f))
+func lineOf(ctx context.Context, repo, f, n string) string {
+	b, _ := proc.ReadFile(ctx, filepath.Join(repo, f))
 	i, _ := strconv.Atoi(n)
 	if l := strings.Split(string(b), "\n"); i > 0 && i <= len(l) {
 		return l[i-1]
@@ -733,9 +733,9 @@ var (
 
 // CITests is the CI file that runs tests on pull requests (a GitHub workflow, GitLab CI), "" = none: then the
 // review runs them. A workflow counts if a push or pull request starts it, with the reusable workflows it calls.
-func CITests(repo string) string {
+func CITests(ctx context.Context, repo string) string {
 	read := func(f string) string {
-		b, _ := proc.ReadFile(f)
+		b, _ := proc.ReadFile(ctx, f)
 		return yamlComment.ReplaceAllString(string(b), "")
 	}
 	if ciTest.MatchString(read(filepath.Join(repo, ".gitlab-ci.yml"))) {
