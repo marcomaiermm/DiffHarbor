@@ -90,8 +90,23 @@ const paint = async table => {
   if (hl && l) {
     // each hunk on its own and each side on its own: a string or comment that one hunk or the removed side
     // leaves open must not color the rest
+    const inside = st => st.getScopes().some(s => /^(string|comment)\b/.test(s));
     const side = rs => {
-      const ts = hl.codeToTokens(rs.map(r => r.cells[2].textContent).join("\n"), { lang: l, theme }).tokens;
+      const text = rs.map(r => r.cells[2].textContent), opts = { lang: l, theme };
+      let ts = hl.codeToTokens(text.join("\n"), opts).tokens;
+      // a hunk that starts inside a string or comment opened above it: its closing delimiter reads as an opening
+      // one and colors the rest. When the hunk ends inside one opened by a line that is only the delimiter
+      // (a lone ` or */), the lines up to that one are the string, the rest code.
+      if (inside(hl.getLastGrammarState(text.join("\n"), opts))) {
+        let st, at = -1, open;
+        for (const [i, t] of text.entries()) {
+          st = hl.getLastGrammarState(t, { ...opts, grammarState: st });
+          if (!inside(st)) at = -1;
+          else if (at < 0) [at, open] = [i, st];
+        }
+        if (at >= 0 && !/\w/.test(text[at])) ts = [...hl.codeToTokens(text.slice(0, at + 1).join("\n"), { ...opts, grammarState: open }).tokens,
+          ...hl.codeToTokens(text.slice(at + 1).join("\n"), opts).tokens];
+      }
       rs.forEach((r, i) => tokens.set(r, ts[i]));
     };
     try {
