@@ -102,9 +102,9 @@
   }
   sync();
   const copy = document.getElementById("draft-copy"), status = document.getElementById("draft-status");
-  copy.addEventListener("click", () => navigator.clipboard.writeText(document.getElementById("draft-md").textContent).then(
-    () => status.textContent = "The review text is on your clipboard.",
-    () => status.textContent = "The browser kept the clipboard closed: select the text above and copy it."));
+  const closed = () => status.textContent = "The browser kept the clipboard closed: select the text above and copy it.";
+  copy.addEventListener("click", () => navigator.clipboard ? navigator.clipboard.writeText(document.getElementById("draft-md").textContent).then(
+    () => status.textContent = "The review text is on your clipboard.", closed) : closed()); // no clipboard off https
 
   // the filter over the files: all, the ones not viewed, the ones whose change differs from the last review's.
   // For this page only: a filter left on hides files on the next PR
@@ -295,7 +295,10 @@
     let to;
     if (key === "j") to = i >= 0 ? files[i + 1] : files.find(f => y(f) > 8);
     else if (key === "k") to = i >= 0 ? files[i - 1] : files.findLast(f => y(f) < -8);
-    else if (key === "n") to = [...document.querySelectorAll(".file [id^='finding-']")].find(f => y(f) > 8 + 48);
+    else if (key === "n") { // one in a closed file or fold counts where its shown ancestor is: jump opens it
+      const at = x => { while (!x.getClientRects().length) x = x.parentElement; return x; };
+      to = files.flatMap(f => [...f.querySelectorAll("[id^='finding-']")]).find(f => y(at(f)) > 8 + 48);
+    }
     else if (key === "v" && e.repeat) return; // held, it would mark the file and unmark it again
     else if (key === "v") shown(".file").find(f => f.getBoundingClientRect().bottom > head + 8)?.querySelector("input[data-key]").click();
     else return;
