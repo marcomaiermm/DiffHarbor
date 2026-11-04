@@ -39,7 +39,11 @@ type Settings struct {
 	Skills string   `json:"skills"` // dir of review skills, default .review/skills
 	Checks []string `json:"checks"` // scripts run after the built-in checks, default .review/checks.sh
 	// itsaplan projects whose tickets a PR may name ("WID"); unset = any, [] = none. Never for a PR from a fork.
-	Tickets  []string `json:"tickets"`
+	Tickets []string `json:"tickets"`
+	// true: the checks' installs run lifecycle scripts (postinstall, native builds); default off, a dependency's
+	// script would run as node next to the PR's code.
+	InstallScripts bool `json:"install_scripts"`
+
 	IgnoreRe *regexp.Regexp
 	CITests  string    // checks.CITests: the CI file running the tests; unless "tests" says otherwise, the review doesn't
 	pkgs     []pkgRule // longest pattern first

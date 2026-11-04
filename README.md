@@ -189,6 +189,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
   "max_parts": 4,
   "report": "auto",
   "tickets": ["ABC"],
+  "install_scripts": false,
   "checks": [".review/checks.sh"],
   "packages": {
     "apps/web": {"min_severity": "major"},
@@ -206,6 +207,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
 | `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
+| `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part; the longest glob wins. |
@@ -240,6 +242,7 @@ Within that:
 - Root serves and holds the forge keys and Pi's login. git, checks and Pi run as `node`; git gets a read-only token (short-lived on GitHub) by env, not argv.
 - Root reads and writes in the checkout only as `node`: a symlink in the PR can't reach root's files.
 - Processes a job leaves behind are killed before and after each job, and node's home (git config, Pi's config and extensions) and temp files are reset before each. Check output is capped.
+- The checks install dependencies without lifecycle scripts, so a malicious dependency's postinstall doesn't run; `install_scripts` in `review.json` turns them back on per repo.
 - The cache (`/cache`: Go build cache, module and pnpm stores) is shared by all repos and node can write it: a PR in one repo can change what a later job of another repo runs. Run one instance per group of repos whose authors trust each other.
 - PR code shares the container's network: it reaches `localhost:3000/r/` (all reports, the SSO is in front of the proxy only) and, on a cloud VM, the metadata endpoint. Block `169.254.169.254` for the container there.
 - During a Pi run, the PR's code can read Pi's model key from its env (same uid). A gateway that adds the key itself avoids that.
