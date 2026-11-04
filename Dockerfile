@@ -1,7 +1,8 @@
 FROM golang:1.27-alpine AS build
 # Pinned so a release tag rebuilds the same checks.
 RUN CGO_ENABLED=0 go install honnef.co/go/tools/cmd/staticcheck@v0.8.2 && CGO_ENABLED=0 go install github.com/zricethezav/gitleaks/v8@v8.30.1 \
-    && CGO_ENABLED=0 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 && CGO_ENABLED=0 go install golang.org/x/tools/cmd/deadcode@v0.52.0
+    && CGO_ENABLED=0 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 && CGO_ENABLED=0 go install golang.org/x/tools/cmd/deadcode@v0.52.0 \
+    && CGO_ENABLED=0 go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
 # Tests run as a user: as root the code drops its children to uid 1000, which can't write root's temp dirs.
 RUN apk add --no-cache git && adduser -D -u 1000 node
 # Tailwind's standalone CLI (go:generate's): the build checks styles.gen.css, start compiles TEMPLATE_DIR's classes.
@@ -13,8 +14,9 @@ COPY --chown=node go.mod ./
 COPY --chown=node cmd cmd
 COPY --chown=node internal internal
 ARG VERSION=dev
+# govulncheck fails the build on a known vulnerability the code reaches, the stdlib's too, until Renovate bumps Go.
 RUN tailwindcss -i internal/report/styles.css -o /tmp/styles.css --minify && { cmp -s /tmp/styles.css internal/report/styles.gen.css || { echo "styles.gen.css is stale: go generate ./internal/report"; exit 1; }; } \
-    && go vet ./... && go test ./... && CGO_ENABLED=0 go build -trimpath -ldflags="-s -X main.version=$VERSION" -o /home/node/diffharbor ./cmd/diffharbor
+    && go vet ./... && go test ./... && govulncheck ./... && CGO_ENABLED=0 go build -trimpath -ldflags="-s -X main.version=$VERSION" -o /home/node/diffharbor ./cmd/diffharbor
 
 FROM node:24-alpine
 # fallow's musl binary needs a CPU with AVX2.

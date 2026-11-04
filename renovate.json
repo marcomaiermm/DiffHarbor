@@ -1,6 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", ":semanticCommits", "helpers:pinGitHubActionDigests", "group:allNonMajor"],
+  "extends": ["config:recommended", ":semanticCommits", "helpers:pinGitHubActionDigests", "docker:pinDigests", "group:allNonMajor"],
+  "osvVulnerabilityAlerts": true,
   "ignoreDeps": ["ghcr.io/marcomaiermm/diffharbor"],
   "schedule": ["before 6am on monday"],
   "minimumReleaseAge": "3 days",
