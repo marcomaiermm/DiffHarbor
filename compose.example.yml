@@ -11,7 +11,7 @@ services:
     restart: unless-stopped
     pids_limit: 4096 # a fork bomb in the PR's tests
     security_opt: [no-new-privileges:true] # no setuid binary takes node back to root
-    # Root needs these to make node's work dirs, drop to node, kill its leftovers and clean up after it.
+    # Root needs these to make the repos' users' work dirs, drop to them, kill their leftovers and clean up after them.
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID]
     ports: ["3000:3000"]
@@ -62,10 +62,10 @@ services:
       # Optional: your logo, colors and templates for the report (README: Branding the report), with the volume below.
       # TEMPLATE_DIR: /branding
       DOCKER_HOST: tcp://dind:2375 # testcontainers in the checks; drop with the dind service if you don't need them
-    # Root serves and holds the forge keys; git, checks and Pi run as node (uid 1000) and can't read root's environ.
+    # Root serves and holds the forge keys; git, checks and Pi run as a uid per repo and can't read root's environ.
     volumes:
-      - diffharbor-data:/data # learnings, pending reviews, reports, Pi's ChatGPT login
-      - diffharbor-cache:/cache # package stores, Go modules, work dirs
+      - diffharbor-data:/data # learnings, pending reviews, reports, Pi's ChatGPT login, the repos' uids
+      - diffharbor-cache:/cache # per repo: package stores, Go modules; work dirs
       # - ./branding:/branding:ro
     # depends_on: [seaweedfs] # with the seaweedfs service: S3 is up when the server moves the reports on start
 

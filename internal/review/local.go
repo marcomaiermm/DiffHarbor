@@ -60,7 +60,7 @@ func Tree(ctx context.Context, cwd, dir, title string, closed []Comment, large b
 
 // Checkout fetches the PR head and base into repo with history but without old file contents (blob:none) for
 // co-change hints, checks out head (a commit) and returns the PR's diff as GitHub shows it:
-// merge-base(base, head)..head, base a ref or commit of the remote. token reads the repo. As root git runs as node,
+// merge-base(base, head)..head, base a ref or commit of the remote. token reads the repo. As root git runs as the repo's user,
 // like the PR's code: it fetches through the vault, whose remote works until ctx is done (blob:none fetches the
 // blobs later commands need) and never holds token. Else token goes in the env (argv is world-readable).
 func Checkout(ctx context.Context, repo, cloneURL, head, base, token string) (string, error) {
@@ -84,7 +84,7 @@ func Checkout(ctx context.Context, repo, cloneURL, head, base, token string) (st
 		}
 		return string(out), nil
 	}
-	if _, err := proc.Run(proc.Command(ctx, filepath.Dir(repo), nil, "git", "init", "-q", repo)); err != nil { // as node, when we're root
+	if _, err := proc.Run(proc.Command(ctx, filepath.Dir(repo), nil, "git", "init", "-q", repo)); err != nil { // as the repo's user, when we're root
 		return "", err
 	}
 	for _, args := range [][]string{

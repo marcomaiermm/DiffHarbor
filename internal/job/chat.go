@@ -129,7 +129,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		}
 	}
 
-	dir, err := proc.Workspace()
+	dir, err := agent.Workspace(e.Repo())
 	if err != nil {
 		return err
 	}

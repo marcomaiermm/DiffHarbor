@@ -507,7 +507,7 @@ func Resolve(e *forge.Event, api string, n int, token string, t forge.Thread, sh
 }
 
 // ResolveThread needs Contents: write, GitHub refuses it to an app with Pull requests: write only. So it gets its
-// own token, which stays in this process: the review's token reaches git, which runs as node.
+// own token, which stays in this process: the review's token reaches git, which runs as the repo's user.
 func ResolveThread(e *forge.Event, id string) error {
 	token, err := Mint(e, map[string]string{"contents": "write", "pull_requests": "write"})
 	if err != nil {

@@ -81,11 +81,8 @@ func work(queue chan *forge.Event) {
 		case e.Kind != "pull_request":
 			run = func(ctx context.Context) error { return job.Chat(ctx, f, mentions[e.Forge], e) }
 		}
-		proc.KillOrphans()      // what an earlier job's PR code left running, e.g. listening for this job's token
-		err := proc.ResetHome() // and what it left in node's home, e.g. a git hook for this job's token
-		if err == nil {
-			err = agent.Proxies() // Pi's models.json went with the reset
-		}
+		proc.KillLeftovers()   // what an earlier job's PR code left running, e.g. listening for this job's token
+		err := proc.CleanTmp() // and left in the temp dirs all share; home and caches are the job's (proc.Workspace)
 		ctx, cancel := context.WithCancel(context.Background())
 		running.Lock()
 		running.key, running.review, running.cancel = e.Key(), e.Kind == "pull_request", cancel
@@ -97,7 +94,7 @@ func work(queue chan *forge.Event) {
 			log.Println(e.Key(), err)
 		}
 		cancel() // revokes the job's vault tokens: git's remote, Pi's keys
-		proc.KillOrphans()
+		proc.KillLeftovers()
 		running.Lock()
 		running.key = "" // idle: a later push or close has nothing to stop
 		running.Unlock()
@@ -170,10 +167,7 @@ func Serve(cfg Config) {
 		mentions[name] = mentionOf(f.Bot())
 		log.Printf("%s as @%s on POST /webhook/%s", name, f.Bot(), name)
 	}
-	// Work dirs live next to the pnpm store (hardlinks); leftovers from a crash go.
-	proc.WorkDir = filepath.Join(proc.CacheDir, "work")
-	_ = os.RemoveAll(proc.WorkDir)
-	if err := os.MkdirAll(proc.WorkDir, 0o755); err != nil {
+	if err := proc.Clean(); err != nil { // a crash's work dirs, the cache all repos shared before
 		log.Fatal(err)
 	}
 	queue := make(chan *forge.Event, 100)

@@ -41,7 +41,7 @@ type Settings struct {
 	// itsaplan projects whose tickets a PR may name ("WID"); unset = any, [] = none. Never for a PR from a fork.
 	Tickets []string `json:"tickets"`
 	// true: the checks' installs run lifecycle scripts (postinstall, native builds); default off, a dependency's
-	// script would run as node next to the PR's code.
+	// script would run as the repo's user next to the PR's code.
 	InstallScripts bool `json:"install_scripts"`
 
 	IgnoreRe *regexp.Regexp

@@ -1,4 +1,4 @@
-// Package checks runs linters, scanners and tests on the changed files, as node in the PR checkout. Their output goes to
+// Package checks runs linters, scanners and tests on the changed files, as the repo's user in the PR checkout. Their output goes to
 // the model as hints (exit codes don't matter); tools that find something cost no tokens to find it.
 package checks
 
@@ -127,7 +127,7 @@ type Script struct{ Name, File string }
 // Run runs the built-in checks for files, then the repo's own scripts with the files after "--". patch is
 // the diff under review as a file. JS and Go checks run per package (nearest package.json or go.mod), so a
 // monorepo's apps get theirs; tests(file) says whether the tests of file's package run. Installs skip lifecycle
-// scripts unless installScripts: a dependency's postinstall would run as node next to the PR's code.
+// scripts unless installScripts: a dependency's postinstall would run as the repo's user next to the PR's code.
 //
 //nolint:gocognit,gocyclo // the checks step by step, each step a few lines
 func Run(ctx context.Context, repo string, scripts []Script, patch string, files []string, tests func(string) bool, installScripts bool) string {
