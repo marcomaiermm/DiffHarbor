@@ -119,7 +119,7 @@ const paint = async table => {
         s.textContent = t.content.slice(a - at, b - at);
         if (t.color) s.style.color = t.color;
         if (a >= from && b <= to && to > from) s.className = "chg";
-        if (Object.hasOwn(syms, t.content)) { s.classList.add("sym"); s.dataset.sym = t.content; }
+        if (Object.hasOwn(syms, t.content)) { s.classList.add("sym"); s.dataset.sym = t.content; s.tabIndex = -1; }
         spans.push(s);
       }
       at += t.content.length;

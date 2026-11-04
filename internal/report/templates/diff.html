@@ -1,15 +1,17 @@
 {{/* A file and its diff, a line of it, a finding on it; a call graph. */}}
-{{define "file"}}<details class="collapsible file" id="{{.Path}}"{{if .Open}} open{{end}}{{if .Changed}} data-changed{{end}}>
-  <summary class="collapsible-trigger flex-wrap justify-start gap-x-3 gap-y-1 py-2.5 pr-3 pl-3">
+{{define "file"}}<div class="collapsible file" id="{{.Path}}"{{if .Open}} open{{end}}{{if .Changed}} data-changed{{end}}>
+  <div class="file-head">
+    <button type="button" class="file-toggle" aria-expanded="{{.Open}}" aria-controls="{{.Path}}~body">
     {{icon "chevron-down" "collapsible-chevron"}}
     <span class="min-w-0 font-mono text-[13px] break-all"><span class="font-normal text-muted-foreground">{{dir .Path}}</span>{{base .Path}}</span>
     <span class="font-mono text-xs tabular-nums"><span class="text-diff-add">+{{.Add}}</span> <span class="text-diff-del">−{{.Del}}</span></span>
     {{with .Moved}}<span class="badge font-mono" data-variant="outline">{{.}} moved</span>{{end}}
     {{if .Changed}}<span class="badge changed" data-variant="outline">changed</span>{{end}}
     {{with .Note}}<span class="min-w-48 flex-1 text-[13px] font-normal text-muted-foreground">{{.}}</span>{{end}}
-    <label class="viewed ml-auto"><input type="checkbox" class="checkbox" data-key="{{.Path}}@{{.ID}}" data-path="{{.Path}}"> Viewed</label>
-  </summary>
-  <div class="collapsible-content">
+    </button>
+    <label class="viewed"><input type="checkbox" class="checkbox" data-key="{{.Path}}@{{.ID}}" data-path="{{.Path}}"> Viewed</label>
+  </div>
+  <div class="collapsible-content" id="{{.Path}}~body">
   {{with .Findings}}<div class="px-3">{{range .}}{{template "finding" .}}{{end}}</div>{{end}}
   {{if .Long}}{{with .Changes}}<nav class="flex flex-wrap items-center gap-1 border-b px-3 py-2" aria-label="Declarations it changes"><span class="mr-1 text-xs text-muted-foreground">Changes</span>{{range .}}<a href="#{{.ID}}" class="badge change" data-variant="outline" data-state="{{.State}}">{{.Name}}</a>{{end}}</nav>{{end}}{{end}}
   <div class="diff overflow-x-auto"><table class="w-full border-collapse font-mono text-[12.5px] leading-5" data-path="{{.Path}}">
@@ -20,12 +22,12 @@
   </table></div>
   {{if .Cut}}<div class="border-t px-4 py-2 text-sm text-muted-foreground">{{.Cut}} more lines on the pull request's page.</div>{{end}}
   </div>
-</details>{{end}}
+</div>{{end}}
 
-{{define "line"}}{{if eq .Class "hunk"}}<tr class="hunk"><td colspan="3" class="py-0.5 pr-2 pl-4 text-xs"><span class="flex items-center gap-2"><button type="button" class="hunk-seen" aria-pressed="false" title="Hide this hunk once read">{{icon "check" "size-3"}}<span>Seen</span></button><span class="min-w-0 truncate">{{.Text}}</span></span></td></tr>{{else}}<tr class="{{.Class}}"{{with .ID}} id="{{.}}"{{end}}{{with .Old}} data-old="{{.}}"{{end}}><td>{{.No}}</td><td>{{if eq .Class "add"}}+{{else if eq .Class "del"}}−{{end}}</td><td>{{.Text}}</td></tr>{{end}}
+{{define "line"}}{{if eq .Class "hunk"}}<tr class="hunk"><td colspan="3" class="py-0.5 pr-2 pl-4 text-xs"><span class="flex items-center gap-2"><button type="button" class="hunk-seen" aria-pressed="false" title="Hide this hunk once read">{{icon "check" "size-3"}}<span>Fold</span></button><span class="min-w-0 truncate">{{.Text}}</span></span></td></tr>{{else}}<tr class="{{.Class}}"{{with .ID}} id="{{.}}"{{end}}{{with .Old}} data-old="{{.}}"{{end}}><td>{{.No}}</td><td>{{if eq .Class "add"}}+{{else if eq .Class "del"}}−{{end}}</td><td>{{.Text}}</td></tr>{{end}}
 {{range .Findings}}<tr><td colspan="3" class="bg-background px-3">{{template "finding" .}}</td></tr>{{end}}{{end}}
 
-{{define "finding"}}<div class="alert my-2 font-sans whitespace-normal"{{if eq .Severity "critical"}} data-variant="destructive"{{end}} role="note">
+{{define "finding"}}<div class="alert my-2 font-sans whitespace-normal"{{with .ID}} id="{{.}}"{{end}}{{if eq .Severity "critical"}} data-variant="destructive"{{end}} role="note">
   <div class="alert-content">
     {{if .Title}}<h5 class="alert-title">{{.Severity}} · {{.Title}}</h5>{{end}}
     <p class="alert-description whitespace-pre-wrap">{{.Body}}</p>

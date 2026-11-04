@@ -26,6 +26,12 @@
   a { @apply underline-offset-4; }
   a:where(:not([class])):hover { @apply underline; }
   ::selection { background: color-mix(in oklab, var(--ring) 30%, transparent); }
+  html { scrollbar-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent) transparent; }
+  /* a jump lands under the sticky header and a file's sticky head */
+  [id] { scroll-margin-top: 4.5rem; }
+  .diff [id] { scroll-margin-top: 7.5rem; }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  .diff :focus-visible, .file-toggle:focus-visible { outline-offset: -2px; }
 }
 /* the side bar: shadcn's, under the header, a rail at ⌘B; Linear's list, a ring per step that fills as its files get viewed */
 @property --p { syntax: "<number>"; inherits: false; initial-value: 0; }
@@ -68,10 +74,13 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / 9px no-repeat; }
 /* a file: GitHub's sticky header, Geist's restraint */
 .collapsible.file { overflow: clip; }
-.file > summary { @apply sticky top-14 z-10 bg-background; }
-.file[open] > summary { @apply border-b; }
+.file-head { @apply sticky top-14 z-10 flex items-center gap-3 bg-background py-2.5 pr-3 pl-3; }
+.file-head:hover { @apply bg-accent; }
+.file-toggle { @apply flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 rounded-sm text-left text-sm font-medium; }
+.file[open] > .file-head { @apply border-b; }
+.file:not([open]) > .collapsible-content { display: none; }
 .file .collapsible-chevron { transform: rotate(-90deg); }
-.file[open] > summary > .collapsible-chevron { transform: none; }
+.file[open] .file-toggle > .collapsible-chevron { transform: none; }
 .collapsible.file > .collapsible-content { padding: 0; color: inherit; font-size: inherit; }
 /* shadcn's badge, at the height of a line of the page */
 .badge { @apply h-5 shrink-0 gap-1 px-2 leading-none; }
@@ -79,7 +88,7 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
 .viewed:hover { @apply text-foreground; }
 .viewed:has(:checked) { @apply bg-accent text-foreground; }
 .viewed .checkbox { @apply size-3.5; }
-.collapsible.seen > summary { @apply opacity-60; }
+.collapsible.seen .file-toggle, .collapsible.seen .file-toggle * { @apply text-muted-foreground; } /* not opacity: it took the text under AA */
 /* shadcn's Trace: a row is an icon, a one-line title, a muted description, a chevron after it when it opens */
 .trace { @apply flex min-w-0 flex-col gap-2; }
 .trace-line { @apply flex w-fit max-w-full min-w-0 items-center gap-2 text-sm text-muted-foreground transition-colors; }
@@ -89,6 +98,9 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
 .trace-icon svg { @apply pointer-events-none size-4; }
 .trace-title ~ .trace-icon { @apply -ml-1; }
 .trace-title { @apply min-w-0 truncate; }
+.keys { @apply ml-auto flex items-center gap-1.5 text-xs text-muted-foreground; }
+.keys kbd { @apply inline-flex h-5 min-w-5 items-center justify-center rounded border bg-muted px-1 font-mono text-[11px] text-foreground; }
+@media (hover: none) { .keys { display: none; } }
 .trace-description { @apply shrink-0 tabular-nums text-muted-foreground/70; }
 .trace-collapsible > summary { @apply flex w-fit max-w-full min-w-0 cursor-pointer list-none rounded-md; }
 .trace-collapsible > summary::-webkit-details-marker { display: none; }
@@ -100,7 +112,7 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
 .diff tr.del { background: var(--diff-del-bg); }
 .diff tr.hunk, .split-bar { background: var(--diff-hunk); color: var(--diff-muted); }
 /* a line's cells take no classes: Tailwind's browser build rescans every classed element on each change */
-.diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(1) { @apply w-px px-3 text-right whitespace-nowrap select-none; color: var(--diff-dim); }
+.diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(1) { @apply w-px px-2 text-right whitespace-nowrap tabular-nums select-none; min-width: calc(5ch + 16px); /* a table cell takes width as a wish */ color: var(--diff-dim); }
 .diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(2) { @apply w-px pr-2 select-none; }
 .diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(3) { @apply pr-4 whitespace-pre; }
 .sl > .no { color: var(--diff-dim); }
@@ -337,7 +349,7 @@ a.frow[href]:hover .ftitle { @apply underline; }
 .badge.changed { color: var(--ring); border-color: color-mix(in oklab, var(--ring) 35%, transparent); }
 .nav-file[data-changed]::after { content: ""; @apply ml-auto size-1.5 shrink-0 rounded-full; background: var(--ring); }
 .tree-leaf.nav-file[data-changed]::after { @apply ml-1.5; }
-html[data-since] details.file:not([data-changed]), html[data-since] [id^="step-"]:not(:has(details.file[data-changed])),
+html[data-since] .file:not([data-changed]), html[data-since] [id^="step-"]:not(:has(.file[data-changed])),
 html[data-since] .sidebar-files li:not(:has([data-changed])) { display: none; }
 .reach-item li > .btn { @apply h-auto p-0; }
 /* a graph's right-click menu, shadcn's dropdown */

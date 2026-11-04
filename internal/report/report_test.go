@@ -78,7 +78,7 @@ func TestRender(t *testing.T) {
 		"Findings", "Decisions", "Fix before merging", `href="#finding-1"`, "Error dropped", "handler.go:2 · step 2", "not verified",
 		"Minor", `href="https://gitlab.com/acme/shop/-/blob/0123456789abcdef/other.go"`, "elsewhere", "other.go · not in the diff",
 		"What only a person can settle", "Should a failed save retry?",
-		"Storage first", `id="store/store.go"`, "Then the handler", `id="api/handler.go"`, "major · Error dropped",
+		"Storage first", `id="store/store.go"`, "Then the handler", `id="api/handler.go"`, `id="finding-1"`, "major · Error dropped",
 		`id="tests"`, "api/handler_test.go: TestHandle", `id="api/handler_test.go"`, `id="other"`, `id="README.md"`,
 		`id="deleted"`, `id="gone.go"`, `id="commits"`, "Work in progress", "/merge_requests/7/diffs?commit_id=aaaaaaaaaa",
 		`id="finish"`, "Request changes", "Review for !7 · 1 line comment",
@@ -103,6 +103,12 @@ func TestRender(t *testing.T) {
 	}
 	if strings.Contains(s, `id="missing.go"`) {
 		t.Error("a flow file outside the diff got a block")
+	}
+	// the head opens the file, the Viewed box beside it is not inside the button
+	_, head, _ := strings.Cut(s, `aria-controls="api/handler.go~body"`)
+	button, rest, _ := strings.Cut(head, "</button>")
+	if strings.Contains(button, "Viewed") || !strings.Contains(rest[:strings.Index(rest, `id="api/handler.go~body"`)], "Viewed") {
+		t.Error("the Viewed box is not beside the file's button")
 	}
 	if strings.Count(s, `id="api/handler.go"`) != 1 {
 		t.Error("a file shows twice")

@@ -34,6 +34,12 @@
     if (t) choose(t.dataset.files ? "files" : "diff", t.dataset.files || t.dataset.diff);
   });
   const boxes = [...document.querySelectorAll("input[data-key]")];
+  // a file's head opens and closes its diff; the Viewed box beside it is not part of the button
+  const fileOpen = (f, on) => { f.toggleAttribute("open", on); f.querySelector(".file-toggle").setAttribute("aria-expanded", on); };
+  document.addEventListener("click", e => {
+    const t = e.target.closest(".file-toggle");
+    if (t) fileOpen(t.closest(".file"), !t.closest(".file").hasAttribute("open"));
+  });
   const viewed = new Set();
   const navFiles = [...document.querySelectorAll(".sidebar-content a[data-path]")];
   const steps = [...document.querySelectorAll("[data-step]")];
@@ -42,7 +48,7 @@
     viewed.clear();
     for (const b of boxes) {
       if (b.checked) viewed.add(b.dataset.path);
-      b.closest("details").classList.toggle("seen", b.checked);
+      b.closest(".file").classList.toggle("seen", b.checked);
     }
     const n = boxes.filter(b => b.checked).length;
     document.getElementById("progress").style.width = (boxes.length ? 100 * n / boxes.length : 0) + "%";
@@ -66,23 +72,22 @@
   };
   for (const b of boxes) {
     b.checked = !!get(prefix + b.dataset.key);
-    if (b.checked) b.closest("details").open = false; // read already: a jump to it opens it again
-    b.closest("label").addEventListener("click", e => e.stopPropagation());
+    if (b.checked) fileOpen(b.closest(".file"), false); // read already: a jump to it opens it again
     b.addEventListener("change", () => {
       set(prefix + b.dataset.key, b.checked);
-      const d = b.closest("details");
-      if (b.checked && d.open) {
-        d.open = false;
+      const d = b.closest(".file");
+      if (b.checked && d.hasAttribute("open")) {
+        fileOpen(d, false);
         if (d.getBoundingClientRect().top < 0) d.scrollIntoView(); // the next file starts where this one did
       }
       sync();
+    });
+  }
+  sync();
   const copy = document.getElementById("draft-copy"), status = document.getElementById("draft-status");
   copy.addEventListener("click", () => navigator.clipboard.writeText(document.getElementById("draft-md").textContent).then(
     () => status.textContent = "The review text is on your clipboard.",
     () => status.textContent = "The browser kept the clipboard closed: select the text above and copy it."));
-    });
-  }
-  sync();
 
   // versions: "Only what changed" leaves the files whose change differs from the last version's; the picker and a
   // newer version's banner come from the PR's list of versions, next to this page's URL (none: a page alone)
@@ -123,10 +128,12 @@
   };
   const hunkKey = h => {
     const t = h.closest("table");
-    return prefix + t.closest("details").querySelector("input[data-key]").dataset.key + "#" + [...t.querySelectorAll("tr.hunk")].indexOf(h);
+    return prefix + t.closest(".file").querySelector("input[data-key]").dataset.key + "#" + [...t.querySelectorAll("tr.hunk")].indexOf(h);
   };
   const seeHunk = (h, on) => {
-    h.querySelector(".hunk-seen").setAttribute("aria-pressed", on);
+    const b = h.querySelector(".hunk-seen");
+    b.setAttribute("aria-pressed", on);
+    b.lastChild.textContent = on ? "Unfold" : "Fold";
     const rows = [...h.closest("table").rows];
     for (let i = rows.indexOf(h) + 1; i < rows.length && !rows[i].matches("tr.hunk"); i++) rows[i].classList.toggle("gone", on);
     set(hunkKey(h), on);
@@ -137,7 +144,7 @@
     if (!b) return;
     const h = b.closest("tr");
     seeHunk(h, b.getAttribute("aria-pressed") !== "true");
-    const t = h.closest("table"), box = t.closest("details").querySelector("input[data-key]");
+    const t = h.closest("table"), box = t.closest(".file").querySelector("input[data-key]");
     if (![...t.querySelectorAll(".hunk-seen")].some(x => x.getAttribute("aria-pressed") !== "true") && !box.checked) {
       box.checked = true;
       box.dispatchEvent(new Event("change"));
@@ -154,7 +161,7 @@
     if (!el) return;
     const tab = el.closest("[role=tabpanel][hidden]");
     if (tab) document.getElementById(tab.getAttribute("aria-labelledby")).click();
-    for (let d = el.closest("details"); d; d = d.parentElement.closest("details")) d.open = true;
+    for (let d = el.closest("details, .file"); d; d = d.parentElement.closest("details, .file")) d.matches(".file") ? fileOpen(d, true) : d.open = true;
     const fold = el.closest("tbody.fold");
     if (fold) { fold.classList.add("open"); fold.querySelector(".fold-toggle").setAttribute("aria-expanded", true); }
     if (el.matches("tr.gone")) seeHunk(hunkOf(el), false);
@@ -167,6 +174,26 @@
   addEventListener("hashchange", reveal);
   reveal();
 
+  // j and k: the next and the previous file, n: the next finding, v: the file at the top viewed. Esc closes what
+  // is open: the dialogs and the symbol card do that themselves.
+  const head = 72; // where a jump puts a file: under the header, see scroll-margin-top
+  const shown = sel => [...document.querySelectorAll(sel)].filter(x => x.getClientRects().length);
+  let last, lastAt = 0; // the smooth scroll to the last jump may still run: a key right after it goes on from there
+  const jump = el => { last = el; lastAt = performance.now(); history.replaceState(null, "", "#" + encodeURI(el.id)); reveal(); };
+  addEventListener("keydown", e => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.("input, textarea, select, [contenteditable]") || document.querySelector("dialog[open]")) return;
+    const y = el => el.getBoundingClientRect().top - head;
+    const files = shown(".file"), i = performance.now() - lastAt < 700 ? files.indexOf(last) : -1;
+    let to;
+    if (e.key === "j") to = i >= 0 ? files[i + 1] : files.find(f => y(f) > 8);
+    else if (e.key === "k") to = i >= 0 ? files[i - 1] : files.findLast(f => y(f) < -8);
+    else if (e.key === "n") to = [...document.querySelectorAll(".file [id^='finding-']")].find(f => y(f) > 8 + 48);
+    else if (e.key === "v") shown(".file").find(f => f.getBoundingClientRect().bottom > head + 8)?.querySelector("input[data-key]").click();
+    else return;
+    e.preventDefault();
+    if (to) jump(to);
+  });
+
   // what is in view is current in the side bar: the file, its step, its section
   const links = [...document.querySelectorAll(".sidebar-content a[href^='#']")];
   const current = el => {
@@ -178,10 +205,10 @@
   };
   const spy = new IntersectionObserver(es => {
     const hit = es.filter(e => e.isIntersecting).map(e => e.target);
-    const el = hit.find(t => t.matches("details")) || hit[0];
+    const el = hit.find(t => t.matches(".file")) || hit[0];
     if (el) current(el);
   }, { rootMargin: "-15% 0px -75% 0px" });
-  document.querySelectorAll("main section[id], main [id^='step-'], details.file").forEach(el => spy.observe(el));
+  document.querySelectorAll("main section[id], main [id^='step-'], .file").forEach(el => spy.observe(el));
 })();
 </script>
 {{end}}

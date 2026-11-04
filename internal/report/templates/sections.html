@@ -1,7 +1,8 @@
 {{/* The sections after the overview, one template each. */}}
 {{define "flow"}}
 {{if .Steps}}<section id="flow" class="mt-14 border-t pt-10">
-  <h2 class="mb-8 text-xl font-semibold tracking-tight">Reading order</h2>
+  <div class="mb-8 flex flex-wrap items-baseline gap-x-6 gap-y-2"><h2 class="text-xl font-semibold tracking-tight">Reading order</h2>
+    <p class="keys"><kbd>j</kbd><kbd>k</kbd> file <kbd>n</kbd> finding <kbd>v</kbd> viewed <kbd>Esc</kbd> close</p></div>
   {{range $i, $s := .Steps}}
   <div class="mb-12" id="step-{{inc $i}}">
     <div class="flex items-baseline gap-3">
