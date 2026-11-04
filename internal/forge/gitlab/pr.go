@@ -157,17 +157,28 @@ func (p *pr) Resolve(t forge.Thread, sha string) {
 	}
 }
 
-// Post starts a discussion per finding on a diff line, then a note with the rest. A position GitLab refuses
-// (outdated diff, a line it doesn't show) moves the finding into the note.
-func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, footer string) (int, error) {
+// Post sends the summary note, then a discussion per finding on a diff line: the summary heads them, as a GitHub
+// review does. A position GitLab refuses (outdated diff, a line it doesn't show) moves the finding into the note.
+func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, footer string) (_ int, err error) {
 	inline, rest := forge.Split(r, threads, diff.NewLines(raw))
 	if p.refs[2] != sha { // GitLab hasn't built the diff of this push yet: no positions on it
 		log.Println(p.e.Key(), "diff of", sha[:7], "not ready, findings go in the note")
 		rest, inline = append(rest, inline...), nil
 	}
+	id, err := p.Note(0, forge.Summary(inline, rest, footer))
+	if err != nil {
+		return 0, err
+	}
 	lines := olds(raw)
 	var posted []forge.Finding
-	for _, c := range inline {
+	defer func() { // a refused or failed discussion: the note says what was posted
+		if len(posted) < len(inline) {
+			if _, e := p.Note(id, forge.Summary(posted, rest, footer)); err == nil {
+				err = e
+			}
+		}
+	}()
+	for i, c := range inline {
 		err := p.discuss(c, lines)
 		if c.Start > 0 && rejected(err) { // the suggestion's range: the finding on its own line, the fix as plain code
 			c.Start = 0
@@ -177,14 +188,15 @@ func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, foot
 		case rejected(err):
 			c.Start = 0
 			rest = append(rest, c)
-		case err != nil:
+		case err != nil: // the rest isn't tried: the note keeps them
+			for _, c := range inline[i:] {
+				c.Start = 0
+				rest = append(rest, c)
+			}
 			return len(posted), err
 		default:
 			posted = append(posted, c)
 		}
-	}
-	if _, err := p.Note(0, forge.Summary(posted, rest, footer)); err != nil {
-		return len(posted), err
 	}
 	return len(posted) + len(rest), nil
 }

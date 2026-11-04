@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -182,5 +183,93 @@ func TestRevokeStream(t *testing.T) {
 	at := time.Now()
 	if _, err := io.ReadAll(r); err == nil || time.Since(at) > 5*time.Second { // not the client's timeout
 		t.Fatal("the stream outlived its token")
+	}
+}
+
+func TestNpm(t *testing.T) {
+	start(t)
+	got := make(chan *http.Request, 10)
+	var reg string
+	u := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- r
+		switch {
+		case strings.HasSuffix(r.URL.Path, ".tgz"):
+			http.Redirect(w, r, reg+"blobs/a.tgz", http.StatusFound)
+			return
+		case strings.HasSuffix(r.URL.Path, "/relative"):
+			w.Header().Set("Location", "/api/npm/virtual/blobs/b.tgz")
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		body := `{"versions":{"1.0.0":{"dist":{"tarball":"` + reg + `@corp/a/-/a-1.0.0.tgz"}}}}`
+		w.Header().Set("Content-Type", "application/vnd.npm.install-v1+json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.Header().Set("ETag", `"up"`)
+		if r.Method != http.MethodHead {
+			w.Write([]byte(body))
+		}
+	}))
+	t.Cleanup(u.Close)
+	reg = u.URL + "/api/npm/virtual/"
+	ctx, revoke := context.WithCancel(context.Background())
+	via, err := Npm(ctx, reg, "art-token")
+	if err != nil || !strings.HasPrefix(via, base+"/npm/") {
+		t.Fatal(via, err)
+	}
+	basic, _ := Npm(ctx, reg, "user:pw")
+
+	res, err := client.Get(via + "@corp%2fa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	r := <-got
+	if r.URL.EscapedPath() != "/api/npm/virtual/@corp%2fa" || r.Header.Get("Authorization") != "Bearer art-token" {
+		t.Fatalf("upstream got %s %q", r.URL.EscapedPath(), r.Header.Get("Authorization"))
+	}
+	if want := via + "@corp/a/-/a-1.0.0.tgz"; !strings.Contains(string(b), want) || strings.Contains(string(b), reg) || res.ContentLength != int64(len(b)) || res.Header.Get("ETag") != "" {
+		t.Fatalf("packument %q (length %d, ETag %q), want the tarball at %s", b, res.ContentLength, res.Header.Get("ETag"), want)
+	}
+	res, err = client.Head(via + "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if <-got; res.Header.Get("Content-Length") == "0" || res.Header.Get("ETag") != `"up"` { // nothing to rewrite
+		t.Fatalf("HEAD: length %q, ETag %q", res.Header.Get("Content-Length"), res.Header.Get("ETag"))
+	}
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	res, err = noRedirect.Get(basic + "@corp/a/-/a-1.0.0.tgz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if r := <-got; r.Header.Get("Authorization") != "Basic "+base64.StdEncoding.EncodeToString([]byte("user:pw")) || res.Header.Get("Location") != basic+"blobs/a.tgz" {
+		t.Fatalf("tarball: %q, redirect to %q", r.Header.Get("Authorization"), res.Header.Get("Location"))
+	}
+	req, _ := http.NewRequest("GET", via+"relative", nil)
+	req.Header.Set("X-HTTP-Method-Override", "DELETE")
+	res, err = noRedirect.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if r := <-got; r.Header.Get("X-Http-Method-Override") != "" || res.Header.Get("Location") != via+"blobs/b.tgz" {
+		t.Fatalf("override %q reached upstream, relative redirect to %q", r.Header.Get("X-Http-Method-Override"), res.Header.Get("Location"))
+	}
+
+	for _, p := range []string{"PUT /@corp%2fa", "POST /-/npm/v1/security/advisories/bulk", "GET /../../x", "GET /%2e%2e/x"} {
+		m, path, _ := strings.Cut(p, " ")
+		if c := send(t, m, via+strings.TrimPrefix(path, "/")); c != 403 {
+			t.Errorf("%s: %d, want 403", p, c)
+		}
+	}
+	revoke()
+	if c := send(t, "GET", via+"a"); c != 401 {
+		t.Fatalf("revoked: %d", c)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a refused request reached upstream: %s", (<-got).URL)
 	}
 }

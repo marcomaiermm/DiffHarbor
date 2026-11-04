@@ -57,6 +57,13 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	if s.State.SHA == sha && !manual {
 		return nil // reviewed already, e.g. a redelivered event; `@app review` forces one
 	}
+	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
+	// Like a bot author: green, and `@app review` still reviews. A broken review.json reviews, its note says why.
+	if !manual && cfgErr == nil && !cfg.Reviews(pr.Base.Ref, e.Repository.DefaultBranch) {
+		s.Write(fmt.Sprintf("⏭️ **Review skipped:** base branch `%s` is not the default branch or in `base_branches`. Comment `@%s review` for one.", pr.Base.Ref, f.Bot()), "")
+		p.Status(sha, "success", "Skipped: base branch")
+		return nil
+	}
 	// Dependency bumps and release PRs get no review unless asked for. Green, so a required check passes.
 	// A self-hosted Renovate on a user token is a User, so its PRs get reviewed.
 	if pr.User.Type == "Bot" && !manual {
@@ -114,7 +121,6 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 			}
 		}
 	}
-	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
 	outline := diff.Analyze(raw)
 	s.Outline = &outline
 	guide := ReportURL != "" && cfg.Reports(len(prFiles)) // a large PR: a reading order and a report
@@ -127,7 +133,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		desc = "Nothing to review"
 		s.State = s.State.Update(review.Result{}, sha, prFiles, false)
 		s.State.Patches = reviewedPatches(s.State.Patches, patches, nil)
-		s.Write("", footer(fmt.Sprintf("Reviewed up to `%s`, nothing to review", sha[:7])))
+		s.Write("", footer(fmt.Sprintf("Reviewed up to `%s` · nothing to review", sha[:7])))
 		return nil
 	}
 
@@ -168,12 +174,14 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 
 	started := time.Now()
 	var tid, tk string
-	if pr.Head.Repo.ID == e.Repository.ID { // a fork's author could name any ticket and read it in the review
+	var regs []checks.Registry
+	if pr.Head.Repo.ID == e.Repository.ID { // a fork's author could name any ticket and read it in the review, or fetch the internal packages
 		tid, tk = ticket.Lookup(ctx, cfg.Tickets, pr.Title, pr.Head.Ref, pr.Body)
+		regs, _ = checks.Registries(e.Owner()) // main checked them
 	}
 	r, stats, err := review.Analyze(ctx, review.Input{
 		Agent: agent.Pi{}, Dir: dir, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Ticket: tk, Parts: parts,
-		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo())), Checks: scripts, Prior: prior, Closed: closed, Settings: cfg,
+		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo())), Checks: scripts, Registries: regs, Prior: prior, Closed: closed, Settings: cfg,
 		Guide: guide && only == nil, // an incremental review sees a few files: the last full one's reading order stays
 	})
 	if err != nil {
@@ -213,12 +221,12 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 			return err
 		}
 	}
-	desc = fmt.Sprintf("%d findings", n)
+	desc = text.Count(n, "finding")
 	if len(r.Fixed) > 0 {
 		desc += fmt.Sprintf(", %d fixed", len(r.Fixed))
 	}
 	if len(r.Failed) > 0 { // their part failed: not green, the next push or `@app review` reviews them
-		desc, state = fmt.Sprintf("%s, %d files not reviewed", desc, len(r.Failed)), "error"
+		desc, state = desc+", "+text.Count(len(r.Failed), "file")+" not reviewed", "error"
 	}
 	log.Printf("%s %s %s %s: %s", key, sha[:7], kind, stats, desc)
 	s.State = s.State.Update(r, sha, prFiles, only == nil)
@@ -248,7 +256,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	}
 	banner := ""
 	if n == 0 {
-		banner = "No actionable comments were generated in the recent review."
+		banner = "No actionable comments were generated in the latest review."
 	}
 	s.Write(banner, footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc)))
 	return nil

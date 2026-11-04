@@ -183,12 +183,13 @@ type Input struct {
 	Agent       Agent
 	Dir         string // temp dir, checkout in Dir/repo
 	Title, Body string
-	Ticket      string          // ticket.Lookup(): the linked issue, "" = none
-	Parts       []string        // diff.Filter: one review and one verify pass each
-	Trusted     string          // TrustedContext()
-	Checks      []checks.Script // the repo's own check scripts
-	Prior       []Comment       // open findings from earlier reviews on these files
-	Closed      []Comment       // resolved ones: fixed or declined
+	Ticket      string            // ticket.Lookup(): the linked issue, "" = none
+	Parts       []string          // diff.Filter: one review and one verify pass each
+	Trusted     string            // TrustedContext()
+	Checks      []checks.Script   // the repo's own check scripts
+	Registries  []checks.Registry // the npm registries the installs read from
+	Prior       []Comment         // open findings from earlier reviews on these files
+	Closed      []Comment         // resolved ones: fixed or declined
 	Settings    Settings
 	Guide       bool // ask for Result.Flow and Decisions
 }
@@ -206,13 +207,13 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	if err := proc.WriteFile(patch, []byte(whole)); err != nil {
 		return Result{}, "", err
 	}
-	in.Settings.CITests = checks.CITests(repo)
+	in.Settings.CITests = checks.CITests(ctx, repo)
 	ci := "" // the footer says why tests didn't run
 	if slices.ContainsFunc(files, in.Settings.LeftToCI) {
 		ci = in.Settings.CITests
 	}
 	var hints strings.Builder
-	found, tests := checks.Run(ctx, repo, in.Checks, patch, files, in.Settings.RunsTests, in.Settings.InstallScripts)
+	found, tests := checks.Run(ctx, repo, in.Checks, patch, files, in.Settings.RunsTests, in.Settings.InstallScripts, in.Registries)
 	fmt.Fprintf(&hints, "## Check results (lint, types, tests, secrets, vulnerabilities; may include issues the change didn't cause)\n\n```\n%s\n```\n\n", found)
 	gctx, cancel := context.WithTimeout(ctx, time.Minute)
 	gitLog, err := proc.Run(proc.Command(gctx, repo, nil, "git", "log", "-n", historyDepth, "--format=%x00", "--name-only", "--no-renames"))
@@ -220,10 +221,10 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	if cc := coChanged(string(gitLog), files); err == nil && cc != "" {
 		fmt.Fprintf(&hints, "## Often changed together (git history)\n\n%s\n", cc)
 	}
-	if big := grownPast(repo, whole, 1000); len(big) > 0 {
+	if big := grownPast(ctx, repo, whole, 1000); len(big) > 0 {
 		fmt.Fprintf(&hints, "## Files this change pushes past 1000 lines\n\n%s\n\n", strings.Join(big, "\n"))
 	}
-	if st := stack(repo, files); st != "" {
+	if st := stack(ctx, repo, files); st != "" {
 		fmt.Fprintf(&hints, "## Stack (detected)\n\n%s\n\n", st)
 	}
 	// a fresh index per review, ~1 s for 100 files; codegraph reads the root's go.mod only, so a Go module below
@@ -608,7 +609,7 @@ func coChanged(gitLog string, changed []string) string {
 }
 
 // grownPast lists changed files the diff pushes from at most limit lines to more.
-func grownPast(repo, diff string, limit int) []string {
+func grownPast(ctx context.Context, repo, diff string, limit int) []string {
 	delta := map[string]int{}
 	file, hunk := "", false
 	for _, l := range strings.Split(diff, "\n") {
@@ -627,7 +628,7 @@ func grownPast(repo, diff string, limit int) []string {
 	}
 	var out []string
 	for f, d := range delta {
-		b, err := proc.ReadFile(filepath.Join(repo, f))
+		b, err := proc.ReadFile(ctx, filepath.Join(repo, f))
 		if !filepath.IsLocal(f) || err != nil {
 			continue
 		}
@@ -651,7 +652,7 @@ func goModules(repo string, files []string) []string {
 }
 
 // stack names the ecosystems in the checkout, so the model knows which tools and conventions apply.
-func stack(repo string, files []string) string {
+func stack(ctx context.Context, repo string, files []string) string {
 	has := func(name string) bool {
 		for _, g := range []string{name, "*/" + name, "*/*/" + name} {
 			if m, _ := filepath.Glob(filepath.Join(repo, g)); len(m) > 0 {
@@ -665,10 +666,10 @@ func stack(repo string, files []string) string {
 		s = append(s, "npm (JavaScript/TypeScript)")
 	}
 	// The root package.json and those of the packages the change touches.
-	pkg, _ := proc.ReadFile(filepath.Join(repo, "package.json"))
+	pkg, _ := proc.ReadFile(ctx, filepath.Join(repo, "package.json"))
 	for _, f := range files {
 		if p := checks.Up(repo, filepath.Dir(f), "package.json"); p != "" && p != "package.json" {
-			b, _ := proc.ReadFile(filepath.Join(repo, p))
+			b, _ := proc.ReadFile(ctx, filepath.Join(repo, p))
 			pkg = append(pkg, b...)
 		}
 	}

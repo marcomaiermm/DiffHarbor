@@ -133,7 +133,7 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 			b.WriteString("**⚠️ Tests to check**\n")
 			list(&b, o.Weakened, func(f diff.Flag) string { return "`" + f.At + "` " + f.What })
 		}
-		b.WriteString("<details>\n<summary><b>Walkthrough</b></summary>\n\n" + st.Summary + "\n\n")
+		b.WriteString("<details open>\n<summary><b>Walkthrough</b></summary>\n\n" + st.Summary + "\n\n")
 		skip := o.Skippable()
 		kinds := map[string][]string{}
 		for _, f := range slices.Sorted(maps.Keys(st.Files)) {
@@ -141,35 +141,44 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 				kinds[diff.Kind(f)] = append(kinds[diff.Kind(f)], f)
 			}
 		}
-		table := func(fs []string) {
+		if code := kinds["code"]; len(code) > 0 { // open on the PR: as many rows as a list shows
 			b.WriteString("| File | Change |\n|---|---|\n")
-			for _, f := range fs {
+			for _, f := range code[:min(len(code), shown)] {
 				fmt.Fprintf(&b, "| `%s` | %s |\n", f, strings.ReplaceAll(st.Files[f], "|", `\|`))
 			}
 			b.WriteString("\n")
-		}
-		if code := kinds["code"]; len(code) > 0 {
-			table(code)
+			if len(code) > shown {
+				fmt.Fprintf(&b, "… %d more files\n\n", len(code)-shown)
+			}
 		}
 		if tests := kinds["test"]; len(tests) > 0 || len(o.Added) > 0 {
-			fmt.Fprintf(&b, "<details>\n<summary>🧪 Tests: %d files, %d new cases, %d deleted</summary>\n\n", len(tests), len(o.Added), len(o.Removed))
-			if len(o.Added) > 0 {
-				list(&b, o.Added, func(c string) string { return c })
-			}
+			var sum []string
 			if len(tests) > 0 {
-				table(tests)
+				sum = append(sum, text.Count(len(tests), "file"))
+			}
+			sum = append(sum, text.Count(len(o.Added), "new case"))
+			if len(o.Removed) > 0 {
+				sum = append(sum, fmt.Sprintf("%d deleted", len(o.Removed)))
+			}
+			b.WriteString("<details>\n<summary>🧪 Tests: " + strings.Join(sum, ", ") + "</summary>\n\n")
+			if len(o.Added) > 0 { // the case, not its file: diff.Outline writes "path: case"
+				list(&b, o.Added, func(c string) string { _, n, _ := strings.Cut(c, ": "); return n })
 			}
 			b.WriteString("</details>\n\n")
 		}
 		if other := slices.Concat(kinds["data"], kinds["doc"]); len(other) > 0 {
-			fmt.Fprintf(&b, "<details>\n<summary>📄 Data and docs: %d files</summary>\n\n", len(other))
-			table(other)
+			b.WriteString("<details>\n<summary>📄 Data and docs: " + text.Count(len(other), "file") + "</summary>\n\n")
+			list(&b, other, func(f string) string { return "`" + f + "`" })
 			b.WriteString("</details>\n\n")
 		}
 		if len(o.Mechanical) > 0 {
-			fmt.Fprintf(&b, "<details>\n<summary>🔁 Mechanical: %d files to skim</summary>\n\n", len(skip))
+			b.WriteString("<details>\n<summary>🔁 Mechanical: " + text.Count(len(skip), "file") + " to skim</summary>\n\n")
 			list(&b, o.Mechanical, func(g diff.Group) string {
-				return fmt.Sprintf("%s (%d): `%s`", g.What, len(g.Files), strings.Join(g.Files[:min(len(g.Files), 5)], "`, `"))
+				s := fmt.Sprintf("%s (%d): `%s`", g.What, len(g.Files), strings.Join(g.Files[:min(len(g.Files), 5)], "`, `"))
+				if len(g.Files) > 5 {
+					s += ", …"
+				}
+				return s
 			})
 			b.WriteString("</details>\n\n")
 		}

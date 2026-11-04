@@ -61,18 +61,18 @@ func TestStack(t *testing.T) {
 		os.MkdirAll(filepath.Join(d, filepath.Dir(f)), 0o755)
 		os.WriteFile(filepath.Join(d, f), nil, 0o644)
 	}
-	if got := stack(d, nil); got != "npm (JavaScript/TypeScript), Go modules, World of Warcraft addon (Lua, WoW API)" {
+	if got := stack(t.Context(), d, nil); got != "npm (JavaScript/TypeScript), Go modules, World of Warcraft addon (Lua, WoW API)" {
 		t.Fatalf("stack: %q", got)
 	}
-	if got := stack(t.TempDir(), []string{"a.lua"}); got != "Lua" {
+	if got := stack(t.Context(), t.TempDir(), []string{"a.lua"}); got != "Lua" {
 		t.Fatalf("stack lua: %q", got)
 	}
 	os.WriteFile(filepath.Join(d, "apps/web/package.json"), []byte(`{"dependencies":{"@tanstack/react-start":"1"}}`), 0o644)
-	if got := stack(d, []string{"apps/web/src/a.ts"}); !strings.Contains(got, "SSR with @tanstack/react-start (") || strings.Contains(stack(d, nil), "SSR") {
+	if got := stack(t.Context(), d, []string{"apps/web/src/a.ts"}); !strings.Contains(got, "SSR with @tanstack/react-start (") || strings.Contains(stack(t.Context(), d, nil), "SSR") {
 		t.Fatalf("stack in a package: %q", got)
 	}
 	os.WriteFile(filepath.Join(d, "package.json"), []byte(`{"dependencies":{"@tanstack/react-start":"1"}}`), 0o644)
-	if got := stack(d, nil); !strings.Contains(got, "SSR with @tanstack/react-start (") {
+	if got := stack(t.Context(), d, nil); !strings.Contains(got, "SSR with @tanstack/react-start (") {
 		t.Fatalf("stack ssr: %q", got)
 	}
 }
@@ -115,7 +115,7 @@ func TestGrownPast(t *testing.T) {
 	diff := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,4 @@\n 1\n+2\n+3\n 4\n" +
 		"diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1,4 +1,4 @@\n-x\n+1\n 2\n 3\n 4\n" +
 		"diff --git a/x b/x\n+++ b/../../etc/passwd\n@@ -0,0 +1 @@\n+x\n"
-	if got := grownPast(repo, diff, 3); !slices.Equal(got, []string{"- a.go: 2 → 4 lines"}) {
+	if got := grownPast(t.Context(), repo, diff, 3); !slices.Equal(got, []string{"- a.go: 2 → 4 lines"}) {
 		t.Fatal(got)
 	}
 }
@@ -177,6 +177,14 @@ func TestSettings(t *testing.T) {
 	cfg, _ = LoadSettings(`{"review_model":"anthropic/claude-sonnet-5-5"}`)
 	if _, v := cfg.Models(); v != "anthropic/claude-haiku-5-5:low" {
 		t.Errorf("verify model %q doesn't follow the review model's provider", v)
+	}
+	rel, err := LoadSettings(`{"base_branches":["release/*","develop"]}`)
+	if err != nil || !rel.Reviews("main", "main") || !rel.Reviews("release/1.2", "main") || !rel.Reviews("develop", "main") ||
+		rel.Reviews("prod", "main") || rel.Reviews("release/1/x", "main") || (Settings{}).Reviews("prod", "main") || !(Settings{}).Reviews("prod", "") {
+		t.Errorf("base_branches: %v", err)
+	}
+	if _, err := LoadSettings(`{"base_branches":["["]}`); err == nil {
+		t.Error("bad base_branches glob accepted")
 	}
 	if _, err := LoadSettings(`{"ignore":`); err == nil {
 		t.Error("broken json accepted")

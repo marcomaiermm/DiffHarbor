@@ -37,11 +37,11 @@ func TestParse(t *testing.T) {
 	if _, err := h.Parse(http.Header{"X-Gitlab-Token": {"x"}}, []byte(`{}`)); !errors.Is(err, forge.ErrSignature) {
 		t.Fatal("token not checked")
 	}
-	push := `{"object_kind":"merge_request","project":{"id":5,"path_with_namespace":"g/s/p","git_http_url":"https://gl/g/s/p.git"},
+	push := `{"object_kind":"merge_request","project":{"id":5,"path_with_namespace":"g/s/p","git_http_url":"https://gl/g/s/p.git","default_branch":"main"},
 "object_attributes":{"iid":3,"state":"opened","action":"update","oldrev":"a","last_commit":{"id":"abc"},"source_branch":"f","target_branch":"main","source_project_id":5}}`
 	e, err := h.Parse(hd, []byte(push))
 	if err != nil || e.Kind != "pull_request" || e.Action != "synchronize" || e.Key() != "gitlab/g/s/p#3" || e.PullRequest.Head.SHA != "abc" ||
-		e.PullRequest.State != "open" || e.PullRequest.Base.Ref != "main" || e.Owner() != "gitlab/g" {
+		e.PullRequest.State != "open" || e.PullRequest.Base.Ref != "main" || e.Repository.DefaultBranch != "main" || e.Owner() != "gitlab/g" {
 		t.Fatalf("push: %+v %v", e, err)
 	}
 	if e, _ := h.Parse(hd, []byte(strings.Replace(push, `"oldrev":"a"`, `"title":"x"`, 1))); e != nil {
@@ -68,10 +68,11 @@ func TestOlds(t *testing.T) {
 	}
 }
 
-// A suggestion GitLab refuses goes without it, a line it refuses into the note.
+// The note comes first. A suggestion GitLab refuses goes without it, a line it refuses into the note.
 func TestPost(t *testing.T) {
 	var discussions []map[string]any
 	var summary string
+	first := false
 	serve(t, func(w http.ResponseWriter, r *http.Request) {
 		var b map[string]any
 		json.NewDecoder(r.Body).Decode(&b)
@@ -82,6 +83,8 @@ func TestPost(t *testing.T) {
 				w.WriteHeader(400)
 			}
 		case "/projects/5/merge_requests/3/notes":
+			summary, first = b["body"].(string), discussions == nil
+		case "/projects/5/merge_requests/3/notes/9":
 			summary = b["body"].(string)
 		}
 		fmt.Fprint(w, `{"id":9}`)
@@ -96,12 +99,40 @@ func TestPost(t *testing.T) {
 	ctx := review.Comment{Path: "a.go", Line: 13, Body: "context line"}
 	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{fix, ctx}}, nil, src, "f")
 	pos := func(i int) map[string]any { return discussions[i]["position"].(map[string]any) }
-	if err != nil || n != 2 || len(discussions) != 3 ||
+	if err != nil || n != 2 || len(discussions) != 3 || !first ||
 		!strings.Contains(discussions[0]["body"].(string), "```suggestion:-1+0\n") || pos(0)["new_line"] != 12.0 ||
 		strings.Contains(discussions[1]["body"].(string), "suggestion") || pos(1)["new_line"] != 11.0 || pos(1)["old_line"] != nil ||
 		pos(2)["old_line"] != 3.0 || pos(2)["head_sha"] != "abcdef1" ||
-		!strings.Contains(summary, "Actionable comments posted: 2") || !strings.Contains(summary, "context line") {
+		!strings.Contains(summary, "Actionable comments posted: 2") || !strings.Contains(summary, "<summary><b>⚠️ Outside diff range comments (1)</b></summary>") ||
+		!strings.Contains(summary, "context line") {
 		t.Fatalf("post: %d %v %v\n%s", n, err, discussions, summary)
+	}
+}
+
+// A discussion GitLab fails: the note keeps the findings not posted.
+func TestPostFails(t *testing.T) {
+	var summary string
+	serve(t, func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		json.NewDecoder(r.Body).Decode(&b)
+		switch r.URL.Path {
+		case "/projects/5/merge_requests/3/discussions":
+			w.WriteHeader(500)
+		case "/projects/5/merge_requests/3/notes", "/projects/5/merge_requests/3/notes/9":
+			summary = b["body"].(string)
+		}
+		fmt.Fprint(w, `{"id":9}`)
+	})
+	e := &forge.Event{Forge: "gitlab"}
+	e.Repository.ID, e.PullRequest.Number = 5, 3
+	f, _ := (&Hub{}).Open(e)
+	p := f.(*pr)
+	p.refs = [3]string{"b", "s", "abcdef1"}
+	src := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,2 @@\n ctx\n+new\n"
+	c := review.Comment{Path: "a.go", Line: 2, Body: "lost?"}
+	if _, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{c}}, nil, src, "f"); err == nil ||
+		!strings.Contains(summary, "Outside diff range comments (1)") || !strings.Contains(summary, "lost?") {
+		t.Fatalf("post: %v\n%s", err, summary)
 	}
 }
 

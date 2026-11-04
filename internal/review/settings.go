@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -43,6 +44,8 @@ type Settings struct {
 	// true: the checks' installs run lifecycle scripts (postinstall, native builds); default off, a dependency's
 	// script would run as the repo's user next to the PR's code.
 	InstallScripts bool `json:"install_scripts"`
+	// Base branches besides the default branch whose PRs get reviewed without asking, as globs ("release/*").
+	BaseBranches []string `json:"base_branches"`
 
 	IgnoreRe *regexp.Regexp
 	CITests  string    // checks.CITests: the CI file running the tests; unless "tests" says otherwise, the review doesn't
@@ -92,6 +95,15 @@ const ReportFiles = 10
 // Reports reports whether a PR with files changed files gets a report.
 func (cfg Settings) Reports(files int) bool {
 	return cfg.Report == "always" || cfg.Report != "off" && files >= ReportFiles
+}
+
+// Reviews reports whether a PR into base gets reviewed without asking: into the default branch (unknown: any)
+// or one of BaseBranches.
+func (cfg Settings) Reviews(base, defaultBranch string) bool {
+	return defaultBranch == "" || base == defaultBranch || slices.ContainsFunc(cfg.BaseBranches, func(g string) bool {
+		ok, _ := path.Match(g, base)
+		return ok
+	})
 }
 
 // Asks reports whether a review cut short offers the box for all parts.
@@ -152,6 +164,11 @@ func LoadSettings(s string) (Settings, error) {
 	for _, t := range []string{cfg.SyntaxTheme.Light, cfg.SyntaxTheme.Dark} {
 		if t != "" && !themeRe.MatchString(t) { // goes into the page's script
 			return Settings{}, fmt.Errorf("syntax_theme %q: want a Shiki theme name", t)
+		}
+	}
+	for _, g := range cfg.BaseBranches {
+		if _, err := path.Match(g, ""); err != nil {
+			return Settings{}, fmt.Errorf("base_branches %q: %w", g, err)
 		}
 	}
 	if cfg.MaxParts < 0 || cfg.MaxParts > 8 {

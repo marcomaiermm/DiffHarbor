@@ -1,10 +1,14 @@
 package proc
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestCapped(t *testing.T) {
@@ -27,7 +31,7 @@ func TestFiles(t *testing.T) {
 	if err := WriteFile(f, []byte("x")); err != nil {
 		t.Fatal(err)
 	}
-	if b, err := ReadFile(f); err != nil || string(b) != "x" {
+	if b, err := ReadFile(t.Context(), f); err != nil || string(b) != "x" {
 		t.Fatal(string(b), err)
 	}
 	for range 2 { // the second time it is gone already
@@ -37,6 +41,23 @@ func TestFiles(t *testing.T) {
 	}
 	if Exists(f) {
 		t.Fatal("still there")
+	}
+}
+
+// A PR's file that would never end (a symlink to /dev/zero, a FIFO) is no read: an error, at once.
+func TestReadFileEndless(t *testing.T) {
+	dir := t.TempDir()
+	zero, fifo := filepath.Join(dir, "zero.sql"), filepath.Join(dir, "fifo.sql")
+	if err := errors.Join(os.Symlink("/dev/zero", zero), syscall.Mkfifo(fifo, 0o644)); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	for _, f := range []string{zero, fifo} {
+		start := time.Now()
+		if b, err := ReadFile(ctx, f); err == nil || len(b) > 0 || time.Since(start) > time.Second {
+			t.Fatalf("%s: %d bytes, %v, in %s", f, len(b), err, time.Since(start))
+		}
 	}
 }
 

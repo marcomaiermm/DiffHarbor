@@ -286,6 +286,7 @@ func (h *Hub) Parse(hd http.Header, body []byte) (*forge.Event, error) {
 			ID       int64  `json:"id"`
 			Path     string `json:"path_with_namespace"`
 			CloneURL string `json:"git_http_url"`
+			Default  string `json:"default_branch"`
 		} `json:"project"`
 		Attrs   json.RawMessage `json:"object_attributes"`
 		MR      mr              `json:"merge_request"`
@@ -298,6 +299,7 @@ func (h *Hub) Parse(hd http.Header, body []byte) (*forge.Event, error) {
 	}
 	e := &forge.Event{Forge: "gitlab"}
 	e.Repository.ID, e.Repository.FullName, e.Repository.CloneURL = w.Project.ID, w.Project.Path, w.Project.CloneURL
+	e.Repository.DefaultBranch = w.Project.Default
 	e.Sender.Login = w.User.Username
 	switch w.Kind {
 	case "merge_request":
