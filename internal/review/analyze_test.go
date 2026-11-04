@@ -114,6 +114,15 @@ func TestAnalyze(t *testing.T) {
 		t.Fatalf("another part's file: %+v", r.Comments)
 	}
 
+	// A file in pieces: a finding on lines of another part's piece is that part's.
+	at11 := `{"summary":"","comments":[{"path":"a.md","line":11,"severity":"major","title":"t","body":"b"}]}`
+	piece2 := "diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -9 +10,2 @@\n x\n+z\n"
+	r, _, calls = run(map[string][]string{"review1": {at11}, "review2": {at11}, "verify2": {`{"verdicts":[{"i":0,"keep":true}]}`}}, Settings{}, md, piece2)
+	slices.Sort(calls)
+	if len(r.Comments) != 1 || strings.Join(calls, ",") != "review1,review2,verify2" {
+		t.Fatalf("a file in pieces: %+v %v", r.Comments, calls)
+	}
+
 	if _, tag, _ := merge([]part{{}}, "m", "m", "ci.yml"); tag != "m · tests: CI (ci.yml)" {
 		t.Fatalf("tests left to CI: %q", tag)
 	}

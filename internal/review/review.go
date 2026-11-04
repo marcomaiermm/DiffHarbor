@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -315,9 +314,12 @@ func runPart(ctx context.Context, in Input, name, prompt, block, m, vm string) p
 	slices.Sort(r.Fixed)
 	r.Fixed = slices.DeleteFunc(slices.Compact(r.Fixed), func(i int) bool { return i < 0 || i >= len(in.Prior) })
 	mine, all := diff.Paths(block), diff.Paths(strings.Join(in.Parts, ""))
+	here, every := diff.RightLines(block, true), diff.RightLines(strings.Join(in.Parts, ""), true)
 	r.Comments = slices.DeleteFunc(r.Comments, func(c Comment) bool { // before verify: it costs
-		// another part's file is its reviewer's: two parts reported one finding at two lines otherwise
-		if !slices.Contains(mine, c.Path) && slices.Contains(all, c.Path) {
+		// another part's file, or lines of a file in pieces, are its reviewer's: two parts reported one finding at
+		// two lines otherwise
+		at := fmt.Sprintf("%s:%d", c.Path, c.Line)
+		if !slices.Contains(mine, c.Path) && slices.Contains(all, c.Path) || every[at] && !here[at] {
 			log.Printf("review%s dropped %s:%d %s: another part's file", name, c.Path, c.Line, c.Title)
 			return true
 		}
@@ -386,7 +388,9 @@ func merge(ps []part, m, vm, ci string) (Result, string, error) {
 		if p.r.Summary != "" {
 			sums = append(sums, p.r.Summary)
 		}
-		maps.Copy(r.Walkthrough, p.r.Walkthrough)
+		for f, w := range p.r.Walkthrough { // a file in pieces: each part tells its own
+			r.Walkthrough[f] = strings.TrimSpace(r.Walkthrough[f] + " " + w)
+		}
 		r.Diagram = cmp.Or(r.Diagram, p.r.Diagram)
 		r.Flow = append(r.Flow, p.r.Flow...) // parts are packed by directory: their steps read on in part order
 		r.Decisions = append(r.Decisions, p.r.Decisions...)
