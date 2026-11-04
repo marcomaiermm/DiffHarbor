@@ -152,9 +152,14 @@
   const seeHunk = (h, on) => {
     const b = h.querySelector(".hunk-seen");
     b.setAttribute("aria-pressed", on);
-    b.lastChild.textContent = on ? "Unfold" : "Fold";
+    b.textContent = on ? "Unfold" : "Fold";
     const rows = [...h.closest("table").rows];
-    for (let i = rows.indexOf(h) + 1; i < rows.length && !rows[i].matches("tr.hunk, tr.gap"); i++) rows[i].classList.toggle("gone", on);
+    let n = 0;
+    for (let i = rows.indexOf(h) + 1; i < rows.length && !rows[i].matches("tr.hunk, tr.gap"); i++) {
+      rows[i].classList.toggle("gone", on);
+      n += rows[i].matches("tr.add, tr.del, tr.ctx");
+    }
+    h.querySelector(".hunk-folded").textContent = on ? n + (n === 1 ? " line" : " lines") + " folded" : "";
     set(hunkKey(h), on);
   };
   for (const h of document.querySelectorAll("tr.hunk")) if (get(hunkKey(h))) seeHunk(h, true);
@@ -189,7 +194,7 @@
       if (hi < lo) return;
       const row = document.createElement("tr");
       row.className = "gap";
-      row.innerHTML = '<td colspan="3"><div class="gap-bar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg><span></span></div></td>';
+      row.innerHTML = '<td colspan="4"><div class="gap-bar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg><span></span></div></td>';
       const g = { lo, hi, row };
       const show = (a, b, where) => { // new lines a..b, before or after the gap's row
         const rs = lines().slice(a - 1, b).map((l, i) => {

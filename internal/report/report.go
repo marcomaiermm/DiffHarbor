@@ -241,6 +241,16 @@ type line struct {
 	Findings        []*finding
 }
 
+// Range is a hunk line's "@@ -a,b +c,d @@", Fn what follows it: the declaration git found it in.
+func (l line) Range() string {
+	if i := strings.Index(l.Text[min(2, len(l.Text)):], "@@"); strings.HasPrefix(l.Text, "@@") && i >= 0 {
+		return l.Text[:i+4]
+	}
+	return l.Text
+}
+
+func (l line) Fn() string { return strings.TrimSpace(l.Text[len(l.Range()):]) }
+
 type file struct {
 	Path, Kind, Note string
 	Short            string // Path without the directory all files share, for the side bar

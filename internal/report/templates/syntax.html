@@ -458,12 +458,9 @@ const split = table => {
       lineOf.set(row, bar);
     } else if (row.matches("tr.hunk")) {
       flush();
-      const orig = row.querySelector(".hunk-seen"), b = el("button", "hunk-seen", ...clone(orig));
-      b.type = "button";
-      b.title = orig.title;
-      b.setAttribute("aria-pressed", orig.getAttribute("aria-pressed"));
+      const orig = row.querySelector(".hunk-seen"), b = orig.cloneNode(true);
       b.addEventListener("click", e => { e.stopPropagation(); orig.click(); split(table); });
-      const bar = el("div", "split-bar", b, el("span", "min-w-0 truncate", row.querySelector(".truncate").textContent));
+      const bar = el("div", "split-bar", ...[...row.querySelector(".hunk-in").children].map(c => c === orig ? b : c.cloneNode(true)));
       box.append(bar);
       lineOf.set(row, bar);
     } else if (row.matches("tr.ctx")) {
