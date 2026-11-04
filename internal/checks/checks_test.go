@@ -213,3 +213,15 @@ func TestInstallScripts(t *testing.T) {
 		}
 	}
 }
+
+// A line split across writes reaches f whole, once its end comes.
+func TestLineWriter(t *testing.T) {
+	var got []string
+	w := &lineWriter{f: func(l string) { got = append(got, l) }}
+	for _, p := range []string{"a\nb", "c\n", "d"} {
+		w.Write([]byte(p))
+	}
+	if !slices.Equal(got, []string{"a", "bc"}) {
+		t.Errorf("lines %q", got)
+	}
+}

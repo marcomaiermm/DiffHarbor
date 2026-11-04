@@ -11,6 +11,7 @@ import (
 	"diffharbor/internal/text"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"maps"
 	"os"
@@ -154,12 +155,18 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 		fmt.Fprintf(&out, "\n### npm registries\n%s\n", err)
 	}
 	env = append(env, regEnv...)
-	// in runs a tool in dir (repo-relative) and returns stdout and stderr.
+	// in runs a tool in dir (repo-relative) and returns stdout and stderr. tee, when set, gets each line whole,
+	// the ones the cap drops from the middle too.
+	var tee func(string)
 	in := func(dir string) func(string, ...string) string {
 		return func(name string, args ...string) string {
 			b := proc.Capped{N: 1 << 20}
+			var w io.Writer = &b
+			if tee != nil {
+				w = io.MultiWriter(&b, &lineWriter{f: tee})
+			}
 			c := proc.Command(ctx, filepath.Join(repo, dir), env, name, args...)
-			c.Stdout, c.Stderr = &b, &b
+			c.Stdout, c.Stderr = w, w
 			_ = c.Run()
 			return b.String()
 		}
@@ -345,9 +352,10 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 		section("deadcode (unreachable functions the change added)"+where, grep(run("deadcode", "-test", "./..."), onAdded), 40)
 		// -short skips what tests mark as slow; testcontainers get Docker from dind.
 		if len(tested) > 0 {
+			tee = func(l string) { testRuns(l, &ran) } // a big run's middle is past the cap
 			js := run("go", append([]string{"test", "-json", "-short", "-count=1", "-timeout=4m"}, tested...)...)
+			tee = nil
 			section("go test -short (changed packages; failed tests only)"+where, testFailures(js), 80)
-			testRuns(js, &ran)
 		}
 	}
 
@@ -425,6 +433,24 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 
 // testRuns adds what go test -json reports to t: a test's outcome, a package that does not build. A test that ran
 // in two packages under one name fails if either fails.
+// lineWriter hands f each line as it is written.
+type lineWriter struct {
+	buf []byte
+	f   func(string)
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			return len(p), nil
+		}
+		w.f(string(w.buf[:i]))
+		w.buf = w.buf[i+1:]
+	}
+}
+
 func testRuns(js string, t *Tests) {
 	for l := range strings.SplitSeq(js, "\n") {
 		var e struct{ Action, Package, ImportPath, Test string }
