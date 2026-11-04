@@ -27,7 +27,7 @@ func TestFormat(t *testing.T) {
 	if !strings.HasPrefix(got, "_🟠 Major_ · **t**\n\nb") || !strings.Contains(got, "Prompt for AI Agents") || strings.Count(got, "````") != 2 {
 		t.Fatalf("format: %q", got)
 	}
-	if allPrompts([]Finding{{Comment: review.Comment{Body: "x"}}}) != "" || !strings.Contains(allPrompts([]Finding{c, c}), "use ```x```\n\nIn a.go") {
+	if allPrompts([]Finding{{Comment: review.Comment{Body: "x"}}}) != "" || !strings.Contains(allPrompts([]Finding{c, c}), "use ```x```\nIn a.go") {
 		t.Fatalf("allPrompts: %q", allPrompts([]Finding{c, c}))
 	}
 }
@@ -89,7 +89,7 @@ func TestStickyOutline(t *testing.T) {
 	o := &diff.Outline{
 		Added:      []string{"api/a_test.go: TestA"},
 		Weakened:   []diff.Flag{{At: "api/a_test.go:9", What: "skip/only: `t.Skip()`"}},
-		Mechanical: []diff.Group{{What: "same edit in 3 files", Files: []string{"p1/x.go", "p2/x.go", "p3/x.go"}}},
+		Mechanical: []diff.Group{{What: "Same edit in 3 files", Files: []string{"p1/x.go", "p2/x.go", "p3/x.go"}}},
 	}
 	body := st.render("", "", "foot", o)
 	top, walk, ok := strings.Cut(body, "<summary><b>Walkthrough")
@@ -105,7 +105,7 @@ func TestStickyOutline(t *testing.T) {
 	if !strings.Contains(code, "`api/a.go`") || strings.Contains(code, "a_test.go") || strings.Contains(code, "p1/x.go") || strings.Contains(code, "README") {
 		t.Errorf("code table: %s", code)
 	}
-	for _, w := range []string{"🧪 Tests: 1 files, 1 new cases", "- api/a_test.go: TestA", "📄 Data and docs: 1 files", "🔁 Mechanical: 3 files"} {
+	for _, w := range []string{"🧪 Tests: 1 file, 1 new case</summary>", "</summary>\n\n- TestA\n", "📄 Data and docs: 1 file</summary>\n\n- `README.md`", "🔁 Mechanical: 3 files to skim", "- Same edit in 3 files (3)"} {
 		if !strings.Contains(walk, w) {
 			t.Errorf("folded sections lack %q:\n%s", w, walk)
 		}

@@ -149,7 +149,7 @@ func Analyze(diff string) Outline {
 	var ms []Group
 	for key, fs := range edits {
 		if len(fs) >= sameEdit {
-			ms = append(ms, Group{What: fmt.Sprintf("same edit in %d files: %s", len(fs), desc[key]), Files: fs})
+			ms = append(ms, Group{What: fmt.Sprintf("Same edit in %d files: %s", len(fs), desc[key]), Files: fs})
 		}
 	}
 	slices.SortFunc(ms, func(a, b Group) int { return len(b.Files) - len(a.Files) })
@@ -157,7 +157,7 @@ func Analyze(diff string) Outline {
 	for _, m := range moved.FindAllStringSubmatch(diff, -1) {
 		mv = append(mv, m[1]+" → "+m[2])
 	}
-	for _, g := range []Group{{"moved without changes", mv}, {"whitespace only", blank}, {"lockfiles and generated", gen}} {
+	for _, g := range []Group{{"Moved without changes", mv}, {"Whitespace only", blank}, {"Lockfiles and generated", gen}} {
 		if len(g.Files) > 0 {
 			ms = append(ms, g)
 		}
@@ -273,10 +273,12 @@ func testFlags(o *Outline, p, f string, added, removed map[string][]string) (gon
 // edit describes a repeated edit by its first changed lines.
 func edit(minus, plus []string) string {
 	var s []string
-	if len(minus) > 0 {
+	switch {
+	case len(minus) > 0 && len(plus) > 0:
+		s = append(s, "`"+oneLine(minus[0])+"` → `"+oneLine(plus[0])+"`")
+	case len(minus) > 0:
 		s = append(s, "`-"+oneLine(minus[0])+"`")
-	}
-	if len(plus) > 0 {
+	case len(plus) > 0:
 		s = append(s, "`+"+oneLine(plus[0])+"`")
 	}
 	if n := len(minus) + len(plus); n > 2 {

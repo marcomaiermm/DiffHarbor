@@ -101,8 +101,12 @@ func allPrompts(cs []Finding) string {
 	if len(ps) == 0 {
 		return ""
 	}
+	sep := "\n" // one finding a line; a blank line once a prompt has lines of its own
+	if slices.ContainsFunc(ps, func(p string) bool { return strings.Contains(p, "\n") }) {
+		sep = "\n\n"
+	}
 	return "<details>\n<summary>🤖 Prompt for all review comments with AI agents</summary>\n\n" +
-		review.Fence("Verify each finding against the current code and only fix it if needed.\n\n"+strings.Join(ps, "\n\n")) + "\n\n</details>"
+		review.Fence("Verify each finding against the current code and only fix it if needed.\n\n"+strings.Join(ps, sep)) + "\n\n</details>"
 }
 
 // Summary is the review's top comment: how many findings, the ones outside the diff in full, all prompts.
@@ -112,12 +116,12 @@ func Summary(inline, rest []Finding, footer string) string {
 		parts[0] = "**No actionable comments were generated in this review.**"
 	}
 	if len(rest) > 0 { // inline comments only go on diff lines
-		out := fmt.Sprintf("> [!CAUTION]\n> Some comments are outside the diff and can't be posted inline.\n\n**⚠️ Outside diff range comments (%d)**", len(rest))
+		out := fmt.Sprintf("> [!CAUTION]\n> Some comments are outside the diff and can't be posted inline.\n\n<details open>\n<summary><b>⚠️ Outside diff range comments (%d)</b></summary>", len(rest))
 		for _, c := range rest {
 			out += fmt.Sprintf("\n\n<details open>\n<summary>%s · <code>%s:%d</code></summary>\n\n%s\n\n</details>",
 				html.EscapeString(cmp.Or(c.Title, c.Severity)), html.EscapeString(c.Path), c.Line, Format(c, ""))
 		}
-		parts = append(parts, out)
+		parts = append(parts, out+"\n\n</details>")
 	}
 	if p := allPrompts(append(slices.Clone(inline), rest...)); p != "" {
 		parts = append(parts, p)
