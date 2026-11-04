@@ -60,7 +60,7 @@
     </div>
     {{with .Decisions}}<div class="tab-content" role="tabpanel" id="decide" aria-labelledby="tab-decide" tabindex="0" hidden>
       <p class="tab-hint">What only a person can settle: product, architecture or risk. The draft review asks them as questions.</p>
-      <ol class="list-decimal space-y-2 pl-5 text-sm">{{range .}}<li>{{.}}</li>{{end}}</ol>
+      <ol class="list-decimal space-y-2 pl-5 text-sm">{{range .}}<li>{{.Text}}</li>{{end}}</ol>
     </div>{{end}}
     {{if .MergeN}}<div class="tab-content" role="tabpanel" id="merge" aria-labelledby="tab-merge" tabindex="0" hidden>
       <p class="tab-hint">Before you merge: what merging alone doesn't finish, read from the diff and the base as of this review.</p>

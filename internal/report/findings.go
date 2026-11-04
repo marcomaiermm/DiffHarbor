@@ -188,7 +188,7 @@ func draftOf(v *view) draft {
 	if len(v.Decisions) > 0 {
 		b.WriteString("\n\nQuestions:")
 		for i, q := range v.Decisions {
-			fmt.Fprintf(&b, "\n%d. %s", i+1, q)
+			fmt.Fprintf(&b, "\n%d. %s", i+1, q.Text)
 		}
 	}
 	if ms := v.Groups[2].Items; len(ms) > 0 {

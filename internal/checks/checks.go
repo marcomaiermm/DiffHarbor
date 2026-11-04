@@ -124,17 +124,26 @@ func noScripts(cmd []string, yarnVersion string) []string {
 // Script is a repo's own check: Name its path in the repo, File the copy that runs (from the base branch).
 type Script struct{ Name, File string }
 
+// Tests is what the test runs among the checks report: each test's outcome by its name as the runner prints it
+// ("TestTotal", "TestTotal/discount"), "pass", "fail" or "skip", and the packages that do not build. Empty when
+// no test ran. ponytail: go test only; vitest and jest print no per-test result here, a JSON reporter if wanted.
+type Tests struct {
+	Ran    map[string]string `json:"ran,omitempty"`
+	Broken []string          `json:"broken,omitempty"`
+}
+
 // Run runs the built-in checks for files, then the repo's own scripts with the files after "--". patch is
 // the diff under review as a file. JS and Go checks run per package (nearest package.json or go.mod), so a
 // monorepo's apps get theirs; tests(file) says whether the tests of file's package run. Installs skip lifecycle
 // scripts unless installScripts: a dependency's postinstall would run as the repo's user next to the PR's code.
 //
 //nolint:gocognit,gocyclo // the checks step by step, each step a few lines
-func Run(ctx context.Context, repo string, scripts []Script, patch string, files []string, tests func(string) bool, installScripts bool) string {
+func Run(ctx context.Context, repo string, scripts []Script, patch string, files []string, tests func(string) bool, installScripts bool) (string, Tests) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	started := time.Now()
 	var out strings.Builder
+	var ran Tests
 	env := append(proc.ToolEnv(), "NO_COLOR=1")
 	if h := os.Getenv("DOCKER_HOST"); h != "" { // dind for testcontainers, see compose.yml
 		env = append(env, "DOCKER_HOST="+h)
@@ -325,8 +334,9 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 		section("deadcode (unreachable functions the change added)"+where, grep(run("deadcode", "-test", "./..."), onAdded), 40)
 		// -short skips what tests mark as slow; testcontainers get Docker from dind.
 		if len(tested) > 0 {
-			section("go test -short (changed packages; failed tests only)"+where,
-				testFailures(run("go", append([]string{"test", "-json", "-short", "-count=1", "-timeout=4m"}, tested...)...)), 80)
+			js := run("go", append([]string{"test", "-json", "-short", "-count=1", "-timeout=4m"}, tested...)...)
+			section("go test -short (changed packages; failed tests only)"+where, testFailures(js), 80)
+			testRuns(js, &ran)
 		}
 	}
 
@@ -399,7 +409,31 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 		s += "\n(checks timed out)"
 	}
 	log.Printf("checks: %d bytes in %s", len(s), time.Since(started).Round(time.Second))
-	return text.Truncate(s, 12_000)
+	return text.Truncate(s, 12_000), ran
+}
+
+// testRuns adds what go test -json reports to t: a test's outcome, a package that does not build. A test that ran
+// in two packages under one name fails if either fails.
+func testRuns(js string, t *Tests) {
+	for l := range strings.SplitSeq(js, "\n") {
+		var e struct{ Action, Package, ImportPath, Test string }
+		if json.Unmarshal([]byte(l), &e) != nil {
+			continue
+		}
+		switch {
+		case e.Action == "build-fail" || e.Action == "fail" && e.Test == "" && strings.Contains(e.Package, "[build failed]"):
+			if p, _, _ := strings.Cut(cmp.Or(e.ImportPath, e.Package), " "); !slices.Contains(t.Broken, p) { // "q [q.test]"
+				t.Broken = append(t.Broken, p)
+			}
+		case e.Test != "" && (e.Action == "pass" || e.Action == "fail" || e.Action == "skip"):
+			if t.Ran == nil {
+				t.Ran = map[string]string{}
+			}
+			if t.Ran[e.Test] != "fail" {
+				t.Ran[e.Test] = e.Action
+			}
+		}
+	}
 }
 
 // testFailures keeps what go test -json printed for failed tests, builds and packages: a failed package prints

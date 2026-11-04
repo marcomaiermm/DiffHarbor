@@ -57,7 +57,7 @@ func TestRender(t *testing.T) {
 			Name: "GitLab", Ref: "!", Blob: "https://gitlab.com/acme/shop/-/blob/0123456789abcdef/",
 			PRCommit: "https://gitlab.com/acme/shop/-/merge_requests/7/diffs?commit_id=",
 		}, // nothing in the page is GitHub's
-		Summary: "Handle saves orders.", Diagram: "sequenceDiagram", Decisions: []string{"Should a failed save retry?"},
+		Summary: "Handle saves orders.", Diagram: "sequenceDiagram", Decisions: []review.Decision{{Text: "Should a failed save retry?"}},
 		Story: review.Story{Problem: "Orders were lost.", Before: "POST /orders: 200, nothing stored.", After: "POST /orders: the order is in the store."},
 		Flow: []review.Step{
 			{Title: "Storage first", Why: "Save is what Handle calls.", Files: []string{"store/store.go", "missing.go"}},
@@ -702,7 +702,7 @@ func TestSince(t *testing.T) {
 
 func TestJudge(t *testing.T) {
 	const d = "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n x\n+y\n"
-	v := prepare(Data{SHA: "0123456789", Diff: d, Decisions: []string{"Retry?"}, Flow: []review.Step{{Title: "s", Files: []string{"a.go"}}},
+	v := prepare(Data{SHA: "0123456789", Diff: d, Decisions: []review.Decision{{Text: "Retry?"}}, Flow: []review.Step{{Title: "s", Files: []string{"a.go"}}},
 		Outline: diff.Outline{Weakened: []diff.Flag{{At: "a_test.go:4", What: "skip/only: `t.Skip()`"}}},
 		Findings: []review.Comment{
 			{Path: "a.go", Line: 9, Severity: "minor", Title: "naming"},
@@ -733,7 +733,7 @@ func TestJudge(t *testing.T) {
 		t.Errorf("draft: %+v\n%s", v.Draft, v.Draft.MD)
 	}
 
-	v = prepare(Data{SHA: "0123456789", Diff: d, Decisions: []string{"Retry?"}})
+	v = prepare(Data{SHA: "0123456789", Diff: d, Decisions: []review.Decision{{Text: "Retry?"}}})
 	if !v.Verdict.OK || v.Verdict.Short != "No findings" || v.Verdict.Body != "No finding on 0123456. 1 decision still needs you before you approve." ||
 		v.Draft.Event != "Comment" || v.Draft.MD != "No findings on 0123456.\n\nQuestions:\n1. Retry?" || v.Draft.Say != "none" {
 		t.Errorf("none: %+v %+v", v.Verdict, v.Draft)

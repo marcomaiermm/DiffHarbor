@@ -24,10 +24,10 @@ type State struct {
 	Patches map[string]string `json:"patches"`         // diff.PatchIDs at SHA: what a push has to change to get reviewed
 	Large   bool              `json:"large,omitempty"` // someone asked for all parts: later pushes get them too
 	// The report's reading order and the questions for a person, from the last full review that asked for them.
-	Flow      []review.Step `json:"flow,omitempty"`
-	Decisions []string      `json:"decisions,omitempty"`
-	Story     review.Story  `json:"story,omitzero"`
-	Report    string        `json:"report,omitempty"` // the report's URL, "" = none
+	Flow      []review.Step     `json:"flow,omitempty"`
+	Decisions []review.Decision `json:"decisions,omitempty"`
+	Story     review.Story      `json:"story,omitzero"`
+	Report    string            `json:"report,omitempty"` // the report's URL, "" = none
 	// The report folder's secret in its URL. Here, as only who can read the PR sees this comment; kept across pushes,
 	// restarts and a close, so a reopened PR's report comes back at its old link.
 	Secret string `json:"secret,omitempty"`
@@ -125,7 +125,7 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 		if len(st.Decisions) > 0 {
 			b.WriteString("**For you to decide**\n")
 			for _, d := range st.Decisions {
-				b.WriteString("- " + text.OneLine(d, 300) + "\n")
+				b.WriteString("- " + text.OneLine(d.Text, 300) + "\n")
 			}
 			b.WriteString("\n")
 		}

@@ -89,7 +89,7 @@ func TestStickyOutline(t *testing.T) {
 	st := State{}.Update(review.Result{
 		Summary:     "s",
 		Walkthrough: map[string]string{"api/a.go": "code", "api/a_test.go": "test", "README.md": "doc", "p1/x.go": "import", "p2/x.go": "import", "p3/x.go": "import"},
-		Flow:        []review.Step{{Title: "Start", Files: []string{"api/a.go"}}}, Decisions: []string{"Retry on failure?"},
+		Flow:        []review.Step{{Title: "Start", Files: []string{"api/a.go"}}}, Decisions: []review.Decision{{Text: "Retry on failure?"}},
 		Story: review.Story{Problem: "p", Before: "a 429 failed the review", After: "the fallback reviews"},
 	}, "abcdef1234", []string{"api/a.go", "api/a_test.go", "README.md", "p1/x.go", "p2/x.go", "p3/x.go"}, true)
 	st.Report = "https://review.example/r/o/r/1"
@@ -117,7 +117,7 @@ func TestStickyOutline(t *testing.T) {
 			t.Errorf("folded sections lack %q:\n%s", w, walk)
 		}
 	}
-	if got := parseState(body); len(got.Flow) != 1 || got.Decisions[0] != "Retry on failure?" || got.Story.After != "the fallback reviews" || got.Report == "" {
+	if got := parseState(body); len(got.Flow) != 1 || got.Decisions[0].Text != "Retry on failure?" || got.Story.After != "the fallback reviews" || got.Report == "" {
 		t.Errorf("state: %+v", got)
 	}
 }

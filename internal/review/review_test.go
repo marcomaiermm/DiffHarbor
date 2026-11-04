@@ -2,6 +2,7 @@ package review
 
 import (
 	"diffharbor/internal/agent"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,21 +79,32 @@ func TestStack(t *testing.T) {
 
 func TestVerdicts(t *testing.T) {
 	cs := []Comment{{Path: "a.go", Line: 3, Body: "b", Prompt: "In a.go around line 3, fix"}, {Path: "b.go", Line: 9}}
-	kept, fixed, ok := verdicts(cs, []int{2, 4}, `{"verdicts":[{"i":0,"keep":true,"path":"c.go","line":5,"evidence":"e"},{"i":0,"keep":true},{"i":1,"keep":false},{"i":7,"keep":true}],"fixed":[4,4,3]}`)
+	kept, dropped, fixed, ok := verdicts(cs, []int{2, 4}, `{"verdicts":[{"i":0,"keep":true,"path":"c.go","line":5,"evidence":"e"},{"i":0,"keep":true},{"i":1,"keep":false,"evidence":"handled in b.go:3"},{"i":7,"keep":true}],"fixed":[4,4,3]}`)
 	if !ok || len(kept) != 1 || kept[0].Path != "c.go" || kept[0].Line != 5 || kept[0].Prompt != "In c.go around line 5, fix" || kept[0].Body != "b\n\n_Verified:_ e" {
 		t.Fatalf("%+v", kept)
 	}
 	if !slices.Equal(fixed, []int{4}) {
 		t.Fatalf("fixed: %v", fixed)
 	}
-	if _, _, ok := verdicts(cs, nil, "no json"); ok {
+	if len(dropped) != 1 || dropped[0].Path != "b.go" || dropped[0].Evidence != "handled in b.go:3" {
+		t.Fatalf("dropped: %+v", dropped)
+	}
+	if _, _, _, ok := verdicts(cs, nil, "no json"); ok {
 		t.Fatal("no json accepted")
 	}
-	if _, _, ok := verdicts(cs, nil, `{"verdicts":[{"i":0,"keep":true}]}`); ok {
+	if _, _, _, ok := verdicts(cs, nil, `{"verdicts":[{"i":0,"keep":true}]}`); ok {
 		t.Fatal("a finding without a verdict accepted")
 	}
-	if kept, _, ok := verdicts([]Comment{{Existing: "a", Fix: "b"}}, nil, `{"verdicts":[{"i":0,"keep":true,"fix":false}]}`); !ok || kept[0].Fix != "" {
+	if kept, _, _, ok := verdicts([]Comment{{Existing: "a", Fix: "b"}}, nil, `{"verdicts":[{"i":0,"keep":true,"fix":false}]}`); !ok || kept[0].Fix != "" {
 		t.Fatalf("fix=false kept the fix: %+v", kept)
+	}
+}
+
+// A decision is an object with its place; a plain string, as states before it hold, is its text.
+func TestDecision(t *testing.T) {
+	var ds []Decision
+	if err := json.Unmarshal([]byte(`["a?",{"text":"b?","at":"x.go:3"}]`), &ds); err != nil || !reflect.DeepEqual(ds, []Decision{{Text: "a?"}, {Text: "b?", At: "x.go:3"}}) {
+		t.Fatalf("%v %+v", err, ds)
 	}
 }
 
@@ -210,9 +222,9 @@ func TestSettings(t *testing.T) {
 }
 
 func TestParseCommits(t *testing.T) {
-	log := "\x00aaa\tAdd x\n\ndiff --git a/q.sql b/q.sql\n--- a/q.sql\n+++ b/q.sql\n@@ -1 +1 @@\n--- old note\n+select 1;\n\x00bbb\twip\n"
+	log := "\x00aaa\tKim\tAdd x\n\ndiff --git a/q.sql b/q.sql\n--- a/q.sql\n+++ b/q.sql\n@@ -1 +1 @@\n--- old note\n+select 1;\n\x00bbb\tKim\twip\n"
 	got := parseCommits(log)
-	want := []Commit{{SHA: "aaa", Subject: "Add x", Files: 1, Add: 1, Del: 1, Lines: []string{"--- old note", "+select 1;"}}, {SHA: "bbb", Subject: "wip"}}
+	want := []Commit{{SHA: "aaa", Author: "Kim", Subject: "Add x", Files: 1, Add: 1, Del: 1, Lines: []string{"--- old note", "+select 1;"}}, {SHA: "bbb", Author: "Kim", Subject: "wip"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("parseCommits %+v", got)
 	}

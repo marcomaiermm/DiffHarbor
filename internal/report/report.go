@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"diffharbor/internal/assets"
+	"diffharbor/internal/checks"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
@@ -37,7 +38,7 @@ type Data struct {
 	Summary     string
 	Diagram     string // mermaid
 	Effort      int
-	Decisions   []string
+	Decisions   []review.Decision
 	Story       review.Story
 	Flow        []review.Step
 	Walkthrough map[string]string // path -> one line
@@ -53,7 +54,10 @@ type Data struct {
 	Behind      []review.Commit    // the base's commits since the fork point (review.Behind)
 	Conflicts   bool               // the forge says the PR conflicts with its base
 	Forge       Forge
-	Prev        *Version // the version before: the report marks what changed since; nil for the first
+	Prev        *Version          // the version before: the report marks what changed since; nil for the first
+	Dropped     []review.Comment  // what the verifier dropped, its reason in Evidence
+	Tests       checks.Tests      // what the checks' test runs report at SHA; empty when none ran
+	Sources     map[string]string // the head's text of changed files, for the lines between hunks (see Sources)
 }
 
 // Forge is how the forge hosting the repository names and links what a report points to.
@@ -697,4 +701,25 @@ func rank(f *file) int {
 		}
 	}
 	return 0
+}
+
+// maxSource and maxSources are the bytes of one changed file and of all that a report carries for the lines
+// between hunks: past them a file shows its hunks only.
+const maxSource, maxSources = 256 << 10, 4 << 20
+
+// Sources is the text at the checkout repo of the files diffText changes and keeps, for the unchanged lines
+// between and around hunks; a file too big, unreadable or not text stays out.
+func Sources(repo, diffText string) map[string]string {
+	out, total := map[string]string{}, 0
+	diff.EachFile(diffText, func(p, _ string) {
+		if !filepath.IsLocal(p) {
+			return
+		}
+		b, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(p)))
+		if err != nil || len(b) > maxSource || total+len(b) > maxSources || bytes.IndexByte(b, 0) >= 0 {
+			return
+		}
+		out[p], total = string(b), total+len(b)
+	})
+	return out
 }
