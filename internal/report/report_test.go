@@ -1083,3 +1083,19 @@ func TestSources(t *testing.T) {
 		t.Errorf("a.go's source: %q", page[i:min(len(page), i+120)])
 	}
 }
+
+func TestCallAt(t *testing.T) {
+	for _, c := range []struct{ line, name, want string }{
+		{"\tif err := inv.Validate(); err != nil {", "Validate", "inv.Validate()"},
+		{"\tmax := settings.MaxDiscount(ctx, id)", "MaxDiscount", "settings.MaxDiscount(…)"},
+		{"\t\tinv.Lines[i].Discount = max", "Discount", "inv.Lines[i].Discount"},
+		{"\tr.Get(\"/x\", GetInvoice)", "GetInvoice", "GetInvoice"},
+		{"\tf().Save()", "Save", "Save()"},
+		{"\tSaver(x)", "Save", ""},
+		{"\taVeryLongReceiverName.anotherLongFieldName.yetAnotherOne.Save()", "Save", ""},
+	} {
+		if got := callAt(c.line, c.name); got != c.want {
+			t.Errorf("callAt(%q, %q) = %q, want %q", c.line, c.name, got, c.want)
+		}
+	}
+}

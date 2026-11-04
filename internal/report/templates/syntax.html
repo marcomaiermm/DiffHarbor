@@ -208,11 +208,11 @@ const code = async (sig, path) => el("pre", "sym-sig scroll-area", ...(await col
 ]));
 // code lines outside the diff, the API's and the reach list's, colored like it once their box opens: a hundred
 // signatures colored at load hold the page up; a signature's name shows the card
-// a way's node is a name alone: read as a call, it takes the color a function has, and the brackets are cut off
+// a way's node that is a name alone, a handler passed on, is read as a call: it takes a function's color, the brackets cut off
 const upto = (ts, n) => { let at = 0; return ts.flatMap(t => { const x = t.content.slice(0, Math.max(0, n - at)); at += t.content.length; return x ? [{ ...t, content: x }] : []; }); };
 const tint = box => {
   for (const c of box.querySelectorAll(".inv-lines code, .reach-item li > code, .asig, .ct-pill code")) {
-    const path = c.closest("[data-path]")?.dataset.path, node = c.matches(".ct-pill code"), text = c.textContent;
+    const path = c.closest("[data-path]")?.dataset.path, node = c.matches(".ct-pill code") && !c.textContent.endsWith(")"), text = c.textContent;
     if (path && lang(path)) colored(node ? text + "()" : text, path).then(([ts = []]) => {
       if (node) ts = upto(ts, text.length);
       c.replaceChildren(...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; }));

@@ -93,7 +93,7 @@
 {{define "way"}}<ol class="ct" aria-label="{{.Label}}">
   <li class="ct-entry"{{if .Rows}} data-kids{{end}}><span class="chip" data-m="{{.Method}}">{{.Method}}</span><span class="ct-route">{{.Route}}</span>{{with .Sub}}<span class="ct-sub">{{.}}</span>{{end}}<span class="ct-end">{{template "way-at" .At}}</span></li>
   {{- range .Rows}}
-  <li data-d="{{.D}}"{{with .St}} data-st="{{.}}"{{end}}{{if .Kids}} data-kids{{end}}><span class="ct-g" aria-hidden="true">{{range .Cols}}<span class="gc" data-g="{{.}}"></span>{{end}}</span><span class="ct-pill"><code data-path="{{.Path}}"{{if .Sym}} class="sym" tabindex="0" data-sym="{{.Name}}"{{end}}>{{.Name}}</code></span><span class="ct-end">{{with .Sev}}<span class="chip" data-sev="{{.Sev}}">{{.Text}}</span>{{else}}{{with .Tag}}<span class="ct-tag">{{.}}</span>{{end}}{{end}}{{template "way-at" .At}}</span></li>
+  <li data-d="{{.D}}"{{with .St}} data-st="{{.}}"{{end}}{{if .Kids}} data-kids{{end}}><span class="ct-g" aria-hidden="true">{{range .Cols}}<span class="gc" data-g="{{.}}"></span>{{end}}</span><span class="ct-pill"><code data-path="{{.Path}}"{{if .Sym}} class="sym" tabindex="0" data-sym="{{.Name}}"{{end}}>{{.Call}}</code></span><span class="ct-end">{{with .Sev}}<span class="chip" data-sev="{{.Sev}}">{{.Text}}</span>{{else}}{{with .Tag}}<span class="ct-tag">{{.}}</span>{{end}}{{end}}{{template "way-at" .At}}</span></li>
   {{- end}}
 </ol>
 <p class="ct-punch"{{with .Sev}} data-sev="{{.}}"{{end}}>{{.Says}}{{with .Finding}} <a href="{{.}}" class="ct-more">See the finding →</a>{{end}}</p>{{end}}

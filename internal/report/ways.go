@@ -30,6 +30,7 @@ type way struct {
 // major; "" for one the PR doesn't change.
 type wrow struct {
 	Name, Path string
+	Call       string // how the one above names it, else its name
 	D          int
 	Cols       []string
 	Kids       bool
@@ -129,6 +130,7 @@ func ways(v *view, syms map[string][]Symbol) []way {
 				if at := v.place(h.In, h.At); h.At > 0 && h.In != "" && at != e.w.At { // the entry shows that one
 					r.At = at
 				}
+				r.Call = cmp.Or(h.Call, h.Name)
 				r.Sym = len(syms[h.Name]) > 0
 				if c := pr(h); c != nil {
 					r.Tag, r.St = "changed", "chg"

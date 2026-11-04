@@ -55,6 +55,7 @@ type Way struct {
 type Hop struct {
 	Name, Path, In string
 	Line, At       int
+	Call           string `json:"-"` // how that line names it: "inv.Validate()", see callAt; "" unknown
 }
 
 // Ref is a line that names a symbol, and the declaration it sits in.

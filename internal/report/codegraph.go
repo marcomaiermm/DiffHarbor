@@ -394,6 +394,16 @@ func (idx *cgIndex) tests(repo string, changed map[string]bool, syms map[string]
 	if len(starts) == 0 || !runNode(cgTests, map[string]any{"repo": repo, "dbs": idx.dbs, "starts": starts}, &got) {
 		return
 	}
+	lines := sources(repo)
+	for _, g := range got {
+		for _, w := range g.Ways {
+			for i, h := range w.Chain {
+				if h.At > 0 && h.In != "" {
+					w.Chain[i].Call = callAt(lines.text(h.In, h.At), h.Name)
+				}
+			}
+		}
+	}
 	set := map[*Symbol]bool{} // two of the index's, one of ours: what reaches either reaches it
 	for _, g := range got {
 		var best *Symbol
@@ -422,6 +432,43 @@ func (idx *cgIndex) tests(repo string, changed map[string]bool, syms map[string]
 type files struct {
 	repo string
 	got  map[string][]string
+}
+
+// callAt is how line names name: the receivers before it and, called, its brackets, "()" or "(…)" with arguments:
+// "inv.Lines[i].Discount", "inv.Validate()". The first time it names it; "" when it doesn't or that runs past maxCall.
+func callAt(line, name string) string {
+	const maxCall = 48
+	for _, m := range ident.FindAllStringIndex(line, -1) {
+		if line[m[0]:m[1]] != name {
+			continue
+		}
+		from, to := m[0], m[1]
+		for from > 0 && line[from-1] == '.' { // a receiver: a name, maybe indexed
+			at := from - 1
+			for at > 0 && line[at-1] == ']' {
+				if at = strings.LastIndexByte(line[:at-1], '['); at < 0 {
+					return ""
+				}
+			}
+			ns := ident.FindAllStringIndex(line[:at], -1)
+			if len(ns) == 0 || ns[len(ns)-1][1] != at {
+				break
+			}
+			from = ns[len(ns)-1][0]
+		}
+		s := line[from:to]
+		if to < len(line) && line[to] == '(' {
+			s += "(…)"
+			if n := strings.IndexByte(line[to:], ')'); n > 0 && strings.TrimSpace(line[to+1:to+n]) == "" {
+				s = s[:len(s)-len("(…)")] + "()"
+			}
+		}
+		if len(s) > maxCall {
+			return ""
+		}
+		return s
+	}
+	return ""
 }
 
 func sources(repo string) files { return files{repo, map[string][]string{}} }
