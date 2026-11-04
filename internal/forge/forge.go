@@ -125,8 +125,8 @@ func Rules(pick map[string]string, read func(string) string) string {
 	return text.Truncate(b.String(), 6000)
 }
 
-// reportSecret is a report link's secret (job.Secret) in a comment.
-var reportSecret = regexp.MustCompile(`/[A-Z2-7]{26}\b`)
+// reportSecret is a report link's secret (job.Secret) in a comment, also percent-encoded: /r/ decodes it.
+var reportSecret = regexp.MustCompile(`/(?:[A-Z2-7]|%[0-9A-Fa-f]{2}){26}\b`)
 
 // Redact cuts report links' secrets from text for a prompt: they are the PR's readers', not the model's.
 func Redact(s string) string { return reportSecret.ReplaceAllString(s, "/…") }

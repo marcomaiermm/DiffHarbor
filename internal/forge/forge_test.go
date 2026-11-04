@@ -69,6 +69,9 @@ func TestSticky(t *testing.T) {
 	if got := Clean("[report](https://x/r/github.com/o/r/1/ABCDEFGHIJKLMNOPQRSTUVWXYZ/versions)"); strings.Contains(got, "ABCDEF") {
 		t.Fatal("a report's secret reaches the prompt:", got)
 	}
+	if got := Clean("https://x/r/github.com/o/r/1/%41%42CDEFGHIJKLMNOPQRSTUVWXYZ/versions"); strings.Contains(got, "CDEF") {
+		t.Fatal("an encoded report secret reaches the prompt:", got)
+	}
 }
 
 func TestStickyOutline(t *testing.T) {
