@@ -45,7 +45,7 @@
       </div>{{end}}
       {{range .Groups}}{{if .Items}}<h3 class="fgrp">{{.Title}} <b>· {{len .Items}}</b></h3>
       <ul class="flist">{{range .Items}}<li><a class="frow"{{with .Href}} href="{{.}}"{{end}}>
-        <span class="sev" data-sev="{{.Severity}}">{{if eq .Severity "critical"}}Blocker{{else if eq .Severity "major"}}Major{{else}}Minor{{end}}</span>
+        {{template "sev" .Severity}}
         <span class="min-w-0"><span class="ftitle">{{.Title}}</span>{{with .Lead}}<span class="flead">{{.}}</span>{{end}}</span>
         <span class="floc"><span class="font-mono" title="{{.Path}}">{{.Where}}</span><span class="chip" data-{{if .Shown}}shown{{else}}dash{{end}}{{with .Evidence}} title="Verified: {{.}}"{{end}}>{{.Proof}}</span></span>
       </a></li>{{end}}</ul>{{end}}{{end}}

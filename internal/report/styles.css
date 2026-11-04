@@ -345,6 +345,16 @@ a.frow[href]:hover .ftitle { @apply underline; }
 .sev { @apply inline-flex h-[22px] items-center justify-self-start rounded-md bg-muted px-2 text-xs font-medium text-muted-foreground; }
 .sev[data-sev="critical"] { background: color-mix(in oklab, var(--destructive) 14%, transparent); color: var(--destructive); }
 .sev[data-sev="major"] { background: color-mix(in oklab, var(--major) 12%, transparent); color: var(--major); }
+/* a finding where it sits: its weight, why to believe it, what it says; in a diff it keeps to the width in view */
+.fnote { @apply sticky left-3 my-2 max-w-[min(820px,calc(100cqw-24px))] rounded-lg border bg-muted px-3.5 py-3 font-sans text-[13px] leading-[1.6] whitespace-normal; }
+.fnotes { @apply px-3; }
+.fnotes > .fnote { @apply max-w-[820px]; }
+.diff tr.fnote-row > td { @apply px-3; }
+.fnote-h { @apply flex flex-wrap items-center gap-2; }
+.fnote-h > .chip { @apply h-[22px]; }
+.fnote-t { @apply text-sm font-medium text-foreground; }
+.fnote-b { @apply mt-2 whitespace-pre-wrap text-muted-foreground; }
+.fnote-at { @apply mt-2.5; }
 .empty { @apply pt-5 pb-2; }
 .empty h3 { @apply text-[15px] font-semibold; }
 .empty p { @apply mt-1.5 max-w-[68ch] text-muted-foreground; }

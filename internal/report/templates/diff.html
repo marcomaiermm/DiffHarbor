@@ -16,7 +16,7 @@
     <label class="viewed"><input type="checkbox" class="checkbox" data-key="{{.Path}}@{{.ID}}" data-path="{{.Path}}"> Viewed</label>
   </div>
   <div class="collapsible-content" id="{{.Path}}~body">
-  {{with .Findings}}<div class="px-3">{{range .}}{{template "finding" .}}{{end}}</div>{{end}}
+  {{with .Findings}}<div class="fnotes">{{range .}}{{template "finding" .}}{{end}}</div>{{end}}
   {{if or .Changes .Moves}}<nav class="cnav" aria-label="Declarations it changes"><span>Changes</span>{{range .Changes}}<a href="#{{.ID}}" class="chip change" data-state="{{.State}}"{{with .Sev}} data-sev="{{.}}"{{end}}>{{.Name}}</a>{{end}}{{range .Moves}}<a href="#{{.ID}}" class="chip change" data-state="moved" title="Only moved here">{{.Name}}</a>{{end}}</nav>{{end}}
   <div class="diff overflow-x-auto"><table class="w-full border-collapse font-mono text-[12.5px] leading-5" data-path="{{.Path}}">
   {{range .Parts}}{{if .ID}}<tbody class="fold{{if .Open}} open{{end}}" id="fold-{{.ID}}">
@@ -30,15 +30,16 @@
 </div>{{end}}
 
 {{define "line"}}{{if eq .Class "hunk"}}<tr class="hunk"><td colspan="4"><span class="hunk-in"><span class="hunk-text">{{.Range}}{{with .Fn}}<span>{{.}}</span>{{end}}</span><span class="hunk-folded"></span><button type="button" class="btn hunk-seen" data-variant="outline" data-size="xs" aria-pressed="false" title="Hide this hunk once read">Fold</button></span></td></tr>{{else}}<tr class="{{.Class}}"{{with .ID}} id="{{.}}"{{end}}{{with .Old}} data-old="{{.}}"{{end}}><td>{{.No}}</td><td>{{if eq .Class "add"}}+{{else if eq .Class "del"}}−{{end}}</td><td>{{.Text}}</td></tr>{{end}}
-{{range .Findings}}<tr><td colspan="4" class="bg-background px-3">{{template "finding" .}}</td></tr>{{end}}{{end}}
+{{range .Findings}}<tr class="fnote-row"><td colspan="4">{{template "finding" .}}</td></tr>{{end}}{{end}}
 
-{{define "finding"}}<div class="alert my-2 font-sans whitespace-normal"{{with .ID}} id="{{.}}"{{end}}{{if eq .Severity "critical"}} data-variant="destructive"{{end}} role="note">
-  <div class="alert-content">
-    {{if .Title}}<h5 class="alert-title">{{.Severity}} · {{.Title}}</h5>{{end}}
-    <p class="alert-description whitespace-pre-wrap">{{.Body}}</p>
-    {{with .Blob}}<p class="alert-description"><a href="{{.}}" target="_blank" rel="noopener">{{$.Loc}} at the head ↗</a></p>{{end}}
-  </div>
+{{define "finding"}}<div class="fnote"{{with .ID}} id="{{.}}"{{end}} role="note">
+  <div class="fnote-h">{{template "sev" .Severity}}{{with .Proof}}<span class="chip" data-{{if $.Shown}}shown{{else}}dash{{end}}{{with $.Evidence}} title="Verified: {{.}}"{{end}}>{{.}}</span>{{end}}{{with .Title}}<span class="fnote-t">{{.}}</span>{{end}}</div>
+  <p class="fnote-b">{{.Body}}</p>
+  {{with .Blob}}<p class="fnote-at"><a href="{{.}}" class="chip loc" target="_blank" rel="noopener">{{icon "code" ""}}{{$.Loc}} at the head ↗</a></p>{{end}}
 </div>{{end}}
+
+{{/* A finding's weight as its chip: Blocker, Major, Minor. */}}
+{{define "sev"}}<span class="sev" data-sev="{{.}}">{{if eq . "critical"}}Blocker{{else if eq . "major"}}Major{{else}}Minor{{end}}</span>{{end}}
 
 {{define "graph"}}<div class="graph" data-graph="{{json .}}"><div class="cy"></div>
   <div class="graph-tools btn-group" role="group" aria-label="Graph">

@@ -80,7 +80,7 @@ func TestRender(t *testing.T) {
 		"Minor", `href="#finding-2"`, "elsewhere", "other.go · not in the diff", "Outside the diff", `id="finding-2"`,
 		`href="https://gitlab.com/acme/shop/-/blob/0123456789abcdef/other.go"`, "other.go at the head",
 		"What only a person can settle", "Should a failed save retry?",
-		"Storage first", `id="store/store.go"`, "Then the handler", `id="api/handler.go"`, `id="finding-1"`, "major · Error dropped",
+		"Storage first", `id="store/store.go"`, "Then the handler", `id="api/handler.go"`, `id="finding-1"`, `<span class="sev" data-sev="major">Major</span>`, `<span class="fnote-t">Error dropped</span>`,
 		`id="tests"`, `title="api/handler_test.go">TestHandle<`, `id="api/handler_test.go"`, `id="other"`, `id="README.md"`,
 		`id="deleted"`, `id="gone.go"`, `id="explore"`, "Look closer", "How the parts talk", `id="commits"`, "Work in progress", "/merge_requests/7/diffs?commit_id=aaaaaaaaaa", "Only this commit",
 		`id="finish"`, "Request changes", "Review for !7</span>",
