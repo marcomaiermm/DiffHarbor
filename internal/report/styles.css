@@ -433,7 +433,7 @@ html[data-filter="unviewed"] .sidebar-files li:has(.done) { display: none; }
 .kind[data-k="type"] { --k: #a855f7; }
 .kind[data-k="constant"], .kind[data-k="variable"] { --k: #f59e0b; }
 .kind[data-k^="field"], .kind[data-k^="method of"] { --k: #14b8a6; }
-.sym-sig { @apply rounded-lg px-3 py-2.5 font-mono text-xs leading-5 whitespace-pre; background: var(--diff-bg); color: var(--diff-fg);
+.sym-sig { @apply rounded-lg px-3 py-2.5 font-mono text-xs leading-5 whitespace-pre; tab-size: 4; background: var(--diff-bg); color: var(--diff-fg);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--diff-fg) 8%, transparent); }
 .sym-doc { @apply line-clamp-4 text-[13px] leading-relaxed text-pretty text-muted-foreground; }
 .sym-foot { @apply flex items-center gap-3 border-t bg-muted/50 px-3.5 py-2 text-xs text-muted-foreground; }
@@ -515,19 +515,20 @@ html:not([data-diff="split"]) .split-legend { display: none; }
 .ctabs > .toggle[aria-pressed="true"] { @apply border-ring text-foreground; background: color-mix(in oklab, var(--ring) 10%, var(--card)); }
 .ctabs > .btn { @apply ml-auto motion-reduce:hidden; } /* Replay: nothing moves to play again */
 /* a method: GET, POST, CALL; a chip in its color */
-.chip[data-m] { @apply h-5 rounded border-transparent px-1.5 font-mono text-[11px] font-semibold tracking-[0.04em]; --c: var(--muted-foreground); background: color-mix(in oklab, var(--c) 18%, transparent); color: var(--c); }
+.chip[data-m] { @apply h-[20px] rounded-[4px] border-transparent px-[6px] font-mono text-[11px] font-semibold tracking-[0.04em]; --c: var(--muted-foreground); background: color-mix(in oklab, var(--c) 18%, transparent); color: var(--c); }
 .chip[data-m="GET"], .chip[data-m="HEAD"] { --c: var(--ring); }
 .chip[data-m="POST"], .chip[data-m="PUT"], .chip[data-m="PATCH"] { --c: var(--diff-add); }
 .chip[data-m="DELETE"] { --c: var(--destructive); }
 .ct-dot { @apply size-[7px] rounded-full bg-major; }
 .ct-dot[data-sev="critical"] { @apply bg-destructive; }
 .ct { @apply m-0 grid list-none grid-cols-[minmax(100%,max-content)] overflow-x-auto rounded-[10px] border bg-background py-2.5 font-mono text-[13px]; --gl: color-mix(in oklab, var(--muted-foreground) 45%, transparent); }
-.ct li { @apply relative flex min-h-9 items-center gap-2.5 px-3.5 whitespace-nowrap hover:bg-muted/60; }
+/* the guides are drawn at pixel offsets: what they hang on is in pixels too, or a larger root font moves the one off the other */
+.ct li { @apply relative flex min-h-[36px] items-center gap-[10px] px-[14px] whitespace-nowrap hover:bg-muted/60; }
 .ct-g { @apply flex self-stretch empty:hidden; color: var(--gl); }
-.gc { @apply relative w-6 flex-none; }
+.gc { @apply relative w-[24px] flex-none; }
 .gc[data-g="pipe"]::before, .gc[data-g="tee"]::before { @apply absolute inset-y-0 left-[11px] w-px bg-current content-['']; }
 .gc[data-g="tee"]::after { @apply absolute top-1/2 left-[11px] h-px w-[23px] bg-current content-['']; }
-.gc[data-g="end"]::before { @apply absolute top-0 left-[11px] h-1/2 w-3 rounded-bl-md border-b border-l border-current content-['']; }
+.gc[data-g="end"]::before { @apply absolute top-0 left-[11px] h-1/2 w-[12px] rounded-bl-[6px] border-b border-l border-current content-['']; }
 .gc[data-g="end"]::after { @apply absolute top-1/2 left-[23px] h-px w-[11px] bg-current content-['']; }
 .ct li[data-kids]::after { @apply absolute bottom-0 left-[25px] w-px content-['']; top: calc(50% + 13px); background: var(--gl); }
 .ct li.ct-entry[data-kids]::after { top: calc(50% + 10px); }
@@ -542,7 +543,7 @@ html:not([data-diff="split"]) .split-legend { display: none; }
 .ct li[data-d="9"][data-kids]::after { left: 241px; } /* the index walks 8 calls up: no row is deeper */
 .ct-route { @apply font-medium text-foreground; }
 .ct-sub { @apply font-sans text-[13px] text-muted-foreground; }
-.ct-pill { @apply inline-flex min-h-[26px] items-center gap-2 rounded-md border bg-card px-[9px] text-foreground; }
+.ct-pill { @apply inline-flex min-h-[26px] items-center gap-[8px] rounded-[6px] border bg-card px-[9px] text-foreground; }
 .ct-pill code { font: inherit; }
 .ct li[data-st="new"] .ct-pill { border-color: color-mix(in oklab, var(--diff-add) 60%, transparent); }
 .ct li[data-st="chg"] .ct-pill { border-color: color-mix(in oklab, var(--ring) 60%, transparent); }

@@ -65,6 +65,9 @@ type Ref struct {
 	Text string `json:"text"` // the line, trimmed and cut
 }
 
+// gofmt prints as gofmt does: tabs indent, spaces align, so a column stays a column at any tab width.
+var gofmt = printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
+
 const (
 	maxRefs, maxSymbols = 20, 3000
 	maxFiles, maxSize   = 20000, 512 << 10
@@ -222,7 +225,7 @@ func goDecls(path string, src []byte, wanted map[string]bool, syms map[string][]
 		}
 		var b strings.Builder
 		b.WriteString(prefix)
-		_ = printer.Fprint(&b, fset, sig)
+		_ = gofmt.Fprint(&b, fset, sig)
 		doc := ""
 		for _, d := range docs {
 			if doc = strings.TrimSpace(d.Text()); doc != "" {

@@ -304,8 +304,9 @@ func TestSymbols(t *testing.T) {
 		}
 	}
 	write("a.go", "package a\n\n// Limit caps it.\nconst Limit = 3\n\ntype T struct {\n\tCount int // how many\n}\n\nfunc Use() int { return Limit }\n\nfunc Show(t T) int {\n\treturn t.Count + f().Limit\n}\n")
+	write("c.go", "package a\n\ntype Rec struct {\n\tID      string `json:\"id\"`\n\tCreated int    `json:\"c\"`\n}\n")
 	write("b.ts", "/** Greets. */\nexport function greet(n: string) {\n  return n\n}\ngreet(\"x\")\n")
-	s := Symbols(dir, "+x := a.Limit + t.Count + Show(t)\n+greet(y)\n")
+	s := Symbols(dir, "+x := a.Limit + t.Count + Show(t)\n+greet(y)\n+Rec{}\n")
 	l := s["Limit"]
 	if len(l) != 1 || l[0].Sig != "const Limit = 3" || l[0].Doc != "Limit caps it." || l[0].Uses != 2 || l[0].Refs[0].In != "Use" || l[0].Kind != "constant" || l[0].Unit != "package" {
 		t.Errorf("Limit %+v", l)
@@ -315,6 +316,10 @@ func TestSymbols(t *testing.T) {
 	}
 	if g := s["greet"]; len(g) != 1 || g[0].Sig != "export function greet(n: string)" || g[0].Doc != "Greets." || g[0].Uses != 1 || g[0].Kind != "function" || g[0].Unit != "" {
 		t.Errorf("greet %+v", g)
+	}
+	// gofmt's way: a tab only to indent, columns kept by spaces, so they line up at any tab width
+	if r := s["Rec"]; len(r) != 1 || r[0].Sig != "type Rec struct {\n\tID      string `json:\"id\"`\n\tCreated int    `json:\"c\"`\n}" {
+		t.Errorf("Rec %+v", r)
 	}
 	if _, ok := s["Use"]; ok {
 		t.Error("a name the diff doesn't show is indexed")
