@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: withastro/action@15aa0a5a1e067940253e3b259413ab2ae882a740 # v5
+      - uses: withastro/action@a8b97df764791eb61fbf3338ef713b0e61ae05c5 # v6
         with:
           path: docs
           package-manager: bun@latest
