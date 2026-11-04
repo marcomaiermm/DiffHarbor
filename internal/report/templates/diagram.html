@@ -11,6 +11,9 @@ mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "base",
   clusterBkg: "transparent", clusterBorder: dark ? "#292e42" : "#ebebeb", titleColor: dark ? "#98a1cc" : "#6b6b6b",
   actorBkg: bg, actorBorder: box, actorTextColor: fg, signalColor: line, signalTextColor: fg, noteBkgColor: dark ? "#1f2335" : "#f5f5f5",
   noteBorderColor: box, noteTextColor: fg } });
-await mermaid.run();
+// in a closed card it draws once the card opens: a hidden diagram measures as nothing
+const pre = document.querySelector("pre.mermaid"), card = pre.closest("details");
+const draw = () => mermaid.run({ nodes: [pre] });
+if (!card || card.open) await draw(); else card.addEventListener("toggle", draw, { once: true });
 </script>
 {{end}}

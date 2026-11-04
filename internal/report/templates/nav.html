@@ -33,6 +33,7 @@
         {{if .Other}}<a href="#other" class="sidebar-link" title="Data and docs">{{icon "file-text" ""}}<span>Data and docs</span><span class="sidebar-badge">{{.NOther}}</span></a>{{end}}
         {{if .Mechanical}}<a href="#mechanical" class="sidebar-link" title="Mechanical">{{icon "files" ""}}<span>Mechanical</span><span class="sidebar-badge">{{len .Mechanical}}</span></a>{{end}}
         {{if .Deleted}}<a href="#deleted" class="sidebar-link" title="Deleted">{{icon "trash-2" ""}}<span>Deleted</span><span class="sidebar-badge">{{len .Deleted}}</span></a>{{end}}
+        {{if or .Inventory .Deps .Affected .Diagram}}<a href="#explore" class="sidebar-link" title="Look closer">{{icon "search" ""}}<span>Look closer</span></a>{{end}}
         {{if .Commits}}<a href="#commits" class="sidebar-link" title="Commits">{{icon "git-commit-horizontal" ""}}<span>Commits</span><span class="sidebar-badge">{{len .Commits}}</span></a>{{end}}
         <a href="#finish" class="sidebar-link" title="Finish the review">{{icon "check" ""}}<span>Finish the review</span></a>
       </nav>

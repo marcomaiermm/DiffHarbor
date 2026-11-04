@@ -353,7 +353,7 @@ document.addEventListener("click", e => {
 });
 // the matrix: a cell lights its row and column and says who uses whom with which names
 for (const t of document.querySelectorAll(".deps")) {
-  const say = t.closest(".card-content").querySelector(".deps-say"), rows = [...t.rows], label = i => rows[i].cells[0].textContent.replace(/^\d+/, "");
+  const say = t.closest(".bb").querySelector(".deps-say"), rows = [...t.rows], label = i => rows[i].cells[0].textContent.replace(/^\d+/, "");
   const idle = "Hover a number for the names, click a directory to go to its first file.";
   say.textContent = idle;
   t.addEventListener("mouseover", e => {

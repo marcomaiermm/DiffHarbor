@@ -83,11 +83,17 @@
     </div>{{end}}
     </div>
   </section>
-  {{if or .Inventory .Deps .Affected .Diagram}}<div class="mt-10 space-y-4">
-  {{with .Inventory}}<div class="card" id="happened">
-    <div class="card-header"><h2 class="card-title">What happened to the code</h2>
-      <p class="card-description">Each declaration the PR touches, moves and renames matched across files.</p></div>
-    <div class="card-content">
+</section>
+{{end}}
+{{/* Look closer: what the steps don't show, after them and closed until asked. */}}
+{{define "explore"}}{{if or .Inventory .Deps .Affected .Diagram}}
+<section id="explore" class="mt-16 border-t pt-10" aria-labelledby="explore-h">
+  <h2 id="explore-h" class="text-xl font-semibold tracking-tight">Look closer</h2>
+  <p class="mt-1 mb-5 text-muted-foreground">Optional, after the steps: the declarations as a diff, how the changed directories use each other, and what the change reaches outside the PR.</p>
+  <div class="space-y-2.5">
+  {{with .Inventory}}<details class="box" id="happened">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">The declarations, before and after</span><span class="bs-note">each one the PR touches, moves and renames matched across files</span></summary>
+    <div class="bb">
       <div class="scroll-area"><div class="tab-list inv-tabs" data-variant="line" role="tablist" aria-label="Kind of change">{{range $i, $g := .}}<button type="button" class="tab-trigger" role="tab" id="inv-tab-{{.Key}}" aria-controls="inv-{{.Key}}" aria-selected="{{eq $i 0}}"{{if $i}} tabindex="-1"{{end}}{{with .Hint}} title="{{.}}"{{end}}>{{.Title}}<span class="badge inv-count" data-variant="secondary">{{add (len .Items) .More}}</span></button>{{end}}</div></div>
       {{range $i, $g := .}}<div class="tab-content" role="tabpanel" id="inv-{{.Key}}" aria-labelledby="inv-tab-{{.Key}}" tabindex="0"{{if $i}} hidden{{end}}>
         <div class="relative"><div class="scroll-area inv-scroll"><ul>{{range $it := .Items}}<li class="inv-item" data-path="{{.File}}"{{with .OldHead}} data-old-head="{{.}}" data-head="{{$it.Head}}"{{end}}>
@@ -100,28 +106,26 @@
         {{with .More}}<p class="inv-hint mt-2">and {{.}} more in the diff</p>{{end}}
       </div>{{end}}
     </div>
-  </div>{{end}}
-  {{with .Deps}}<details class="card deps-card">
-    <summary class="card-header"><h2 class="card-title"><span class="trace-icon trace-chevron">{{icon "chevron-right" ""}}</span>Dependencies between {{len .Dirs}} changed directories{{with .Cycles}} · <span class="text-destructive">{{.}} {{if eq . 1}}cycle{{else}}cycles{{end}}</span>{{end}}</h2>
-      {{with .Top}}<p class="card-description">Most used: {{range $i, $t := .}}{{if $i}}, {{end}}<span class="font-mono text-foreground">{{$t}}</span>{{end}}.</p>{{end}}</summary>
-    <div class="card-content"><p class="mb-3 text-[13px] text-muted-foreground">A row's changed code calls or names a column's, the number how many declarations; hover a cell for which. What uses comes before what it uses, so the numbers sit right of the diagonal. A red one left of it is a cycle: those directories use each other.</p><div class="deps-wrap scroll-area"><table class="deps">
+  </details>{{end}}
+  {{with .Deps}}<details class="box">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">Dependencies between {{len .Dirs}} changed directories</span>{{with .Cycles}}<span class="bs-note text-destructive">{{.}} {{if eq . 1}}cycle{{else}}cycles{{end}}</span>{{end}}</summary>
+    <div class="bb">{{with .Top}}<p class="mb-2 text-[13px] text-muted-foreground">Most used: {{range $i, $t := .}}{{if $i}}, {{end}}<span class="font-mono text-foreground">{{$t}}</span>{{end}}.</p>{{end}}<p class="mb-3 text-[13px] text-muted-foreground">A row's changed code calls or names a column's, the number how many declarations; hover a cell for which. What uses comes before what it uses, so the numbers sit right of the diagonal. A red one left of it is a cycle: those directories use each other.</p><div class="deps-wrap scroll-area"><table class="deps">
       <thead><tr><th></th>{{range $i, $d := .Dirs}}<th scope="col" title="{{$d.Label}}">{{inc $i}}</th>{{end}}</tr></thead>
       <tbody>{{range $d := .Dirs}}<tr><th scope="row"><a href="{{$d.Href}}" title="{{$d.Label}}"><span class="deps-no"></span><span class="truncate">{{$d.Label}}</span></a></th>{{range $c := $d.Cells}}<td{{if .Self}} class="d-self"{{else if .Back}} class="d-back"{{else if .N}} class="d-use" style="--n: {{.N}}"{{end}}{{if .N}} data-n="{{.N}}" data-names="{{.Names}}"{{end}}>{{if .N}}{{.N}}{{end}}</td>{{end}}</tr>{{end}}</tbody>
     </table></div><p class="deps-say"></p></div>
   </details>{{end}}
-  {{with .Affected}}<div class="card">
-    <div class="card-header"><h2 class="card-title">What the change reaches outside the PR</h2>
-      <p class="card-description">Code outside the diff that calls or names what changed.</p></div>
-    <div class="card-content accordion">{{range .}}<details class="accordion-item reach-item">
+  {{with .Affected}}<details class="box">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">What the change reaches outside the PR</span><span class="bs-note">{{plural (len .) "declaration" "declarations"}} called or named by code outside the diff</span></summary>
+    <div class="bb accordion">{{range .}}<details class="accordion-item reach-item">
       <summary class="accordion-trigger"><a href="#{{.ID}}">{{.Name}}</a>{{with .Why}}<span class="badge" data-variant="outline">{{.}}</span>{{end}}<span class="reach-path">{{.Path}}</span><span class="reach-n">{{.N}} {{if eq .N 1}}place{{else}}places{{end}}</span>{{icon "chevron-down" "accordion-chevron size-4"}}</summary>
       <ul>{{range .Refs}}<li><a href="{{$.Forge.Blob}}{{.Path}}#L{{.Line}}" target="_blank" rel="noopener">{{.Path}}:{{.Line}}</a>{{with .In}}<span class="shrink-0 text-muted-foreground">in {{.}}</span>{{end}}<code data-path="{{.Path}}">{{.Text}}</code></li>{{end}}
         <li><button type="button" class="btn" data-variant="link" data-size="xs" data-uses="{{.Name}}" data-path="{{.Path}}">Every use</button></li></ul>
     </details>{{end}}</div>
-  </div>{{end}}
-  {{with .Diagram}}<div class="card">
-    <div class="card-header"><h2 class="card-title">How the parts talk</h2></div>
-    <div class="card-content scroll-area"><pre class="mermaid flex justify-center [&_svg]:max-h-96">{{.}}</pre></div>
-  </div>{{end}}
-  </div>{{end}}
+  </details>{{end}}
+  {{with .Diagram}}<details class="box">
+    <summary class="bs">{{icon "chevron-right" "box-chev"}}<span class="font-medium">How the parts talk</span></summary>
+    <div class="bb scroll-area"><pre class="mermaid flex justify-center [&_svg]:max-h-96">{{.}}</pre></div>
+  </details>{{end}}
+  </div>
 </section>
-{{end}}
+{{end}}{{end}}

@@ -208,10 +208,6 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
 .deps td[data-n] { @apply cursor-default; }
 .deps :is(td, th).hl { box-shadow: inset 0 0 0 999px color-mix(in oklab, currentColor 7%, transparent); }
 .deps td.at { @apply outline-2 -outline-offset-2 outline-foreground; }
-.deps-card > summary { @apply cursor-pointer list-none; }
-.deps-card > summary::-webkit-details-marker { display: none; }
-.deps-card > summary .card-title { @apply flex items-center gap-1.5; }
-.deps-card[open] > summary .trace-chevron { @apply rotate-90; }
 .deps-say { @apply mt-2 min-h-5 text-xs text-muted-foreground; }
 .deps-say b { @apply font-mono font-medium text-foreground; }
 /* shadcn's contains the wheel (a sideways one kept it from the page) and draws the thumb in --border, which vanishes

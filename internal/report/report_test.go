@@ -57,7 +57,7 @@ func TestRender(t *testing.T) {
 			Name: "GitLab", Ref: "!", Blob: "https://gitlab.com/acme/shop/-/blob/0123456789abcdef/",
 			PRCommit: "https://gitlab.com/acme/shop/-/merge_requests/7/diffs?commit_id=",
 		}, // nothing in the page is GitHub's
-		Summary: "Handle saves orders.", Decisions: []string{"Should a failed save retry?"},
+		Summary: "Handle saves orders.", Diagram: "sequenceDiagram", Decisions: []string{"Should a failed save retry?"},
 		Story: review.Story{Problem: "Orders were lost.", Before: "POST /orders: 200, nothing stored.", After: "POST /orders: the order is in the store."},
 		Flow: []review.Step{
 			{Title: "Storage first", Why: "Save is what Handle calls.", Files: []string{"store/store.go", "missing.go"}},
@@ -81,7 +81,7 @@ func TestRender(t *testing.T) {
 		"What only a person can settle", "Should a failed save retry?",
 		"Storage first", `id="store/store.go"`, "Then the handler", `id="api/handler.go"`, `id="finding-1"`, "major · Error dropped",
 		`id="tests"`, "api/handler_test.go: TestHandle", `id="api/handler_test.go"`, `id="other"`, `id="README.md"`,
-		`id="deleted"`, `id="gone.go"`, `id="commits"`, "work in progress", "/merge_requests/7/diffs?commit_id=aaaaaaaaaa", "Only this commit",
+		`id="deleted"`, `id="gone.go"`, `id="explore"`, "Look closer", "How the parts talk", `id="commits"`, "work in progress", "/merge_requests/7/diffs?commit_id=aaaaaaaaaa", "Only this commit",
 		`id="finish"`, "Request changes", "Review for !7</span>",
 		"Error dropped (handler.go:2).", "Questions:\n1. Should a failed save retry?", "Minor:\n- other.go  elsewhere", "Open the draft on GitLab",
 	}
