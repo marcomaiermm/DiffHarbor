@@ -86,7 +86,7 @@ func TestRender(t *testing.T) {
 		"Error dropped (handler.go:2).", "Questions:\n1. Should a failed save retry?", "Minor:\n- other.go  elsewhere", "Open the draft on GitLab",
 	}
 	for _, w := range []string{"acme/shop!7 · Save", ">GitLab <svg", // the forge's own names
-		`<span class="chip" data-sev="major">1 major</span>`, `data-progress="step-2"`, `<span class="chip" data-del>deleted</span>`, // a step's head, a file's
+		`<span class="chip" data-sev="major">1 major</span>`, `data-progress="step-2"`, `id="progress-text" data-steps="2"`, `<span class="chip" data-del>deleted</span>`, // a step's head, a file's
 		`<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2Zy`, `sizes="32x32" href="data:image/png;base64,iVBORw0KGgo`, `<img src="data:image/png;base64,iVBORw0KGgo`} { // the favicons, unescaped
 		if !strings.Contains(s, w) {
 			t.Errorf("%q missing", w)

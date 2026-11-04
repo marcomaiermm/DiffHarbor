@@ -13,7 +13,7 @@
     </ol></nav>
     <div class="ml-auto flex shrink-0 items-center gap-3">
       <a href="#focus" class="vd"{{if .Verdict.OK}} data-ok{{end}} title="{{.Verdict.Title}}">{{if .Verdict.OK}}{{icon "circle-check" ""}}{{else}}{{icon "circle-alert" ""}}{{end}}<span class="max-sm:sr-only">{{.Verdict.Short}}</span></a>
-      <span id="progress-text" class="hidden font-mono text-xs tabular-nums text-muted-foreground sm:block"></span>
+      <span id="progress-text" data-steps="{{.NSteps}}" class="hidden font-mono text-xs tabular-nums text-muted-foreground xl:block"></span>
       <div class="toggle-group view-toggle" data-variant="outline" role="group" aria-label="Diff layout">
         <button type="button" class="toggle" data-diff="unified" aria-pressed="true" title="One column">{{icon "rows-2" ""}}Unified</button>
         <button type="button" class="toggle" data-diff="split" aria-pressed="false" title="Side by side, the changes joined">{{icon "columns-2" ""}}Split</button>

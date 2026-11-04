@@ -50,13 +50,16 @@
       if (b.checked) viewed.add(b.dataset.path);
       b.closest(".file").classList.toggle("seen", b.checked);
     }
-    const n = boxes.filter(b => b.checked).length;
-    document.getElementById("progress").style.width = (boxes.length ? 100 * n / boxes.length : 0) + "%";
-    document.getElementById("progress-text").textContent = n + "/" + boxes.length + " viewed";
+    // the header counts the reading order's code files, and names the first step not read yet
+    const code = boxes.filter(b => b.closest("#flow")), counted = code.length ? code : boxes;
+    const n = counted.filter(b => b.checked).length, text = document.getElementById("progress-text");
+    document.getElementById("progress").style.width = (counted.length ? 100 * n / counted.length : 0) + "%";
+    const ns = +text.dataset.steps, cur = steps.slice(0, ns).findIndex(s => [...s.querySelectorAll("a[data-path]")].some(a => !viewed.has(a.dataset.path)));
+    text.textContent = (ns ? "step " + (cur < 0 ? ns : cur + 1) + " of " + ns + " · " : "") + n + "/" + counted.length + (code.length ? " code files viewed" : " viewed");
     for (const a of navFiles) a.classList.toggle("done", viewed.has(a.dataset.path));
     const fin = document.getElementById("fin-viewed"), next = document.getElementById("fin-next");
     if (fin) { // the finish checklist: the code files of the reading order, and the first one left
-      const code = boxes.filter(b => b.closest("#flow")), left = code.find(b => !b.checked);
+      const left = code.find(b => !b.checked);
       fin.textContent = code.filter(b => b.checked).length + " of " + code.length + " viewed";
       next.hidden = !left;
       if (left) { next.href = "#" + left.dataset.path; next.textContent = "next: " + left.dataset.path.split("/").pop(); }
