@@ -19,7 +19,7 @@ type finding struct {
 	Lead       string // the first paragraph of Body, the list's line under the title
 	Proof      string // why to believe it: a source shown without a model, or the second model's
 	Shown      bool   // Proof needs no model: the diff, the imports, a search
-	External   bool   // Href leaves the page: not in the diff
+	Blob       string // outside the diff: its file on the forge
 }
 
 // fgroup is findings that weigh the same: what blocks the merge, what to fix before it, the rest.

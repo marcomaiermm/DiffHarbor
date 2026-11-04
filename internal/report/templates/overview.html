@@ -45,11 +45,13 @@
         <p>A second model read the change and kept nothing it could point to in the code. That is no proof{{if or .Decisions .MergeN}}, so the decisions and merge risks still need you{{end}}.</p>
       </div>{{end}}
       {{range .Groups}}{{if .Items}}<h3 class="fgrp">{{.Title}} <b>· {{len .Items}}</b></h3>
-      <ul class="flist">{{range .Items}}<li><a class="frow"{{with .Href}} href="{{.}}"{{end}}{{if .External}} target="_blank" rel="noopener"{{end}}>
+      <ul class="flist">{{range .Items}}<li><a class="frow"{{with .Href}} href="{{.}}"{{end}}>
         <span class="sev" data-sev="{{.Severity}}">{{if eq .Severity "critical"}}Blocker{{else if eq .Severity "major"}}Major{{else}}Minor{{end}}</span>
         <span class="min-w-0"><span class="ftitle">{{.Title}}</span>{{with .Lead}}<span class="flead">{{.}}</span>{{end}}</span>
-        <span class="floc"><span class="font-mono" title="{{.Path}}">{{.Where}}{{if .External}} ↗{{end}}</span><span class="chip" data-{{if .Shown}}shown{{else}}dash{{end}}{{with .Evidence}} title="Verified: {{.}}"{{end}}>{{.Proof}}</span></span>
+        <span class="floc"><span class="font-mono" title="{{.Path}}">{{.Where}}</span><span class="chip" data-{{if .Shown}}shown{{else}}dash{{end}}{{with .Evidence}} title="Verified: {{.}}"{{end}}>{{.Proof}}</span></span>
       </a></li>{{end}}</ul>{{end}}{{end}}
+      {{with .Outside}}<h3 class="fgrp">Outside the diff <b>· {{len .}}</b></h3>
+      {{range .}}{{template "finding" .}}{{end}}{{end}}
     </div>
     {{with .Decisions}}<div class="tab-content" role="tabpanel" id="decide" aria-labelledby="tab-decide" tabindex="0" hidden>
       <p class="tab-hint">What only a person can settle: product, architecture or risk. The draft review asks them as questions.</p>

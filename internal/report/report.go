@@ -287,6 +287,7 @@ type view struct {
 	Since                *since          // what changed from Prev
 	Groups               []fgroup        // the findings and weakened tests by weight
 	NFound               int             // in Groups
+	Outside              []*finding      // on a file the diff doesn't show: in full under the list
 	Verdict              verdict
 	Draft                draft
 	MergeN               int     // rows of the merge risks: Risks, BaseMoved, Conflicts, Others
@@ -373,17 +374,18 @@ func prepare(d Data) view {
 		fd := &finding{Comment: c}
 		found = append(found, fd)
 		f := files[c.Path]
-		if f == nil { // outside the diff: the list links to the forge
-			if d.Forge.Blob != "" {
-				fd.Href, fd.External = d.Forge.Blob+c.Path, true
-				if c.Line > 0 {
-					fd.Href += "#L" + strconv.Itoa(c.Line)
-				}
-			}
-			continue
-		}
 		fd.ID = "finding-" + strconv.Itoa(i+1)
 		fd.Href = "#" + fd.ID
+		if f == nil { // outside the diff: in full under the list, a link to the file on the forge
+			if d.Forge.Blob != "" {
+				fd.Blob = d.Forge.Blob + c.Path
+				if c.Line > 0 {
+					fd.Blob += "#L" + strconv.Itoa(c.Line)
+				}
+			}
+			v.Outside = append(v.Outside, fd)
+			continue
+		}
 		at := slices.IndexFunc(f.Lines, func(l line) bool { return l.No == strconv.Itoa(c.Line) })
 		if c.Line == 0 || at < 0 {
 			f.Findings = append(f.Findings, fd)

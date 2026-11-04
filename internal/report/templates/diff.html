@@ -31,6 +31,7 @@
   <div class="alert-content">
     {{if .Title}}<h5 class="alert-title">{{.Severity}} · {{.Title}}</h5>{{end}}
     <p class="alert-description whitespace-pre-wrap">{{.Body}}</p>
+    {{with .Blob}}<p class="alert-description"><a href="{{.}}" target="_blank" rel="noopener">{{$.Loc}} at the head ↗</a></p>{{end}}
   </div>
 </div>{{end}}
 
