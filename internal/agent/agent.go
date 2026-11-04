@@ -249,13 +249,18 @@ func Workspace(repo string) (string, error) {
 // AI gateway): <PROVIDER>_BASE_URL, e.g. ANTHROPIC_BASE_URL, becomes the provider's baseUrl; its models and auth stay
 // Pi's, the key is the proxy's. A provider whose key the vault keeps points at the vault, which forwards to the gateway.
 func proxies(f string) error {
-	providers := map[string]any{}
+	providers := map[string]map[string]any{}
 	for _, r := range Matrix {
 		switch u := os.Getenv(envName(r.Name) + "_BASE_URL"); {
 		case upstream(r.Name) != "":
-			providers[r.Name] = map[string]string{"baseUrl": vaultURL() + "/" + r.Name}
+			providers[r.Name] = map[string]any{"baseUrl": vaultURL() + "/" + r.Name}
 		case u != "" && r.Proxy:
-			providers[r.Name] = map[string]string{"baseUrl": u}
+			providers[r.Name] = map[string]any{"baseUrl": u}
+		}
+		// A gateway (LiteLLM, one on Bedrock) rejects the effort Pi sends as a system message mid-conversation
+		// (messages.N.output_config): the effort goes in output_config instead (pi-ai api/anthropic-messages.js).
+		if p := providers[r.Name]; p != nil && r.Name == "anthropic" && os.Getenv("ANTHROPIC_BASE_URL") != "" {
+			p["compat"] = map[string]bool{"supportsMidConvoEffort": false}
 		}
 	}
 	if len(providers) == 0 {

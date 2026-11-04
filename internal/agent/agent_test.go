@@ -116,7 +116,7 @@ func TestProxies(t *testing.T) {
 	if err := proxies(f); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(f); string(b) != `{"providers":{"anthropic":{"baseUrl":"https://llm.example.com/anthropic"}}}` {
+	if b, _ := os.ReadFile(f); string(b) != `{"providers":{"anthropic":{"baseUrl":"https://llm.example.com/anthropic","compat":{"supportsMidConvoEffort":false}}}}` {
 		t.Fatalf("models.json: %s", b)
 	}
 	t.Setenv("ANTHROPIC_BASE_URL", "")
@@ -175,7 +175,7 @@ func TestVaulted(t *testing.T) {
 	if err := proxies(f); err != nil {
 		t.Fatal(err)
 	}
-	want := fmt.Sprintf(`{"providers":{"anthropic":{"baseUrl":"%[1]s/anthropic"},"azure":{"baseUrl":"%[1]s/azure"}}}`, vault.URL())
+	want := fmt.Sprintf(`{"providers":{"anthropic":{"baseUrl":"%[1]s/anthropic","compat":{"supportsMidConvoEffort":false}},"azure":{"baseUrl":"%[1]s/azure"}}}`, vault.URL())
 	if b, _ := os.ReadFile(f); string(b) != want || upstream("anthropic") != "https://llm.example.com/anthropic" {
 		t.Fatalf("models.json: %s, want %s", b, want)
 	}
