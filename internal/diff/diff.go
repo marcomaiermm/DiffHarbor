@@ -17,7 +17,7 @@ const Max = 60_000
 
 var (
 	// Skip matches lockfiles, generated and binary files: never reviewed.
-	Skip = regexp.MustCompile(`(^|/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|Cargo\.lock|go\.sum|composer\.lock|poetry\.lock|uv\.lock|Gemfile\.lock|Pipfile\.lock|mix\.lock|pubspec\.lock|packages\.lock\.json|Package\.resolved|\.terraform\.lock\.hcl)$|\.(min\.(js|css)|map|snap|svg|png|jpe?g|gif|webp|ico|pdf|woff2?)$|(^|/)(dist|build|vendor|node_modules|__generated__)/|\.pb\.go$|_pb2\.py$|_gen\.go$|\.(gen|generated)\.ts$`)
+	Skip = regexp.MustCompile(`(^|/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|Cargo\.lock|go\.sum|composer\.lock|poetry\.lock|uv\.lock|Gemfile\.lock|Pipfile\.lock|mix\.lock|pubspec\.lock|packages\.lock\.json|Package\.resolved|\.terraform\.lock\.hcl)$|\.(min\.(js|css)|map|snap|svg|png|jpe?g|gif|webp|ico|pdf|woff2?)$|(^|/)(dist|build|vendor|node_modules|__generated__)/|\.pb\.go$|_pb2\.py$|_gen\.go$|\.(gen|generated)\.[a-z]+$`)
 	// Fill order for the budget: code, then tests, data, docs. #490: one 38k-char doc took most of it.
 	testFile  = regexp.MustCompile(`(^|/)(tests?|__tests__|e2e)/|[._-](test|spec)\.[a-z]+$|_test\.go$|(^|/)test_[^/]+\.py$`)
 	dataFile  = regexp.MustCompile(`\.(json|ya?ml|toml|csv|xml)$`)

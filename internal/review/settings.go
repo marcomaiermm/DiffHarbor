@@ -25,8 +25,8 @@ type Settings struct {
 	ReviewModel string `json:"review_model"`
 	VerifyModel string `json:"verify_model"`
 	// A diff past diff.Max reviews in parts of up to diff.Max, one review and verify pass each, at most MaxParts.
-	// "ask" (default): code first up to diff.Max, the walkthrough offers a box to tick for all parts; "all": always
-	// in parts; "off": never.
+	// "all" (default): always in parts; "ask": code first up to diff.Max, the walkthrough offers a box to tick for
+	// all parts; "off": never.
 	LargePR  string `json:"large_pr"`
 	MaxParts int    `json:"max_parts"` // default 4, at most 8
 	// The HTML report to read a PR with (reading order, commits, tests), when the server has REPORT_URL.
@@ -83,7 +83,7 @@ func (cfg Settings) Models() (review, verify string) {
 
 // Parts returns the parts a review may split into; confirmed: someone asked for all of them (the box, `review all`).
 func (cfg Settings) Parts(confirmed bool) int {
-	if cfg.LargePR == "all" || confirmed && cfg.LargePR != "off" {
+	if cfg.LargePR == "" || cfg.LargePR == "all" || confirmed && cfg.LargePR == "ask" {
 		return cmp.Or(cfg.MaxParts, 4)
 	}
 	return 1
@@ -107,7 +107,7 @@ func (cfg Settings) Reviews(base, defaultBranch string) bool {
 }
 
 // Asks reports whether a review cut short offers the box for all parts.
-func (cfg Settings) Asks() bool { return cfg.LargePR == "" || cfg.LargePR == "ask" }
+func (cfg Settings) Asks() bool { return cfg.LargePR == "ask" }
 
 // globRe matches a path any of globs (*, **, ?) matches, or a path under it.
 func globRe(globs ...string) *regexp.Regexp {

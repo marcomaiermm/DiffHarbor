@@ -107,6 +107,13 @@ func TestAnalyze(t *testing.T) {
 		t.Fatalf("parts: %v %q %q %v %v", got, r.Summary, stats, calls, r.Failed)
 	}
 
+	// A finding on another part's file is that part's: dropped before verify. b.md above is in no part, it stays.
+	bmd := strings.ReplaceAll(md, "a.md", "b.md")
+	r, _, _ = run(map[string][]string{"review1": {other}, "verify1": {keep}}, Settings{}, md, bmd)
+	if len(r.Comments) != 1 || r.Comments[0].Path != "a.md" {
+		t.Fatalf("another part's file: %+v", r.Comments)
+	}
+
 	if _, tag, _ := merge([]part{{}}, "m", "m", "ci.yml"); tag != "m · tests: CI (ci.yml)" {
 		t.Fatalf("tests left to CI: %q", tag)
 	}
