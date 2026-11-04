@@ -186,3 +186,21 @@ func TestNestedRules(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+// A thread is ours by its first comment's author: anyone can copy the mark into theirs.
+func TestThreadsOurs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		node := func(id, typ, login string) string {
+			return `{"id":"` + id + `","comments":{"nodes":[{"databaseId":1,"path":"a.go","line":1,"body":"x ` + forge.Mark +
+				`","author":{"__typename":"` + typ + `","login":"` + login + `"}}]}}`
+		}
+		fmt.Fprint(w, `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[`+node("ours", "Bot", "app")+","+
+			node("copy", "User", "app")+","+node("other", "Bot", "else")+`]}}}}}`)
+	}))
+	defer srv.Close()
+	APIURL, Slug = srv.URL, "app"
+	ts, err := Threads("o/r", 1, "t")
+	if err != nil || len(ts) != 1 || ts[0].ID != "ours" {
+		t.Fatalf("threads %v %v", ts, err)
+	}
+}
