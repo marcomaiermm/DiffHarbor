@@ -137,7 +137,9 @@ func compile(dir string) (string, error) {
 var tmpl = template.Must(parseTemplates(nil))
 
 var funcs = template.FuncMap{
-	"short":    func(s string) string { return s[:min(len(s), 7)] },
+	"short":    short,
+	"plural":   plural,
+	"join":     join,
 	"inc":      func(i int) int { return i + 1 },
 	"add":      func(a, b int) int { return a + b },
 	"icon":     icon,
@@ -224,7 +226,7 @@ type line struct {
 	ID              string // a jump target: where a declaration's change starts
 	Old             int    // the line in the old file: del and ctx lines
 	Run             int    // the folded run the line is in, 0 = shown
-	Findings        []review.Comment
+	Findings        []*finding
 }
 
 type file struct {
@@ -234,13 +236,13 @@ type file struct {
 	Open             bool   // unfolded: code in the reading order
 	Add, Del         int
 	Lines            []line
-	Parts            []part           // Lines as shown: plain runs and folded ones
-	Moved            int              // added lines that only moved here
-	Cut              int              // lines left out past maxLines
-	Findings         []review.Comment // on the file but no line it shows
-	Changes          []change         // the declarations it changes
-	Long             bool             // lists Changes above its diff
-	Changed          bool             // its change differs from Prev's, or it's new to the PR
+	Parts            []part     // Lines as shown: plain runs and folded ones
+	Moved            int        // added lines that only moved here
+	Cut              int        // lines left out past maxLines
+	Findings         []*finding // on the file but no line it shows
+	Changes          []change   // the declarations it changes
+	Long             bool       // lists Changes above its diff
+	Changed          bool       // its change differs from Prev's, or it's new to the PR
 }
 
 // change is a declaration a file's diff touches: State "new", "gone" or "" (changed), ID its first changed line.
@@ -267,9 +269,8 @@ type view struct {
 	Steps                []step
 	Tests, Other         []*file
 	Mechanical           []group
-	Loose                []review.Comment // findings outside the diff
-	Deleted              []*file          // what moved out of them folds, the rest is what the PR drops
-	Stepwise             bool             // the commits read one by one
+	Deleted              []*file // what moved out of them folds, the rest is what the PR drops
+	Stepwise             bool    // the commits read one by one
 	Code, NTests, NOther int
 	Added, Moved         int // added lines, and those of them that only moved
 	Tree                 []*node
@@ -280,7 +281,13 @@ type view struct {
 	Risks                []risk          // what a merge doesn't finish
 	BaseMoved            []review.Commit // of Behind, those that change the PR's files
 	Since                *since          // what changed from Prev
-	now                  Version         // what the next version compares with
+	Groups               []fgroup        // the findings and weakened tests by weight
+	NFound               int             // in Groups
+	Verdict              verdict
+	Draft                draft
+	MergeN               int     // rows of the merge risks: Risks, BaseMoved, Conflicts, Others
+	MergeWarn            bool    // one of them is sure trouble
+	now                  Version // what the next version compares with
 }
 
 // node is a directory of the side bar's file tree, or a file when File is set.
@@ -357,17 +364,27 @@ func prepare(d Data) view {
 	for _, p := range gone { // after fold: the moves it finds are in the whole file
 		trim(files[p], runs)
 	}
-	for _, c := range d.Findings {
+	var found []*finding
+	for i, c := range d.Findings {
+		fd := &finding{Comment: c}
+		found = append(found, fd)
 		f := files[c.Path]
-		if f == nil {
-			v.Loose = append(v.Loose, c)
+		if f == nil { // outside the diff: the list links to the forge
+			if d.Forge.Blob != "" {
+				fd.Href, fd.External = d.Forge.Blob+c.Path, true
+				if c.Line > 0 {
+					fd.Href += "#L" + strconv.Itoa(c.Line)
+				}
+			}
 			continue
 		}
+		fd.ID = "finding-" + strconv.Itoa(i+1)
+		fd.Href = "#" + fd.ID
 		at := slices.IndexFunc(f.Lines, func(l line) bool { return l.No == strconv.Itoa(c.Line) })
 		if c.Line == 0 || at < 0 {
-			f.Findings = append(f.Findings, c)
+			f.Findings = append(f.Findings, fd)
 		} else {
-			f.Lines[at].Findings = append(f.Lines[at].Findings, c)
+			f.Lines[at].Findings, fd.inline = append(f.Lines[at].Findings, fd), true
 		}
 	}
 	var all []*file
@@ -375,6 +392,20 @@ func prepare(d Data) view {
 		all = append(all, files[p])
 	}
 	v.Risks, v.BaseMoved = risks(all), baseMoved(d.Behind, files) // before parts, like spans: risks marks the lines it jumps to
+	v.MergeN, v.MergeWarn = len(v.Risks), d.Conflicts
+	for _, r := range v.Risks {
+		for _, it := range r.Items {
+			v.MergeWarn = v.MergeWarn || it.Warn
+		}
+	}
+	for _, b := range []bool{len(v.BaseMoved) > 0, d.Conflicts, len(d.Others) > 0} {
+		if b {
+			v.MergeN++
+		}
+	}
+	for _, o := range d.Others {
+		v.MergeWarn = v.MergeWarn || len(o.Clash) > 0
+	}
 	v.now = stamp(v, ids)
 	v.Since = compare(d.Prev, v.now, files)
 	var ss []*span
@@ -455,6 +486,7 @@ func prepare(d Data) view {
 		}
 	}
 	v.Stepwise = len(d.Commits) > 1 && messy*3 < len(d.Commits) // under a third wip
+	judge(&v, found)
 	return v
 }
 

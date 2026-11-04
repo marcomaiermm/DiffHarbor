@@ -48,6 +48,13 @@
     document.getElementById("progress").style.width = (boxes.length ? 100 * n / boxes.length : 0) + "%";
     document.getElementById("progress-text").textContent = n + "/" + boxes.length + " viewed";
     for (const a of navFiles) a.classList.toggle("done", viewed.has(a.dataset.path));
+    const fin = document.getElementById("fin-viewed"), next = document.getElementById("fin-next");
+    if (fin) { // the finish checklist: the code files of the reading order, and the first one left
+      const code = boxes.filter(b => b.closest("#flow")), left = code.find(b => !b.checked);
+      fin.textContent = code.filter(b => b.checked).length + " of " + code.length + " viewed";
+      next.hidden = !left;
+      if (left) { next.href = "#" + left.dataset.path; next.textContent = "next: " + left.dataset.path.split("/").pop(); }
+    }
     for (const s of steps) {
       const files = [...s.querySelectorAll("a[data-path]")];
       const k = files.filter(a => viewed.has(a.dataset.path)).length;
@@ -69,6 +76,10 @@
         if (d.getBoundingClientRect().top < 0) d.scrollIntoView(); // the next file starts where this one did
       }
       sync();
+  const copy = document.getElementById("draft-copy"), status = document.getElementById("draft-status");
+  copy.addEventListener("click", () => navigator.clipboard.writeText(document.getElementById("draft-md").textContent).then(
+    () => status.textContent = "The review text is on your clipboard.",
+    () => status.textContent = "The browser kept the clipboard closed: select the text above and copy it."));
     });
   }
   sync();

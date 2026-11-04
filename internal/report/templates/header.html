@@ -12,6 +12,7 @@
       <li class="breadcrumb-item hidden min-w-0 md:flex"><span class="breadcrumb-page truncate font-normal text-muted-foreground" aria-current="page">{{.Title}}</span></li>
     </ol></nav>
     <div class="ml-auto flex shrink-0 items-center gap-3">
+      <a href="#focus" class="vd"{{if .Verdict.OK}} data-ok{{end}} title="{{.Verdict.Title}}">{{if .Verdict.OK}}{{icon "circle-check" ""}}{{else}}{{icon "circle-alert" ""}}{{end}}<span class="max-sm:sr-only">{{.Verdict.Short}}</span></a>
       <span id="progress-text" class="hidden font-mono text-xs tabular-nums text-muted-foreground sm:block"></span>
       <div class="toggle-group view-toggle" data-variant="outline" role="group" aria-label="Diff layout">
         <button type="button" class="toggle" data-diff="unified" aria-pressed="true" title="One column">{{icon "rows-2" ""}}Unified</button>

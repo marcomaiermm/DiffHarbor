@@ -20,22 +20,14 @@
         <dd class="mt-1.5"><progress class="progress block h-1" value="{{.Moved}}" max="{{.Added}}">{{percent .Moved .Added}}</progress></dd></div>{{end}}
     </dl>
   </div></div>
-  {{if or .Since .Decisions .Outline.Weakened .Loose .Risks .BaseMoved .Conflicts .Others}}{{$first := ""}}{{$mwarn := .Conflicts}}{{$mn := len .Risks}}{{$clash := false}}
-  {{- if .Since}}{{$first = "since"}}{{else if .Decisions}}{{$first = "decide"}}{{else if or .Risks .BaseMoved .Conflicts}}{{$first = "merge"}}{{else if .Outline.Weakened}}{{$first = "weakened"}}{{else if .Others}}{{$first = "others"}}{{else}}{{$first = "loose"}}{{end}}
-  {{- range .Risks}}{{range .Items}}{{if .Warn}}{{$mwarn = true}}{{end}}{{end}}{{end}}{{if .BaseMoved}}{{$mn = inc $mn}}{{end}}{{if .Conflicts}}{{$mn = inc $mn}}{{end}}
-  {{- range .Others}}{{if .Clash}}{{$clash = true}}{{end}}{{end}}
-  <div class="card attend mt-10" id="attend">
-    <div class="scroll-area"><div class="tab-list inv-tabs" data-variant="line" role="tablist" aria-label="Before you read">
-      {{with .Since}}{{template "tab" (tab "since" (printf "Since %s" (short .Prev.SHA)) (len .Files) false $first)}}{{end}}
-      {{with .Decisions}}{{template "tab" (tab "decide" "Decisions" (len .) false $first)}}{{end}}
-      {{if or .Risks .BaseMoved .Conflicts}}{{template "tab" (tab "merge" "Merge risks" $mn $mwarn $first)}}{{end}}
-      {{with .Outline.Weakened}}{{template "tab" (tab "weakened" "Weakened tests" (len .) true $first)}}{{end}}
-      {{with .Others}}{{template "tab" (tab "others" "Open PRs" (len .) $clash $first)}}{{end}}
-      {{with .Loose}}{{template "tab" (tab "loose" "Outside the diff" (len .) false $first)}}{{end}}
-    </div></div>
-    <div class="card-content">
-    {{with .Since}}<div class="tab-content" role="tabpanel" id="since" aria-labelledby="tab-since" tabindex="0"{{if ne $first "since"}} hidden{{end}}>
-      <div class="since-head"><p class="tab-hint">What changed since the review of <code>{{short .Prev.SHA}}</code>, <time class="since-time" datetime="{{.Prev.At.Format "2006-01-02T15:04:05Z07:00"}}"></time>.</p>
+  <section class="card focus mt-10" id="focus" aria-labelledby="verdict-h">
+    <div class="verdict">
+      <span class="vd"{{if .Verdict.OK}} data-ok{{end}}>{{.Verdict.Short}}</span>
+      <h2 id="verdict-h">{{.Verdict.Title}}</h2>
+      <p>{{.Verdict.Body}} <a href="#finish" class="whitespace-nowrap">Finish the review {{icon "arrow-right" "inline size-3.5"}}</a></p>
+    </div>
+    {{with .Since}}<div class="since" id="since">
+      <div class="since-head"><p class="tab-hint">Since the review of <code>{{short .Prev.SHA}}</code>, <time class="since-time" datetime="{{.Prev.At.Format "2006-01-02T15:04:05Z07:00"}}"></time>.</p>
       {{with .Files}}<button type="button" class="toggle" data-variant="outline" data-size="sm" id="since-only" aria-pressed="false">{{icon "focus" ""}}Only what changed</button>{{end}}</div>
     {{if or .Files .Back .New .Fixed .Risen .Eased}}<dl class="since-rows">
       {{if or .Files .Back}}<dt>Files</dt><dd class="since-list">{{range .Files}}<a href="#{{.Path}}" title="{{.Path}}">{{base .Path}}{{if not (index $.Since.Prev.Files .Path)}}<small>new</small>{{end}}</a>{{end}}{{range .Back}}<s title="{{.}}: no longer in the PR"><span class="sr-only">no longer in the PR: </span>{{base .}}</s>{{end}}</dd>{{end}}
@@ -43,13 +35,32 @@
       {{if or .Risen .Eased}}<dt>Merge risks</dt><dd class="since-list">{{range .Risen}}<span title="{{.}}">{{base .}}</span>{{end}}{{range .Eased}}<s title="{{.}}"><span class="sr-only">no longer: </span>{{base .}}</s>{{end}}</dd>{{end}}
     </dl>{{else}}<p class="since-same">The diff is the same as at the last review: a rebase or a new base, nothing to read again.</p>{{end}}
     </div>{{end}}
-    {{with .Decisions}}<div class="tab-content" role="tabpanel" id="decide" aria-labelledby="tab-decide" tabindex="0"{{if ne $first "decide"}} hidden{{end}}>
-      <p class="tab-hint">For you to decide: product, architecture or risk, what only a person can settle.</p>
-      <ul class="list-disc space-y-1 pl-5 text-sm">{{range .}}<li>{{.}}</li>{{end}}</ul>
+    <div class="scroll-area"><div class="tab-list inv-tabs" data-variant="line" role="tablist" aria-label="Before you approve">
+      {{template "tab" (tab "findings" "Findings" .NFound (not .Verdict.OK) "findings")}}
+      {{with .Decisions}}{{template "tab" (tab "decide" "Decisions" (len .) false "findings")}}{{end}}
+      {{if .MergeN}}{{template "tab" (tab "merge" "Merge risks" .MergeN .MergeWarn "findings")}}{{end}}
+    </div></div>
+    <div class="card-content">
+    <div class="tab-content" role="tabpanel" id="findings" aria-labelledby="tab-findings" tabindex="0">
+      <p class="legend"><span class="chip" data-shown>green</span>shown without a model: the diff, the imports or a search<span class="chip" data-dash>dashed</span>a second model agreed, which is no proof</p>
+      {{if not .NFound}}<div class="empty">
+        <h3>No findings on {{short .SHA}}</h3>
+        <p>A second model read the change and kept nothing it could point to in the code. That is no proof{{if or .Decisions .MergeN}}, so the decisions and merge risks still need you{{end}}.</p>
+      </div>{{end}}
+      {{range .Groups}}{{if .Items}}<h3 class="fgrp">{{.Title}} <b>· {{len .Items}}</b></h3>
+      <ul class="flist">{{range .Items}}<li><a class="frow"{{with .Href}} href="{{.}}"{{end}}{{if .External}} target="_blank" rel="noopener"{{end}}>
+        <span class="sev" data-sev="{{.Severity}}">{{if eq .Severity "critical"}}Blocker{{else if eq .Severity "major"}}Major{{else}}Minor{{end}}</span>
+        <span class="min-w-0"><span class="ftitle">{{.Title}}</span>{{with .Lead}}<span class="flead">{{.}}</span>{{end}}</span>
+        <span class="floc"><span class="font-mono" title="{{.Path}}">{{.Where}}{{if .External}} ↗{{end}}</span><span class="chip" data-{{if .Shown}}shown{{else}}dash{{end}}{{with .Evidence}} title="Verified: {{.}}"{{end}}>{{.Proof}}</span></span>
+      </a></li>{{end}}</ul>{{end}}{{end}}
+    </div>
+    {{with .Decisions}}<div class="tab-content" role="tabpanel" id="decide" aria-labelledby="tab-decide" tabindex="0" hidden>
+      <p class="tab-hint">What only a person can settle: product, architecture or risk. The draft review asks them as questions.</p>
+      <ol class="list-decimal space-y-2 pl-5 text-sm">{{range .}}<li>{{.}}</li>{{end}}</ol>
     </div>{{end}}
-    {{if or .Risks .BaseMoved .Conflicts}}<div class="tab-content" role="tabpanel" id="merge" aria-labelledby="tab-merge" tabindex="0"{{if ne $first "merge"}} hidden{{end}}>
+    {{if .MergeN}}<div class="tab-content" role="tabpanel" id="merge" aria-labelledby="tab-merge" tabindex="0" hidden>
       <p class="tab-hint">Before you merge: what merging alone doesn't finish, read from the diff and the base as of this review.</p>
-      {{if .Conflicts}}<div class="merge-row" data-warn><h3>{{icon "triangle-alert" ""}}Conflicts</h3><p class="merge-hint">{{.Forge.Name}} can't merge it into its base as it is: merge or rebase the base first, then read the result again.</p></div>{{end}}
+      {{if .Conflicts}}<div class="merge-row" data-major><h3>{{icon "triangle-alert" ""}}Conflicts</h3><p class="merge-hint">{{.Forge.Name}} can't merge it into its base as it is: merge or rebase the base first, then read the result again.</p></div>{{end}}
       {{with .BaseMoved}}<div class="merge-row"><h3>{{icon "git-commit-horizontal" ""}}The base moved on</h3><div>
         <p class="merge-hint">{{len $.Behind}} {{if eq (len $.Behind) 1}}commit{{else}}commits{{end}} since the fork, {{len .}} of them change files of this PR: what it was written against changed.</p>
         <ul class="merge-commits">{{range .}}<li><a href="{{$.Forge.Commit}}{{.SHA}}" target="_blank" rel="noopener">{{short .SHA}}</a><span>{{.Subject}}</span><code>{{range $i, $p := .Paths}}{{if $i}}, {{end}}{{base $p}}{{end}}</code></li>{{end}}</ul>
@@ -58,24 +69,16 @@
         <p class="merge-hint">{{.Hint}}</p>
         <ul class="merge-items">{{range .Items}}<li><a href="#{{.ID}}"{{if .Warn}} data-warn{{end}} title="{{.What}}"><code>{{.What}}</code><span>{{.Note}}</span></a></li>{{end}}{{with .More}}<li class="self-center text-xs text-muted-foreground">and {{.}} more</li>{{end}}</ul>
       </div></div>{{end}}
-    </div>{{end}}
-    {{with .Outline.Weakened}}<div class="tab-content" role="tabpanel" id="weakened" aria-labelledby="tab-weakened" tabindex="0"{{if ne $first "weakened"}} hidden{{end}}>
-      <p class="tab-hint">Tests the PR skips, narrows or loosens.</p>
-      <ul class="space-y-1 text-sm">{{range .}}<li><code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs break-all">{{.At}}</code> <span class="text-destructive">{{.What}}</span></li>{{end}}</ul>
-    </div>{{end}}
-    {{with .Others}}<div class="tab-content" role="tabpanel" id="others" aria-labelledby="tab-others" tabindex="0"{{if ne $first "others"}} hidden{{end}}>
-      <p class="tab-hint">Open PRs on the same files. Whichever merges second gets the conflicts, at the files in red for sure: both change the same lines there.</p>
-      <ul>{{range .}}<li class="other">
-      <div class="other-row"><a href="{{.URL}}" target="_blank" rel="noopener">{{$.Forge.Ref}}{{.Number}}</a><span>{{.Title}}</span>{{if .Draft}}<span class="badge" data-variant="outline">Draft</span>{{end}}{{with .Clash}}<span class="badge" data-variant="destructive">same lines</span>{{end}}<span class="other-by">{{.Author}}</span></div>
-      <p class="other-files">{{$o := .}}{{range .Files}}<a href="#{{.}}" title="{{.}}"{{if has $o.Clash .}} data-clash{{end}}>{{base .}}</a>{{end}}</p>
-    </li>{{end}}</ul>
-    </div>{{end}}
-    {{with .Loose}}<div class="tab-content" role="tabpanel" id="loose" aria-labelledby="tab-loose" tabindex="0"{{if ne $first "loose"}} hidden{{end}}>
-      <p class="tab-hint">Findings on lines the diff doesn't show.</p>
-      {{range .}}{{template "finding" .}}{{end}}
+      {{with .Others}}<div class="merge-row"><h3>{{icon "git-pull-request" ""}}Open PRs</h3><div>
+        <p class="merge-hint">On the same files. Whichever merges second gets the conflicts, for sure at the files marked: both change the same lines there.</p>
+        <ul>{{range .}}<li class="other">
+        <div class="other-row"><a href="{{.URL}}" target="_blank" rel="noopener">{{$.Forge.Ref}}{{.Number}}</a><span>{{.Title}}</span>{{if .Draft}}<span class="badge" data-variant="outline">Draft</span>{{end}}{{with .Clash}}<span class="chip" data-major>same lines</span>{{end}}<span class="other-by">{{.Author}}</span></div>
+        <p class="other-files">{{$o := .}}{{range .Files}}<a href="#{{.}}" title="{{.}}"{{if has $o.Clash .}} data-clash{{end}}>{{base .}}</a>{{end}}</p>
+      </li>{{end}}</ul>
+      </div></div>{{end}}
     </div>{{end}}
     </div>
-  </div>{{end}}
+  </section>
   {{if or .Inventory .Deps .Affected .Diagram}}<div class="mt-10 space-y-4">
   {{with .Inventory}}<div class="card" id="happened">
     <div class="card-header"><h2 class="card-title">What happened to the code</h2>

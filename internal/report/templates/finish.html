@@ -1,0 +1,24 @@
+{{/* The end of the page: what is left to do, and the review to send from the forge. */}}
+{{define "finish"}}
+<section id="finish" class="card fin mt-14" aria-labelledby="finish-h">
+  <div class="card-header"><h2 class="card-title" id="finish-h">Finish the review</h2>
+    <p class="card-description">DiffHarbor drafts the review, you send it from {{.Forge.Name}}. Nothing is posted until you do.</p></div>
+  <div class="card-content">
+  <ul class="fin-l">
+    {{if .Code}}<li><span>Code files</span><span id="fin-viewed" class="tabular-nums">{{.Code}} to read</span><a id="fin-next" class="font-mono text-[13px]" hidden></a></li>{{end}}
+    <li><span>Findings</span><span>{{.Draft.Say}}</span>{{if .NFound}}<a href="#findings">read them</a>{{end}}</li>
+    {{with .Decisions}}<li><span>Decisions</span><span>{{len .}} open, they go into the review as questions</span><a href="#decide">read them</a></li>{{end}}
+    {{with .Draft.Risks}}<li><span>Before you merge</span><span>{{join .}}</span><a href="#merge">merge risks</a></li>{{end}}
+  </ul>
+  <div class="draft">
+    <div class="draft-h"><span class="vd"{{if .Verdict.OK}} data-ok{{end}}>{{.Draft.Event}}</span><span>Review for {{.Forge.Ref}}{{.Number}} · {{plural .Draft.Comments "line comment" "line comments"}}</span></div>
+    <pre id="draft-md">{{.Draft.MD}}</pre>
+  </div>
+  <div class="fin-a">
+    {{with .URL}}<a class="btn" href="{{.}}" target="_blank" rel="noopener">Open the draft on {{$.Forge.Name}} {{icon "arrow-up-right" ""}}</a>{{end}}
+    <button type="button" class="btn" data-variant="outline" id="draft-copy">{{icon "copy" ""}}Copy as Markdown</button>
+    <span role="status" id="draft-status" class="text-[13px] text-muted-foreground"></span>
+  </div>
+  </div>
+</section>
+{{end}}
