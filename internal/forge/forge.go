@@ -39,7 +39,7 @@ type PR interface {
 	Refresh() error
 	// Status sets the commit status: pending, success or error. Failures only log.
 	Status(sha, state, desc string)
-	// ReadToken only reads the repo: for git, which runs next to the PR's code.
+	// ReadToken reads the repo: what git fetches with, through the vault as root (git runs next to the PR's code).
 	ReadToken() (string, error)
 	// File returns the first of names that exists at ref (the base, so the PR can't change it).
 	File(ref string, names ...string) string

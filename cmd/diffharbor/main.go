@@ -19,6 +19,7 @@ import (
 	"diffharbor/internal/server"
 	"diffharbor/internal/store"
 	"diffharbor/internal/ticket"
+	"diffharbor/internal/vault"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -96,6 +97,11 @@ func configure() server.Config {
 func main() {
 	log.Printf("diffharbor %s", version)
 	cfg := configure()
+	if proc.AsPi { // git and Pi run as node, next to the PR's code: they get the vault's tokens, not the keys
+		if err := vault.Start(); err != nil {
+			log.Fatal(err)
+		}
+	}
 	if err := agent.Proxies(); err != nil {
 		log.Fatal(err)
 	}
