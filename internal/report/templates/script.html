@@ -17,8 +17,15 @@
   mobile.addEventListener("close", () => lend(false));
   const toggleBar = () => wide.matches ? rail(bar.dataset.state === "expanded") : mobile.open ? mobile.close() : (lend(true), mobile.showModal());
   document.getElementById("nav-trigger").addEventListener("click", toggleBar);
+  // What a keydown means, as TanStack Hotkeys reads it: nothing while an input method composes; the letter typed, else
+  // the one on that key's place (a Cyrillic layout still has its J); Mod is Command on a Mac, Control elsewhere, with
+  // no other modifier.
+  const composing = e => e.isComposing || e.keyCode === 229 || e.key === "Process" || e.key === "Unidentified";
+  const letter = e => /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : e.key;
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+  const mod = e => (mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) && !e.altKey && !e.shiftKey;
   addEventListener("keydown", e => {
-    if (e.key.toLowerCase() === "b" && (e.metaKey || e.ctrlKey) && !e.altKey) { e.preventDefault(); toggleBar(); }
+    if (!composing(e) && mod(e) && letter(e) === "b") { e.preventDefault(); toggleBar(); }
   });
   mobile.addEventListener("click", e => { if (e.target === mobile || e.target.closest(".sidebar-mobile-close, a[href^='#']")) mobile.close(); });
   // a toggle group sets <html data-files> (flow or tree) or <html data-diff> (unified or split); the CSS does the rest
@@ -276,14 +283,16 @@
   let last, lastAt = 0; // the smooth scroll to the last jump may still run: a key right after it goes on from there
   const jump = el => { last = el; lastAt = performance.now(); history.replaceState(null, "", "#" + encodeURI(el.id)); reveal(); };
   addEventListener("keydown", e => {
-    if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.("input, textarea, select, [contenteditable]") || document.querySelector("dialog[open]")) return;
+    if (composing(e) || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.target.closest?.("input, textarea, select, [contenteditable], [role=textbox], [role=searchbox]") || document.querySelector("dialog[open]")) return;
+    const key = letter(e);
     const y = el => el.getBoundingClientRect().top - head;
     const files = shown(".file"), i = performance.now() - lastAt < 700 ? files.indexOf(last) : -1;
     let to;
-    if (e.key === "j") to = i >= 0 ? files[i + 1] : files.find(f => y(f) > 8);
-    else if (e.key === "k") to = i >= 0 ? files[i - 1] : files.findLast(f => y(f) < -8);
-    else if (e.key === "n") to = [...document.querySelectorAll(".file [id^='finding-']")].find(f => y(f) > 8 + 48);
-    else if (e.key === "v") shown(".file").find(f => f.getBoundingClientRect().bottom > head + 8)?.querySelector("input[data-key]").click();
+    if (key === "j") to = i >= 0 ? files[i + 1] : files.find(f => y(f) > 8);
+    else if (key === "k") to = i >= 0 ? files[i - 1] : files.findLast(f => y(f) < -8);
+    else if (key === "n") to = [...document.querySelectorAll(".file [id^='finding-']")].find(f => y(f) > 8 + 48);
+    else if (key === "v" && e.repeat) return; // held, it would mark the file and unmark it again
+    else if (key === "v") shown(".file").find(f => f.getBoundingClientRect().bottom > head + 8)?.querySelector("input[data-key]").click();
     else return;
     e.preventDefault();
     if (to) jump(to);
@@ -314,7 +323,7 @@
     };
     ways.addEventListener("toggle", () => { if (ways.open && !runs) run(); });
     ways.addEventListener("click", e => {
-      const t = e.target.closest("[data-way]");
+      const t = e.target.closest(".ctabs [data-way]"); // the panels carry data-way too: a click in a tree is no pick
       if (t) {
         for (const b of ways.querySelectorAll(".ctabs [data-way]")) b.setAttribute("aria-pressed", b === t);
         for (const w of ways.querySelectorAll(".ctw")) w.hidden = w.dataset.way !== t.dataset.way;

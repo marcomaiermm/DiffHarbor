@@ -390,7 +390,7 @@ document.addEventListener("click", e => {
 });
 addEventListener("keydown", e => {
   if (e.key === "Escape") hide();
-  else if (e.key === "Enter" && anchor && pop.matches(":popover-open") && !e.target.closest?.("a, button, input, textarea")) {
+  else if (e.key === "Enter" && !e.isComposing && anchor && pop.matches(":popover-open") && !e.target.closest?.("a, button, input, textarea")) {
     e.preventDefault();
     open(anchor);
   }
