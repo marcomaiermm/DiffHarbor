@@ -42,13 +42,13 @@
 .sidebar-link { @apply h-7 min-w-0 gap-2 px-2 py-0 text-[13px] text-muted-foreground; }
 .sidebar-link:hover, .sidebar-link[aria-current] { @apply text-foreground; background: var(--sidebar-accent); }
 .sidebar-link > svg { @apply size-3.5; }
-.sidebar-badge { @apply bg-transparent px-0 font-mono font-normal tabular-nums text-muted-foreground/70; }
+.sidebar-badge { @apply bg-transparent px-0 font-mono font-normal tabular-nums text-muted-foreground; }
 .sidebar-group { @apply mt-4; }
-.side-h { @apply mt-4 flex h-7 items-center px-2 font-mono text-[11px] text-muted-foreground/70 first:mt-0; }
+.side-h { @apply mt-4 flex h-7 items-center px-2 font-mono text-[11px] text-muted-foreground first:mt-0; }
 .sidebar-group > summary > span { @apply font-mono text-[11px]; }
-.side-note { @apply mt-1.5 px-2 text-[11.5px] text-muted-foreground/70; }
+.side-note { @apply mt-1.5 px-2 text-[11.5px] text-muted-foreground; }
 .app-sidebar[data-state="collapsed"] :is(.side-h, .side-note) { display: none; }
-.sidebar-group > summary { @apply h-7 px-2 py-0 text-xs font-medium tracking-normal normal-case text-muted-foreground/70; }
+.sidebar-group > summary { @apply h-7 px-2 py-0 text-xs font-medium tracking-normal normal-case text-muted-foreground; }
 .sidebar-group > .sidebar-nav { padding: 0.125rem 0 0; }
 .app-sidebar .toggle-group .toggle, header .toggle-group .toggle { @apply h-7 min-w-7 gap-1.5 px-2 text-xs font-normal; }
 .app-sidebar[data-state="collapsed"] :is(.sidebar-header, .sidebar-files, .sidebar-group > summary, [data-view="tree"]) { display: none; }
@@ -114,7 +114,7 @@ html:not([data-files="tree"]) [data-view="tree"], html[data-files="tree"] [data-
 .rest-intro { @apply mt-1 mb-4 text-muted-foreground; }
 .keys kbd { @apply inline-flex h-5 min-w-5 items-center justify-center rounded border bg-muted px-1 font-mono text-[11px] text-foreground; }
 @media (hover: none) { .keys { display: none; } }
-.trace-description { @apply shrink-0 tabular-nums text-muted-foreground/70; }
+.trace-description { @apply shrink-0 tabular-nums text-muted-foreground; }
 .trace-collapsible > summary { @apply flex w-fit max-w-full min-w-0 cursor-pointer list-none rounded-md; }
 .trace-collapsible > summary::-webkit-details-marker { display: none; }
 .trace-collapsible[open] > summary .trace-chevron, .fold.open .trace-chevron { @apply rotate-90; }
