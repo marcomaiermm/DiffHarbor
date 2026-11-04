@@ -15,8 +15,10 @@
 <script>{
   const dark = matchMedia("(prefers-color-scheme: dark)");
   if (dark.matches) document.documentElement.classList.add("dark");
-  // ponytail: the code's and the graphs' colors are drawn for one theme; a reload redraws them, live would recolor every token
-  dark.addEventListener("change", () => location.reload());
+  // ponytail: the code's and the graphs' colors are drawn for one theme; a reload redraws them, live would recolor every token.
+  // Not under the reader's eyes: a switch at sunset reloads once the tab is away.
+  const reload = () => location.reload();
+  dark.addEventListener("change", () => document.hidden ? reload() : addEventListener("visibilitychange", reload, { once: true }));
 }</script>
 <script src="https://cdn.jsdelivr.net/gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/tabs/tabs.js" defer></script>
 {{template "styles" .}}
