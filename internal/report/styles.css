@@ -559,9 +559,9 @@ html:not([data-diff="split"]) .split-legend { display: none; }
 .ct-punch[data-sev="critical"] { @apply border-destructive; background: color-mix(in oklab, var(--destructive) 8%, transparent); }
 .ct-more { @apply whitespace-nowrap text-major hover:underline; }
 /* the two sides are plain panels: only the label says which is which */
-.story { @apply grid overflow-hidden rounded-[10px] border text-[13.5px] leading-relaxed @2xl:grid-cols-2; }
+.story { @apply grid overflow-hidden rounded-[10px] border text-[13.5px] leading-relaxed @xl:grid-cols-2; }
 .story > div { --c: var(--diff-del); @apply px-4 py-3.5; }
-.story > div + div { @apply border-t @2xl:border-t-0 @2xl:border-l; }
+.story > div + div { @apply border-t @xl:border-t-0 @xl:border-l; }
 .story > [data-side="after"] { --c: var(--diff-add); }
 .story b { @apply flex items-center gap-1.5 font-mono text-xs font-medium; color: color-mix(in oklab, var(--c) 85%, var(--foreground)); }
 .story b > span { @apply text-[13px]; color: var(--c); }

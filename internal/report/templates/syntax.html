@@ -15,7 +15,7 @@ const day = { name: "tokyo-night-day", type: "light", colors: { "editor.backgrou
     { scope: ["keyword.operator", "punctuation.accessor", "constant.character.escape", "string.regexp"], settings: { foreground: "#006a83" } },
     { scope: ["string", "string.quoted", "string.template", "punctuation.definition.string"], settings: { foreground: "#587539" } },
     { scope: ["constant", "constant.numeric", "constant.language", "support.constant", "variable.other.constant"], settings: { foreground: "#b15c00" } },
-    { scope: ["entity.name.function", "support.function", "variable.function", "meta.function-call.generic"], settings: { foreground: "#2e7de9" } },
+    { scope: ["entity.name.function", "support.function", "variable.function", "meta.function-call.generic"], settings: { foreground: "#1f5fc4" } },
     { scope: ["entity.name.type", "entity.name.class", "support.type", "support.class", "entity.other.inherited-class", "entity.name.namespace", "entity.name.package", "storage.type.numeric.go", "storage.type.string.go", "storage.type.boolean.go", "storage.type.byte.go", "storage.type.error.go"], settings: { foreground: "#188092" } },
     { scope: ["variable.parameter", "meta.parameter"], settings: { foreground: "#8c6c3e" } },
     { scope: ["variable.other.property", "variable.other.object.property", "support.variable.property", "meta.property-name", "support.type.property-name", "variable.other.member"], settings: { foreground: "#387068" } },
@@ -394,7 +394,7 @@ document.addEventListener("click", e => {
 });
 addEventListener("keydown", e => {
   if (e.key === "Escape") hide();
-  else if (e.key === "Enter" && !e.isComposing && anchor && pop.matches(":popover-open") && !e.target.closest?.("a, button, input, textarea")) {
+  else if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229 && anchor && pop.matches(":popover-open") && !e.target.closest?.("a, button, input, textarea")) {
     e.preventDefault();
     open(anchor);
   }

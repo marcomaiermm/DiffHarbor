@@ -34,8 +34,11 @@
   --diff-hunk: color-mix(in oklab, var(--diff-fg) 5%, var(--diff-bg));
   --diff-hover: color-mix(in oklab, var(--diff-fg) 12%, var(--diff-bg));
   --gap-ink: color-mix(in oklab, var(--diff-fg), var(--foreground) 45%); /* the page text in the code ink: 4.5:1 on the gap band */
-  --diff-dim: color-mix(in oklab, var(--gap-ink) 70%, var(--diff-bg)); /* line numbers: 4:1 or better, dark and light */
+  --diff-dim: color-mix(in oklab, var(--gap-ink) 80%, var(--diff-bg)); /* line numbers: 4.5:1 or better */
   --diff-muted: color-mix(in oklab, var(--diff-fg) 58%, var(--diff-bg));
+}
+.dark {
+  --diff-dim: color-mix(in oklab, var(--gap-ink) 70%, var(--diff-bg)); /* the dark ink is brighter: 70% reads 4.8:1 */
 }
 </style>
 {{end}}
