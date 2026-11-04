@@ -27,6 +27,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
   "report": "auto",
   "tickets": ["ABC"],
   "install_scripts": false,
+  "base_branches": ["develop", "release/*"],
   "checks": [".review/checks.sh"],
   "packages": {
     "apps/web": {"min_severity": "major"},
@@ -45,6 +46,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
 | `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
 | `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
+| `base_branches` | Globs of base branches besides the default branch whose PRs get reviewed on their own. A PR into any other (`main` → `prod`) is skipped with a green status; `@<bot> review` still reviews it. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part; the longest glob wins. |

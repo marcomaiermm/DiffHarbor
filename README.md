@@ -53,7 +53,7 @@ The server listens on `:3000`. Expose `POST /webhook/github` and/or `POST /webho
 
 ## How a review works
 
-1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, generated code and binaries stay out. A pass gets up to 60k characters, code first, then tests, data and docs; larger PRs can be reviewed [in parts](#large-prs).
+1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, PRs into a branch other than the default branch (see `base_branches`), lockfiles, build output, generated code and binaries stay out. A pass gets up to 60k characters, code first, then tests, data and docs; larger PRs can be reviewed [in parts](#large-prs).
 2. **Context.** The checks above, plus codegraph, co-change from git history, the repo's rules and skills from the base branch, learnings, and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings per pass.
 4. **Verify.** A cheaper model checks each finding in the code.
@@ -191,6 +191,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
   "report": "auto",
   "tickets": ["ABC"],
   "install_scripts": false,
+  "base_branches": ["develop", "release/*"],
   "checks": [".review/checks.sh"],
   "packages": {
     "apps/web": {"min_severity": "major"},
@@ -209,6 +210,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
 | `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
 | `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
+| `base_branches` | Globs of base branches besides the default branch whose PRs get reviewed on their own. A PR into any other (`main` → `prod`) is skipped with a green status; `@<bot> review` still reviews it. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part; the longest glob wins. |

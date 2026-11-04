@@ -166,6 +166,14 @@ func TestSettings(t *testing.T) {
 	if _, v := cfg.Models(); v != "anthropic/claude-haiku-5-5:low" {
 		t.Errorf("verify model %q doesn't follow the review model's provider", v)
 	}
+	rel, err := LoadSettings(`{"base_branches":["release/*","develop"]}`)
+	if err != nil || !rel.Reviews("main", "main") || !rel.Reviews("release/1.2", "main") || !rel.Reviews("develop", "main") ||
+		rel.Reviews("prod", "main") || rel.Reviews("release/1/x", "main") || (Settings{}).Reviews("prod", "main") || !(Settings{}).Reviews("prod", "") {
+		t.Errorf("base_branches: %v", err)
+	}
+	if _, err := LoadSettings(`{"base_branches":["["]}`); err == nil {
+		t.Error("bad base_branches glob accepted")
+	}
 	if _, err := LoadSettings(`{"ignore":`); err == nil {
 		t.Error("broken json accepted")
 	}
