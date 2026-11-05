@@ -124,6 +124,8 @@ type comment struct {
 	ID        int64  `json:"id"`
 	InReplyTo int64  `json:"in_reply_to_id"`
 	Body      string `json:"body"`
+	Created   string `json:"created_at"`
+	Updated   string `json:"updated_at"`
 	Path      string `json:"path"`
 	DiffHunk  string `json:"diff_hunk"`
 	User      struct {
@@ -132,7 +134,7 @@ type comment struct {
 }
 
 func (c comment) note() forge.Note {
-	return forge.Note{ID: c.ID, Login: c.User.Login, Body: c.Body, Ours: c.User.Login == Slug+"[bot]"}
+	return forge.Note{ID: c.ID, Login: c.User.Login, Body: c.Body, Ours: c.User.Login == Slug+"[bot]", Edited: c.Updated != c.Created}
 }
 
 func (p *pr) Notes() ([]forge.Note, error) {

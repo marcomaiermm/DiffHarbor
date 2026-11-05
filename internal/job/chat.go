@@ -57,10 +57,15 @@ func command(mention *regexp.Regexp, body string) string {
 	return strings.ToLower(strings.TrimSpace(mention.ReplaceAllString(body, " ")))
 }
 
+// thanks reports whether body is an ack to @bot. A ? anywhere asks, also where the mention took it: "agreed @bot?".
+func thanks(mention *regexp.Regexp, body string) bool {
+	return !strings.Contains(body, "?") && ack.MatchString(command(mention, body))
+}
+
 // answers reports whether chat answers body in thread d: @us, or in our thread a reply that isn't thanks or for
 // someone else, while we haven't said our piece.
 func answers(mention *regexp.Regexp, d forge.Discussion, body string) bool {
-	if ack.MatchString(command(mention, body)) {
+	if thanks(mention, body) {
 		return false
 	}
 	if mention.MatchString(body) {
@@ -78,7 +83,7 @@ func answers(mention *regexp.Regexp, d forge.Discussion, body string) bool {
 // newer reports whether login wrote again in d after the note id, in a comment chat answers: that one answers both.
 func newer(mention *regexp.Regexp, d forge.Discussion, id int64, login string) bool {
 	i := slices.IndexFunc(d.Notes, func(n forge.Note) bool { return n.ID == id })
-	return i >= 0 && slices.ContainsFunc(d.Notes[i+1:], func(n forge.Note) bool { return n.Login == login && answers(mention, d, n.Body) })
+	return i >= 0 && slices.ContainsFunc(d.Notes[i+1:], func(n forge.Note) bool { return n.Login == login && !n.Edited && answers(mention, d, n.Body) })
 }
 
 // answer is the chat pass's JSON.
@@ -225,7 +230,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		return err
 	}
 	c := e.Comment
-	if ack.MatchString(command(mention, c.Body)) {
+	if thanks(mention, c.Body) {
 		return nil
 	}
 	var about, convo strings.Builder

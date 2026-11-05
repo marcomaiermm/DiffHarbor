@@ -94,6 +94,8 @@ type Note struct {
 	Login string
 	Body  string
 	Ours  bool
+	// Edited after it was posted: chat skips edits, so what it says now was never queued.
+	Edited bool
 }
 
 // Thread is one of our inline review threads.

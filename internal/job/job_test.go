@@ -253,6 +253,7 @@ func TestNewer(t *testing.T) {
 	humans := []forge.Note{{ID: 1, Login: "bob"}, {ID: 2, Login: "ann", Body: "@bot why?"}, {ID: 3, Login: "ann", Body: "also line 9?"}}
 	capped := []forge.Note{{ID: 1, Login: "bot", Ours: true}, {ID: 2, Login: "ann", Body: "why?"},
 		{ID: 3, Ours: true}, {ID: 4, Ours: true}, {ID: 5, Ours: true}, {ID: 6, Login: "ann", Body: "and now?"}}
+	edited := []forge.Note{{ID: 1, Login: "bot", Ours: true}, {ID: 2, Login: "ann", Body: "why?"}, {ID: 3, Login: "ann", Body: "also why?", Edited: true}}
 	for _, c := range []struct {
 		d     forge.Discussion
 		id    int64
@@ -265,6 +266,7 @@ func TestNewer(t *testing.T) {
 		{forge.Discussion{Ours: true, Notes: ours}, 9, "ann", false},
 		{forge.Discussion{Notes: humans}, 2, "ann", false},             // no @bot after: a human thread goes on between humans
 		{forge.Discussion{Ours: true, Notes: capped}, 2, "ann", false}, // we said our piece: "and now?" goes unanswered
+		{forge.Discussion{Ours: true, Notes: edited}, 2, "ann", false}, // "thanks" edited into a question: its edit was never queued
 	} {
 		if got := newer(bot, c.d, c.id, c.login); got != c.want {
 			t.Errorf("%d %s: got %v", c.id, c.login, got)
@@ -315,6 +317,15 @@ func TestAck(t *testing.T) {
 		"ok, but why line 3?": false, "agreed?": false, "done": false, "fixed in abc123": false, "thanks, but this is wrong": false,
 	} {
 		if got := ack.MatchString(body); got != want {
+			t.Errorf("%q: got %v, want %v", body, got, want)
+		}
+	}
+}
+
+func TestThanks(t *testing.T) {
+	bot := regexp.MustCompile(`(?i)(^|[^\w.+-])@(bot)\.*([^\w.-]|$)`)
+	for body, want := range map[string]bool{"@bot thanks!": true, "agreed @bot": true, "@bot agreed?": false, "agreed @bot?": false} {
+		if got := thanks(bot, body); got != want {
 			t.Errorf("%q: got %v, want %v", body, got, want)
 		}
 	}

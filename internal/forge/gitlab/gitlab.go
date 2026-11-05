@@ -396,6 +396,8 @@ type note struct {
 	Body     string `json:"body"`
 	System   bool   `json:"system"`
 	Resolved bool   `json:"resolved"`
+	Created  string `json:"created_at"`
+	Updated  string `json:"updated_at"` // resolving the thread moves it too: then chat may answer twice, not never
 	Author   struct {
 		Username string `json:"username"`
 	} `json:"author"`
@@ -406,7 +408,7 @@ type note struct {
 }
 
 func (n note) forge() forge.Note {
-	return forge.Note{ID: n.ID, Login: n.Author.Username, Body: n.Body, Ours: n.Author.Username == Bot}
+	return forge.Note{ID: n.ID, Login: n.Author.Username, Body: n.Body, Ours: n.Author.Username == Bot, Edited: n.Updated != n.Created}
 }
 
 func discussion(project string, iid int, id string) ([]note, error) {
