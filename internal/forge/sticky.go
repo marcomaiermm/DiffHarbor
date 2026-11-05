@@ -107,7 +107,7 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 	var b strings.Builder
 	b.WriteString(stickyMark + "\n")
 	if banner != "" {
-		b.WriteString("> " + banner + "\n\n")
+		b.WriteString("> [!NOTE]\n> " + banner + "\n\n")
 	}
 	if ask != "" {
 		b.WriteString(ask + "\n\n")
