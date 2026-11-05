@@ -1,5 +1,6 @@
 # cp compose.example.yml compose.yml, put the values in .env next to it, docker compose up -d.
-# Only POST /webhook/github and /webhook/gitlab need to be reachable from the forge; with REPORT_URL, /r/ too, best behind your SSO, and /reviewing*.svg, public: the PR comment shows it.
+# Only POST /webhook/github and /webhook/gitlab need to be reachable from the forge. With REPORT_URL, /r/ too, best behind your SSO,
+# and /reviewing.svg, /reviewing-light.svg and /reviewing-dark.svg, public: the PR comment shows them while a review runs.
 services:
   diffharbor:
     # Or build: . to build it yourself.
