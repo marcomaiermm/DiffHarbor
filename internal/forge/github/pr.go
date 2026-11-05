@@ -182,8 +182,8 @@ func (p *pr) Discussion() (forge.Discussion, error) {
 		}
 		d.Notes = append(d.Notes, c.note())
 	}
-	if !d.Ours { // chat leaves a thread between humans alone: no need to ask
-		return d, nil
+	if !d.Ours && !strings.Contains(strings.ToLower(p.e.Comment.Body), "@"+strings.ToLower(Slug)) {
+		return d, nil // chat leaves a thread between humans alone unless asked: no need to ask GitHub
 	}
 	ts, err := p.Threads()
 	for _, t := range ts {

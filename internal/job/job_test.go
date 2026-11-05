@@ -237,6 +237,7 @@ func TestOtherMention(t *testing.T) {
 		"Fixed in abc123.":                    false,
 		"mail me at a@b.com":                  false,
 		"use `@Override` here":                false,
+		"Why does `@Override` fail here?":     false,
 		"```java\n@Override\nvoid run()\n```": false,
 	} {
 		if got := mentionsOther(body); got != want {
@@ -246,15 +247,42 @@ func TestOtherMention(t *testing.T) {
 }
 
 func TestNewerFrom(t *testing.T) {
-	ns := []forge.Note{{ID: 1, Login: "bot"}, {ID: 2, Login: "ann"}, {ID: 3, Login: "bob"}, {ID: 4, Login: "ann"}}
+	bot := regexp.MustCompile(`@bot\b`)
+	ns := []forge.Note{{ID: 1, Login: "bot"}, {ID: 2, Login: "ann", Body: "why?"}, {ID: 3, Login: "bob", Body: "hm"},
+		{ID: 4, Login: "ann", Body: "and line 9?"}, {ID: 5, Login: "ann", Body: "@bob what do you think?"}, {ID: 6, Login: "ann", Body: "thanks"}}
 	for _, c := range []struct {
 		id    int64
 		login string
 		want  bool
-	}{{2, "ann", true}, {4, "ann", false}, {3, "bob", false}, {9, "ann", false}} {
-		if got := newerFrom(ns, c.id, c.login); got != c.want {
+	}{
+		{2, "ann", true},  // asked again past bob's comment: that one answers both
+		{4, "ann", false}, // later only a question for bob and thanks: chat answers neither, so this one
+		{3, "bob", false}, {9, "ann", false},
+	} {
+		if got := newerFrom(bot, ns, c.id, c.login); got != c.want {
 			t.Errorf("%d %s: got %v", c.id, c.login, got)
 		}
+	}
+}
+
+func TestCommand(t *testing.T) {
+	bot := regexp.MustCompile(`(?i)(^|[^\w.+-])@(bot)\.*([^\w.-]|$)`)
+	for body, want := range map[string]string{"@bot review": "review", "(@bot) review": "review", "(@bot review)": "review", "@bot, Review all!": "review all", "@bot thanks": "thanks"} {
+		if got := command(bot, body); got != want {
+			t.Errorf("%q: got %q, want %q", body, got, want)
+		}
+	}
+}
+
+func TestParseAnswer(t *testing.T) {
+	if _, ok := parseAnswer(`{"reply":"old","resolved":"invalid"}`); ok {
+		t.Fatal("a type error accepted")
+	}
+	if a, ok := parseAnswer(`{}`); ok || a.Reply != nil {
+		t.Fatalf("no reply accepted: %+v", a)
+	}
+	if a, ok := parseAnswer(`{"reply":""}`); !ok || *a.Reply != "" {
+		t.Fatal("an empty reply is an answer")
 	}
 }
 

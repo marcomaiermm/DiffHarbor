@@ -485,5 +485,6 @@ func mentionOf(handles ...string) *regexp.Regexp {
 	for i, h := range handles {
 		handles[i] = regexp.QuoteMeta(h)
 	}
-	return regexp.MustCompile(`(?i)(^|[^\w.+-])@(` + strings.Join(handles, "|") + `)([^\w-]|$)`)
+	// dots end a sentence, not a GitLab username: @bot. yes, @bot.ann no
+	return regexp.MustCompile(`(?i)(^|[^\w.+-])@(` + strings.Join(handles, "|") + `)\.*([^\w.-]|$)`)
 }
