@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.5.0...v0.6.0) (2026-11-05)
+
+
+### Features
+
+* **review:** animated lighthouse while reviewing, banners as a note ([#57](https://github.com/marcomaiermm/DiffHarbor/issues/57)) ([a8264b0](https://github.com/marcomaiermm/DiffHarbor/commit/a8264b0ea69fe4307485fe528abd07113d30556a))
+* **review:** lighthouse in the design system's colors, served by the server with REPORT_URL ([#58](https://github.com/marcomaiermm/DiffHarbor/issues/58)) ([0132f7e](https://github.com/marcomaiermm/DiffHarbor/commit/0132f7e9490f56d699e68220e904f2959bcb0949))
+* **review:** suggest_split counts code only, count and skip configure it ([#55](https://github.com/marcomaiermm/DiffHarbor/issues/55)) ([e0188a0](https://github.com/marcomaiermm/DiffHarbor/commit/e0188a0dae31af675b1c49ba6ac52b9446505cb8))
+
 ## [0.5.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.4.1...v0.5.0) (2026-11-05)
 
 
