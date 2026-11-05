@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -13,6 +14,10 @@ func TestTicket(t *testing.T) {
 	var asked []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		asked = append(asked, r.URL.Path)
+		if r.Header.Get("x-api-key") == "k" && r.URL.Path == "/projects/WID/issues/61" {
+			fmt.Fprint(w, `{"title":"Login","description":"x"}`)
+			return
+		}
 		if r.Header.Get("x-api-key") != "k" || r.URL.Path != "/projects/WID/issues/60" {
 			http.Error(w, `{"error":"Issue not found"}`, 404)
 			return
@@ -33,6 +38,13 @@ func TestTicket(t *testing.T) {
 	}
 	if id, got := Lookup(t.Context(), nil, "no key here", "main", ""); id+got != "" {
 		t.Fatalf("none: %q", got)
+	}
+	if id, _ := Lookup(t.Context(), nil, "Roles", "main", "Some text.\n\nCloses WID-60"); id != "WID-60" {
+		t.Fatalf("description: %q", id)
+	}
+	id, got = Lookup(t.Context(), nil, "Login", "feat/wid-61-login", "Needs [WID-60](https://x/WID-60) first, see WID-9.")
+	if id != "WID-61" || !strings.HasPrefix(got, "## Linked ticket WID-61: Login\n\nx\n\n\n## Referenced ticket WID-60 (context, not what this PR must do): Roles\n") {
+		t.Fatalf("branch first, description as reference: %q %q", id, got)
 	}
 	asked = nil
 	if id, _ := Lookup(t.Context(), []string{"wid"}, "fix UTF-8 names", "WID-60"); id != "WID-60" || len(asked) != 1 {
@@ -56,7 +68,7 @@ func TestLinear(t *testing.T) {
 	defer srv.Close()
 	linearURL, LinearKey = srv.URL, "lin_k"
 	defer func() { LinearKey = "" }()
-	id, got := Lookup(t.Context(), nil, "fix UTF-8 names", "me/eng-7-limit")
+	id, got := Lookup(t.Context(), nil, "fix UTF-8 names", "me/feat_eng-7_limit")
 	want := "## Linked ticket ENG-7: Rate limit\n\n- [ ] 429 on burst\n\n\n"
 	if id != "ENG-7" || got != want {
 		t.Fatalf("got %q %q", id, got)

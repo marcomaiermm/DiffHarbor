@@ -54,36 +54,43 @@ func Active() (string, error) {
 	return "", nil
 }
 
-// Lookup returns the first issue of projects (nil = any) texts name, its id and a prompt section; "" if none resolves.
+// Lookup returns the first issue of projects (nil = any) texts name, its id and a prompt section; "" if none
+// resolves. Up to 3 more issues the texts name ("closes", "see", links in the description) follow it as context.
 func Lookup(ctx context.Context, projects []string, texts ...string) (id, section string) {
 	provider, err := Active()
 	if provider == "" || err != nil {
 		return "", ""
 	}
 	seen := map[string]bool{}
+	var refs strings.Builder
+	nrefs := 0
 	for _, t := range texts {
-		for _, m := range ticketKey.FindAllStringSubmatch(t, -1) {
-			id = strings.ToUpper(m[1]) + "-" + m[2]
-			if seen[id] || len(seen) == 3 || projects != nil && !slices.ContainsFunc(projects, func(p string) bool { return strings.EqualFold(p, m[1]) }) {
-				continue // at most 3 lookups: "UTF-8" matches the pattern too
+		for _, m := range ticketKey.FindAllStringSubmatch(strings.ReplaceAll(t, "_", " "), -1) { // "_" is a word character: \b misses "feat_WID-60_roles"
+			key := strings.ToUpper(m[1]) + "-" + m[2]
+			if seen[key] || len(seen) == 6 || nrefs == 3 || projects != nil && !slices.ContainsFunc(projects, func(p string) bool { return strings.EqualFold(p, m[1]) }) {
+				continue // at most 6 lookups: "UTF-8" matches the pattern too
 			}
-			seen[id] = true
+			seen[key] = true
 			var body string
 			if provider == "linear" {
-				body, err = linear(ctx, id)
+				body, err = linear(ctx, key)
 			} else {
 				body, err = itsaplan(ctx, strings.ToUpper(m[1]), m[2])
 			}
-			if err != nil {
+			switch {
+			case err != nil:
 				log.Println("ticket:", err)
-				return "", ""
-			}
-			if body != "" {
-				return id, text.Truncate(fmt.Sprintf("## Linked ticket %s: %s", id, body), 8000) + "\n\n"
+				return id, section + refs.String()
+			case body == "":
+			case id == "":
+				id, section = key, text.Truncate(fmt.Sprintf("## Linked ticket %s: %s", key, body), 8000)+"\n\n"
+			default:
+				nrefs++
+				refs.WriteString(text.Truncate(fmt.Sprintf("## Referenced ticket %s (context, not what this PR must do): %s", key, body), 2000) + "\n\n")
 			}
 		}
 	}
-	return "", ""
+	return id, section + refs.String()
 }
 
 // itsaplan returns the issue as "title\n\ndescription..."; "" with a nil error if there is no such ticket, or not ours.
