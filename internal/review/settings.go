@@ -50,6 +50,8 @@ type Settings struct {
 	InstallScripts bool `json:"install_scripts"`
 	// Base branches besides the default branch whose PRs get reviewed without asking, as globs ("release/*").
 	BaseBranches []string `json:"base_branches"`
+	// What reviews and chats of this repo follow of the learnings.
+	Learnings Learnings `json:"learnings"`
 
 	ignoreRe, keepRe *regexp.Regexp // ignore's globs, its "!" ones
 	CITests          string         // checks.CITests: the CI file running the tests; unless "tests" says otherwise, the review doesn't
@@ -60,6 +62,23 @@ type Settings struct {
 type SyntaxTheme struct {
 	Light string `json:"light"`
 	Dark  string `json:"dark"`
+}
+
+// Learnings is review.json's learnings, applied when they are read: a lower max hides the oldest, it deletes nothing.
+type Learnings struct {
+	Max        *int `json:"max"`          // the newest of the repo's and of the owner's each; unset 30, 0 = none, at most MaxLearnings
+	MaxAgeDays int  `json:"max_age_days"` // older ones are left out; 0 = any age, an undated one never ages
+}
+
+// MaxLearnings is the most learnings kept per repo and per owner, and review.json's highest max.
+const MaxLearnings = 100
+
+// Limit returns how many of the newest learnings of each file a review follows.
+func (l Learnings) Limit() int {
+	if l.Max == nil {
+		return 30
+	}
+	return *l.Max
 }
 
 // Pass is a finder of review.json's passes.
@@ -260,6 +279,9 @@ func LoadSettings(s string) (Settings, error) {
 	}
 	if cfg.MaxParts < 0 || cfg.MaxParts > 8 {
 		return Settings{}, fmt.Errorf("max_parts %d: want 1 to 8", cfg.MaxParts)
+	}
+	if l := cfg.Learnings; l.Limit() < 0 || l.Limit() > MaxLearnings || l.MaxAgeDays < 0 {
+		return Settings{}, fmt.Errorf("learnings: max %d, max_age_days %d: want max 0 to %d, max_age_days 0 (any) or more", l.Limit(), l.MaxAgeDays, MaxLearnings)
 	}
 	if cfg.MinSeverity != "" && rank[cfg.MinSeverity] == 0 {
 		return Settings{}, fmt.Errorf("min_severity %q: want minor, major or critical", cfg.MinSeverity)

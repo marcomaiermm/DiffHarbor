@@ -4,11 +4,13 @@ import (
 	"diffharbor/internal/forge"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/report"
+	"diffharbor/internal/review"
 	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
 	"testing"
+	"time"
 )
 
 type skipForge struct {
@@ -64,14 +66,34 @@ func TestReviewSkipsBotBranch(t *testing.T) {
 
 func TestLearnings(t *testing.T) {
 	proc.DataDir = t.TempDir()
-	for i := range maxLearnings + 2 {
-		addLearning("o/r", fmt.Sprintf("- r%d", i))
+	now := time.Now()
+	for i := range review.MaxLearnings + 2 {
+		addLearning("o/r", fmt.Sprintf("- r%d (@u)", i), now)
 	}
-	addLearning("o", "- shared")
-	addLearning("x/y", "- other")
-	got := readLearnings("o", "o/r")
-	if !strings.HasPrefix(got, "- shared\n- r2\n") || strings.Contains(got, "- r1\n") || strings.Contains(got, "other") {
+	addLearning("o", "- shared (@u)", now)
+	addLearning("x/y", "- other (@u)", now)
+	got := readLearnings("o", "o/r", review.Learnings{})
+	if !strings.HasPrefix(got, "- shared (@u, "+now.Format(time.DateOnly)+")\n- r72 ") || strings.Count(got, "\n") != 31 || strings.Contains(got, "other") {
 		t.Fatalf("%q", got)
+	}
+	if got := learningsOf("o/r"); len(got) != review.MaxLearnings || !strings.HasPrefix(got[0], "- r2 ") {
+		t.Fatalf("kept %d, first %q", len(got), got[0])
+	}
+	none, ten := 0, 10
+	if got := readLearnings("o", "o/r", review.Learnings{Max: &none}); got != "" {
+		t.Fatalf("max 0: %q", got)
+	}
+	if got := readLearnings("o", "o/r", review.Learnings{Max: &ten}); strings.Count(got, "\n") != 11 {
+		t.Fatalf("max 10: %q", got)
+	}
+	addLearning("a", "- old (@u)", now.AddDate(0, 0, -40))
+	addLearning("a", "- new (@u)", now.AddDate(0, 0, -10))
+	writeLearnings("a", append(learningsOf("a"), "- undated (@u)"))
+	if got := readLearnings("a", "a/b", review.Learnings{MaxAgeDays: 30}); strings.Contains(got, "old") || !strings.Contains(got, "new") || !strings.Contains(got, "undated") {
+		t.Fatalf("max_age_days 30: %q", got)
+	}
+	if gone, err := forgetLearnings("o/r", "R1"); err != nil || len(gone) != 12 || strings.Contains(strings.Join(learningsOf("o/r"), ""), "r1") {
+		t.Fatalf("forget: %v %q", err, gone)
 	}
 }
 
