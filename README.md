@@ -81,8 +81,10 @@ docker compose up -d
 | `@<bot> <question>` | An answer about the PR, from the checkout. |
 | `@<bot> review` | A full review of the PR. |
 | `@<bot> review all` | A large PR reviewed in parts. |
+| `@<bot> learnings` | Lists the saved learnings of the repo and its owner. |
+| `@<bot> forget <text>` | Drops the learnings containing the text. Only owners and members drop the owner's. |
 
-When a maintainer corrects the bot or states a convention, the bot saves a rule in `/data/learnings/`. It keeps the newest 30 per repo and per owner.
+When a maintainer corrects the bot or states a convention, the bot saves a dated rule in `/data/learnings/`. It keeps the newest 100 per repo and per owner. A review follows the newest 30 of each. [`learnings`](#per-repo-settings) in `review.json` changes that.
 
 ## Configuration
 
@@ -284,6 +286,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
   "tickets": ["ABC"],
   "install_scripts": false,
   "base_branches": ["develop", "release/*"],
+  "learnings": {"max": 30, "max_age_days": 180},
   "checks": [".review/checks.sh"],
   "packages": {
     "apps/web": {"min_severity": "major"},
@@ -305,6 +308,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
 | `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
 | `base_branches` | Globs of base branches whose PRs get reviewed, besides the default branch. A PR into any other (`main` → `prod`) is skipped with a green status. `@<bot> review` still reviews it. |
+| `learnings` | `max`: how many of the newest learnings of the repo and of the owner a review and the chat follow, each. `0` is none, at most 100, default 30. `max_age_days`: older ones are left out. Default: any age. A learning saved before dates were kept never ages. Both only hide, nothing is deleted. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part. The longest glob wins. |
