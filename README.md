@@ -29,15 +29,15 @@
 
 ---
 
-A small Go server takes the webhook, runs your checks on the changed lines, lets an agent ([Pi](https://github.com/earendil-works/pi)) review the diff with read, grep and bash in a checkout, has a second model verify every finding against the code, and posts what survives as inline comments with committable suggestions.
+A small Go server takes the webhook and runs your checks on the changed lines. An agent ([Pi](https://github.com/earendil-works/pi)) reviews the diff in a checkout with read, grep and bash. A second model verifies every finding against the code. What survives is posted as inline comments with committable suggestions.
 
 ## Highlights
 
 - **Verified findings.** A second, cheaper model checks each finding in the code and drops what it can't back up.
 - **Your own checks as context.** gitleaks, tsc, biome, eslint, oxlint, gofmt, vet, staticcheck, golangci-lint, deadcode, fallow, squawk, shellcheck, luacheck, actionlint, zizmor, osv-scanner and the tests of changed packages, on the changed lines.
 - **Incremental.** A push reviews only files whose changed lines changed. A rebase or a merge of main reviews nothing.
-- **Committable fixes.** A local fix becomes a suggestion block; fixed findings get their threads resolved.
-- **Chat and learnings.** Reply to a finding or mention the bot; corrections become rules for the next reviews.
+- **Committable fixes.** A local fix becomes a suggestion block. Fixed findings get their threads resolved.
+- **Chat and learnings.** Reply to a finding or mention the bot. Corrections become rules for the next reviews.
 - **Any model Pi supports.** OpenAI, Anthropic, DeepSeek, AWS Bedrock, Azure OpenAI or a gateway in front of them, with automatic fallback.
 - **PR reports.** An optional HTML page per PR with a reading order, diffs with findings, call graphs and merge risks.
 - **Small and self-hosted.** One container, Go standard library only. Your code stays on your server and with your model provider.
@@ -49,17 +49,30 @@ cp compose.example.yml compose.yml   # the values go into .env next to it
 docker compose up -d
 ```
 
-The server listens on `:3000`. Expose `POST /webhook/github` and/or `POST /webhook/gitlab` to your forge; nothing else needs to be public. Then set up at least one [forge](#forges) and one [model provider](#models).
+1. The server listens on `:3000`.
+2. Expose `POST /webhook/github` and/or `POST /webhook/gitlab` to your forge. Nothing else needs to be public.
+3. Set up at least one [forge](#forges) and one [model provider](#models).
 
 ## How a review works
 
-1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, vendored and generated code (by name, Drizzle's migration snapshots, or a "Code generated … DO NOT EDIT" header) and binaries stay out. A pass gets up to 60k characters, code first, then tests, data, stylesheets and docs; larger PRs can be reviewed [in parts](#large-prs).
-2. **Context.** The checks above, plus codegraph, co-change from git history, the PR's commit messages, the repo's rules and skills from the base branch, learnings, and optionally the linked ticket.
-3. **Review.** The agent returns up to 10 findings, then looks at the diff again for what it missed: the same session without tools, up to 10 more at about a tenth of the cost. With [`passes`](#passes), up to two more finders review the diff too.
+1. **Diff.** On open, the whole PR against its merge base. On a push, only what changed since the last review.
+2. **Context.** The checks above, codegraph, co-change from git history, the PR's commit messages, the repo's rules and skills from the base branch, learnings and optionally the linked ticket.
+3. **Review.** The agent returns up to 10 findings. Then it looks at the diff again in the same session without tools: up to 10 more at about a tenth of the cost. [`passes`](#passes) add up to two more finders.
 4. **Verify.** A cheaper model checks each finding in the code.
+   For Go, the test the report names as proof runs against the base versions of the PR's code files. If it still passes there, that is a minor finding.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
-Two kinds of PRs are skipped with a green status unless someone asks for a review: PRs from bots (Dependabot, Renovate, also a self-hosted one on a user token: its branch starts with `renovate/` or `dependabot/`, or Renovate's hidden comments are in the description), and PRs into a branch other than the default branch or one in [`base_branches`](#per-repo-settings).
+**What the review reads:**
+
+- Up to 60k characters per pass: code first, then tests, data, stylesheets and docs. Larger PRs can be reviewed [in parts](#large-prs).
+- Left out: lockfiles, build output, vendored code, binaries and generated code (by name, Drizzle's migration snapshots or a "Code generated … DO NOT EDIT" header).
+
+**Drafts** aren't reviewed until they are marked ready.
+
+**Skipped PRs** get a green status. `@<bot> review` still reviews them.
+
+- PRs from bots: Dependabot, Renovate, also a self-hosted one on a user token. Its branch starts with `renovate/` or `dependabot/`, or Renovate's hidden comments are in the description.
+- PRs into a branch other than the default branch or one in [`base_branches`](#per-repo-settings).
 
 ### Talking to the bot
 
@@ -72,11 +85,11 @@ Two kinds of PRs are skipped with a green status unless someone asks for a revie
 | `@<bot> learnings` | Lists the saved learnings of the repo and its owner. |
 | `@<bot> forget <text>` | Drops the learnings containing the text. Only owners and members drop the owner's. |
 
-When a maintainer corrects the bot or states a convention, it saves a dated rule in `/data/learnings/` (per repo and per owner, the newest 100 each). A review follows the newest 30 of each; `learnings` in `review.json` changes that.
+When a maintainer corrects the bot or states a convention, the bot saves a dated rule in `/data/learnings/`. It keeps the newest 100 per repo and per owner. A review follows the newest 30 of each. [`learnings`](#per-repo-settings) in `review.json` changes that.
 
 ## Configuration
 
-All settings are environment variables, set in `.env` next to `compose.yml`.
+All settings are environment variables in `.env` next to `compose.yml`.
 
 ### Forges
 
@@ -85,9 +98,13 @@ All settings are environment variables, set in `.env` next to `compose.yml`.
 
 Create a GitHub App:
 
-- Webhook URL `https://<host>/webhook/github`, a random secret of 20+ characters.
-- Permissions: Contents read/write (GitHub requires write to resolve threads; reviews get a read-only token), Pull requests read/write, Commit statuses read/write, Issues read, Metadata read.
-- Events: Pull request, Pull request review comment, Issue comment.
+- **Webhook URL:** `https://<host>/webhook/github`, with a random secret of 20+ characters.
+- **Permissions:**
+  - Contents: read/write. GitHub needs write to resolve threads. Reviews get a read-only token.
+  - Pull requests: read/write
+  - Commit statuses: read/write
+  - Issues and Metadata: read
+- **Events:** Pull request, Pull request review comment, Issue comment.
 
 | Variable | |
 |---|---|
@@ -95,29 +112,37 @@ Create a GitHub App:
 | `GITHUB_APP_PRIVATE_KEY_B64` | The App's `.pem`, base64. |
 | `GITHUB_WEBHOOK_SECRET` | The webhook secret. |
 
-Mention the bot by the App's slug. Webhooks that got no 2xx (server down, queue full) are redelivered on start and every 30 minutes.
+- Mention the bot by the App's slug.
+- Webhooks that got no 2xx (server down, queue full) are redelivered on start and every 30 minutes.
 
 </details>
 
 <details>
 <summary><b>GitLab</b></summary>
 
-Add a webhook on the project or group: `https://<host>/webhook/gitlab`, triggers Merge request events and Comments.
+Add a webhook on the project or group: `https://<host>/webhook/gitlab`, with the triggers Merge request events and Comments.
 
 | Variable | |
 |---|---|
 | `GITLAB_URL` | Default `https://gitlab.com`. |
 | `GITLAB_TOKEN` | A bot user's token (or a project/group access token) with scope `api` and at least the Developer role. Its username is the bot: `@<username> review`. |
-| `GITLAB_READ_TOKEN` | Optional: a token with only `read_repository` for git's fetches, else they use the `api` token. Either stays in the server: git fetches through its proxy. |
+| `GITLAB_READ_TOKEN` | Optional. A token with only `read_repository` for git's fetches. Without it they use the `api` token. Both stay in the server: git fetches through its proxy. |
 | `GITLAB_WEBHOOK_SECRET` | The webhook's secret token. |
 
-Differences to GitHub: findings are diff discussions, fixes `suggestion:-N+0` blocks, and a finding GitLab refuses to place goes into the summary note. Large MRs in parts start with `@<bot> review all` (there is no checkbox). There is no redelivery: GitLab retries a failed webhook only briefly. Maintainers count as members, Developers as collaborators.
+Differences to GitHub:
+
+- Findings are diff discussions and fixes are `suggestion:-N+0` blocks.
+- A finding GitLab refuses to place goes into the summary note.
+- Large MRs in parts start with `@<bot> review all`. There is no checkbox.
+- No redelivery. GitLab retries a failed webhook only briefly.
+- Maintainers count as members, Developers as collaborators.
 
 </details>
 
 ### Models
 
-Models are `provider/id[:level]` as Pi names them. Without settings the server picks by the keys present: the first provider reviews, the next one takes over for 30 minutes when the first fails (usage limit, outage).
+- Models are `provider/id[:level]` as Pi names them.
+- Without settings the server picks by the keys present. The first provider reviews. The next one takes over for 30 minutes when the first fails (usage limit, outage).
 
 | Provider (in this order) | Credentials | Review | Verify |
 |---|---|---|---|
@@ -134,31 +159,87 @@ Models are `provider/id[:level]` as Pi names them. Without settings the server p
 | `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `DEEPSEEK_BASE_URL` | A gateway in front of the provider (LiteLLM, your company's AI gateway), with the gateway's key. |
 | `AZURE_OPENAI_DEPLOYMENT_NAME_MAP` | Deployments not named like the models: `gpt-6.1-sol=review,gpt-6-luna=verify`. |
 
-Bedrock in the EU: `amazon-bedrock/eu.anthropic.…`. Each pass gets only its own provider's key.
+- Bedrock in the EU: `amazon-bedrock/eu.anthropic.…`.
+- Each pass gets only its own provider's key.
 
 > [!NOTE]
-> Use API keys. Pi can also log in with a ChatGPT subscription (`openai/…` without `OPENAI_API_KEY`, then `docker compose exec -it diffharbor diffharbor login`). Whether your plan's terms allow that for a review bot is yours to check, and you use it at your own risk.
+> Use API keys. Pi can also log in with a ChatGPT subscription: `openai/…` without `OPENAI_API_KEY`, then `docker compose exec -it diffharbor diffharbor login`. Whether your plan's terms allow that for a review bot is yours to check. You use it at your own risk.
 
-### Optional
+### Report
+
+`REPORT_URL` turns on an HTML page per PR, linked in the bot's PR comment.
+
+- **What's on it:** a verdict, the findings by weight, a reading order, diffs with findings, call graphs and what the change reaches outside the PR. Before you merge: base commits the PR is behind on, conflicts, and open PRs changing the same files or lines. At the end a draft review to send from the forge yourself. The page posts nothing.
+- **Versions:** each reviewed head keeps one, the newest 10 stay. Closing the PR deletes them.
+- **Link:** `/r/<host>/<repo>/<n>/<secret>`. The secret is random per PR (130 bits) and only the PR comment holds it. Any other path is a 404.
+- **Older reports:** reports from before the secret no longer open. The next review writes one at the new link, closing the PR deletes the old.
+
+> [!WARNING]
+> The report contains the PR's code. Put `/r/` behind your SSO anyway: links get forwarded and stay in browser histories.
+
+**Reports in S3** instead of `DATA_DIR`:
 
 | Variable | |
 |---|---|
-| `REPORT_URL` | An HTML report per PR under `/r/<host>/<repo>/<n>/<secret>`, linked in the bot's PR comment: a verdict and the findings by weight, reading order, diffs with findings, call graphs, what the change reaches outside the PR, and before you merge, base commits the PR is behind on, conflicts, and open PRs changing the same files or lines, and at the end a draft review to send from the forge yourself: the page posts nothing. Each reviewed head keeps a version, the newest 10 stay; closing the PR deletes them. The secret is random per PR (130 bits) and only that comment holds it, so only who can read the PR has the link; any other path is a 404. **The report contains the PR's code: still put `/r/` behind your SSO, links get forwarded and stay in browser histories.** Reports from before the secret no longer open: the next review writes one at the new link, closing the PR deletes the old. |
-| `REPORT_S3_URL`, `REPORT_S3_ACCESS_KEY`, `REPORT_S3_SECRET_KEY`, `REPORT_S3_REGION` | The reports in an S3 bucket instead of `DATA_DIR`: `https://host[:port]/bucket[/prefix]`, path-style, for SeaweedFS, MinIO, Garage, R2 or AWS. `/r/` still serves them, so the bucket stays private. The key needs `GetObject`, `PutObject` and `DeleteObject` on `bucket/prefix/*` and `ListBucket` on the bucket. Leave versioning off on it: there a delete only hides a report, its code stays. The region defaults to `us-east-1`. Only the server holds the key; checks and Pi never get it. On the first start with it, the reports on disk move into the bucket and their folder goes; a failed move retries on the next start. A delete that fails when a PR closes retries every 30 minutes. For your own S3, uncomment the `seaweedfs` service in `compose.example.yml` and set `REPORT_S3_URL=http://seaweedfs:8333/reports` with any key and secret: they become its admin, and the bucket comes with the first report. |
-| `TEMPLATE_DIR` | Your branding for the report, see [Branding the report](#branding-the-report). |
-| `ITSAPLAN_URL`, `ITSAPLAN_API_KEY` | The itsaplan ticket a PR names (`ABC-12` in title, branch or description) goes into the review as what the PR must do; up to 3 more it names (`closes ABC-7`, a link in the description) follow as context. Never for PRs from forks. |
-| `LINEAR_API_KEY` | The same for Linear: a personal API key (read-only is enough). The ticket (`ENG-12`) is fetched by its identifier. |
-| `TICKET_PROVIDER` | `itsaplan` or `linear`. Required when both are configured (the server doesn't start otherwise); with one configured it is that one. |
-| `NPM_REGISTRIES` | The npm registries the checks' installs read from, such as your Artifactory's pull-through cache and internal repos: entries `<owner> [@scope] <url> <token>`, split by commas or newlines. `<owner>` is the repo's owner (GitLab: `gitlab/<group>`) or `*` for all; an owner's own entry beats `*` for its scope. The entry without a scope replaces the default registry (npmjs, also in lockfiles), one with `@corp` serves that scope. A token with a colon is `user:password`. Example: `* https://art.corp/artifactory/api/npm/npm-virtual/ <token>, team-a @team-a https://art.corp/artifactory/api/npm/team-a/ <token>`. As root (the image) the tokens stay in the server: installs read through its proxy (GETs only, no publish); lockfile URLs point at it during the install. Run as another user (`diffharbor dry`), the tokens go in the installs' env. Never for PRs from forks. Yarn Berry gets the default registry only, its scopes come from `.yarnrc.yml`. Use read-only tokens. |
-| `DATA_DIR`, `CACHE_DIR` | Where the data (learnings, pending reviews, reports, logins, the repos' uids) and the per-repo caches live. `/data` and `/cache` in the image; keep both on volumes, apart. |
+| `REPORT_S3_URL` | `https://host[:port]/bucket[/prefix]`, path-style. SeaweedFS, MinIO, Garage, R2 or AWS. |
+| `REPORT_S3_ACCESS_KEY`, `REPORT_S3_SECRET_KEY` | Needs `GetObject`, `PutObject` and `DeleteObject` on `bucket/prefix/*` and `ListBucket` on the bucket. |
+| `REPORT_S3_REGION` | Default `us-east-1`. |
+
+- `/r/` still serves the reports, so the bucket stays private.
+- Only the server holds the key. Checks and Pi never get it.
+- Leave versioning off. With it, a delete only hides a report and its code stays.
+- On the first start with S3, the reports on disk move into the bucket and their folder goes. A failed move retries on the next start.
+- A delete that fails when a PR closes retries every 30 minutes.
+- Your own S3: uncomment the `seaweedfs` service in `compose.example.yml` and set `REPORT_S3_URL=http://seaweedfs:8333/reports` with any key and secret. They become its admin. The bucket comes with the first report.
+
+**Branding:** `TEMPLATE_DIR`, see [Branding the report](#branding-the-report).
+
+### Tickets
+
+The ticket a PR names goes into the review as what the PR must do.
+
+| Variable | |
+|---|---|
+| `ITSAPLAN_URL`, `ITSAPLAN_API_KEY` | itsaplan. |
+| `LINEAR_API_KEY` | Linear. A personal API key, read-only is enough. |
+| `TICKET_PROVIDER` | `itsaplan` or `linear`. Required when both are configured, else the server doesn't start. |
+
+- The main ticket is named in title, branch or description: `ABC-12`.
+- Up to 3 more it names (`closes ABC-7`, a link in the description) follow as context.
+- Never for PRs from forks.
+
+### npm registries
+
+`NPM_REGISTRIES` sets the registries the checks' installs read from, such as your Artifactory's pull-through cache and internal repos.
+
+```text
+* https://art.corp/artifactory/api/npm/npm-virtual/ <token>,
+team-a @team-a https://art.corp/artifactory/api/npm/team-a/ <token>
+```
+
+- **Entries:** `<owner> [@scope] <url> <token>`, split by commas or newlines. A token with a colon is `user:password`.
+- **Owner:** the repo's owner (GitLab: `gitlab/<group>`) or `*` for all. An owner's own entry beats `*` for its scope.
+- **Scope:** an entry without one replaces the default registry (npmjs, also in lockfiles). One with `@corp` serves that scope.
+- **Tokens:** as root (the image) they stay in the server. Installs read through its proxy (GETs only, no publish) and lockfile URLs point at it during the install. Run as another user (`diffharbor dry`), the tokens go in the installs' env.
+- Never for PRs from forks.
+- Yarn Berry gets the default registry only. Its scopes come from `.yarnrc.yml`.
+- Use read-only tokens.
+
+### Storage and Docker
+
+| Variable | |
+|---|---|
+| `DATA_DIR`, `CACHE_DIR` | Data (learnings, pending reviews, reports, logins, the repos' uids) and per-repo caches. `/data` and `/cache` in the image. Keep both on volumes, apart. |
 | `DOCKER_HOST` | With the `dind` service: Docker for testcontainers in the checks, isolated with [Sysbox](https://github.com/nestybox/sysbox) (install it on the host). Drop both if your tests don't need Docker. |
 
 ### Branding the report
 
 The report page is the templates in [`internal/report/templates/`](internal/report/templates/). Files in `TEMPLATE_DIR` override them, like Django's template dirs:
 
-- `logo.png` (64 px), `favicon.svg`, `favicon-32x32.png` replace the images.
-- A `*.html` file that defines a template again replaces ours. A file with the name of one of ours (`header.html`) replaces all of that file. Files are read in name order, the last definition wins.
+- `logo.png` (64 px), `favicon.svg` and `favicon-32x32.png` replace the images.
+- A `*.html` file that defines a template again replaces ours.
+- A file named like one of ours (`header.html`) replaces all of that file.
+- Files are read in name order. The last definition wins.
 
 ```html
 <!-- $TEMPLATE_DIR/brand.html -->
@@ -166,17 +247,26 @@ The report page is the templates in [`internal/report/templates/`](internal/repo
 {{define "footer"}}<footer class="py-6 text-center text-xs text-muted-foreground">Acme Engineering</footer>{{end}}
 ```
 
-Blocks meant for this: `theme` (the color tokens, see `theme.html`; `--major` and `--verified` color what to fix and what is shown without a model), `logo`, `head` (more in `<head>`), `header`, `footer`. The others work too but follow the page's data, which can change between versions; `finish` (`finish.html`) is the draft review at the end. The page's CSS is compiled with the classes its templates use; with your templates, DiffHarbor compiles it again at start with theirs (Tailwind's CLI is in the image). DiffHarbor checks the templates at start and doesn't start with a broken one. Reports already rendered keep their look.
+**Blocks meant for this:**
+
+- `theme`: the color tokens, see `theme.html`. `--major` colors what to fix, `--verified` what is shown without a model.
+- `logo`, `head` (more in `<head>`), `header`, `footer`.
+
+The others work too but follow the page's data, which can change between versions. `finish` (`finish.html`) is the draft review at the end.
+
+- The page's CSS is compiled with the classes its templates use. With your templates, DiffHarbor compiles it again at start (Tailwind's CLI is in the image).
+- DiffHarbor checks the templates at start and doesn't start with a broken one.
+- Reports already rendered keep their look.
 
 ## Per-repo settings
 
-Everything lives under `.review/`; `review.json` can change the paths.
+Everything lives under `.review/`. `review.json` can change the paths.
 
 | File | |
 |---|---|
 | `.review/rules.md` | Rules in prose for the prompt. Without it, `AGENTS.md` or `CLAUDE.md`. |
 | `.review/skills/` | Review skills in the [Agent Skills format](https://agentskills.io/specification). On GitHub, skills in `<owner>/.github` under `.review/skills/` apply to all of the owner's repos. |
-| `.review/checks.sh` | Your own checks from the base branch, run in the PR checkout with the changed files after `--`. Their output (120 lines each) goes into the prompt; the exit code doesn't count. |
+| `.review/checks.sh` | Your own checks from the base branch, run in the PR checkout with the changed files after `--`. Their output (120 lines each) goes into the prompt. The exit code doesn't count. |
 | `review.json` | Settings, in the repo root. All keys are optional. |
 
 <details>
@@ -208,41 +298,46 @@ Everything lives under `.review/`; `review.json` can change the paths.
 
 | Key | |
 |---|---|
-| `ignore` | Globs; a path without one takes its folder, `!glob` takes paths back in (`["src/ui", "!src/ui/{chip,toast}.tsx"]`). Neither the model nor a check sees these files. |
-| `min_severity` | `minor`, `major` or `critical`: findings below are dropped. |
+| `ignore` | Globs. A path without one takes its folder. `!glob` takes paths back in: `["src/ui", "!src/ui/{chip,toast}.tsx"]`. Neither the model nor a check sees these files. |
+| `min_severity` | `minor`, `major` or `critical`. Findings below are dropped. |
 | `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. |
-| `review_model`, `verify_model` | Apply where the server sets none; the provider's key must be on the server. |
+| `review_model`, `verify_model` | Apply where the server sets none. The provider's key must be on the server. |
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `passes` | Finders per part, at most 3. See [Passes](#passes). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
 | `suggest_split` | See [Split suggestion](#split-suggestion). |
 | `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
 | `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
-| `base_branches` | Globs of base branches besides the default branch whose PRs get reviewed on their own. A PR into any other (`main` → `prod`) is skipped with a green status; `@<bot> review` still reviews it. |
-| `learnings` | `max`: how many of the newest learnings of the repo and of the owner a review and the chat follow each, `0` none, at most 100, default 30. `max_age_days`: leave out older ones, default any age; a learning saved before dates were kept never ages. Both only hide, nothing is deleted. |
+| `base_branches` | Globs of base branches whose PRs get reviewed, besides the default branch. A PR into any other (`main` → `prod`) is skipped with a green status. `@<bot> review` still reviews it. |
+| `learnings` | `max`: how many of the newest learnings of the repo and of the owner a review and the chat follow, each. `0` is none, at most 100, default 30. `max_age_days`: older ones are left out. Default: any age. A learning saved before dates were kept never ages. Both only hide, nothing is deleted. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
-| `packages` | Overrides per monorepo part; the longest glob wins. |
+| `packages` | Overrides per monorepo part. The longest glob wins. |
 
-A broken `review.json` falls back to the defaults and says so in the review footer.
+- For validation and completion in your editor, add `"$schema": "https://marcomaiermm.github.io/DiffHarbor/review.schema.json"` as the first key. The server ignores it.
+- A broken `review.json` falls back to the defaults and says so in the review footer.
 
 </details>
 
 ### Large PRs
 
-A diff over 60k characters can be reviewed in parts: the files of a folder stay together, a file over 60k is cut at its hunks, a hunk over 60k at its lines, each part gets its own review and verify pass, and the findings are merged, most severe first. Each part costs about one normal review.
+A diff over 60k characters can be reviewed in parts. Each part costs about one normal review.
+
+- The files of a folder stay together.
+- A file over 60k is cut at its hunks, a hunk over 60k at its lines.
+- Each part gets its own review and verify pass. The findings are merged, most severe first.
 
 | `large_pr` | |
 |---|---|
 | `all` (default) | Always in parts. |
-| `ask` | Code up to 60k first. On GitHub the walkthrough offers a checkbox to review all files in parts; on both forges `@<bot> review all` does the same. Later pushes keep reviewing in parts. |
+| `ask` | Code up to 60k first. On GitHub the walkthrough offers a checkbox to review all files in parts. On both forges `@<bot> review all` does the same. Later pushes keep reviewing in parts. |
 | `off` | Never. |
 
 `max_parts`: default 4, at most 8.
 
 ### Passes
 
-Each pass is a finder with tools, followed by its second look; one verify pass checks the findings of all of them. Without `passes` there is one, the review model's.
+Each pass is a finder with tools, followed by its second look. One verify pass checks the findings of all of them. Without `passes` there is one, the review model's.
 
 ```json
 "passes": [{}, {"max_lines": 1500}]
@@ -254,7 +349,18 @@ Each pass is a finder with tools, followed by its second look; one verify pass c
 | `again` | `false`: no second look. |
 | `min_lines`, `max_lines` | Run only on PRs with that many changed lines in the reviewed files. |
 
-The first entry is the review model's and always runs: it takes `again` only. A further pass reads the files in reverse order. The verify pass drops a finding that another pass reported too. On four PRs of this repo, a second pass with `openai/gpt-6-luna:high` found about 1.5 more of 41 known defects per run for 14% more cost, one with `openai/gpt-6.1-terra:medium` about 3 more for 80% more: mostly the same defects the first pass found.
+- The first entry is the review model's and always runs. It takes `again` only.
+- A further pass reads the files in reverse order.
+- The verify pass drops a finding that another pass reported too.
+
+Measured on four PRs of this repo with 41 known defects, per run:
+
+| Second pass | More defects found | More cost |
+|---|---|---|
+| `openai/gpt-6-luna:high` | about 1.5 | 14% |
+| `openai/gpt-6.1-terra:medium` | about 3 | 80% |
+
+Mostly they find the same defects the first pass found.
 
 ### Split suggestion
 
@@ -281,7 +387,8 @@ The AI suggests splitting a big PR into PRs that could each merge on their own. 
 
 ### Monorepos
 
-Checks run per package (the nearest `package.json` or `go.mod`, at most 5 packages) and install once per lockfile. The `AGENTS.md` (else `CLAUDE.md`) files in the folders above the changed files are added to the rules, at most 5.
+- Checks run per package: the nearest `package.json` or `go.mod`, at most 5 packages. They install once per lockfile.
+- The `AGENTS.md` (else `CLAUDE.md`) files in the folders above the changed files are added to the rules, at most 5.
 
 ## Security
 
@@ -290,16 +397,55 @@ Checks run per package (the nearest `package.json` or `go.mod`, at most 5 packag
 
 Within that:
 
-- Root serves and holds the forge keys, the model keys and Pi's login. git, checks and Pi run as a user of the repo's own (one uid per repo) and, but for the cases below, get none of them: git fetches and Pi calls its model through a proxy in the server on `127.0.0.1`, with random tokens that the server revokes when the Pi run (git: the job) ends. A token reaches only its provider's model API or its job's repo (fetches, no push); the proxy adds the key there.
-- Root reads and writes in the checkout only as that user: a symlink in the PR can't reach root's files.
-- All processes of the repos' users are killed before and after each job. Each job gets a fresh home (git config, Pi's config and extensions) and temp dir; the users' files in `/tmp`, `/var/tmp` and `/dev/shm` go before each job. Check output is capped.
-- The checks install dependencies without lifecycle scripts, so a malicious dependency's postinstall doesn't run; `install_scripts` in `review.json` turns them back on per repo.
-- `NPM_REGISTRIES` tokens stay in the server like the model keys: the installs read through its proxy, GETs only, with tokens that end with the checks. During that time the PR's code can read the registries' packages too (same uid), so a PR from a fork gets none.
-- Each repo has its own cache (`/cache/<uid>`: Go build cache, module and pnpm stores) that other repos' users can't read or write, so a PR can't change what another repo's jobs run. It can change what later jobs of its own repo run, its other PRs' too: the cache stays. Still shared: the container's network and its limits below. `diffharbor dry` runs as `node`.
-- A repo's uid is keyed by its forge, the forge's host and the repo's ID in `DATA_DIR/uids.json`, never its name: a renamed repo keeps its uid and cache, a new repo under an old name gets its own. Upgrading from a version that keyed by name: who owned a name-keyed entry can't be told, so it stays in the file to keep its uid taken (never handed out again), and the server drops its cache at startup. Each repo gets a new uid and an empty cache on its next job, so the first installs and builds are cold. The file isn't rewritten, so an interrupted upgrade or a repeated start changes nothing. A broken `uids.json`, or two entries sharing a uid, still stops the server.
-- PR code shares the container's network: it reaches `localhost:3000/r/` (no SSO there, it is in front of the proxy only, but a report opens only by the secret in its link, which only that PR's comment holds) and, on a cloud VM, the metadata endpoint. Block `169.254.169.254` for the container there.
-- During its job the PR's code can use those tokens too (same uid): spend model tokens, fetch the repo it already has. It can't keep a key. Pi still gets the credential itself, readable by the PR's code during the run, for a ChatGPT login (an access token that outlives the run, never the refresh token; Pi sends it only to OpenAI directly), Bedrock with IAM keys (SigV4 signs the host; `AWS_BEARER_TOKEN_BEDROCK` goes through the proxy) and a provider outside the models table. A gateway that adds the key itself avoids that.
-- No new privileges (a setuid binary can't make a repo's user root) and only the capabilities root needs. Limits: 3 GB RAM, 2 CPUs and 4096 processes per container. A Pi run gets 8 minutes; [`extensions/review-guard.js`](extensions/review-guard.js) refuses further tool calls after 6 minutes or at 60% context, so the pass still answers.
+### Keys stay with root
+
+- Root serves and holds the forge keys, the model keys and Pi's login.
+- git, checks and Pi run as a user of the repo's own (one uid per repo). They get none of the keys, except for the cases under [What the PR's code can reach](#what-the-prs-code-can-reach).
+- git fetches and Pi's model calls go through a proxy in the server on `127.0.0.1`. They use random tokens that the server revokes when the Pi run (git: the job) ends.
+- A token reaches only its provider's model API or its job's repo (fetches, no push). The proxy adds the key there.
+- `NPM_REGISTRIES` tokens work the same way: installs read through the proxy, GETs only, with tokens that end with the checks.
+
+### Each job
+
+- Root reads and writes in the checkout only as the repo's user. A symlink in the PR can't reach root's files.
+- All processes of the repos' users are killed before and after each job.
+- Each job gets a fresh home (git config, Pi's config and extensions) and temp dir. The users' files in `/tmp`, `/var/tmp` and `/dev/shm` go before each job.
+- Check output is capped.
+- The checks install dependencies without lifecycle scripts, so a malicious dependency's postinstall doesn't run. `install_scripts` in `review.json` turns them back on per repo.
+- No new privileges: a setuid binary can't make a repo's user root. Root keeps only the capabilities it needs.
+- Limits per container: 3 GB RAM, 2 CPUs, 4096 processes.
+- A Pi run gets 8 minutes. [`extensions/review-guard.js`](extensions/review-guard.js) refuses further tool calls after 6 minutes or at 60% context, so the pass still answers.
+
+### Each repo
+
+- Each repo has its own cache (`/cache/<uid>`: Go build cache, module and pnpm stores). Other repos' users can't read or write it, so a PR can't change what another repo's jobs run.
+- A PR can change what later jobs of its own repo run, its other PRs' too. The cache stays.
+- `diffharbor dry` runs as `node`.
+- A repo's uid is keyed by its forge, the forge's host and the repo's ID in `DATA_DIR/uids.json`, never its name. A renamed repo keeps its uid and cache. A new repo under an old name gets its own.
+- A broken `uids.json`, or two entries sharing a uid, stops the server.
+
+<details>
+<summary>Upgrading from a version that keyed uids by name</summary>
+
+- Who owned a name-keyed entry can't be told. It stays in the file to keep its uid taken (never handed out again), and the server drops its cache at startup.
+- Each repo gets a new uid and an empty cache on its next job, so the first installs and builds are cold.
+- The file isn't rewritten, so an interrupted upgrade or a repeated start changes nothing.
+
+</details>
+
+### What the PR's code can reach
+
+- **The container's network** and its limits:
+  - `localhost:3000/r/`. There is no SSO there, it is in front of the proxy only. A report still opens only by the secret in its link, which only that PR's comment holds.
+  - On a cloud VM, the metadata endpoint. Block `169.254.169.254` for the container there.
+- **The job's tokens** (same uid): it can spend model tokens and fetch the repo it already has. It can't keep a key.
+- **The registries' packages** while the checks install. So a PR from a fork gets no `NPM_REGISTRIES`.
+- **Credentials Pi gets itself**, readable by the PR's code during the run:
+  - A ChatGPT login: an access token that outlives the run, never the refresh token. Pi sends it only to OpenAI directly.
+  - Bedrock with IAM keys, since SigV4 signs the host. `AWS_BEARER_TOKEN_BEDROCK` goes through the proxy.
+  - A provider outside the models table.
+
+  A gateway that adds the key itself avoids that.
 
 ## Development
 
@@ -308,7 +454,8 @@ go test ./...
 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...
 ```
 
-`diffharbor dry` in a checkout reviews `git diff HEAD` and prints the findings as JSON.
+- `diffharbor dry` in a checkout reviews `git diff HEAD` and prints the findings as JSON.
+- The report's CSS is compiled. After changing `internal/report/styles.css` or a class in a template, run `go generate ./internal/report`. It needs [Tailwind's standalone CLI](https://github.com/tailwindlabs/tailwindcss/releases/tag/v4.3.4) 4.3.4 as `tailwindcss` on the `PATH`. The npm package resolves `tailwindcss` from whatever `node_modules` is nearby. The Docker build fails while `styles.gen.css` is stale.
 
 ## Contributing
 
