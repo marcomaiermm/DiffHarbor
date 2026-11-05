@@ -251,6 +251,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	if st := stack(ctx, repo, files); st != "" {
 		fmt.Fprintf(&hints, "## Stack (detected)\n\n%s\n\n", st)
 	}
+	hints.WriteString(depHints(ctx, repo, in.Dir, whole, in.Registries))
 	// a fresh index per review, ~1 s for 100 files; codegraph reads the root's go.mod only, so a Go module below
 	// it the PR changes gets one of its own, for the report's exact uses (the root's stays the model's)
 	gctx, cancel = context.WithTimeout(ctx, 2*time.Minute)
