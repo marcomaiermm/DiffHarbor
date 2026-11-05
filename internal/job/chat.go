@@ -52,10 +52,51 @@ var ack = regexp.MustCompile(`(?i)^(thanks?( you| a lot)?|thx|ty|danke( dir| sch
 // maxReplies is how often chat answers in one thread without being @mentioned: past it, it has said its piece.
 const maxReplies = 3
 
-// newerFrom reports whether login wrote again in notes after the note id.
-func newerFrom(notes []forge.Note, id int64, login string) bool {
-	i := slices.IndexFunc(notes, func(n forge.Note) bool { return n.ID == id })
-	return i >= 0 && slices.ContainsFunc(notes[i+1:], func(n forge.Note) bool { return n.Login == login })
+// command is body without the @bot mention, lower case. Its punctuation stays: "forget foo." looks for "foo.".
+func command(mention *regexp.Regexp, body string) string {
+	return strings.ToLower(strings.TrimSpace(mention.ReplaceAllString(body, " ")))
+}
+
+// thanks reports whether body is an ack to @bot. A ? anywhere asks, also where the mention took it: "agreed @bot?".
+func thanks(mention *regexp.Regexp, body string) bool {
+	return !strings.Contains(body, "?") && ack.MatchString(command(mention, body))
+}
+
+// answers reports whether chat answers body in thread d: @us, or in our thread a reply that isn't thanks or for
+// someone else, while we haven't said our piece.
+func answers(mention *regexp.Regexp, d forge.Discussion, body string) bool {
+	if thanks(mention, body) {
+		return false
+	}
+	if mention.MatchString(body) {
+		return true
+	}
+	replies := 0
+	for _, n := range d.Notes[min(1, len(d.Notes)):] {
+		if n.Ours {
+			replies++
+		}
+	}
+	return d.Ours && !mentionsOther(body) && replies < maxReplies
+}
+
+// newer reports whether login wrote again in d after the note id, in a comment chat answers: that one answers both.
+func newer(mention *regexp.Regexp, d forge.Discussion, id int64, login string) bool {
+	i := slices.IndexFunc(d.Notes, func(n forge.Note) bool { return n.ID == id })
+	return i >= 0 && slices.ContainsFunc(d.Notes[i+1:], func(n forge.Note) bool { return n.Login == login && !n.Edited && answers(mention, d, n.Body) })
+}
+
+// answer is the chat pass's JSON.
+type answer struct {
+	Reply    *string `json:"reply"` // nil: not our JSON; "": nothing to say
+	Learning string  `json:"learning"`
+	Shared   bool    `json:"shared"`
+	Resolved bool    `json:"resolved"`
+}
+
+// parseAnswer reads out fresh each time: a failed decode can leave fields set.
+func parseAnswer(out string) (a answer, ok bool) {
+	return a, agent.Object(out, &a) && a.Reply != nil
 }
 
 const chatRepair = "Your last message ended without the required JSON. Do not call tools. Output the JSON object with reply and learning now, using the evidence you already gathered. No prose outside the JSON."
@@ -189,7 +230,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		return err
 	}
 	c := e.Comment
-	if ack.MatchString(strings.TrimSpace(mention.ReplaceAllString(c.Body, ""))) {
+	if thanks(mention, c.Body) {
 		return nil
 	}
 	var about, convo strings.Builder
@@ -197,8 +238,9 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	resolved := false // someone resolved it already
 
 	if e.Kind == "issue_comment" {
-		cmd := strings.ToLower(strings.TrimSpace(mention.ReplaceAllString(c.Body, "")))
-		ticked := e.Action == "edited" // the walkthrough's box for a review in parts
+		cmd := command(mention, c.Body)
+		bare := strings.Trim(cmd, "()[]{}.,:;!? ") // "(@bot review)" is a review
+		ticked := e.Action == "edited"             // the walkthrough's box for a review in parts
 		if ticked {
 			// GitHub lets only users with write access edit our comment; asked once more, the cost is on the server.
 			ok, err := p.CanWrite(e.Sender.Login)
@@ -210,14 +252,14 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 				return nil
 			}
 		}
-		if large := ticked || cmd == "review all"; large || cmd == "review" || cmd == "full review" {
+		if large := ticked || bare == "review all"; large || bare == "review" || bare == "full review" {
 			e.Action = "manual" // anything but synchronize: full review
 			if large {
 				e.Action = "large"
 			}
 			return Review(ctx, f, e)
 		}
-		if cmd == "learnings" || strings.HasPrefix(cmd, "forget ") {
+		if bare == "learnings" || strings.HasPrefix(cmd, "forget ") {
 			return p.Reply(learningsCommand(cmd, f.Bot(), e) + "\n\n" + forge.Mark)
 		}
 		ns, err := p.Notes()
@@ -233,27 +275,22 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			return err
 		}
 		ours, resolved = d.Ours, d.Resolved
-		if newerFrom(d.Notes, c.ID, c.User.Login) {
-			return nil // they wrote again: that comment's chat answers both
+		if !answers(mention, d, c.Body) || newer(mention, d, c.ID, c.User.Login) {
+			return nil // between humans, for someone else, we said our piece (@us to go on), or they wrote again
+		}
+		if !mention.MatchString(c.Body) {
+			go p.React() // the server left it to us; off the worker, a slow forge would hold up the queue
 		}
 		about.WriteString(d.About)
 		if resolved {
 			about.WriteString("This thread is resolved.\n\n")
 		}
-		for _, n := range d.Notes {
-			fmt.Fprintf(&convo, "**@%s**: %s\n\n", n.Login, forge.Clean(n.Body))
+		notes := d.Notes
+		if i := slices.IndexFunc(notes, func(n forge.Note) bool { return n.ID == c.ID }); i >= 0 {
+			notes = notes[:i+1] // later ones chat doesn't answer: "reply to the last message" is this one
 		}
-		if !mention.MatchString(c.Body) {
-			replies := 0
-			for _, n := range d.Notes[min(1, len(d.Notes)):] {
-				if n.Ours {
-					replies++
-				}
-			}
-			if !ours || mentionsOther(c.Body) || replies >= maxReplies {
-				return nil // between humans, a question for someone else, or we said our piece: @us to go on
-			}
-			go p.React() // the server left it to us; off the worker, a slow forge would hold up the queue
+		for _, n := range notes {
+			fmt.Fprintf(&convo, "**@%s**: %s\n\n", n.Login, forge.Clean(n.Body))
 		}
 	}
 
@@ -291,19 +328,13 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	if err != nil {
 		return err
 	}
-	var a struct {
-		Reply    *string `json:"reply"` // nil: not our JSON; "": nothing to say
-		Learning string  `json:"learning"`
-		Shared   bool    `json:"shared"`
-		Resolved bool    `json:"resolved"`
-	}
-	ok := agent.Object(out, &a) && a.Reply != nil
+	a, ok := parseAnswer(out)
 	if !ok {
 		out, err = agent.Pi{}.Continue(ctx, dir, "chat", system, chatRepair, m)
 		if err != nil {
 			return err
 		}
-		ok = agent.Object(out, &a) && a.Reply != nil
+		a, ok = parseAnswer(out)
 	}
 	if !ok {
 		return fmt.Errorf("chat returned no JSON, ends with %q", text.Tail(out))

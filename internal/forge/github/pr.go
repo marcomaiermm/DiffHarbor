@@ -124,6 +124,8 @@ type comment struct {
 	ID        int64  `json:"id"`
 	InReplyTo int64  `json:"in_reply_to_id"`
 	Body      string `json:"body"`
+	Created   string `json:"created_at"`
+	Updated   string `json:"updated_at"`
 	Path      string `json:"path"`
 	DiffHunk  string `json:"diff_hunk"`
 	User      struct {
@@ -132,7 +134,7 @@ type comment struct {
 }
 
 func (c comment) note() forge.Note {
-	return forge.Note{ID: c.ID, Login: c.User.Login, Body: c.Body, Ours: c.User.Login == Slug+"[bot]"}
+	return forge.Note{ID: c.ID, Login: c.User.Login, Body: c.Body, Ours: c.User.Login == Slug+"[bot]", Edited: c.Updated != c.Created}
 }
 
 func (p *pr) Notes() ([]forge.Note, error) {
@@ -182,16 +184,19 @@ func (p *pr) Discussion() (forge.Discussion, error) {
 		}
 		d.Notes = append(d.Notes, c.note())
 	}
-	if !d.Ours { // chat leaves a thread between humans alone: no need to ask
-		return d, nil
+	if !d.Ours && !forge.MentionOf(Slug).MatchString(p.e.Comment.Body) {
+		return d, nil // chat leaves a thread between humans alone unless asked: no need to ask GitHub
 	}
 	ts, err := p.Threads()
+	if err != nil { // unknown: taken as open, the thread itself is still there to answer
+		log.Println(p.e.Key(), "thread state:", err)
+	}
 	for _, t := range ts {
 		if t.Comment == root {
 			d.Resolved = t.Resolved
 		}
 	}
-	return d, err
+	return d, nil
 }
 
 func (p *pr) Reply(body string) error {
