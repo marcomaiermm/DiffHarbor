@@ -28,7 +28,7 @@
     "ignore": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Globs (*, **, ?); a path without one takes its folder."
+      "description": "Globs (*, **, ?, [abc], {a,b}); a path without one takes its folder, \"!glob\" takes paths back in."
     },
     "min_severity": { "$ref": "#/definitions/severity" },
     "tests": { "type": "boolean", "description": "Run the tests of changed packages. Unset: only when no CI workflow does." },

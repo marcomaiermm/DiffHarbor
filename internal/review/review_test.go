@@ -133,15 +133,18 @@ func TestParseWalkthrough(t *testing.T) {
 }
 
 func TestSettings(t *testing.T) {
-	cfg, err := LoadSettings(`{"_comment":"x","ignore":["drizzle/meta","**/*.snap.ts","locales/*.json"],"min_severity":"major","tests":false}`)
+	cfg, err := LoadSettings(`{"_comment":"x","ignore":["!ui/{chip,toast}.tsx","x/{a,{b,c}d}.ts","[!.]*.lock","n/a**.go","b/\\{c\\}","drizzle/meta","**/*.snap.ts","locales/*.json","ui"],"min_severity":"major","tests":false}`)
 	if err != nil || cfg.Tests == nil || *cfg.Tests {
 		t.Fatalf("%+v %v", cfg, err)
 	}
 	for p, want := range map[string]bool{
 		"drizzle/meta/0001.json": true, "drizzle/meta": true, "drizzle/metax.ts": false,
 		"a/b/c.snap.ts": true, "c.snap.ts": true, "locales/de.json": true, "locales/x/de.json": false, "src/a.ts": false,
+		"ui/button.tsx": true, "ui/chip.tsx": false, "ui/toast.tsx": false, "ui/chip,toast.tsx": true,
+		"x/a.ts": true, "x/cd.ts": true, "x/d.ts": false, "go.lock": true, ".x.lock": false, "n/ab.go": true, "n/a/b.go": false,
+		"b/{c}": true, "b/c": false,
 	} {
-		if cfg.IgnoreRe.MatchString(p) != want {
+		if cfg.Ignored(p) != want {
 			t.Errorf("ignore %s: want %v", p, want)
 		}
 	}
@@ -151,7 +154,7 @@ func TestSettings(t *testing.T) {
 	if _, err := LoadSettings(`{"min_severity":"high"}`); err == nil {
 		t.Error("min_severity high accepted")
 	}
-	for _, bad := range []string{`{"large_pr":"yes"}`, `{"max_parts":9}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
+	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
 		if _, err := LoadSettings(bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
@@ -217,7 +220,7 @@ func TestSettings(t *testing.T) {
 	if _, err := LoadSettings(`{"ignore":`); err == nil {
 		t.Error("broken json accepted")
 	}
-	if cfg, err := LoadSettings(""); err != nil || cfg.IgnoreRe != nil || !cfg.RunsTests("a.go") {
+	if cfg, err := LoadSettings(""); err != nil || cfg.Ignored("a.go") || !cfg.RunsTests("a.go") {
 		t.Error("empty")
 	}
 	if on, _ := LoadSettings(`{"install_scripts":true}`); !on.InstallScripts || cfg.InstallScripts {

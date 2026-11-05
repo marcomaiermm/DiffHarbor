@@ -16,7 +16,8 @@ import (
 // Settings is a repo's review.json at the root, from the base branch. Unknown keys are ignored, so
 // "_comment" works.
 type Settings struct {
-	Ignore []string `json:"ignore"` // globs (*, **, ?) of files not to review; a plain path takes its subtree
+	// Globs (globRe) of files not to review; a plain path takes its subtree, "!glob" takes paths back in.
+	Ignore []string `json:"ignore"`
 	pkgSettings
 	// Overrides for parts of a monorepo, by path glob; the longest matching pattern wins.
 	Packages map[string]pkgSettings `json:"packages"`
@@ -50,9 +51,9 @@ type Settings struct {
 	// Base branches besides the default branch whose PRs get reviewed without asking, as globs ("release/*").
 	BaseBranches []string `json:"base_branches"`
 
-	IgnoreRe *regexp.Regexp
-	CITests  string    // checks.CITests: the CI file running the tests; unless "tests" says otherwise, the review doesn't
-	pkgs     []pkgRule // longest pattern first
+	ignoreRe, keepRe *regexp.Regexp // ignore's globs, its "!" ones
+	CITests          string         // checks.CITests: the CI file running the tests; unless "tests" says otherwise, the review doesn't
+	pkgs             []pkgRule      // longest pattern first
 }
 
 // SyntaxTheme is a Shiki theme for each color mode.
@@ -143,30 +144,69 @@ func (cfg Settings) Reviews(base, defaultBranch string) bool {
 // Asks reports whether a review cut short offers the box for all parts.
 func (cfg Settings) Asks() bool { return cfg.LargePR == "ask" }
 
-// globRe matches a path any of globs (*, **, ?) matches, or a path under it.
-func globRe(globs ...string) *regexp.Regexp {
+// globRe matches a path any of globs matches, or a path under it. The syntax is doublestar's
+// (github.com/bmatcuk/doublestar), translated to a regexp, so linear: * and ? within a segment, ** as a whole
+// segment any depth (else as *), [abc], [a-z], [!abc], {a,b} nested, \ escapes the next byte.
+func globRe(globs ...string) (*regexp.Regexp, error) {
 	var res []string
 	for _, g := range globs {
 		var b strings.Builder
+		lit := func(c byte) {
+			if strings.IndexByte(`\.+*?()|[]{}^$-`, c) >= 0 {
+				b.WriteByte('\\')
+			}
+			b.WriteByte(c)
+		}
+		depth, class := 0, false
 		for i := 0; i < len(g); i++ {
+			c := g[i]
+			seg := i == 0 || g[i-1] == '/'
 			switch {
-			case strings.HasPrefix(g[i:], "**/"):
+			case c == '\\' && i+1 < len(g):
+				i++
+				lit(g[i])
+			case class && c == ']':
+				b.WriteByte(']')
+				class = false
+			case class && c == '-':
+				b.WriteByte('-')
+			case class:
+				lit(c)
+			case c == '[':
+				b.WriteByte('[')
+				class = true
+				if i+1 < len(g) && (g[i+1] == '!' || g[i+1] == '^') {
+					b.WriteString("^/")
+					i++
+				}
+			case seg && strings.HasPrefix(g[i:], "**/"):
 				b.WriteString("(.*/)?")
 				i += 2
-			case strings.HasPrefix(g[i:], "**"):
+			case seg && g[i:] == "**":
 				b.WriteString(".*")
 				i++
-			case g[i] == '*':
+			case c == '*':
 				b.WriteString("[^/]*")
-			case g[i] == '?':
+			case c == '?':
 				b.WriteString("[^/]")
+			case c == '{':
+				b.WriteString("(?:")
+				depth++
+			case c == '}': // a stray one fails to compile below
+				b.WriteString(")")
+				depth--
+			case c == ',' && depth > 0:
+				b.WriteString("|")
 			default:
-				b.WriteString(regexp.QuoteMeta(g[i : i+1]))
+				lit(c)
 			}
+		}
+		if _, err := regexp.Compile(b.String()); err != nil {
+			return nil, fmt.Errorf("glob %q: want closed [] and {}, ranges low-high", g)
 		}
 		res = append(res, b.String())
 	}
-	return regexp.MustCompile(`^(` + strings.Join(res, "|") + `)(/.*)?$`)
+	return regexp.Compile(`^(` + strings.Join(res, "|") + `)(/.*)?$`)
 }
 
 // LoadSettings parses s ("" = defaults). A broken file reviews with the defaults, the error says why.
@@ -224,15 +264,35 @@ func LoadSettings(s string) (Settings, error) {
 	if cfg.MinSeverity != "" && rank[cfg.MinSeverity] == 0 {
 		return Settings{}, fmt.Errorf("min_severity %q: want minor, major or critical", cfg.MinSeverity)
 	}
-	if len(cfg.Ignore) > 0 {
-		cfg.IgnoreRe = globRe(cfg.Ignore...)
+	var ignore, keep []string
+	for _, g := range cfg.Ignore {
+		if k, ok := strings.CutPrefix(g, "!"); ok {
+			keep = append(keep, k)
+		} else {
+			ignore = append(ignore, g)
+		}
+	}
+	var err error
+	if len(ignore) > 0 {
+		if cfg.ignoreRe, err = globRe(ignore...); err != nil {
+			return Settings{}, fmt.Errorf("ignore: %w", err)
+		}
+	}
+	if len(keep) > 0 {
+		if cfg.keepRe, err = globRe(keep...); err != nil {
+			return Settings{}, fmt.Errorf("ignore: %w", err)
+		}
 	}
 	for _, p := range slices.SortedFunc(maps.Keys(cfg.Packages), func(a, b string) int { return cmp.Compare(len(b), len(a)) }) {
 		ps := cfg.Packages[p]
 		if ps.MinSeverity != "" && rank[ps.MinSeverity] == 0 {
 			return Settings{}, fmt.Errorf("packages %q: min_severity %q: want minor, major or critical", p, ps.MinSeverity)
 		}
-		cfg.pkgs = append(cfg.pkgs, pkgRule{globRe(strings.TrimSuffix(p, "/")), ps})
+		re, err := globRe(strings.TrimSuffix(p, "/"))
+		if err != nil {
+			return Settings{}, fmt.Errorf("packages: %w", err)
+		}
+		cfg.pkgs = append(cfg.pkgs, pkgRule{re, ps})
 	}
 	return cfg, nil
 }
@@ -284,6 +344,11 @@ func (cfg Settings) at(path string) pkgSettings {
 // LeftToCI reports whether path's tests are skipped because the CI runs them, not because review.json says so.
 func (cfg Settings) LeftToCI(path string) bool {
 	return cfg.CITests != "" && cfg.at(path).Tests == nil
+}
+
+// Ignored reports whether path is not reviewed: an ignore glob matches it and no "!" one does, in any order.
+func (cfg Settings) Ignored(path string) bool {
+	return cfg.ignoreRe != nil && cfg.ignoreRe.MatchString(path) && (cfg.keepRe == nil || !cfg.keepRe.MatchString(path))
 }
 
 // Keep reports whether c reaches the min_severity for its file.
