@@ -230,7 +230,7 @@ func (p *pr) Discussion() (forge.Discussion, error) {
 		return d, err
 	}
 	first := ns[0]
-	d.Ours = first.forge().Ours && strings.Contains(first.Body, forge.Mark)
+	d.Ours, d.Resolved = first.forge().Ours && strings.Contains(first.Body, forge.Mark), first.Resolved
 	if pos := first.Position; pos != nil {
 		d.About = fmt.Sprintf("## `%s` line %d (read the file for context)\n\n", pos.NewPath, pos.NewLine)
 	}

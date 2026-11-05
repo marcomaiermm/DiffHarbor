@@ -228,3 +228,58 @@ func TestChatReactsOffTheWorker(t *testing.T) {
 		t.Fatal("Chat did not react")
 	}
 }
+
+func TestOtherMention(t *testing.T) {
+	for body, want := range map[string]bool{
+		"That is true. @BrudyR, what do you think?": true,
+		"@john.doe-2 ok?":                     true,
+		"What do you think (@alice)?":         true,
+		"Fixed in abc123.":                    false,
+		"mail me at a@b.com":                  false,
+		"use `@Override` here":                false,
+		"```java\n@Override\nvoid run()\n```": false,
+	} {
+		if got := mentionsOther(body); got != want {
+			t.Errorf("%q: got %v, want %v", body, got, want)
+		}
+	}
+}
+
+func TestNewerFrom(t *testing.T) {
+	ns := []forge.Note{{ID: 1, Login: "bot"}, {ID: 2, Login: "ann"}, {ID: 3, Login: "bob"}, {ID: 4, Login: "ann"}}
+	for _, c := range []struct {
+		id    int64
+		login string
+		want  bool
+	}{{2, "ann", true}, {4, "ann", false}, {3, "bob", false}, {9, "ann", false}} {
+		if got := newerFrom(ns, c.id, c.login); got != c.want {
+			t.Errorf("%d %s: got %v", c.id, c.login, got)
+		}
+	}
+}
+
+func TestChatLeavesQuestionsForOthers(t *testing.T) {
+	pr := &reactPR{reacted: make(chan struct{}), release: make(chan struct{})}
+	defer close(pr.release)
+	e := &forge.Event{Kind: "pull_request_review_comment"}
+	e.Comment.Body = "What do you think (@alice)?"
+	if err := Chat(t.Context(), reactForge{pr: pr}, regexp.MustCompile(`@bot`), e); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-pr.reacted:
+		t.Fatal("Chat reacted to a question for @alice")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestAck(t *testing.T) {
+	for body, want := range map[string]bool{
+		"thanks!": true, "Danke schön": true, "LGTM": true, "👍": true, "ok.": true,
+		"ok, but why line 3?": false, "done": false, "fixed in abc123": false, "thanks, but this is wrong": false,
+	} {
+		if got := ack.MatchString(body); got != want {
+			t.Errorf("%q: got %v, want %v", body, got, want)
+		}
+	}
+}
