@@ -222,5 +222,9 @@ func TestChatReactsOffTheWorker(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Chat waited on the reaction")
 	}
-	<-pr.reacted
+	select {
+	case <-pr.reacted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Chat did not react")
+	}
 }
