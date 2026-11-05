@@ -209,7 +209,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			if !ours {
 				return nil // a thread between humans
 			}
-			p.React() // the server left it to us
+			go p.React() // the server left it to us; off the worker, a slow forge would hold up the queue
 		}
 	}
 

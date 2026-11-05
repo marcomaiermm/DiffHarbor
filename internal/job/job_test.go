@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -188,4 +189,38 @@ func TestReportSecret(t *testing.T) {
 			t.Fatal(s, got)
 		}
 	}
+}
+
+// A reply in our thread without @bot gets 👀 from Chat, off the worker: a slow forge doesn't hold up the queue.
+type reactPR struct {
+	skipPR
+	reacted, release chan struct{}
+}
+
+func (*reactPR) Discussion() (forge.Discussion, error) { return forge.Discussion{Ours: true}, nil }
+func (p *reactPR) React()                              { close(p.reacted); <-p.release }
+
+type reactForge struct {
+	skipForge
+	pr *reactPR
+}
+
+func (f reactForge) Open(*forge.Event) (forge.PR, error) { return f.pr, nil }
+
+func TestChatReactsOffTheWorker(t *testing.T) {
+	pr := &reactPR{reacted: make(chan struct{}), release: make(chan struct{})}
+	defer close(pr.release)
+	e := &forge.Event{Kind: "pull_request_review_comment"} // no repository id: Chat stops right after the thread check
+	e.Comment.Body = "why?"
+	done := make(chan error, 1)
+	go func() { done <- Chat(t.Context(), reactForge{pr: pr}, regexp.MustCompile(`@bot`), e) }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "no repository id") {
+			t.Fatal("Chat stopped elsewhere:", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Chat waited on the reaction")
+	}
+	<-pr.reacted
 }
