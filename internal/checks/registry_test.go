@@ -35,7 +35,7 @@ func TestRegistries(t *testing.T) {
 func TestRegistryLockfile(t *testing.T) {
 	defer func(pi bool) { proc.AsPi = pi }(proc.AsPi)
 	proc.AsPi = false
-	env, urls, err := registryEnv(context.Background(), []Registry{{"", "https://art.corp/npm/", "tok"}, {"@corp", "https://art.corp/npm/internal/", "user:pw"}})
+	env, urls, err := RegistryEnv(context.Background(), []Registry{{"", "https://art.corp/npm/", "tok"}, {"@corp", "https://art.corp/npm/internal/", "user:pw"}})
 	if err != nil {
 		t.Fatal(err)
 	}

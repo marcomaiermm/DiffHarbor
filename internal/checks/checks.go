@@ -32,6 +32,8 @@ var (
 	luaFile   = regexp.MustCompile(`\.lua$`)
 	sqlFile   = regexp.MustCompile(`\.sql$`)
 	testFile  = regexp.MustCompile(`(^|/)(tests?|__tests__)/|\.(test|spec)\.[cm]?[jt]sx?$`)
+	// depSet is a package.json diff line that sets a version: a dependency's, or the package's own ("version").
+	depSet = regexp.MustCompile(`(?m)^\+\s*"([^"]+)":\s*"[\^~=v<>]*\s*\d`)
 	// A CI job that runs tests: go test, vitest, `pnpm -r run test:unit`, `turbo run test`, `nx affected -t test` …
 	ciTest = regexp.MustCompile(`\b(go test|gotestsum|vitest|jest|pytest|cargo (test|nextest)|make test)\b|\b(npm|pnpm|yarn|bun|turbo|nx)\b[^\n]*\stest(:\S*)?(\s|$)`)
 	// A path heuristic for "touches the Drizzle schema", the configs' schema globs aren't read.
@@ -150,7 +152,7 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 	if h := os.Getenv("DOCKER_HOST"); h != "" { // dind for testcontainers, see compose.yml
 		env = append(env, "DOCKER_HOST="+h)
 	}
-	regEnv, regURLs, err := registryEnv(ctx, regs)
+	regEnv, regURLs, err := RegistryEnv(ctx, regs)
 	if err != nil {
 		fmt.Fprintf(&out, "\n### npm registries\n%s\n", err)
 	}
@@ -216,9 +218,20 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 		section("gitleaks (secrets)", leaks, 60)
 	}
 
+	// A package.json that bumps a dependency makes its package a root even without changed code: the bump breaks
+	// code it doesn't touch.
+	var bumped []string
+	diff.EachFile(string(pd), func(path, f string) {
+		if filepath.Base(path) == "package.json" && slices.Contains(changed, path) &&
+			slices.ContainsFunc(depSet.FindAllStringSubmatch(f, -1), func(m []string) bool { return m[1] != "version" }) {
+			bumped = append(bumped, path)
+		}
+	})
 	installed := map[string]bool{}
-	for _, root := range roots(repo, match(jsFile), "package.json", &out) {
-		dir, js := root.dir, root.files
+	for _, root := range roots(repo, append(match(jsFile), bumped...), "package.json", &out) {
+		dir := root.dir
+		js := slices.DeleteFunc(slices.Clone(root.files), func(f string) bool { return !jsFile.MatchString(f) })
+		bump := len(js) < len(root.files)
 		run, rel, where := in(dir), relTo(dir, js), titled(dir)
 		// Workspaces install once at their lockfile, separate apps each at their own.
 		if lock := Up(repo, dir, "pnpm-lock.yaml", "yarn.lock", "package-lock.json"); lock != "" && !installed[lock] {
@@ -251,18 +264,23 @@ func Run(ctx context.Context, repo string, scripts []Script, patch string, files
 		}
 		at := func(f string) bool { return has(filepath.Join(dir, f)) }
 		if tsc := bin("tsc"); at("tsconfig.json") && tsc != "" {
-			// The whole package gets checked; keep the lines about changed files.
-			section("tsc --noEmit (lines about changed files)"+where, grep(run(tsc, "--noEmit", "-p", "."), func(l string) bool {
-				return slices.ContainsFunc(rel, func(f string) bool { return strings.Contains(l, f) })
-			}), 60)
+			res := run(tsc, "--noEmit", "-p", ".")
+			if bump {
+				section("tsc --noEmit (whole package: the change bumps its dependencies; errors may predate it)"+where, res, 60)
+			} else { // keep the lines about changed files
+				section("tsc --noEmit (lines about changed files)"+where, grep(res, func(l string) bool {
+					return slices.ContainsFunc(rel, func(f string) bool { return strings.Contains(l, f) })
+				}), 60)
+			}
 		}
-		if biome := bin("biome"); biome != "" && Up(repo, dir, "biome.json", "biome.jsonc") != "" {
+		if len(rel) == 0 { // a bump alone: the linters would take no files as the whole package
+		} else if biome := bin("biome"); biome != "" && Up(repo, dir, "biome.json", "biome.jsonc") != "" {
 			section("biome lint"+where, run(biome, append([]string{"lint", "--colors=off"}, rel...)...), 80)
 		} else if eslint := bin("eslint"); eslint != "" {
 			section("eslint"+where, run(eslint, append([]string{"--no-color"}, rel...)...), 80)
 		}
 		addedHere := under(dir, added)
-		if at("tsconfig.json") {
+		if at("tsconfig.json") && len(rel) > 0 {
 			section("oxlint --type-aware (added lines)"+where, grep(run("oxlint", append([]string{
 				"--type-aware", "--disable-nested-config",
 				"-c", config("oxlintrc.json", oxlintConfig), "-f", "unix",
