@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.6.0...v0.6.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **chat:** no 👀 on replies in threads between humans ([#59](https://github.com/marcomaiermm/DiffHarbor/issues/59)) ([61721ed](https://github.com/marcomaiermm/DiffHarbor/commit/61721edf2b028ba3acce634aa962f767f614b4cf))
+
 ## [0.6.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.5.0...v0.6.0) (2026-11-05)
 
 
