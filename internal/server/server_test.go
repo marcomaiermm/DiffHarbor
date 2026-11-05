@@ -214,3 +214,15 @@ func TestReportRoute(t *testing.T) {
 		}
 	}
 }
+
+// Each lighthouse file is an SVG with a CSP: GitHub picks -light or -dark by its theme, the rest gets the plain one.
+func TestServeLighthouse(t *testing.T) {
+	for _, name := range []string{"reviewing.svg", "reviewing-light.svg", "reviewing-dark.svg"} {
+		w := httptest.NewRecorder()
+		serveLighthouse(w, httptest.NewRequest(http.MethodGet, "/"+name, nil))
+		if w.Code != 200 || w.Header().Get("Content-Type") != "image/svg+xml" || w.Header().Get("Content-Security-Policy") == "" ||
+			!strings.HasPrefix(w.Body.String(), "<svg") {
+			t.Fatal(name, w.Code, w.Header())
+		}
+	}
+}

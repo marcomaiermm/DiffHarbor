@@ -257,7 +257,10 @@ func Serve(cfg Config) {
 	})
 	if job.ReportURL != "" {
 		http.HandleFunc("GET /r/{path...}", serveReport)
-		http.HandleFunc("GET /reviewing.svg", serveLighthouse)
+		names, _ := fs.Glob(assets.Reviewing, "*.svg")
+		for _, name := range names {
+			http.HandleFunc("GET /"+name, serveLighthouse)
+		}
 	}
 	resume(queue)
 	go func() {
@@ -278,13 +281,18 @@ func Serve(cfg Config) {
 }
 
 // serveLighthouse serves the walkthrough's reviewing banner: GitHub's image proxy fetches it, on GitLab the browser.
-func serveLighthouse(w http.ResponseWriter, _ *http.Request) {
+func serveLighthouse(w http.ResponseWriter, r *http.Request) {
+	b, err := assets.Reviewing.ReadFile(path.Base(r.URL.Path)) // only the routes registered for its files get here
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
 	h := w.Header()
 	h.Set("Content-Type", "image/svg+xml")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'") // opened on its own: no scripts
 	h.Set("Cache-Control", "public, max-age=86400")
-	_, _ = w.Write(assets.Reviewing)
+	_, _ = w.Write(b)
 }
 
 // serveReport serves a PR's report to who has its link: a report holds the PR's code, and the app has no login, the

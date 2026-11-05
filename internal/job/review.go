@@ -72,8 +72,11 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		return nil
 	}
 	// The lighthouse comes from this server when it has a public URL, else from the docs site: the forge fetches it.
-	img := cmp.Or(ReportURL, "https://marcomaiermm.github.io/DiffHarbor") + "/reviewing.svg"
-	s.Write(fmt.Sprintf(`<img src="%s" width="440" alt="A lighthouse sweeping its beam"><br>⏳ **Reviewing** `+"`%s` …", img, sha[:7]), "")
+	// GitHub picks a <source> by its theme setting; elsewhere the <img> follows the OS's color scheme.
+	img := cmp.Or(ReportURL, "https://marcomaiermm.github.io/DiffHarbor") + "/reviewing"
+	s.Write(fmt.Sprintf(`<picture><source media="(prefers-color-scheme: dark)" srcset="%[1]s-dark.svg">`+
+		`<source media="(prefers-color-scheme: light)" srcset="%[1]s-light.svg">`+
+		`<img src="%[1]s.svg" width="440" alt="A lighthouse sweeping its beam"></picture><br>⏳ **Reviewing** `+"`%[2]s` …", img, sha[:7]), "")
 	desc, state := "Review completed", "success"
 	p.Status(sha, "pending", "Review in progress")
 	defer func() {
