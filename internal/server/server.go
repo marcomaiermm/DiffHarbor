@@ -247,7 +247,8 @@ func Serve(cfg Config) {
 		select {
 		case queue <- e:
 			w.WriteHeader(http.StatusAccepted)
-			if e.Kind != "pull_request" {
+			// a reply without @bot may be in a thread between humans: Chat reacts once it knows the thread is ours
+			if e.Kind != "pull_request" && (e.Kind != "pull_request_review_comment" || mention.MatchString(c.Body)) {
 				go job.Seen(f, e)
 			}
 		default:
