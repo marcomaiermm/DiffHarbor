@@ -39,6 +39,10 @@ const schema = `Output JSON only:
 "existing":"<only if the whole fix is one local edit: the current lines it replaces, copied exactly from the new file>","fix":"<their replacement, same indentation>"}]}
 Max 10 comments, [] if none.`
 
+// splitSchema asks a large PR's guide for the changes that could each merge on their own: more than one asks to split.
+const splitSchema = `
+"split":["<a few words: one change in the diff that could be reviewed and merged on its own, its main files>"] every such change, also when there is one.`
+
 // guideSchema asks for a reading guide too: the report a person reads a large PR with.
 const guideSchema = `
 Also add to the JSON, for the person who reviews it after you:
@@ -48,7 +52,7 @@ Also add to the JSON, for the person who reviews it after you:
 "story":{"problem":"<one sentence, at most 20 words: what was wrong or missing before>","before":"<at most 25 words: one concrete case, an input or action and what happened>","after":"<at most 25 words: the same case now>",
 "before_at":"<path:line of the code that did it before, empty if outside the diff>","after_at":"<path:line of the code that does it now>","proof":"<the test that runs this case, as go test names it (TestX/sub), empty if none>"}
  only for a change in behaviour a user or caller sees; omit it for refactors, tests, docs;
-"decisions":[{"text":"<a question only a person can answer: scope, product behaviour, architecture, risk; no bug>","at":"<path:line it is about, empty if none>"}] max 3, [] if none;
+"decisions":[{"text":"<a question only a person can answer: scope, product behaviour, architecture, risk; or an assumption the code makes that nothing states or checks (a single writer, the input fits in memory, the caller already authorized), asked as: does it hold?; no bug>","at":"<path:line it is about, empty if none>"}] max 3, [] if none;
 In the summary, put the place of each main claim right after it as (path:line).
 "routine":[{"path":"<changed file>","line":<a line of the hunk in the new file>,"why":"<a few words>"}] hunks the person can skip: no behaviour to check (a rename, a parameter passed through, log or error text, call sites updated to a new signature), never one with a finding; [] if none.`
 
@@ -64,7 +68,10 @@ a status or flag that claims complete or valid: does every cut-off, cap, skipped
 filters, dedupe or skips after a LIMIT or page cut; ORDER BY and cursors against the promised order,
 input accepted but ignored (flag combinations, repeated or unknown parameters),
 decoded external data (JSON, config, API): a missing or renamed field turns zero or empty at any nesting level; is that skipped or taken as valid,
-multi-step writes: a crash or error between the steps, half-applied updates.
+multi-step writes: a crash or error between the steps, half-applied updates,
+a query, model or API call inside a loop: N+1, worst-case count and cost,
+contracts: a removed or renamed field, endpoint, status or stored format that callers, clients or the still deployed old version read,
+migrations: a dropped or renamed column or table the old version still reads during the rollout (expand, migrate, contract), a backfill that locks or loads a whole table.
 Against the PR description and a linked ticket: promised behaviour that is missing or wrong, behaviour nobody asked for.
 Against changed docs and API specs: every claim they make about the code (fields, nulls, status codes, when a value is set) must hold there;
 command examples must work pasted as written, a code block top to bottom.
@@ -125,6 +132,7 @@ type Result struct {
 	Effort      int               `json:"effort,omitempty"`      // 1-5
 	Flow        []Step            `json:"flow,omitempty"`        // reading order, with Input.Guide
 	Decisions   []Decision        `json:"decisions,omitempty"`   // what only a person can decide, with Input.Guide
+	Split       []string          `json:"split,omitempty"`       // changes that could each merge on their own, with Input.Guide
 	Story       Story             `json:"story,omitzero"`        // the problem and one case before and after, with Input.Guide
 	Routine     []Routine         `json:"routine,omitempty"`     // hunks a person can skip, with Input.Guide
 	Fixed       []int             `json:"fixed,omitempty"`       // indexes into input.prior
@@ -199,6 +207,7 @@ type Input struct {
 	Closed      []Comment         // resolved ones: fixed or declined
 	Settings    Settings
 	Guide       bool // ask for Result.Flow and Decisions
+	split       bool // and with Guide for Result.Split: the PR reaches review.json's suggest_split
 }
 
 // Analyze is the pipeline: checks + history as hints, then per part a review pass and a verification pass on its findings.
@@ -208,7 +217,9 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	files := diff.Paths(whole)
 	lvl := Level(whole, files)
 	rm, verify := in.Settings.Models()
-	fs := in.Settings.Finders(diff.Changed(whole))
+	lines := diff.Changed(whole)
+	fs := in.Settings.Finders(lines)
+	in.split = in.Settings.SuggestsSplit(lines, len(files))
 	models := make([]string, len(fs))
 	for k := range fs {
 		fs[k].Model = agent.PassModel(fs[k].Model, lvl)
@@ -450,6 +461,7 @@ func merge(ps []part, m, vm, ci string) (Result, string, error) {
 		r.Diagram = cmp.Or(r.Diagram, p.r.Diagram)
 		r.Flow = append(r.Flow, p.r.Flow...) // parts are packed by directory: their steps read on in part order
 		r.Decisions = append(r.Decisions, p.r.Decisions...)
+		r.Split = append(r.Split, p.r.Split...)
 		r.Story = cmp.Or(r.Story, p.r.Story) // the first part that tells one: a second case would only repeat it
 		r.Routine = append(r.Routine, p.r.Routine...)
 		r.Effort = max(r.Effort, p.r.Effort)
@@ -477,6 +489,11 @@ func merge(ps []part, m, vm, ci string) (Result, string, error) {
 		tag += " · " + n
 	}
 	r.Summary = strings.Join(sums, " ")
+	// ponytail: parts list their own changes, so a feature packed into two parts reads as two; a split is only asked
+	if len(r.Split) > 1 {
+		ask := Decision{Text: fmt.Sprintf("Split into %d PRs? The AI suggests: %s. Each could be reviewed and merged on its own; check the cut first.", len(r.Split), strings.Join(r.Split, "; "))}
+		r.Decisions = append([]Decision{ask}, r.Decisions...)
+	}
 	r.Decisions = r.Decisions[:min(len(r.Decisions), 3)]
 	slices.Sort(r.Fixed)
 	r.Fixed = slices.Compact(r.Fixed)
@@ -497,6 +514,9 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string, again boo
 	system := reviewSystem
 	if in.Guide {
 		system += guideSchema
+	}
+	if in.Guide && in.split {
+		system += splitSchema
 	}
 	system += in.Trusted
 	var out string

@@ -36,6 +36,8 @@ type Settings struct {
 	// The HTML report to read a PR with (reading order, commits, tests), when the server has REPORT_URL.
 	// "auto" (default): from ReportFiles changed files; "always"; "off".
 	Report string `json:"report"`
+	// From these changed lines or files of the reviewed diff, the guide asks whether the PR should be several; unset: never.
+	SuggestSplit SplitAt `json:"suggest_split"`
 	// The report's code colors: Shiki theme names (shiki.style/themes), by the reader's light or dark mode.
 	// Default tokyo-night-day and tokyo-night.
 	SyntaxTheme SyntaxTheme `json:"syntax_theme"`
@@ -79,6 +81,12 @@ func (l Learnings) Limit() int {
 		return 30
 	}
 	return *l.Max
+}
+
+// SplitAt is review.json's suggest_split: either count reached asks; 0 asks by the other only.
+type SplitAt struct {
+	Lines int `json:"lines"`
+	Files int `json:"files"`
 }
 
 // Pass is a finder of review.json's passes.
@@ -141,6 +149,12 @@ func (cfg Settings) Parts(confirmed bool) int {
 		return cmp.Or(cfg.MaxParts, 4)
 	}
 	return 1
+}
+
+// SuggestsSplit reports whether a PR with lines changed lines in files files is asked whether it should be several.
+func (cfg Settings) SuggestsSplit(lines, files int) bool {
+	s := cfg.SuggestSplit
+	return s.Lines > 0 && lines >= s.Lines || s.Files > 0 && files >= s.Files
 }
 
 // ReportFiles is the changed files from which a PR gets a report unless review.json says otherwise.
@@ -282,6 +296,9 @@ func LoadSettings(s string) (Settings, error) {
 	}
 	if l := cfg.Learnings; l.Limit() < 0 || l.Limit() > MaxLearnings || l.MaxAgeDays < 0 {
 		return Settings{}, fmt.Errorf("learnings: max %d, max_age_days %d: want max 0 to %d, max_age_days 0 (any) or more", l.Limit(), l.MaxAgeDays, MaxLearnings)
+	}
+	if s := cfg.SuggestSplit; s.Lines < 0 || s.Files < 0 {
+		return Settings{}, fmt.Errorf("suggest_split %+v: want 0 (off) or more", s)
 	}
 	if cfg.MinSeverity != "" && rank[cfg.MinSeverity] == 0 {
 		return Settings{}, fmt.Errorf("min_severity %q: want minor, major or critical", cfg.MinSeverity)

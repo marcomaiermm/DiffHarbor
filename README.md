@@ -53,7 +53,7 @@ The server listens on `:3000`. Expose `POST /webhook/github` and/or `POST /webho
 
 ## How a review works
 
-1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, vendored and generated code (by name or a "Code generated … DO NOT EDIT" header) and binaries stay out. A pass gets up to 60k characters, code first, then tests, data, stylesheets and docs; larger PRs can be reviewed [in parts](#large-prs).
+1. **Diff.** On open, the whole PR against its merge base; on a push, only what changed since the last review. Drafts, lockfiles, build output, vendored and generated code (by name, Drizzle's migration snapshots, or a "Code generated … DO NOT EDIT" header) and binaries stay out. A pass gets up to 60k characters, code first, then tests, data, stylesheets and docs; larger PRs can be reviewed [in parts](#large-prs).
 2. **Context.** The checks above, plus codegraph, co-change from git history, the PR's commit messages, the repo's rules and skills from the base branch, learnings, and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings, then looks at the diff again for what it missed: the same session without tools, up to 10 more at about a tenth of the cost. With [`passes`](#passes), up to two more finders review the diff too.
 4. **Verify.** A cheaper model checks each finding in the code.
@@ -193,6 +193,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
   "max_parts": 4,
   "passes": [{}, {"max_lines": 1500}],
   "report": "auto",
+  "suggest_split": {"lines": 300, "files": 20},
   "tickets": ["ABC"],
   "install_scripts": false,
   "base_branches": ["develop", "release/*"],
@@ -214,6 +215,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `passes` | Finders per part, at most 3. See [Passes](#passes). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
+| `suggest_split` | See [Split suggestion](#split-suggestion). |
 | `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
 | `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
 | `base_branches` | Globs of base branches besides the default branch whose PRs get reviewed on their own. A PR into any other (`main` → `prod`) is skipped with a green status; `@<bot> review` still reviews it. |
@@ -253,6 +255,22 @@ Each pass is a finder with tools, followed by its second look; one verify pass c
 | `min_lines`, `max_lines` | Run only on PRs with that many changed lines in the reviewed files. |
 
 The first entry is the review model's and always runs: it takes `again` only. A further pass reads the files in reverse order. The verify pass drops a finding that another pass reported too. On four PRs of this repo, a second pass with `openai/gpt-6-luna:high` found about 1.5 more of 41 known defects per run for 14% more cost, one with `openai/gpt-6.1-terra:medium` about 3 more for 80% more: mostly the same defects the first pass found.
+
+### Split suggestion
+
+The AI suggests splitting a big PR into PRs that could each merge on their own. Off by default.
+
+```json
+"suggest_split": {"lines": 300, "files": 20}
+```
+
+| Key | |
+|---|---|
+| `lines` | Changed lines from which it suggests. |
+| `files` | Changed files from which it suggests. |
+
+- **Either one is enough**: 400 lines in 3 files or 25 files with 100 lines both get a suggestion.
+- Lockfiles, generated, ignored and deleted files don't count.
 
 ### Monorepos
 
