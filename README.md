@@ -171,7 +171,7 @@ Differences to GitHub:
 
 - **What's on it:** a verdict, the findings by weight, a reading order, diffs with findings, call graphs and what the change reaches outside the PR. Before you merge: base commits the PR is behind on, conflicts, and open PRs changing the same files or lines. At the end a draft review to send from the forge yourself. The page posts nothing.
 - **Versions:** each reviewed head keeps one, the newest 10 stay. Closing the PR deletes them.
-- **Link:** `/r/<host>/<repo>/<n>/<secret>`. The secret is random per PR (130 bits) and only the PR comment holds it. Any other path is a 404.
+- **Link:** `/r/<host>/<repo>/<n>/<secret>`. The secret is random per PR (130 bits) and only the PR comment holds it. Any other `/r/` path is a 404.
 - **Older reports:** reports from before the secret no longer open. The next review writes one at the new link, closing the PR deletes the old.
 - **Reviewing banner:** while a review runs, the PR comment shows `/reviewing.svg` (and `-light`, `-dark` for GitHub's theme setting) from this server. Keep them public: GitHub fetches them through its image proxy. Without `REPORT_URL` it comes from the docs site.
 
