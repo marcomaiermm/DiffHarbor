@@ -21,7 +21,7 @@ const Max = 60_000
 
 var (
 	// Skip matches lockfiles, generated, vendored and binary files: never reviewed.
-	Skip = regexp.MustCompile(`(^|/)(pnpm-lock\.yaml|package-lock\.json|npm-shrinkwrap\.json|[^/]+\.lock(b|file)?|go\.sum|packages\.lock\.json|Package\.resolved|\.terraform\.lock\.hcl)$|\.(min\.(js|css)|map|snap|svg|png|jpe?g|gif|webp|ico|pdf|woff2?)$|(^|/)(dist|build|vendor|third_party|node_modules|__generated__)/|(^|/)zz_generated[^/]*\.go$|\.(pb|sql)\.go$|_pb2(_grpc)?\.py$|_pb\.(js|ts)$|\.(g|freezed)\.dart$|_gen\.go$|\.(gen|generated)\.[a-z]+$`)
+	Skip = regexp.MustCompile(`(^|/)(pnpm-lock\.yaml|package-lock\.json|npm-shrinkwrap\.json|[^/]+\.lock(b|file)?|go\.sum|packages\.lock\.json|Package\.resolved|\.terraform\.lock\.hcl)$|\.(min\.(js|css)|map|snap|svg|png|jpe?g|gif|webp|ico|pdf|woff2?)$|(^|/)(dist|build|vendor|third_party|node_modules|__generated__)/|(^|/)meta/(_journal|\d+_snapshot)\.json$|(^|/)zz_generated[^/]*\.go$|\.(pb|sql)\.go$|_pb2(_grpc)?\.py$|_pb\.(js|ts)$|\.(g|freezed)\.dart$|_gen\.go$|\.(gen|generated)\.[a-z]+$`)
 	// generated matches a file diff whose first lines, a license comment first, start a comment saying it is:
 	// "Code generated … DO NOT EDIT.", "@generated" and the like. A changed file's first lines are in its diff only
 	// when a hunk starts there; generatedAt reads the others.
