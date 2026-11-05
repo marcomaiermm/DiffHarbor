@@ -162,6 +162,16 @@ func TestAnalyze(t *testing.T) {
 	if _, tag, _ := merge([]part{{}}, "m", "m", "ci.yml"); tag != "m · tests: CI (ci.yml)" {
 		t.Fatalf("tests left to CI: %q", tag)
 	}
+
+	// Changes that could merge on their own, across parts, become the first decision; one change asks nothing.
+	q := []Decision{{Text: "q1"}, {Text: "q2"}, {Text: "q3"}}
+	r, _, _ = merge([]part{{r: Result{Split: []string{"cache"}, Decisions: q}}, {r: Result{Split: []string{"retry"}}}}, "m", "m", "")
+	if len(r.Decisions) != 3 || r.Decisions[0].Text != "Split into 2 PRs? The AI suggests: cache; retry. Each could be reviewed and merged on its own; check the cut first." || r.Decisions[2].Text != "q2" {
+		t.Fatalf("split: %+v", r.Decisions)
+	}
+	if r, _, _ = merge([]part{{r: Result{Split: []string{"cache"}}}}, "m", "m", ""); len(r.Decisions) != 0 {
+		t.Fatalf("one change: %+v", r.Decisions)
+	}
 }
 
 func TestExplain(t *testing.T) {

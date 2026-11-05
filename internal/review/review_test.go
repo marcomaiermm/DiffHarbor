@@ -154,7 +154,7 @@ func TestSettings(t *testing.T) {
 	if _, err := LoadSettings(`{"min_severity":"high"}`); err == nil {
 		t.Error("min_severity high accepted")
 	}
-	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
+	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"suggest_split":{"files":-1}}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
 		if _, err := LoadSettings(bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
@@ -165,6 +165,12 @@ func TestSettings(t *testing.T) {
 	if (Settings{}).Parts(false) != 4 || (Settings{}).Asks() || all.Parts(false) != 6 || all.Asks() ||
 		off.Parts(true) != 1 || off.Asks() || ask.Parts(false) != 1 || ask.Parts(true) != 4 || !ask.Asks() {
 		t.Error("large_pr parts")
+	}
+	lines, _ := LoadSettings(`{"suggest_split":{"lines":300}}`)
+	either, _ := LoadSettings(`{"suggest_split":{"lines":300,"files":20}}`)
+	if (Settings{}).SuggestsSplit(1e6, 1e3) || lines.SuggestsSplit(299, 1e3) || !lines.SuggestsSplit(300, 1) ||
+		either.SuggestsSplit(299, 19) || !either.SuggestsSplit(10, 20) || !either.SuggestsSplit(300, 1) {
+		t.Error("suggest_split")
 	}
 	if _, err := LoadSettings(`{"review_model":"--tools=bash"}`); err == nil {
 		t.Error("flag as model accepted")
