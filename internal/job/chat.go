@@ -39,6 +39,13 @@ Output JSON only: {"reply":"<markdown or empty>","learning":"<rule or empty>","s
 // the bot isn't mentioned, so it is someone else.
 var otherMention = regexp.MustCompile(`(^|[^\w.+-])@[\w.-]+`)
 
+// code is fenced and inline code: an @Override in it talks to no one.
+var code = regexp.MustCompile("(?s)```.*?```|`[^`\n]*`")
+
+func mentionsOther(body string) bool {
+	return otherMention.MatchString(code.ReplaceAllString(body, ""))
+}
+
 // ack is a reply that needs no answer: no Pi run for it. Not "done" or "fixed": those claims get checked.
 var ack = regexp.MustCompile(`(?i)^(thanks?( you| a lot)?|thx|ty|danke( dir| schön)?|merci|ok(ay)?|lgtm|\+1|agreed|makes sense|sounds good|will do|mach ich|👍|🙏|❤️)[\s.!]*$`)
 
@@ -243,7 +250,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 					replies++
 				}
 			}
-			if !ours || otherMention.MatchString(c.Body) || replies >= maxReplies {
+			if !ours || mentionsOther(c.Body) || replies >= maxReplies {
 				return nil // between humans, a question for someone else, or we said our piece: @us to go on
 			}
 			go p.React() // the server left it to us; off the worker, a slow forge would hold up the queue

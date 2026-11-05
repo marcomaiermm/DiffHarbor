@@ -232,12 +232,14 @@ func TestChatReactsOffTheWorker(t *testing.T) {
 func TestOtherMention(t *testing.T) {
 	for body, want := range map[string]bool{
 		"That is true. @BrudyR, what do you think?": true,
-		"@john.doe-2 ok?":             true,
-		"What do you think (@alice)?": true,
-		"Fixed in abc123.":            false,
-		"mail me at a@b.com":          false,
+		"@john.doe-2 ok?":                     true,
+		"What do you think (@alice)?":         true,
+		"Fixed in abc123.":                    false,
+		"mail me at a@b.com":                  false,
+		"use `@Override` here":                false,
+		"```java\n@Override\nvoid run()\n```": false,
 	} {
-		if got := otherMention.MatchString(body); got != want {
+		if got := mentionsOther(body); got != want {
 			t.Errorf("%q: got %v, want %v", body, got, want)
 		}
 	}
