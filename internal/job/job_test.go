@@ -241,3 +241,16 @@ func TestOtherMention(t *testing.T) {
 		}
 	}
 }
+
+func TestNewerFrom(t *testing.T) {
+	ns := []forge.Note{{ID: 1, Login: "bot"}, {ID: 2, Login: "ann"}, {ID: 3, Login: "bob"}, {ID: 4, Login: "ann"}}
+	for _, c := range []struct {
+		id    int64
+		login string
+		want  bool
+	}{{2, "ann", true}, {4, "ann", false}, {3, "bob", false}, {9, "ann", false}} {
+		if got := newerFrom(ns, c.id, c.login); got != c.want {
+			t.Errorf("%d %s: got %v", c.id, c.login, got)
+		}
+	}
+}

@@ -28,7 +28,9 @@ var (
 	// APIURL is GITLAB_URL's REST API.
 	APIURL = "https://gitlab.com/api/v4"
 	// Bot is the token's user: @Bot in an MR comment talks to the bot.
-	Bot              string
+	Bot string
+	// Name is its display name: people type @Name when they skip the autocomplete.
+	Name             string
 	token, readToken string
 	client           = &http.Client{Timeout: time.Minute}
 	errNotFound      = errors.New("not found")
@@ -55,11 +57,12 @@ func Setup(cfg Config) (h *Hub, ok bool, err error) {
 	readToken = cfg.ReadToken // unset: git fetches with token, which stays in the vault like this one
 	var u struct {
 		Username string `json:"username"`
+		Name     string `json:"name"`
 	}
 	if err := call("GET", "/user", nil, &u); err != nil || u.Username == "" {
 		return nil, true, fmt.Errorf("gitlab GET /user: %w", err)
 	}
-	Bot = u.Username
+	Bot, Name = u.Username, u.Name
 	return h, true, nil
 }
 

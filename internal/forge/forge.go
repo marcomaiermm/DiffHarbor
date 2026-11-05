@@ -109,9 +109,10 @@ type Thread struct {
 
 // Discussion is a review thread with what it is about.
 type Discussion struct {
-	Ours  bool   // we started it: chat may resolve it
-	About string // markdown: the file and its hunk
-	Notes []Note
+	Ours     bool   // we started it: chat may resolve it
+	Resolved bool   // someone resolved it already
+	About    string // markdown: the file and its hunk
+	Notes    []Note
 }
 
 // RuleDirs are the dirs above files, below the root, whose AGENTS.md applies to them.

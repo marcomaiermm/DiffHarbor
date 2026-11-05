@@ -174,7 +174,11 @@ func Serve(cfg Config) {
 		log.Fatal("no forge: set GITHUB_APP_PRIVATE_KEY_B64 or GITLAB_TOKEN")
 	}
 	for name, f := range forges {
-		mentions[name] = mentionOf(f.Bot())
+		handles := []string{f.Bot()}
+		if name == "gitlab" && gitlab.Name != "" {
+			handles = append(handles, gitlab.Name)
+		}
+		mentions[name] = mentionOf(handles...)
 		log.Printf("%s as @%s on POST /webhook/%s", name, f.Bot(), name)
 	}
 	if err := proc.Clean(); err != nil { // a crash's work dirs, the cache all repos shared before
@@ -476,7 +480,10 @@ func retryDrops(queue chan *forge.Event) {
 	}
 }
 
-// mentionOf matches @slug as a whole login (not @slug-other).
-func mentionOf(slug string) *regexp.Regexp {
-	return regexp.MustCompile(`(?i)(^|\s)@` + regexp.QuoteMeta(slug) + `([^\w-]|$)`)
+// mentionOf matches @handle for any of handles as a whole login (not @handle-other).
+func mentionOf(handles ...string) *regexp.Regexp {
+	for i, h := range handles {
+		handles[i] = regexp.QuoteMeta(h)
+	}
+	return regexp.MustCompile(`(?i)(^|\s)@(` + strings.Join(handles, "|") + `)([^\w-]|$)`)
 }

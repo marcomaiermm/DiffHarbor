@@ -182,7 +182,16 @@ func (p *pr) Discussion() (forge.Discussion, error) {
 		}
 		d.Notes = append(d.Notes, c.note())
 	}
-	return d, nil
+	if !d.Ours { // chat leaves a thread between humans alone: no need to ask
+		return d, nil
+	}
+	ts, err := p.Threads()
+	for _, t := range ts {
+		if t.Comment == root {
+			d.Resolved = t.Resolved
+		}
+	}
+	return d, err
 }
 
 func (p *pr) Reply(body string) error {
