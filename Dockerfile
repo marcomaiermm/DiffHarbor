@@ -13,6 +13,8 @@ WORKDIR /home/node/src
 COPY --chown=node go.mod ./
 COPY --chown=node cmd cmd
 COPY --chown=node internal internal
+# assets_test checks the docs site serves the same lighthouse.
+COPY --chown=node docs/public/reviewing*.svg docs/public/
 ARG VERSION=dev
 # govulncheck fails the build on a known vulnerability the code reaches, the stdlib's too, until Renovate bumps Go.
 RUN tailwindcss -i internal/report/styles.css -o /tmp/styles.css --minify && { cmp -s /tmp/styles.css internal/report/styles.gen.css || { echo "styles.gen.css is stale: go generate ./internal/report"; exit 1; }; } \

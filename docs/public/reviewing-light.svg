@@ -1,0 +1,401 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="570" height="224" viewBox="0 0 570 224" role="img">
+<title>A lighthouse sweeping its beam</title>
+<style>
+text{font:14px 'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,'DejaVu Sans Mono',monospace;white-space:pre}
+text{fill:#6b6b6b}.w,.v{fill:#1f5fc4}.l,.g,.b1,.b2,.b3,.b4,.b5,.b6{fill:#8c6c3e}
+.g{fill-opacity:.75}.v{fill-opacity:.55}
+.b1{fill-opacity:0.38}
+.b2{fill-opacity:0.50}
+.b3{fill-opacity:0.62}
+.b4{fill-opacity:0.75}
+.b5{fill-opacity:0.88}
+.f{opacity:0;animation:f 3.0s steps(1,end) infinite}
+@keyframes f{0%{opacity:1}4.167%,100%{opacity:0}}
+.f1{animation-delay:0.125s}
+.f2{animation-delay:0.250s}
+.f3{animation-delay:0.375s}
+.f4{animation-delay:0.500s}
+.f5{animation-delay:0.625s}
+.f6{animation-delay:0.750s}
+.f7{animation-delay:0.875s}
+.f8{animation-delay:1.000s}
+.f9{animation-delay:1.125s}
+.f10{animation-delay:1.250s}
+.f11{animation-delay:1.375s}
+.f12{animation-delay:1.500s}
+.f13{animation-delay:1.625s}
+.f14{animation-delay:1.750s}
+.f15{animation-delay:1.875s}
+.f16{animation-delay:2.000s}
+.f17{animation-delay:2.125s}
+.f18{animation-delay:2.250s}
+.f19{animation-delay:2.375s}
+.f20{animation-delay:2.500s}
+.f21{animation-delay:2.625s}
+.f22{animation-delay:2.750s}
+.f23{animation-delay:2.875s}
+@media (prefers-reduced-motion:reduce){.f{animation:none}.f0{opacity:1}}
+</style>
+<g transform="translate(8 20)" xml:space="preserve">
+<g class="f f0">
+<text y="0" textLength="554.4">                                                         <tspan class="b2">::::</tspan><tspan class="b1">.....</tspan></text>
+<text y="16" textLength="554.4">                                 _                <tspan class="b3">----</tspan><tspan class="b2">:::::::::</tspan><tspan class="b1">...</tspan></text>
+<text y="32" textLength="554.4">                                /^\        <tspan class="b4">======</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">-------</tspan><tspan class="b2">::::::</tspan><tspan class="b1">..</tspan></text>
+<text y="48" textLength="554.4">                               |[<tspan class="l">*</tspan>]|<tspan class="b6">******</tspan><tspan class="b5">++++++</tspan><tspan class="b4">======</tspan><tspan class="b3">-----</tspan><tspan class="b2">::::::</tspan><tspan class="b1">.</tspan></text>
+<text y="64" textLength="554.4">                              [=====]           <tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">-------</tspan><tspan class="b2">::::::</tspan><tspan class="b1">..</tspan></text>
+<text y="80" textLength="554.4">                               |   |                        <tspan class="b2">:::</tspan><tspan class="b1">...</tspan></text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">~-~^~--~~-~^~--~~-~^~--~~-~^~</tspan>/_______\<tspan class="w">-</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-~^~--~~-</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-</tspan></text>
+</g>
+<g class="f f1">
+<text y="0" textLength="554.4">                                                         <tspan class="b2">::::</tspan><tspan class="b1">....</tspan> </text>
+<text y="16" textLength="554.4">                                 _                <tspan class="b3">----</tspan><tspan class="b2">:::::::::</tspan><tspan class="b1">..</tspan> </text>
+<text y="32" textLength="554.4">                                /^\        <tspan class="b4">======</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">-------</tspan><tspan class="b2">::::::</tspan><tspan class="b1">.</tspan> </text>
+<text y="48" textLength="554.4">                               |[<tspan class="l">*</tspan>]|<tspan class="b6">******</tspan><tspan class="b5">++++++</tspan><tspan class="b4">======</tspan><tspan class="b3">-----</tspan><tspan class="b2">::::::</tspan> </text>
+<text y="64" textLength="554.4">                              [=====]           <tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">-------</tspan><tspan class="b2">::::::</tspan><tspan class="b1">.</tspan> </text>
+<text y="80" textLength="554.4">                               |   |                        <tspan class="b2">:::</tspan><tspan class="b1">..</tspan> </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">~-~^~--~~-~^~--~~-~^~--~~-~^~</tspan>/_______\<tspan class="w">-</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-~^~--~~-</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-</tspan></text>
+</g>
+<g class="f f2">
+<text y="0" textLength="554.4">                                                         <tspan class="b2">::::</tspan><tspan class="b1">...</tspan>  </text>
+<text y="16" textLength="554.4">                                 _                <tspan class="b3">----</tspan><tspan class="b2">::::::::</tspan><tspan class="b1">..</tspan>  </text>
+<text y="32" textLength="554.4">                                /^\        <tspan class="b4">======</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">-------</tspan><tspan class="b2">::::</tspan><tspan class="b1">..</tspan>  </text>
+<text y="48" textLength="554.4">                               |[<tspan class="l">@</tspan>]|<tspan class="b6">******</tspan><tspan class="b5">++++++</tspan><tspan class="b4">======</tspan><tspan class="b3">-----</tspan><tspan class="b2">:::</tspan><tspan class="b1">..</tspan>  </text>
+<text y="64" textLength="554.4">                              [=====]           <tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">-------</tspan><tspan class="b2">::::</tspan><tspan class="b1">..</tspan>  </text>
+<text y="80" textLength="554.4">                               |   |                        <tspan class="b2">::</tspan><tspan class="b1">..</tspan>  </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">~-~^~--~~-~^~--~~-~^~--~~-~^~</tspan>/_______\<tspan class="w">-</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-~^~--~~-</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-</tspan></text>
+</g>
+<g class="f f3">
+<text y="0" textLength="554.4">                                                         <tspan class="b1">....</tspan>     </text>
+<text y="16" textLength="554.4">                                 _                <tspan class="b3">----</tspan><tspan class="b2">:::</tspan><tspan class="b1">....</tspan>     </text>
+<text y="32" textLength="554.4">                             <tspan class="l">\</tspan>  /^\  <tspan class="l">/</tspan>     <tspan class="b4">======</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">------</tspan><tspan class="b1">....</tspan>     </text>
+<text y="48" textLength="554.4">                             <tspan class="l">-</tspan> |[<tspan class="l">@</tspan>]|<tspan class="b6">*</tspan><tspan class="l">-</tspan><tspan class="b6">****</tspan><tspan class="b5">++++++</tspan><tspan class="b4">======</tspan><tspan class="b3">---</tspan><tspan class="b1">....</tspan>     </text>
+<text y="64" textLength="554.4">                             <tspan class="l">/</tspan>[=====]<tspan class="l">\</tspan>          <tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">------</tspan><tspan class="b1">....</tspan>     </text>
+<text y="80" textLength="554.4">                               |   |                        <tspan class="b1">.</tspan>     </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">-~^~--~~-~^~--~~-~^~--~~-~^~-</tspan>/_______\<tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-~^~--~~-~</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~</tspan></text>
+</g>
+<g class="f f4">
+<text y="0" textLength="554.4">                                                                  </text>
+<text y="16" textLength="554.4">                                 _                <tspan class="b3">-</tspan><tspan class="b2">:</tspan><tspan class="b1">....</tspan>          </text>
+<text y="32" textLength="554.4">                             <tspan class="l">\</tspan>  /^\  <tspan class="l">/</tspan>     <tspan class="b4">======</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b2">::::</tspan><tspan class="b1">....</tspan>       </text>
+<text y="48" textLength="554.4">                             <tspan class="l">-</tspan> |[<tspan class="l">@</tspan>]|<tspan class="b6">*</tspan><tspan class="l">-</tspan><tspan class="b6">****</tspan><tspan class="b5">++++++</tspan><tspan class="b4">===</tspan><tspan class="b2">:::::</tspan><tspan class="b1">....</tspan>      </text>
+<text y="64" textLength="554.4">                             <tspan class="l">/</tspan>[=====]<tspan class="l">\</tspan>          <tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b2">::::</tspan><tspan class="b1">....</tspan>       </text>
+<text y="80" textLength="554.4">                               |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">-~^~--~~-~^~--~~-~^~--~~-~^~-</tspan>/_______\<tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^</tspan><tspan class="w">~--~~-~^~--~~-~</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~</tspan></text>
+</g>
+<g class="f f5">
+<text y="0" textLength="554.4">                                                                  </text>
+<text y="16" textLength="554.4">                                 _                <tspan class="b1">.....</tspan>           </text>
+<text y="32" textLength="554.4">                             <tspan class="l">\</tspan>  /^\  <tspan class="l">/</tspan>     <tspan class="b4">=</tspan><tspan class="b2">::::::</tspan><tspan class="b1">.....</tspan>           </text>
+<text y="48" textLength="554.4">                             <tspan class="l">-</tspan> |[<tspan class="l">@</tspan>]|<tspan class="b6">*</tspan><tspan class="l">-</tspan><tspan class="b6">****</tspan><tspan class="b5">++</tspan><tspan class="b3">----</tspan><tspan class="b2">::</tspan><tspan class="b1">.....</tspan>           </text>
+<text y="64" textLength="554.4">                             <tspan class="l">/</tspan>[=====]<tspan class="l">\</tspan>          <tspan class="b2">::</tspan><tspan class="b1">.....</tspan>           </text>
+<text y="80" textLength="554.4">                               |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">-~^~--~~-~^~--~~-~^~--~~-~^~-</tspan>/_______\<tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--~~-~^~--~~-~^~--~~-~</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~</tspan></text>
+</g>
+<g class="f f6">
+<text y="0" textLength="554.4">                                                                  </text>
+<text y="16" textLength="554.4">                                 _                                </text>
+<text y="32" textLength="554.4">                             <tspan class="l">\</tspan>  /^\  <tspan class="l">/</tspan>     <tspan class="b1">......</tspan>                 </text>
+<text y="48" textLength="554.4">                             <tspan class="l">-</tspan> |[<tspan class="l">@</tspan>]|<tspan class="b6">*</tspan><tspan class="l">-</tspan><tspan class="b3">-----</tspan><tspan class="b2">:</tspan><tspan class="b1">.....</tspan>                 </text>
+<text y="64" textLength="554.4">                             <tspan class="l">/</tspan>[=====]<tspan class="l">\</tspan>          <tspan class="b1">.</tspan>                 </text>
+<text y="80" textLength="554.4">                               |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">~^~--~~-~^~--~~-~^~--~~-~^~--</tspan>/_______\<tspan class="g">~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--~~-~^~--~~-~^~--~~-~^</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">-~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~</tspan></text>
+</g>
+<g class="f f7">
+<text y="0" textLength="554.4">                                                                  </text>
+<text y="16" textLength="554.4">                                 _                                </text>
+<text y="32" textLength="554.4">                       <tspan class="b4">=</tspan>     <tspan class="l">\</tspan>  /^\  <tspan class="l">/</tspan>                            </text>
+<text y="48" textLength="554.4">                       <tspan class="b5">++</tspan><tspan class="b6">****</tspan><tspan class="l">-</tspan><tspan class="b6">*</tspan>|[<tspan class="l">@</tspan>]|<tspan class="b2">:</tspan><tspan class="l">-</tspan><tspan class="b2">::::</tspan><tspan class="b1">...</tspan>                     </text>
+<text y="64" textLength="554.4">                             <tspan class="l">/</tspan>[=====]<tspan class="l">\</tspan>                            </text>
+<text y="80" textLength="554.4">                               |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">~^~--~~-~^~--~~-~^~--~~-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan>/_______\<tspan class="w">~-~^~--~~-~^~--~~-~^~--~~-~^</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">-~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~</tspan></text>
+</g>
+<g class="f f8">
+<text y="0" textLength="554.4">                                                                  </text>
+<text y="16" textLength="554.4">                <tspan class="b3">-</tspan>                _                                </text>
+<text y="32" textLength="554.4">                <tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">======</tspan>     <tspan class="l">\</tspan>  /^\  <tspan class="l">/</tspan>                            </text>
+<text y="48" textLength="554.4">                <tspan class="b4">===</tspan><tspan class="b5">++++++</tspan><tspan class="b6">****</tspan><tspan class="l">-</tspan><tspan class="b6">*</tspan>|[<tspan class="l">@</tspan>]|<tspan class="b1">.</tspan><tspan class="l">-</tspan><tspan class="b1">..</tspan>                          </text>
+<text y="64" textLength="554.4">                <tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan>          <tspan class="l">/</tspan>[=====]<tspan class="l">\</tspan>                            </text>
+<text y="80" textLength="554.4">                               |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">~^~--~~-~^~--~~-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan>/_______\<tspan class="w">~-~^~--~~-~^~--~~-~^~--~~-~^</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">-~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~</tspan></text>
+</g>
+<g class="f f9">
+<text y="0" textLength="554.4">                                                                  </text>
+<text y="16" textLength="554.4">          <tspan class="b2">:::</tspan><tspan class="b3">----</tspan>                _                                </text>
+<text y="32" textLength="554.4">          <tspan class="b3">------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">======</tspan>     <tspan class="l">\</tspan>  /^\  <tspan class="l">/</tspan>                            </text>
+<text y="48" textLength="554.4">          <tspan class="b3">---</tspan><tspan class="b4">======</tspan><tspan class="b5">++++++</tspan><tspan class="b6">****</tspan><tspan class="l">-</tspan><tspan class="b6">*</tspan>|[<tspan class="l">@</tspan>]| <tspan class="l">-</tspan>                            </text>
+<text y="64" textLength="554.4">          <tspan class="b3">------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan>          <tspan class="l">/</tspan>[=====]<tspan class="l">\</tspan>                            </text>
+<text y="80" textLength="554.4">                               |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">^~--~~-~^~--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~</tspan>/_______\<tspan class="w">-~^~--~~-~^~--~~-~^~--~~-~^~</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--</tspan></text>
+</g>
+<g class="f f10">
+<text y="0" textLength="554.4">     <tspan class="b1">.</tspan><tspan class="b2">::::</tspan>                                                        </text>
+<text y="16" textLength="554.4">     <tspan class="b2">::::::::</tspan><tspan class="b3">----</tspan>                _                                </text>
+<text y="32" textLength="554.4">     <tspan class="b2">::::</tspan><tspan class="b3">-------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">======</tspan>        /^\                               </text>
+<text y="48" textLength="554.4">     <tspan class="b2">:::</tspan><tspan class="b3">-----</tspan><tspan class="b4">======</tspan><tspan class="b5">++++++</tspan><tspan class="b6">******</tspan>|[<tspan class="l">@</tspan>]|                              </text>
+<text y="64" textLength="554.4">     <tspan class="b2">::::</tspan><tspan class="b3">-------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan>           [=====]                             </text>
+<text y="80" textLength="554.4">     <tspan class="b2">::</tspan>                        |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">^~--~~-~^</tspan><tspan class="g">~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~</tspan>/_______\<tspan class="w">-~^~--~~-~^~--~~-~^~--~~-~^~</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--</tspan></text>
+</g>
+<g class="f f11">
+<text y="0" textLength="554.4">  <tspan class="b1">....</tspan><tspan class="b2">::::</tspan>                                                        </text>
+<text y="16" textLength="554.4">  <tspan class="b1">..</tspan><tspan class="b2">:::::::::</tspan><tspan class="b3">----</tspan>                _                                </text>
+<text y="32" textLength="554.4">  <tspan class="b1">.</tspan><tspan class="b2">::::::</tspan><tspan class="b3">-------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">======</tspan>        /^\                               </text>
+<text y="48" textLength="554.4">  <tspan class="b2">::::::</tspan><tspan class="b3">-----</tspan><tspan class="b4">======</tspan><tspan class="b5">++++++</tspan><tspan class="b6">******</tspan>|[<tspan class="l">*</tspan>]|                              </text>
+<text y="64" textLength="554.4">  <tspan class="b1">.</tspan><tspan class="b2">::::::</tspan><tspan class="b3">-------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan>           [=====]                             </text>
+<text y="80" textLength="554.4">  <tspan class="b1">..</tspan><tspan class="b2">:::</tspan>                        |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">^~--~~-~^</tspan><tspan class="g">~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~</tspan>/_______\<tspan class="w">-~^~--~~-~^~--~~-~^~--~~-~^~</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--</tspan></text>
+</g>
+<g class="f f12">
+<text y="0" textLength="554.4"> <tspan class="b1">.....</tspan><tspan class="b2">::::</tspan>                                                        </text>
+<text y="16" textLength="554.4"> <tspan class="b1">...</tspan><tspan class="b2">:::::::::</tspan><tspan class="b3">----</tspan>                _                                </text>
+<text y="32" textLength="554.4"> <tspan class="b1">..</tspan><tspan class="b2">::::::</tspan><tspan class="b3">-------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">======</tspan>        /^\                               </text>
+<text y="48" textLength="554.4"> <tspan class="b1">.</tspan><tspan class="b2">::::::</tspan><tspan class="b3">-----</tspan><tspan class="b4">======</tspan><tspan class="b5">++++++</tspan><tspan class="b6">******</tspan>|[<tspan class="l">*</tspan>]|                              </text>
+<text y="64" textLength="554.4"> <tspan class="b1">..</tspan><tspan class="b2">::::::</tspan><tspan class="b3">-------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan>           [=====]                             </text>
+<text y="80" textLength="554.4"> <tspan class="b1">...</tspan><tspan class="b2">:::</tspan>                        |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">~--~~-~^~--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan>/_______\<tspan class="w">~^~--~~-~^~--~~-~^~--~~-~^~-</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~-</tspan></text>
+</g>
+<g class="f f13">
+<text y="0" textLength="554.4">  <tspan class="b1">....</tspan><tspan class="b2">::::</tspan>                                                        </text>
+<text y="16" textLength="554.4">  <tspan class="b1">..</tspan><tspan class="b2">:::::::::</tspan><tspan class="b3">----</tspan>                _                                </text>
+<text y="32" textLength="554.4">  <tspan class="b1">.</tspan><tspan class="b2">::::::</tspan><tspan class="b3">-------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">======</tspan>        /^\                               </text>
+<text y="48" textLength="554.4">  <tspan class="b2">::::::</tspan><tspan class="b3">-----</tspan><tspan class="b4">======</tspan><tspan class="b5">++++++</tspan><tspan class="b6">******</tspan>|[<tspan class="l">*</tspan>]|                              </text>
+<text y="64" textLength="554.4">  <tspan class="b1">.</tspan><tspan class="b2">::::::</tspan><tspan class="b3">-------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan>           [=====]                             </text>
+<text y="80" textLength="554.4">  <tspan class="b1">..</tspan><tspan class="b2">:::</tspan>                        |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">~--~~-~^~--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan>/_______\<tspan class="w">~^~--~~-~^~--~~-~^~--~~-~^~-</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~-</tspan></text>
+</g>
+<g class="f f14">
+<text y="0" textLength="554.4">   <tspan class="b1">...</tspan><tspan class="b2">::::</tspan>                                                        </text>
+<text y="16" textLength="554.4">   <tspan class="b1">..</tspan><tspan class="b2">::::::::</tspan><tspan class="b3">----</tspan>                _                                </text>
+<text y="32" textLength="554.4">   <tspan class="b1">..</tspan><tspan class="b2">::::</tspan><tspan class="b3">-------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">======</tspan>        /^\                               </text>
+<text y="48" textLength="554.4">   <tspan class="b1">..</tspan><tspan class="b2">:::</tspan><tspan class="b3">-----</tspan><tspan class="b4">======</tspan><tspan class="b5">++++++</tspan><tspan class="b6">******</tspan>|[<tspan class="l">*</tspan>]|                              </text>
+<text y="64" textLength="554.4">   <tspan class="b1">..</tspan><tspan class="b2">::::</tspan><tspan class="b3">-------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan>           [=====]                             </text>
+<text y="80" textLength="554.4">   <tspan class="b1">..</tspan><tspan class="b2">::</tspan>                        |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">~--~~-~^~--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan>/_______\<tspan class="w">~^~--~~-~^~--~~-~^~--~~-~^~-</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~-</tspan></text>
+</g>
+<g class="f f15">
+<text y="0" textLength="554.4">      <tspan class="b1">....</tspan>                                                        </text>
+<text y="16" textLength="554.4">      <tspan class="b1">....</tspan><tspan class="b2">:::</tspan><tspan class="b3">----</tspan>                _                                </text>
+<text y="32" textLength="554.4">      <tspan class="b1">....</tspan><tspan class="b3">------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">======</tspan>        /^\                               </text>
+<text y="48" textLength="554.4">      <tspan class="b1">....</tspan><tspan class="b3">---</tspan><tspan class="b4">======</tspan><tspan class="b5">++++++</tspan><tspan class="b6">******</tspan>|[o]|                              </text>
+<text y="64" textLength="554.4">      <tspan class="b1">....</tspan><tspan class="b3">------</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan>           [=====]                             </text>
+<text y="80" textLength="554.4">      <tspan class="b1">.</tspan>                        |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">--~~-~^~--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan>/_______\<tspan class="w">^~--~~-~^~--~~-~^~--~~-~^~--</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~</tspan></text>
+</g>
+<g class="f f16">
+<text y="0" textLength="554.4">                                                                  </text>
+<text y="16" textLength="554.4">           <tspan class="b1">....</tspan><tspan class="b2">:</tspan><tspan class="b3">-</tspan>                _                                </text>
+<text y="32" textLength="554.4">        <tspan class="b1">....</tspan><tspan class="b2">::::</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">======</tspan>        /^\                               </text>
+<text y="48" textLength="554.4">       <tspan class="b1">....</tspan><tspan class="b2">:::::</tspan><tspan class="b4">===</tspan><tspan class="b5">++++++</tspan><tspan class="b6">******</tspan>|[o]|                              </text>
+<text y="64" textLength="554.4">        <tspan class="b1">....</tspan><tspan class="b2">::::</tspan><tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan>           [=====]                             </text>
+<text y="80" textLength="554.4">                               |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">--~~-~^~--~~-~^~--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan>/_______\<tspan class="w">^~--~~-~^~--~~-~^~--~~-~^~--</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~</tspan></text>
+</g>
+<g class="f f17">
+<text y="0" textLength="554.4">                                                                  </text>
+<text y="16" textLength="554.4">            <tspan class="b1">.....</tspan>                _                                </text>
+<text y="32" textLength="554.4">            <tspan class="b1">.....</tspan><tspan class="b2">::::::</tspan><tspan class="b4">=</tspan>        /^\                               </text>
+<text y="48" textLength="554.4">            <tspan class="b1">.....</tspan><tspan class="b2">::</tspan><tspan class="b3">----</tspan><tspan class="b5">++</tspan><tspan class="b6">******</tspan>|[o]|                              </text>
+<text y="64" textLength="554.4">            <tspan class="b1">.....</tspan><tspan class="b2">::</tspan>           [=====]                             </text>
+<text y="80" textLength="554.4">                               |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">--~~-~^~--~~-~^~--~~-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan>/_______\<tspan class="w">^~--~~-~^~--~~-~^~--~~-~^~--</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~</tspan></text>
+</g>
+<g class="f f18">
+<text y="0" textLength="554.4">                                                                  </text>
+<text y="16" textLength="554.4">                                 _                                </text>
+<text y="32" textLength="554.4">                  <tspan class="b1">......</tspan>        /^\                               </text>
+<text y="48" textLength="554.4">                  <tspan class="b1">.....</tspan><tspan class="b2">:</tspan><tspan class="b3">-----</tspan><tspan class="b4">=</tspan><tspan class="b6">*</tspan>|[o]|                              </text>
+<text y="64" textLength="554.4">                  <tspan class="b1">.</tspan>           [=====]                             </text>
+<text y="80" textLength="554.4">                               |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">-~~-~^~--~~-~^~--~~-~^~--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~</tspan>/_______\<tspan class="w">~--~~-~^~--~~-~^~--~~-~^~--~</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^</tspan></text>
+</g>
+<g class="f f19">
+<text y="0" textLength="554.4">                                                                  </text>
+<text y="16" textLength="554.4">                                 _                                </text>
+<text y="32" textLength="554.4">                                /^\        <tspan class="b4">=</tspan>                      </text>
+<text y="48" textLength="554.4">                      <tspan class="b1">...</tspan><tspan class="b2">::::::</tspan>|[o]|<tspan class="b6">******</tspan><tspan class="b5">++</tspan>                      </text>
+<text y="64" textLength="554.4">                              [=====]                             </text>
+<text y="80" textLength="554.4">                               |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">-~~-~^~--~~-~^~--~~-~^~--~~-~</tspan>/_______\<tspan class="g">~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-~^~--~~-~^~--~~-~^~--~</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^</tspan></text>
+</g>
+<g class="f f20">
+<text y="0" textLength="554.4">                                                                  </text>
+<text y="16" textLength="554.4">                                 _                <tspan class="b3">-</tspan>               </text>
+<text y="32" textLength="554.4">                                /^\        <tspan class="b4">======</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan>               </text>
+<text y="48" textLength="554.4">                           <tspan class="b1">....</tspan>|[o]|<tspan class="b6">******</tspan><tspan class="b5">++++++</tspan><tspan class="b4">===</tspan>               </text>
+<text y="64" textLength="554.4">                              [=====]           <tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan>               </text>
+<text y="80" textLength="554.4">                               |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">-~~-~^~--~~-~^~--~~-~^~--~~-~</tspan>/_______\<tspan class="g">~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-~^~--~~-~^~--~</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^</tspan></text>
+</g>
+<g class="f f21">
+<text y="0" textLength="554.4">                                                                  </text>
+<text y="16" textLength="554.4">                                 _                <tspan class="b3">----</tspan><tspan class="b2">:::</tspan>         </text>
+<text y="32" textLength="554.4">                                /^\        <tspan class="b4">======</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">------</tspan>         </text>
+<text y="48" textLength="554.4">                               |[o]|<tspan class="b6">******</tspan><tspan class="b5">++++++</tspan><tspan class="b4">======</tspan><tspan class="b3">---</tspan>         </text>
+<text y="64" textLength="554.4">                              [=====]           <tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">------</tspan>         </text>
+<text y="80" textLength="554.4">                               |   |                              </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">~~-~^~--~~-~^~--~~-~^~--~~-~^</tspan>/_______\<tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~</tspan><tspan class="w">~-~^~--~~</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~</tspan></text>
+</g>
+<g class="f f22">
+<text y="0" textLength="554.4">                                                         <tspan class="b2">::::</tspan><tspan class="b1">.</tspan>    </text>
+<text y="16" textLength="554.4">                                 _                <tspan class="b3">----</tspan><tspan class="b2">::::::::</tspan>    </text>
+<text y="32" textLength="554.4">                                /^\        <tspan class="b4">======</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">-------</tspan><tspan class="b2">::::</tspan>    </text>
+<text y="48" textLength="554.4">                               |[o]|<tspan class="b6">******</tspan><tspan class="b5">++++++</tspan><tspan class="b4">======</tspan><tspan class="b3">-----</tspan><tspan class="b2">:::</tspan>    </text>
+<text y="64" textLength="554.4">                              [=====]           <tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">-------</tspan><tspan class="b2">::::</tspan>    </text>
+<text y="80" textLength="554.4">                               |   |                        <tspan class="b2">::</tspan>    </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">~~-~^~--~~-~^~--~~-~^~--~~-~^</tspan>/_______\<tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-~^~--~~</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~</tspan></text>
+</g>
+<g class="f f23">
+<text y="0" textLength="554.4">                                                         <tspan class="b2">::::</tspan><tspan class="b1">....</tspan> </text>
+<text y="16" textLength="554.4">                                 _                <tspan class="b3">----</tspan><tspan class="b2">:::::::::</tspan><tspan class="b1">..</tspan> </text>
+<text y="32" textLength="554.4">                                /^\        <tspan class="b4">======</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">-------</tspan><tspan class="b2">::::::</tspan><tspan class="b1">.</tspan> </text>
+<text y="48" textLength="554.4">                               |[<tspan class="l">*</tspan>]|<tspan class="b6">******</tspan><tspan class="b5">++++++</tspan><tspan class="b4">======</tspan><tspan class="b3">-----</tspan><tspan class="b2">::::::</tspan> </text>
+<text y="64" textLength="554.4">                              [=====]           <tspan class="b4">=</tspan><tspan class="b3">-</tspan><tspan class="b4">=</tspan><tspan class="b3">-------</tspan><tspan class="b2">::::::</tspan><tspan class="b1">.</tspan> </text>
+<text y="80" textLength="554.4">                               |   |                        <tspan class="b2">:::</tspan><tspan class="b1">..</tspan> </text>
+<text y="96" textLength="554.4">                               |###|                              </text>
+<text y="112" textLength="554.4">                               |   |                              </text>
+<text y="128" textLength="554.4">                               |###|                              </text>
+<text y="144" textLength="554.4">                               |   |                              </text>
+<text y="160" textLength="554.4">                              /     \                             </text>
+<text y="176" textLength="554.4"><tspan class="w">~~-~^~--~~-~^~--~~-~^~--~~-~^</tspan>/_______\<tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-</tspan><tspan class="g">~^~</tspan><tspan class="w">--</tspan><tspan class="g">~~</tspan><tspan class="w">-~^~--~~</tspan></text>
+<text y="192" textLength="554.4"><tspan class="v">-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~^~--~~-~</tspan></text>
+</g>
+</g>
+</svg>
