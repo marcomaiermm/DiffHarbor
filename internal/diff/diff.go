@@ -61,10 +61,18 @@ func each(diff string, path *regexp.Regexp, fn func(path, f string)) {
 }
 
 func rank(path string) int {
-	if bulkFile.MatchString(path) && Kind(path) == "code" {
-		return 2
+	return map[string]int{"test": 1, "data": 2, "bulk": 2, "doc": 3}[Class(path)]
+}
+
+// Classes are Class's results.
+var Classes = []string{"code", "test", "data", "bulk", "doc"}
+
+// Class is Kind with bulk code apart: "bulk" for stylesheets, notebooks, translations, seeds.
+func Class(path string) string {
+	if k := Kind(path); k != "code" || !bulkFile.MatchString(path) {
+		return k
 	}
-	return map[string]int{"test": 1, "data": 2, "doc": 3}[Kind(path)]
+	return "bulk"
 }
 
 // split cuts a file's diff past Max into pieces of up to Max, each under the file's header: at hunks, a hunk past

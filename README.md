@@ -268,9 +268,16 @@ The AI suggests splitting a big PR into PRs that could each merge on their own. 
 |---|---|
 | `lines` | Changed lines from which it suggests. |
 | `files` | Changed files from which it suggests. |
+| `count` | Which files count, by class: `code`, `test`, `data` (JSON, YAML, TOML, CSV, XML), `bulk` (stylesheets, notebooks, translations, seeds), `doc`. Default `["code"]`. |
+| `skip` | Globs, like `ignore`, of files that don't count. `"!glob"` counts a file whatever its class. |
 
 - **Either one is enough**: 400 lines in 3 files or 25 files with 100 lines both get a suggestion.
-- Lockfiles, generated, ignored and deleted files don't count.
+- **Only code counts by default**: thorough tests, fixtures or docs are no reason to split.
+- Lockfiles, generated, ignored and deleted files never count.
+
+```json
+"suggest_split": {"lines": 300, "count": ["code", "test"], "skip": ["migrations/**", "!deploy/**/*.yaml"]}
+```
 
 ### Monorepos
 
