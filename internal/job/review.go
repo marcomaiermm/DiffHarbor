@@ -65,8 +65,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		return nil
 	}
 	// Dependency bumps and release PRs get no review unless asked for. Green, so a required check passes.
-	// A self-hosted Renovate on a user token is a User, so its PRs get reviewed.
-	if pr.User.Type == "Bot" && !manual {
+	// A self-hosted Renovate on a user token is a User, under any name: its branch or its description tells.
+	if (pr.User.Type == "Bot" || botBranch.MatchString(pr.Head.Ref) || botBody.MatchString(pr.Body)) && !manual {
 		s.Write(fmt.Sprintf("⏭️ **Review skipped:** bot author. Comment `@%s review` for one.", f.Bot()), "")
 		p.Status(sha, "success", "Skipped: bot author")
 		return nil
@@ -284,6 +284,13 @@ func reportPath(e *forge.Event) string {
 // Secret is a report folder's secret, rand.Text's: 130 bits, URL-safe. Without it a report's URL is its PR's, which
 // anyone guesses, and the app has no login: an exposed port or PR code on localhost read every report.
 var Secret = regexp.MustCompile(`^[A-Z2-7]{26}$`)
+
+// botBranch is the branch of a dependency bump, Renovate's or Dependabot's default prefix; botBody is the
+// hidden comments Renovate puts in every description, whatever its branchPrefix.
+var (
+	botBranch = regexp.MustCompile(`^(renovate|dependabot)/`)
+	botBody   = regexp.MustCompile(`<!--renovate-(debug|config-hash):`)
+)
 
 // reportSecret is the PR's secret: the one its walkthrough holds, a new one for its first report or one edited by hand.
 func reportSecret(s string) string {

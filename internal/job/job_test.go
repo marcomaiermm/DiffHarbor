@@ -45,6 +45,23 @@ func TestReviewSkipsBaseBranch(t *testing.T) {
 	}
 }
 
+// A self-hosted Renovate on a user token is no Bot type, its branch or description skips the review.
+func TestReviewSkipsBotBranch(t *testing.T) {
+	e := &forge.Event{Action: "opened"}
+	e.Repository.DefaultBranch = "main"
+	e.PullRequest.State, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", strings.Repeat("a", 40), "main"
+	for _, c := range []struct{ ref, body string }{
+		{"renovate/vite-7.x", ""},
+		{"deps/vite-7.x", "Update vite\n\n<!--renovate-debug:eyJjcmVhdGVk-->"},
+	} {
+		pr := &skipPR{}
+		e.PullRequest.Head.Ref, e.PullRequest.Body = c.ref, c.body
+		if err := Review(t.Context(), skipForge{pr: pr}, e); err != nil || pr.status != "success Skipped: bot author" {
+			t.Fatalf("%s: %v %q %q", c.ref, err, pr.status, pr.notes)
+		}
+	}
+}
+
 func TestLearnings(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	for i := range maxLearnings + 2 {
