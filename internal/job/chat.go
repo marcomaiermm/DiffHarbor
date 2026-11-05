@@ -205,8 +205,11 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		for _, n := range d.Notes {
 			fmt.Fprintf(&convo, "**@%s**: %s\n\n", n.Login, forge.Clean(n.Body))
 		}
-		if !ours && !mention.MatchString(c.Body) {
-			return nil // a thread between humans
+		if !mention.MatchString(c.Body) {
+			if !ours {
+				return nil // a thread between humans
+			}
+			p.React() // the server left it to us
 		}
 	}
 
