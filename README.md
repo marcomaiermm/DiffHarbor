@@ -57,7 +57,7 @@ The server listens on `:3000`. Expose `POST /webhook/github` and/or `POST /webho
 2. **Context.** The checks above, plus codegraph, co-change from git history, the PR's commit messages, the repo's rules and skills from the base branch, learnings, and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings, then looks at the diff again for what it missed: the same session without tools, up to 10 more at about a tenth of the cost. With [`passes`](#passes), up to two more finders review the diff too.
 4. **Verify.** A cheaper model checks each finding in the code.
-   For Go, the test the report names as proof runs against the base versions of the PR's code files; one that still passes there is a minor finding.
+   For Go, the test the report names as proof runs against the base versions of the PR's code files. If it still passes there, that is a minor finding.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
 Two kinds of PRs are skipped with a green status unless someone asks for a review: PRs from bots (Dependabot, Renovate, also a self-hosted one on a user token: its branch starts with `renovate/` or `dependabot/`, or Renovate's hidden comments are in the description), and PRs into a branch other than the default branch or one in [`base_branches`](#per-repo-settings).
