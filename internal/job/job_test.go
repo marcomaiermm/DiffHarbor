@@ -228,3 +228,16 @@ func TestChatReactsOffTheWorker(t *testing.T) {
 		t.Fatal("Chat did not react")
 	}
 }
+
+func TestOtherMention(t *testing.T) {
+	for body, want := range map[string]bool{
+		"That is true. @BrudyR, what do you think?": true,
+		"@john.doe-2 ok?":    true,
+		"Fixed in abc123.":   false,
+		"mail me at a@b.com": false,
+	} {
+		if got := otherMention.MatchString(body); got != want {
+			t.Errorf("%q: got %v, want %v", body, got, want)
+		}
+	}
+}
