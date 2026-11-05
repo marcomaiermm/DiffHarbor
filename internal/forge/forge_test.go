@@ -60,7 +60,7 @@ func TestSticky(t *testing.T) {
 		LargeTicked(ticked, ticked) || LargeTicked(ticked, st.render("", "", "foot", nil)) || LargeTicked(body, body) {
 		t.Fatalf("ask: %s", body)
 	}
-	if !strings.HasPrefix(body, stickyMark+"\n> ⏳ busy") || !strings.Contains(body, "| `a.go` | x \\| y |") ||
+	if !strings.HasPrefix(body, stickyMark+"\n> [!NOTE]\n> ⏳ busy") || !strings.Contains(body, "| `a.go` | x \\| y |") ||
 		!strings.Contains(body, "```mermaid\nsequenceDiagram\n```") || !strings.Contains(body, "🎯 5 (Very complex)") {
 		t.Fatalf("render: %s", body)
 	}
