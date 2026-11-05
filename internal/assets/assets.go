@@ -1,4 +1,4 @@
-// Package assets holds the files the report page embeds: the favicons and the logo.
+// Package assets holds the files the server embeds: the report's favicons and logo, the reviewing banner's lighthouse.
 package assets
 
 import _ "embed" // the files below
@@ -13,4 +13,7 @@ var (
 	// Logo is the report header's logo, 64 px.
 	//go:embed logo.png
 	Logo []byte
+	// Reviewing is the lighthouse the walkthrough shows while a review runs; docs/public serves the same file.
+	//go:embed reviewing.svg
+	Reviewing []byte
 )

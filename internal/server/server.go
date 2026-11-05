@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"diffharbor/internal/agent"
+	"diffharbor/internal/assets"
 	"diffharbor/internal/forge"
 	"diffharbor/internal/forge/github"
 	"diffharbor/internal/forge/gitlab"
@@ -256,6 +257,7 @@ func Serve(cfg Config) {
 	})
 	if job.ReportURL != "" {
 		http.HandleFunc("GET /r/{path...}", serveReport)
+		http.HandleFunc("GET /reviewing.svg", serveLighthouse)
 	}
 	resume(queue)
 	go func() {
@@ -273,6 +275,16 @@ func Serve(cfg Config) {
 	// A client that sends its body slowly or idles holds a connection only so long. No WriteTimeout: a report is big.
 	srv := &http.Server{Addr: ":3000", ReadHeaderTimeout: 10 * time.Second, ReadTimeout: time.Minute, IdleTimeout: 2 * time.Minute}
 	log.Fatal(srv.ListenAndServe())
+}
+
+// serveLighthouse serves the walkthrough's reviewing banner: GitHub's image proxy fetches it, on GitLab the browser.
+func serveLighthouse(w http.ResponseWriter, _ *http.Request) {
+	h := w.Header()
+	h.Set("Content-Type", "image/svg+xml")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'") // opened on its own: no scripts
+	h.Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(assets.Reviewing)
 }
 
 // serveReport serves a PR's report to who has its link: a report holds the PR's code, and the app has no login, the
