@@ -59,7 +59,7 @@ The server listens on `:3000`. Expose `POST /webhook/github` and/or `POST /webho
 4. **Verify.** A cheaper model checks each finding in the code.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
-Two kinds of PRs are skipped with a green status unless someone asks for a review: PRs from bots (Dependabot, Renovate), and PRs into a branch other than the default branch or one in [`base_branches`](#per-repo-settings).
+Two kinds of PRs are skipped with a green status unless someone asks for a review: PRs from bots (Dependabot, Renovate, also a self-hosted one on a user token: its branch starts with `renovate/` or `dependabot/`, or Renovate's hidden comments are in the description), and PRs into a branch other than the default branch or one in [`base_branches`](#per-repo-settings).
 
 ### Talking to the bot
 
