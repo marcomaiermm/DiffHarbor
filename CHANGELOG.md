@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.3.0...v0.4.0) (2026-11-05)
+
+
+### Features
+
+* **config:** ignore takes paths back with !glob, globs get doublestar's syntax ([#44](https://github.com/marcomaiermm/DiffHarbor/issues/44)) ([d7e677b](https://github.com/marcomaiermm/DiffHarbor/commit/d7e677b722013964320514a64c9b8ad2ba74f72f))
+* **ticket:** tickets the description references go into the review as context ([#42](https://github.com/marcomaiermm/DiffHarbor/issues/42)) ([9548b78](https://github.com/marcomaiermm/DiffHarbor/commit/9548b78e66cc68d306786581ae4b7b926c82a23d))
+
+
+### Bug Fixes
+
+* **review:** skip a self-hosted Renovate under any name, like a bot author ([#47](https://github.com/marcomaiermm/DiffHarbor/issues/47)) ([193acea](https://github.com/marcomaiermm/DiffHarbor/commit/193acea661a327b948d7eafe4389611664bf5d4f))
+
 ## [0.3.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.2.0...v0.3.0) (2026-11-04)
 
 
