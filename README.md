@@ -173,6 +173,7 @@ Differences to GitHub:
 - **Versions:** each reviewed head keeps one, the newest 10 stay. Closing the PR deletes them.
 - **Link:** `/r/<host>/<repo>/<n>/<secret>`. The secret is random per PR (130 bits) and only the PR comment holds it. Any other path is a 404.
 - **Older reports:** reports from before the secret no longer open. The next review writes one at the new link, closing the PR deletes the old.
+- **Reviewing banner:** while a review runs, the PR comment shows `/reviewing.svg` from this server. Keep it public: GitHub fetches it through its image proxy. Without `REPORT_URL` it comes from the docs site.
 
 > [!WARNING]
 > The report contains the PR's code. Put `/r/` behind your SSO anyway: links get forwarded and stay in browser histories.
