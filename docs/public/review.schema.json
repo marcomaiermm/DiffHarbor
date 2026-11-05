@@ -73,6 +73,15 @@
       },
       "description": "Shiki theme names for the report's code colors."
     },
+    "learnings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max": { "type": "integer", "minimum": 0, "maximum": 100, "description": "The newest learnings of the repo and of the owner a review follows, each. 0 = none. Default 30." },
+        "max_age_days": { "type": "integer", "minimum": 0, "description": "Leave out learnings older than this. 0 = any age (default)." }
+      },
+      "description": "What reviews and the chat follow of the saved learnings. Only hides, deletes nothing."
+    },
     "rules": { "$ref": "#/definitions/repoPath" },
     "skills": { "$ref": "#/definitions/repoPath" },
     "checks": { "type": "array", "items": { "$ref": "#/definitions/repoPath" } },

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const chatSystem = `You reviewed this pull request; a maintainer now asks or replies. Repo = cwd at the PR head: check the code with tools before answering.
@@ -36,29 +37,106 @@ func learningsFile(key string) string {
 	return filepath.Join(proc.DataDir, "learnings", strings.ReplaceAll(key, "/", "__")+".md")
 }
 
-func learningsOf(key string) string {
+func learningsOf(key string) []string {
 	b, _ := os.ReadFile(learningsFile(key))
-	return string(b)
+	return strings.FieldsFunc(string(b), func(r rune) bool { return r == '\n' })
 }
 
-// readLearnings is what a review of repo follows: the owner's shared rules, then the repo's own.
-func readLearnings(owner, repo string) string {
-	return learningsOf(owner) + learningsOf(repo)
-}
-
-const maxLearnings = 30
-
-// addLearning appends one rule to a repo or owner; the next reviews get the last maxLearnings of each in their system prompt.
-func addLearning(key, entry string) error {
+func writeLearnings(key string, lines []string) error {
 	f := learningsFile(key)
 	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
 		return err
 	}
-	lines := append(strings.FieldsFunc(learningsOf(key), func(r rune) bool { return r == '\n' }), entry)
-	if len(lines) > maxLearnings { // the oldest goes
-		lines = lines[len(lines)-maxLearnings:]
+	return os.WriteFile(f, []byte(strings.Join(append(lines, ""), "\n")), 0o600)
+}
+
+// learnedRe is the date addLearning ends an entry with; entries from before have none and never age.
+var learnedRe = regexp.MustCompile(`, (\d{4}-\d{2}-\d{2})\)$`)
+
+// readLearnings is what a review of repo follows: the owner's shared rules, then the repo's own, each its newest
+// up to l's max and age.
+func readLearnings(owner, repo string, l review.Learnings) string {
+	var b strings.Builder
+	for _, key := range []string{owner, repo} {
+		var kept []string
+		for _, s := range learningsOf(key) {
+			if m := learnedRe.FindStringSubmatch(s); m != nil && l.MaxAgeDays > 0 {
+				if t, err := time.Parse(time.DateOnly, m[1]); err == nil && time.Since(t) > time.Duration(l.MaxAgeDays)*24*time.Hour {
+					continue
+				}
+			}
+			kept = append(kept, s)
+		}
+		for _, s := range kept[max(0, len(kept)-l.Limit()):] {
+			b.WriteString(s + "\n")
+		}
 	}
-	return os.WriteFile(f, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+	return b.String()
+}
+
+// addLearning appends one rule to a repo or owner, dated; the oldest past review.MaxLearnings goes.
+func addLearning(key, entry string, now time.Time) error {
+	lines := append(learningsOf(key), strings.TrimSuffix(entry, ")")+", "+now.Format(time.DateOnly)+")")
+	return writeLearnings(key, lines[max(0, len(lines)-review.MaxLearnings):])
+}
+
+// forgetLearnings drops key's learnings containing s, any case, and returns them.
+func forgetLearnings(key, s string) ([]string, error) {
+	var kept, gone []string
+	for _, l := range learningsOf(key) {
+		if strings.Contains(strings.ToLower(l), strings.ToLower(s)) {
+			gone = append(gone, l)
+		} else {
+			kept = append(kept, l)
+		}
+	}
+	if len(gone) == 0 {
+		return nil, nil
+	}
+	return gone, writeLearnings(key, kept)
+}
+
+// learningsCommand answers `learnings` (list them) and `forget <text>` (drop the ones containing text). Only an
+// owner or member may forget the owner's, like only they may save them.
+func learningsCommand(cmd, bot string, e *forge.Event) string {
+	keys := []string{e.Repo()}
+	if a := e.Comment.AuthorAssociation; a == "OWNER" || a == "MEMBER" {
+		keys = append(keys, e.Owner())
+	}
+	var b strings.Builder
+	if s, ok := strings.CutPrefix(cmd, "forget "); ok {
+		s = strings.TrimSpace(s)
+		if len([]rune(s)) < 4 {
+			return "Forget what? Give at least 4 characters of the learning, `@" + bot + " learnings` lists them."
+		}
+		for _, key := range keys {
+			gone, err := forgetLearnings(key, s)
+			if err != nil {
+				log.Println(e.Key(), "forget:", err)
+				return "Could not forget: " + err.Error()
+			}
+			for _, l := range gone {
+				b.WriteString(l + "\n")
+			}
+		}
+		if b.Len() == 0 {
+			return "No learning contains `" + s + "`. `@" + bot + " learnings` lists them."
+		}
+		return "🗑️ _Forgotten:_\n\n" + b.String()
+	}
+	for _, key := range []string{e.Repo(), e.Owner()} {
+		title := "This repo"
+		if key == e.Owner() {
+			title = "All `" + key + "` repos"
+		}
+		if ls := learningsOf(key); len(ls) > 0 {
+			fmt.Fprintf(&b, "**%s**\n\n%s\n\n", title, strings.Join(ls, "\n"))
+		}
+	}
+	if b.Len() == 0 {
+		return "No learnings yet."
+	}
+	return b.String() + "_Newest last. `@" + bot + " forget <text>` drops the ones containing text; review.json's `learnings` sets how many and how old a review follows._"
 }
 
 // Seen puts 👀 on a maintainer's comment as soon as it is queued, before the worker gets to it.
@@ -107,6 +185,9 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			}
 			return Review(ctx, f, e)
 		}
+		if cmd == "learnings" || strings.HasPrefix(cmd, "forget ") {
+			return p.Reply(learningsCommand(cmd, f.Bot(), e) + "\n\n" + forge.Mark)
+		}
 		ns, err := p.Notes()
 		if err != nil {
 			return err
@@ -154,7 +235,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	cfg, _ := review.LoadSettings(p.File(pr.Base.SHA, "review.json")) // broken: defaults, the review says so
 	rules := p.File(pr.Base.SHA, cfg.RulePaths()...)
 	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(dir, "skills"))
-	system := chatSystem + review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo()))
+	system := chatSystem + review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings))
 	rm, _ := cfg.Models()
 	m := agent.PassModel(rm, "medium")
 	out, err := agent.Pi{}.Run(ctx, dir, "chat", system,
@@ -192,7 +273,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			key, scope = e.Owner(), " for all `"+e.Owner()+"` repos"
 			where = ", " + e.Repo() + where
 		}
-		if err := addLearning(key, fmt.Sprintf("- %s (@%s%s)", l, c.User.Login, where)); err != nil {
+		if err := addLearning(key, fmt.Sprintf("- %s (@%s%s)", l, c.User.Login, where), time.Now()); err != nil {
 			return err
 		}
 		body += "\n\n📝 _Learning saved" + scope + ":_ " + l

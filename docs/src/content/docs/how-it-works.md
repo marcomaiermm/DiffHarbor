@@ -19,5 +19,7 @@ Two kinds of PRs are skipped with a green status unless someone asks for a revie
 | `@<bot> <question>` | An answer about the PR, from the checkout. |
 | `@<bot> review` | A full review of the PR. |
 | `@<bot> review all` | A large PR reviewed in parts. |
+| `@<bot> learnings` | Lists the saved learnings of the repo and its owner. |
+| `@<bot> forget <text>` | Drops the learnings containing the text. Only owners and members drop the owner's. |
 
-When a maintainer corrects the bot or states a convention, it saves a rule in `/data/learnings/` (per repo and per owner, the newest 30 each).
+When a maintainer corrects the bot or states a convention, it saves a dated rule in `/data/learnings/` (per repo and per owner, the newest 100 each). A review follows the newest 30 of each; `learnings` in `review.json` changes that.

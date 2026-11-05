@@ -154,7 +154,7 @@ func TestSettings(t *testing.T) {
 	if _, err := LoadSettings(`{"min_severity":"high"}`); err == nil {
 		t.Error("min_severity high accepted")
 	}
-	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"suggest_split":{"files":-1}}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
+	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"suggest_split":{"files":-1}}`, `{"learnings":{"max":-1}}`, `{"learnings":{"max":101}}`, `{"learnings":{"max_age_days":-1}}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
 		if _, err := LoadSettings(bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
