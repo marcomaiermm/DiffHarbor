@@ -3,7 +3,7 @@
 services:
   diffharbor:
     # Or build: . to build it yourself.
-    image: ghcr.io/marcomaiermm/diffharbor:0.4.0 # x-release-please-version
+    image: ghcr.io/marcomaiermm/diffharbor:0.4.1 # x-release-please-version
     init: true
     # Idle is the Go server (~10 MB); the cap is for installs and type checks of big repos during checks.
     mem_limit: 3g

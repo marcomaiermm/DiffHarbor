@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.4.0...v0.4.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **agent:** a gateway doesn't get Pi's tool_removal blocks ([#48](https://github.com/marcomaiermm/DiffHarbor/issues/48)) ([2fcd9ff](https://github.com/marcomaiermm/DiffHarbor/commit/2fcd9ff3e8c99799a4a69f49ef5b5430bc60e0da))
+
 ## [0.4.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.3.0...v0.4.0) (2026-11-05)
 
 
