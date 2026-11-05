@@ -178,7 +178,7 @@ func Serve(cfg Config) {
 		if name == "gitlab" && gitlab.Name != "" {
 			handles = append(handles, gitlab.Name)
 		}
-		mentions[name] = mentionOf(handles...)
+		mentions[name] = forge.MentionOf(handles...)
 		log.Printf("%s as @%s on POST /webhook/%s", name, f.Bot(), name)
 	}
 	if err := proc.Clean(); err != nil { // a crash's work dirs, the cache all repos shared before
@@ -478,13 +478,4 @@ func retryDrops(queue chan *forge.Event) {
 			return
 		}
 	}
-}
-
-// mentionOf matches @handle for any of handles as a whole login (not @handle-other).
-func mentionOf(handles ...string) *regexp.Regexp {
-	for i, h := range handles {
-		handles[i] = regexp.QuoteMeta(h)
-	}
-	// dots end a sentence, not a GitLab username: @bot. yes, @bot.ann no
-	return regexp.MustCompile(`(?i)(^|[^\w.+-])@(` + strings.Join(handles, "|") + `)\.*([^\w.-]|$)`)
 }

@@ -246,20 +246,27 @@ func TestOtherMention(t *testing.T) {
 	}
 }
 
-func TestNewerFrom(t *testing.T) {
+func TestNewer(t *testing.T) {
 	bot := regexp.MustCompile(`@bot\b`)
-	ns := []forge.Note{{ID: 1, Login: "bot"}, {ID: 2, Login: "ann", Body: "why?"}, {ID: 3, Login: "bob", Body: "hm"},
+	ours := []forge.Note{{ID: 1, Login: "bot", Ours: true}, {ID: 2, Login: "ann", Body: "why?"}, {ID: 3, Login: "bob", Body: "hm"},
 		{ID: 4, Login: "ann", Body: "and line 9?"}, {ID: 5, Login: "ann", Body: "@bob what do you think?"}, {ID: 6, Login: "ann", Body: "thanks"}}
+	humans := []forge.Note{{ID: 1, Login: "bob"}, {ID: 2, Login: "ann", Body: "@bot why?"}, {ID: 3, Login: "ann", Body: "also line 9?"}}
+	capped := []forge.Note{{ID: 1, Login: "bot", Ours: true}, {ID: 2, Login: "ann", Body: "why?"},
+		{ID: 3, Ours: true}, {ID: 4, Ours: true}, {ID: 5, Ours: true}, {ID: 6, Login: "ann", Body: "and now?"}}
 	for _, c := range []struct {
+		d     forge.Discussion
 		id    int64
 		login string
 		want  bool
 	}{
-		{2, "ann", true},  // asked again past bob's comment: that one answers both
-		{4, "ann", false}, // later only a question for bob and thanks: chat answers neither, so this one
-		{3, "bob", false}, {9, "ann", false},
+		{forge.Discussion{Ours: true, Notes: ours}, 2, "ann", true},  // asked again past bob's comment: that one answers both
+		{forge.Discussion{Ours: true, Notes: ours}, 4, "ann", false}, // later only a question for bob and thanks: chat answers neither, so this one
+		{forge.Discussion{Ours: true, Notes: ours}, 3, "bob", false},
+		{forge.Discussion{Ours: true, Notes: ours}, 9, "ann", false},
+		{forge.Discussion{Notes: humans}, 2, "ann", false},             // no @bot after: a human thread goes on between humans
+		{forge.Discussion{Ours: true, Notes: capped}, 2, "ann", false}, // we said our piece: "and now?" goes unanswered
 	} {
-		if got := newerFrom(bot, ns, c.id, c.login); got != c.want {
+		if got := newer(bot, c.d, c.id, c.login); got != c.want {
 			t.Errorf("%d %s: got %v", c.id, c.login, got)
 		}
 	}
@@ -267,7 +274,8 @@ func TestNewerFrom(t *testing.T) {
 
 func TestCommand(t *testing.T) {
 	bot := regexp.MustCompile(`(?i)(^|[^\w.+-])@(bot)\.*([^\w.-]|$)`)
-	for body, want := range map[string]string{"@bot review": "review", "(@bot) review": "review", "(@bot review)": "review", "@bot, Review all!": "review all", "@bot thanks": "thanks"} {
+	for body, want := range map[string]string{"@bot review": "review", "(@bot) review": "review", "(@bot review)": "review)",
+		"@bot, Review all!": "review all!", "@bot thanks": "thanks", "@bot forget foo.": "forget foo.", "@bot agreed?": "agreed?"} {
 		if got := command(bot, body); got != want {
 			t.Errorf("%q: got %q, want %q", body, got, want)
 		}
@@ -303,8 +311,8 @@ func TestChatLeavesQuestionsForOthers(t *testing.T) {
 
 func TestAck(t *testing.T) {
 	for body, want := range map[string]bool{
-		"thanks!": true, "Danke schön": true, "LGTM": true, "👍": true, "ok.": true,
-		"ok, but why line 3?": false, "done": false, "fixed in abc123": false, "thanks, but this is wrong": false,
+		"thanks!": true, "agreed!": true, "Danke schön": true, "LGTM": true, "👍": true, "ok.": true,
+		"ok, but why line 3?": false, "agreed?": false, "done": false, "fixed in abc123": false, "thanks, but this is wrong": false,
 	} {
 		if got := ack.MatchString(body); got != want {
 			t.Errorf("%q: got %v, want %v", body, got, want)

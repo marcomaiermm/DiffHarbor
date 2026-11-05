@@ -182,16 +182,19 @@ func (p *pr) Discussion() (forge.Discussion, error) {
 		}
 		d.Notes = append(d.Notes, c.note())
 	}
-	if !d.Ours && !strings.Contains(strings.ToLower(p.e.Comment.Body), "@"+strings.ToLower(Slug)) {
+	if !d.Ours && !forge.MentionOf(Slug).MatchString(p.e.Comment.Body) {
 		return d, nil // chat leaves a thread between humans alone unless asked: no need to ask GitHub
 	}
 	ts, err := p.Threads()
+	if err != nil { // unknown: taken as open, the thread itself is still there to answer
+		log.Println(p.e.Key(), "thread state:", err)
+	}
 	for _, t := range ts {
 		if t.Comment == root {
 			d.Resolved = t.Resolved
 		}
 	}
-	return d, err
+	return d, nil
 }
 
 func (p *pr) Reply(body string) error {

@@ -52,20 +52,33 @@ var ack = regexp.MustCompile(`(?i)^(thanks?( you| a lot)?|thx|ty|danke( dir| sch
 // maxReplies is how often chat answers in one thread without being @mentioned: past it, it has said its piece.
 const maxReplies = 3
 
-// command is body without the @bot mention and the punctuation around it, lower case: "(@bot) review" is review.
+// command is body without the @bot mention, lower case. Its punctuation stays: "forget foo." looks for "foo.".
 func command(mention *regexp.Regexp, body string) string {
-	return strings.ToLower(strings.Trim(mention.ReplaceAllString(body, " "), " \t\r\n()[]{}.,:;!?"))
+	return strings.ToLower(strings.TrimSpace(mention.ReplaceAllString(body, " ")))
 }
 
-// handled reports whether chat answers a reply in our thread: not thanks, not a question for someone else.
-func handled(mention *regexp.Regexp, body string) bool {
-	return !ack.MatchString(command(mention, body)) && (mention.MatchString(body) || !mentionsOther(body))
+// answers reports whether chat answers body in thread d: @us, or in our thread a reply that isn't thanks or for
+// someone else, while we haven't said our piece.
+func answers(mention *regexp.Regexp, d forge.Discussion, body string) bool {
+	if ack.MatchString(command(mention, body)) {
+		return false
+	}
+	if mention.MatchString(body) {
+		return true
+	}
+	replies := 0
+	for _, n := range d.Notes[min(1, len(d.Notes)):] {
+		if n.Ours {
+			replies++
+		}
+	}
+	return d.Ours && !mentionsOther(body) && replies < maxReplies
 }
 
-// newerFrom reports whether login wrote again in notes after the note id, in a comment chat answers.
-func newerFrom(mention *regexp.Regexp, notes []forge.Note, id int64, login string) bool {
-	i := slices.IndexFunc(notes, func(n forge.Note) bool { return n.ID == id })
-	return i >= 0 && slices.ContainsFunc(notes[i+1:], func(n forge.Note) bool { return n.Login == login && handled(mention, n.Body) })
+// newer reports whether login wrote again in d after the note id, in a comment chat answers: that one answers both.
+func newer(mention *regexp.Regexp, d forge.Discussion, id int64, login string) bool {
+	i := slices.IndexFunc(d.Notes, func(n forge.Note) bool { return n.ID == id })
+	return i >= 0 && slices.ContainsFunc(d.Notes[i+1:], func(n forge.Note) bool { return n.Login == login && answers(mention, d, n.Body) })
 }
 
 // answer is the chat pass's JSON.
@@ -221,7 +234,8 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 
 	if e.Kind == "issue_comment" {
 		cmd := command(mention, c.Body)
-		ticked := e.Action == "edited" // the walkthrough's box for a review in parts
+		bare := strings.Trim(cmd, "()[]{}.,:;!? ") // "(@bot review)" is a review
+		ticked := e.Action == "edited"             // the walkthrough's box for a review in parts
 		if ticked {
 			// GitHub lets only users with write access edit our comment; asked once more, the cost is on the server.
 			ok, err := p.CanWrite(e.Sender.Login)
@@ -233,14 +247,14 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 				return nil
 			}
 		}
-		if large := ticked || cmd == "review all"; large || cmd == "review" || cmd == "full review" {
+		if large := ticked || bare == "review all"; large || bare == "review" || bare == "full review" {
 			e.Action = "manual" // anything but synchronize: full review
 			if large {
 				e.Action = "large"
 			}
 			return Review(ctx, f, e)
 		}
-		if cmd == "learnings" || strings.HasPrefix(cmd, "forget ") {
+		if bare == "learnings" || strings.HasPrefix(cmd, "forget ") {
 			return p.Reply(learningsCommand(cmd, f.Bot(), e) + "\n\n" + forge.Mark)
 		}
 		ns, err := p.Notes()
@@ -256,27 +270,22 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			return err
 		}
 		ours, resolved = d.Ours, d.Resolved
-		if newerFrom(mention, d.Notes, c.ID, c.User.Login) {
-			return nil // they wrote again: that comment's chat answers both
+		if !answers(mention, d, c.Body) || newer(mention, d, c.ID, c.User.Login) {
+			return nil // between humans, for someone else, we said our piece (@us to go on), or they wrote again
+		}
+		if !mention.MatchString(c.Body) {
+			go p.React() // the server left it to us; off the worker, a slow forge would hold up the queue
 		}
 		about.WriteString(d.About)
 		if resolved {
 			about.WriteString("This thread is resolved.\n\n")
 		}
-		for _, n := range d.Notes {
-			fmt.Fprintf(&convo, "**@%s**: %s\n\n", n.Login, forge.Clean(n.Body))
+		notes := d.Notes
+		if i := slices.IndexFunc(notes, func(n forge.Note) bool { return n.ID == c.ID }); i >= 0 {
+			notes = notes[:i+1] // later ones chat doesn't answer: "reply to the last message" is this one
 		}
-		if !mention.MatchString(c.Body) {
-			replies := 0
-			for _, n := range d.Notes[min(1, len(d.Notes)):] {
-				if n.Ours {
-					replies++
-				}
-			}
-			if !ours || mentionsOther(c.Body) || replies >= maxReplies {
-				return nil // between humans, a question for someone else, or we said our piece: @us to go on
-			}
-			go p.React() // the server left it to us; off the worker, a slow forge would hold up the queue
+		for _, n := range notes {
+			fmt.Fprintf(&convo, "**@%s**: %s\n\n", n.Login, forge.Clean(n.Body))
 		}
 	}
 

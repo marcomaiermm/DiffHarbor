@@ -19,27 +19,6 @@ import (
 	"testing"
 )
 
-func TestMention(t *testing.T) {
-	m := mentionOf("diffharbor")
-	for s, want := range map[string]bool{
-		"@diffharbor review": true, "hey @DiffHarbor, why?": true, "@diffharbor": true,
-		"@diffharbor-bot hi": false, "mail@diffharbor": false,
-	} {
-		if m.MatchString(s) != want {
-			t.Errorf("%q", s)
-		}
-	}
-	if got := strings.TrimSpace(m.ReplaceAllString("@diffharbor review", "")); got != "review" {
-		t.Fatalf("%q", got)
-	}
-	m = mentionOf("project_1_bot_ab", "mr-agent")
-	for s, want := range map[string]bool{"@mr-agent why?": true, "@project_1_bot_ab why?": true, "(@mr-agent) why?": true, "@mr-agent-x": false, "@mr-agent.alice what?": false, "ask @mr-agent.": true, "@mr-agent... hm": true, "@mr why": false} {
-		if m.MatchString(s) != want {
-			t.Errorf("%q", s)
-		}
-	}
-}
-
 func TestStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	running.key, running.review, running.cancel = "o/r#1", false, cancel
