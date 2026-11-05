@@ -43,12 +43,12 @@ func Registries(owner string) ([]Registry, error) {
 	return slices.SortedFunc(maps.Values(byScope), func(a, b Registry) int { return cmp.Compare(a.Scope, b.Scope) }), nil
 }
 
-// registryEnv lends regs through the vault until ctx is done and returns the installs' env, and the lockfiles' URLs
+// RegistryEnv lends regs through the vault until ctx is done and returns the installs' env, and the lockfiles' URLs
 // to rewrite (old, new pairs, longest old first: a registry under another's path keeps its own): npm ci fetches a
 // lockfile's tarballs where it says, and keeps only the host of the registry it points them at
 // (replace-registry-host), which loses the vault's token. Without the vault (not root) the tokens go in the env as
 // they are.
-func registryEnv(ctx context.Context, regs []Registry) (env, urls []string, err error) {
+func RegistryEnv(ctx context.Context, regs []Registry) (env, urls []string, err error) {
 	var pairs [][2]string
 	for _, r := range regs {
 		via := r.URL

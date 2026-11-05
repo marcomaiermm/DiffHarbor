@@ -147,6 +147,35 @@ func TestMonorepoChecks(t *testing.T) {
 	}
 }
 
+// A bump alone installs and type-checks its whole package: it breaks code it doesn't touch.
+func TestBumpChecks(t *testing.T) {
+	bin, repo := t.TempDir(), t.TempDir() // fake tools print how they were called
+	for _, tool := range []string{"gitleaks", "oxlint", "fallow", "pnpm"} {
+		os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\necho \"$(basename \"$0\") $*\"\n"), 0o755)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	defer func(pi bool) { proc.AsPi = pi }(proc.AsPi)
+	proc.AsPi = false
+	for f, s := range map[string]string{
+		"pnpm-lock.yaml": "", "apps/web/package.json": "{}", "apps/web/tsconfig.json": "{}",
+		"node_modules/.bin/tsc":    "#!/bin/sh\necho 'src/old.ts(3,1): error TS2305: no exported member getIp'\n",
+		"node_modules/.bin/eslint": "#!/bin/sh\necho eslint \"$@\"\n",
+	} {
+		os.MkdirAll(filepath.Join(repo, filepath.Dir(f)), 0o755)
+		os.WriteFile(filepath.Join(repo, f), []byte(s), 0o755)
+	}
+	head := "diff --git a/apps/web/package.json b/apps/web/package.json\n--- a/apps/web/package.json\n+++ b/apps/web/package.json\n@@ -2 +2 @@\n"
+	for line, want := range map[string]bool{"-    \"better-auth\": \"^1.6.3\",\n+    \"better-auth\": \"^1.7.0\",\n": true, "-  \"version\": \"1.0.0\",\n+  \"version\": \"1.1.0\",\n": false} {
+		patch := filepath.Join(t.TempDir(), "pr.diff")
+		os.WriteFile(patch, []byte(head+line), 0o644)
+		out, _ := Run(context.Background(), repo, nil, patch, []string{"apps/web/package.json"}, func(string) bool { return true }, false, nil)
+		got := strings.Contains(out, "pnpm install") && strings.Contains(out, "### tsc --noEmit (whole package: the change bumps its dependencies; errors may predate it) in apps/web/ (paths relative to it)\nsrc/old.ts(3,1): error TS2305")
+		if got != want || strings.Contains(out, "eslint") || strings.Contains(out, "oxlint") {
+			t.Errorf("bump %v:\n%s", want, out)
+		}
+	}
+}
+
 func TestFallowSecurity(t *testing.T) {
 	out := "warning: x\n" + `{"security_findings":[{"path":"a.ts","line":3,"category":"ssrf","cwe":918,"severity":"medium","evidence":"Non-literal URL passed to fetch(). Candidate for verification: x."},` +
 		`{"path":"a.ts","line":9,"category":"ssrf","cwe":918}]}` + "\nmore"
