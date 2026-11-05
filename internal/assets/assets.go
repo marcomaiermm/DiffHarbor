@@ -3,6 +3,8 @@ package assets
 
 import "embed"
 
+//go:generate go run lighthouse.go
+
 var (
 	// FaviconSVG is the page's icon.
 	//go:embed favicon.svg
