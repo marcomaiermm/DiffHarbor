@@ -290,6 +290,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 		p := runPart(ctx, in, "", prompt, in.Parts[0], fs, vm, sem)
 		r, tag, err := merge([]part{p}, m, vm, ci)
 		r.Tests = tests
+		r.Comments = append(r.Comments, proofOnBase(ctx, repo, in.Dir, r.Story.Proof, tests.Ran, in.Settings)...)
 		return r, tag, err
 	}
 	// One pass per part: each reads its files closely and its context stays small.
@@ -318,6 +319,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	wg.Wait()
 	r, tag, err := merge(ps, m, vm, ci)
 	r.Tests = tests
+	r.Comments = append(r.Comments, proofOnBase(ctx, repo, in.Dir, r.Story.Proof, tests.Ran, in.Settings)...)
 	return r, tag, err
 }
 

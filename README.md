@@ -59,6 +59,7 @@ docker compose up -d
 2. **Context.** The checks above, codegraph, co-change from git history, the PR's commit messages, the repo's rules and skills from the base branch, learnings and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings. Then it looks at the diff again in the same session without tools: up to 10 more at about a tenth of the cost. [`passes`](#passes) add up to two more finders.
 4. **Verify.** A cheaper model checks each finding in the code.
+   For Go, the test the report names as proof runs against the base versions of the PR's code files. If it still passes there, that is a minor finding.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
 **What the review reads:**
