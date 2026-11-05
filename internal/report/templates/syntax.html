@@ -36,9 +36,9 @@ const lang = path => {
 };
 let hl = null;
 try {
-  const { createHighlighter } = await import("https://cdn.jsdelivr.net/npm/shiki@4.5.0/+esm");
+  const { createHighlighter } = await import("https://cdn.jsdelivr.net/npm/shiki@4.6.0/+esm");
   // the JavaScript engine: Shiki's default is WebAssembly, which the page's CSP blocks
-  const { createJavaScriptRegexEngine } = await import("https://cdn.jsdelivr.net/npm/shiki@4.5.0/dist/engine-javascript.mjs/+esm");
+  const { createJavaScriptRegexEngine } = await import("https://cdn.jsdelivr.net/npm/shiki@4.6.0/dist/engine-javascript.mjs/+esm");
   hl = await createHighlighter({ themes: [], langs: [], engine: createJavaScriptRegexEngine() });
   try {
     await hl.loadTheme(theme === day.name ? day : theme);
