@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.4.1...v0.5.0) (2026-11-05)
+
+
+### Features
+
+* **chat:** learnings settings in review.json, learnings and forget commands ([#53](https://github.com/marcomaiermm/DiffHarbor/issues/53)) ([f3c3031](https://github.com/marcomaiermm/DiffHarbor/commit/f3c3031260c9d96c185cb4ab5fe03f6328058d19))
+* **review:** ask about unstated assumptions, check contracts and migrations, suggest a split ([#50](https://github.com/marcomaiermm/DiffHarbor/issues/50)) ([1134adc](https://github.com/marcomaiermm/DiffHarbor/commit/1134adc0bc726e74e1c5374f8882a8d6fc1f8f5f))
+* **review:** run the proof test on the base versions of the PR's code ([#54](https://github.com/marcomaiermm/DiffHarbor/issues/54)) ([c5446df](https://github.com/marcomaiermm/DiffHarbor/commit/c5446df245d4e2d5d486a94e9c1e46a96ce682df))
+
 ## [0.4.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.4.0...v0.4.1) (2026-11-05)
 
 
