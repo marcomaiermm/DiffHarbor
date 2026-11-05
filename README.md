@@ -204,7 +204,7 @@ Everything lives under `.review/`; `review.json` can change the paths.
 
 | Key | |
 |---|---|
-| `ignore` | Globs; a path without one takes its folder. Neither the model nor a check sees these files. |
+| `ignore` | Globs; a path without one takes its folder, `!glob` takes paths back in (`["src/ui", "!src/ui/{chip,toast}.tsx"]`). Neither the model nor a check sees these files. |
 | `min_severity` | `minor`, `major` or `critical`: findings below are dropped. |
 | `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. |
 | `review_model`, `verify_model` | Apply where the server sets none; the provider's key must be on the server. |

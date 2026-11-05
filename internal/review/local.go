@@ -54,7 +54,7 @@ func Tree(ctx context.Context, cwd, dir, title string, closed []Comment, large b
 			scripts = append(scripts, checks.Script{Name: p, File: f})
 		}
 	}
-	parts, _ := diff.Filter(string(out), cwd, nil, cfg.IgnoreRe, cfg.Parts(large))
+	parts, _ := diff.Filter(string(out), cwd, nil, cfg.Ignored, cfg.Parts(large))
 	return Analyze(ctx, Input{Agent: agent.Pi{}, Dir: dir, Title: title, Parts: parts, Trusted: TrustedContext(rules, ""), Checks: scripts, Closed: closed, Settings: cfg})
 }
 

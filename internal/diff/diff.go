@@ -136,14 +136,14 @@ func split(f string) []string {
 // before tests, data, bulk code and docs, a file next to others of its directory; in a part they keep the diff's
 // order. The last part names the omitted files, also returned (a file with a piece left out too), and with only nil
 // the deleted files: their diffs are no use, what still relies on them is.
-func Filter(diff, root string, only map[string]bool, ignore *regexp.Regexp, n int) ([]string, []string) {
+func Filter(diff, root string, only map[string]bool, ignore func(string) bool, n int) ([]string, []string) {
 	type file struct {
 		i          int
 		path, diff string
 	}
 	var files []file
 	EachFile(diff, func(p, f string) {
-		if !Skip.MatchString(p) && !generated.MatchString(f) && (only == nil || only[p]) && (ignore == nil || !ignore.MatchString(p)) && !generatedAt(root, p) {
+		if !Skip.MatchString(p) && !generated.MatchString(f) && (only == nil || only[p]) && (ignore == nil || !ignore(p)) && !generatedAt(root, p) {
 			for _, s := range split(f) {
 				files = append(files, file{len(files), p, s})
 			}
@@ -191,7 +191,7 @@ func Filter(diff, root string, only map[string]bool, ignore *regexp.Regexp, n in
 	}
 	var gone []string
 	for _, m := range deleted.FindAllStringSubmatch(diff, -1) {
-		if only == nil && !Skip.MatchString(m[1]) && (ignore == nil || !ignore.MatchString(m[1])) {
+		if only == nil && !Skip.MatchString(m[1]) && (ignore == nil || !ignore(m[1])) {
 			gone = append(gone, m[1])
 		}
 	}
