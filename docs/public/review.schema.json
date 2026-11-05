@@ -60,7 +60,18 @@
       "type": "object",
       "properties": {
         "lines": { "type": "integer", "minimum": 0 },
-        "files": { "type": "integer", "minimum": 0 }
+        "files": { "type": "integer", "minimum": 0 },
+        "count": {
+          "type": "array",
+          "items": { "enum": ["code", "test", "data", "bulk", "doc"] },
+          "uniqueItems": true,
+          "description": "The classes of files that count. Default [\"code\"]."
+        },
+        "skip": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Globs of files that don't count; \"!glob\" counts a file whatever its class."
+        }
       },
       "additionalProperties": false,
       "description": "The AI suggests splitting a PR from this many changed lines or files, either one is enough. Off by default."

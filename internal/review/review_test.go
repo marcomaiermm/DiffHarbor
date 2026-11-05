@@ -154,7 +154,7 @@ func TestSettings(t *testing.T) {
 	if _, err := LoadSettings(`{"min_severity":"high"}`); err == nil {
 		t.Error("min_severity high accepted")
 	}
-	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"suggest_split":{"files":-1}}`, `{"learnings":{"max":-1}}`, `{"learnings":{"max":101}}`, `{"learnings":{"max_age_days":-1}}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
+	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"suggest_split":{"files":-1}}`, `{"suggest_split":{"count":["tests"]}}`, `{"suggest_split":{"skip":["a/{b"]}}`, `{"learnings":{"max":-1}}`, `{"learnings":{"max":101}}`, `{"learnings":{"max_age_days":-1}}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
 		if _, err := LoadSettings(bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
@@ -166,11 +166,32 @@ func TestSettings(t *testing.T) {
 		off.Parts(true) != 1 || off.Asks() || ask.Parts(false) != 1 || ask.Parts(true) != 4 || !ask.Asks() {
 		t.Error("large_pr parts")
 	}
+	// pr is a diff of files with n added lines each.
+	pr := func(n int, paths ...string) string {
+		var b strings.Builder
+		for _, p := range paths {
+			fmt.Fprintf(&b, "diff --git a/%s b/%[1]s\n--- a/%[1]s\n+++ b/%[1]s\n@@ -0,0 +1,%d @@\n%s", p, n, strings.Repeat("+x\n", n))
+		}
+		return b.String()
+	}
+	twenty := make([]string, 20)
+	for k := range twenty {
+		twenty[k] = fmt.Sprintf("p%d/a.go", k)
+	}
 	lines, _ := LoadSettings(`{"suggest_split":{"lines":300}}`)
 	either, _ := LoadSettings(`{"suggest_split":{"lines":300,"files":20}}`)
-	if (Settings{}).SuggestsSplit(1e6, 1e3) || lines.SuggestsSplit(299, 1e3) || !lines.SuggestsSplit(300, 1) ||
-		either.SuggestsSplit(299, 19) || !either.SuggestsSplit(10, 20) || !either.SuggestsSplit(300, 1) {
+	if (Settings{}).SuggestsSplit(pr(1000, twenty...)) || lines.SuggestsSplit(pr(299, "a.go")) || !lines.SuggestsSplit(pr(300, "a.go")) ||
+		either.SuggestsSplit(pr(10, twenty[:19]...)) || !either.SuggestsSplit(pr(10, twenty...)) || !either.SuggestsSplit(pr(150, "a.go", "a.go")) {
 		t.Error("suggest_split")
+	}
+	// Only code counts by default; count picks the classes, skip's globs leave paths out and "!" takes them in.
+	if lines.SuggestsSplit(pr(299, "a.go", "a_test.go", "x.json", "s.css", "README.md")) {
+		t.Error("suggest_split counted tests, data, bulk or docs")
+	}
+	tuned, err := LoadSettings(`{"suggest_split":{"lines":300,"count":["code","test"],"skip":["gen/**","!deploy/*.yaml"]}}`)
+	if err != nil || !tuned.SuggestsSplit(pr(150, "a.go", "a_test.go")) || tuned.SuggestsSplit(pr(150, "a.go", "gen/b.go")) ||
+		!tuned.SuggestsSplit(pr(150, "a.go", "deploy/k8s.yaml")) || tuned.SuggestsSplit(pr(150, "a.go", "ci.yaml")) {
+		t.Error("suggest_split count, skip", err)
 	}
 	if _, err := LoadSettings(`{"review_model":"--tools=bash"}`); err == nil {
 		t.Error("flag as model accepted")

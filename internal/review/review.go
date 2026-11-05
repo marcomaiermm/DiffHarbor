@@ -219,7 +219,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	rm, verify := in.Settings.Models()
 	lines := diff.Changed(whole)
 	fs := in.Settings.Finders(lines)
-	in.split = in.Settings.SuggestsSplit(lines, len(files))
+	in.split = in.Settings.SuggestsSplit(whole)
 	models := make([]string, len(fs))
 	for k := range fs {
 		fs[k].Model = agent.PassModel(fs[k].Model, lvl)

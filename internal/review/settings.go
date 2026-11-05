@@ -3,6 +3,7 @@ package review
 import (
 	"cmp"
 	"diffharbor/internal/agent"
+	"diffharbor/internal/diff"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -85,8 +86,24 @@ func (l Learnings) Limit() int {
 
 // SplitAt is review.json's suggest_split: either count reached asks; 0 asks by the other only.
 type SplitAt struct {
-	Lines int `json:"lines"`
-	Files int `json:"files"`
+	Lines int      `json:"lines"`
+	Files int      `json:"files"`
+	Count []string `json:"count"` // the classes (diff.Classes) counted; unset: code, [] = only skip's "!" globs
+	Skip  []string `json:"skip"`  // globs not counted; "!glob" counts a path whatever its class, in any order
+
+	skipRe, keepRe *regexp.Regexp
+}
+
+// Counts reports whether path's changes count toward suggest_split.
+func (s SplitAt) Counts(path string) bool {
+	if s.keepRe != nil && s.keepRe.MatchString(path) {
+		return true
+	}
+	count := s.Count
+	if count == nil {
+		count = []string{"code"}
+	}
+	return slices.Contains(count, diff.Class(path)) && (s.skipRe == nil || !s.skipRe.MatchString(path))
 }
 
 // Pass is a finder of review.json's passes.
@@ -151,10 +168,18 @@ func (cfg Settings) Parts(confirmed bool) int {
 	return 1
 }
 
-// SuggestsSplit reports whether a PR with lines changed lines in files files is asked whether it should be several.
-func (cfg Settings) SuggestsSplit(lines, files int) bool {
+// SuggestsSplit reports whether a PR with diff d is asked whether it should be several: its changed lines or files
+// that Counts.
+func (cfg Settings) SuggestsSplit(d string) bool {
 	s := cfg.SuggestSplit
-	return s.Lines > 0 && lines >= s.Lines || s.Files > 0 && files >= s.Files
+	lines, files := 0, map[string]bool{}
+	diff.EachFile(d, func(p, f string) {
+		if s.Counts(p) {
+			lines += diff.Changed(f)
+			files[p] = true // Filter's pieces of one file count once
+		}
+	})
+	return s.Lines > 0 && lines >= s.Lines || s.Files > 0 && len(files) >= s.Files
 }
 
 // ReportFiles is the changed files from which a PR gets a report unless review.json says otherwise.
@@ -242,6 +267,29 @@ func globRe(globs ...string) (*regexp.Regexp, error) {
 	return regexp.Compile(`^(` + strings.Join(res, "|") + `)(/.*)?$`)
 }
 
+// globsRe compiles globs (globRe) apart from its "!glob" ones; none of a kind is nil.
+func globsRe(globs []string) (in, out *regexp.Regexp, err error) {
+	var plain, not []string
+	for _, g := range globs {
+		if k, ok := strings.CutPrefix(g, "!"); ok {
+			not = append(not, k)
+		} else {
+			plain = append(plain, g)
+		}
+	}
+	if len(plain) > 0 {
+		if in, err = globRe(plain...); err != nil {
+			return nil, nil, err
+		}
+	}
+	if len(not) > 0 {
+		if out, err = globRe(not...); err != nil {
+			return nil, nil, err
+		}
+	}
+	return in, out, nil
+}
+
 // LoadSettings parses s ("" = defaults). A broken file reviews with the defaults, the error says why.
 func LoadSettings(s string) (Settings, error) {
 	var cfg Settings
@@ -298,29 +346,23 @@ func LoadSettings(s string) (Settings, error) {
 		return Settings{}, fmt.Errorf("learnings: max %d, max_age_days %d: want max 0 to %d, max_age_days 0 (any) or more", l.Limit(), l.MaxAgeDays, MaxLearnings)
 	}
 	if s := cfg.SuggestSplit; s.Lines < 0 || s.Files < 0 {
-		return Settings{}, fmt.Errorf("suggest_split %+v: want 0 (off) or more", s)
+		return Settings{}, fmt.Errorf("suggest_split: lines %d, files %d: want 0 (off) or more", s.Lines, s.Files)
+	}
+	for _, c := range cfg.SuggestSplit.Count {
+		if !slices.Contains(diff.Classes, c) {
+			return Settings{}, fmt.Errorf("suggest_split: count %q: want %s", c, strings.Join(diff.Classes, ", "))
+		}
 	}
 	if cfg.MinSeverity != "" && rank[cfg.MinSeverity] == 0 {
 		return Settings{}, fmt.Errorf("min_severity %q: want minor, major or critical", cfg.MinSeverity)
 	}
-	var ignore, keep []string
-	for _, g := range cfg.Ignore {
-		if k, ok := strings.CutPrefix(g, "!"); ok {
-			keep = append(keep, k)
-		} else {
-			ignore = append(ignore, g)
-		}
-	}
 	var err error
-	if len(ignore) > 0 {
-		if cfg.ignoreRe, err = globRe(ignore...); err != nil {
-			return Settings{}, fmt.Errorf("ignore: %w", err)
-		}
+	if cfg.ignoreRe, cfg.keepRe, err = globsRe(cfg.Ignore); err != nil {
+		return Settings{}, fmt.Errorf("ignore: %w", err)
 	}
-	if len(keep) > 0 {
-		if cfg.keepRe, err = globRe(keep...); err != nil {
-			return Settings{}, fmt.Errorf("ignore: %w", err)
-		}
+	sp := &cfg.SuggestSplit
+	if sp.skipRe, sp.keepRe, err = globsRe(sp.Skip); err != nil {
+		return Settings{}, fmt.Errorf("suggest_split: skip: %w", err)
 	}
 	for _, p := range slices.SortedFunc(maps.Keys(cfg.Packages), func(a, b string) int { return cmp.Compare(len(b), len(a)) }) {
 		ps := cfg.Packages[p]
