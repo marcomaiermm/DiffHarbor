@@ -100,6 +100,7 @@ func (*Hub) Open(e *forge.Event) (forge.PR, error) {
 }
 
 func (p *pr) Refresh() error {
+	p.e.PullRequest.Body = "" // a cleared description is null, which keeps the old text
 	return Call("GET", fmt.Sprintf("%s/pulls/%d", p.api, p.e.PullRequest.Number), p.token, nil, &p.e.PullRequest)
 }
 
