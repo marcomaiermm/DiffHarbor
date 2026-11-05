@@ -19,8 +19,9 @@ const Ran = "Ran on the base: "
 // worktree of head under dir: test files stay the PR's, the checkout is untouched. A test that still passes there does
 // not prove the change: a finding on the test. Minor, not major: the run is exact, but the proof is the model's pick
 // and the change may be covered elsewhere. Go only (go test names); tests, the run of head's tests, says whether
-// proof already fails on head. A test not found once in the changed test files, or any error, skips it.
-func proofOnBase(ctx context.Context, repo, dir, proof string, tests map[string]string) []Comment {
+// proof already fails on head. A test not found once in the changed test files, review.json turning its tests off,
+// or any error, skips it.
+func proofOnBase(ctx context.Context, repo, dir, proof string, tests map[string]string, cfg Settings) []Comment {
 	if proof == "" || tests[proof] == "fail" {
 		return nil
 	}
@@ -61,7 +62,7 @@ func proofOnBase(ctx context.Context, repo, dir, proof string, tests map[string]
 			}
 		}
 	}
-	if found != 1 {
+	if found != 1 || !cfg.RunsTests(testFile) && !cfg.LeftToCI(testFile) {
 		return nil
 	}
 	wt := filepath.Join(dir, "proof")
@@ -98,10 +99,14 @@ func proofOnBase(ctx context.Context, repo, dir, proof string, tests map[string]
 		return nil
 	}
 	ev := Ran + proof + " passes without the change to the code, so it does not prove it."
-	return []Comment{{
+	fd := Comment{
 		Path: testFile, Line: line, Severity: "minor", Title: "Test passes without the change",
 		Body: fmt.Sprintf("`%s` is the test for this change, but it still passes with the code files at their base versions: "+
 			"it does not fail without the change. Assert the new behaviour.\n\n%s%s", proof, Verified, ev),
 		Evidence: ev,
-	}}
+	}
+	if !cfg.Keep(fd) {
+		return nil
+	}
+	return []Comment{fd}
 }
