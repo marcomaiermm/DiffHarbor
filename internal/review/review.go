@@ -60,7 +60,7 @@ const reviewSystem = `Senior code reviewer. Review only what the diff changes.
 Report: bugs, security, data loss, races, hangs/leaks, broken edge cases, perf traps, project-rule violations, files the change forgot.
 Skip: style, praise, restating the diff, speculation.
 Don't stop at the worst few: report every defect you can point to in the code. A real defect with a small blast radius (one edge case, a wrong message or status, a missing guard, a doc or comment the change made wrong) is a minor finding: report it as minor.
-A defect only reachable through code that does not exist yet (nothing calls or does X today): minor, the fix is the wrong comment or doc, not building or guarding the missing path.
+A defect only reachable through code that does not exist yet (nothing calls or does X today, and X is no exported API, endpoint or handler others call): minor, the fix is the wrong comment or doc, not building or guarding the missing path.
 Severity is what the worst case breaks: a race or edge case whose worst case is a failed request or an error the user caused on their own data is minor.
 Per changed function check: every return path (errors too), shared state and locks, a timeout on outbound calls (HTTP, RPC, subprocess), auth checks (an unset or empty secret must fail closed, compare secrets in constant time),
 input bounds and overflow (sizes computed from counts in the input, 32-bit ints),

@@ -232,9 +232,10 @@ func TestChatReactsOffTheWorker(t *testing.T) {
 func TestOtherMention(t *testing.T) {
 	for body, want := range map[string]bool{
 		"That is true. @BrudyR, what do you think?": true,
-		"@john.doe-2 ok?":    true,
-		"Fixed in abc123.":   false,
-		"mail me at a@b.com": false,
+		"@john.doe-2 ok?":             true,
+		"What do you think (@alice)?": true,
+		"Fixed in abc123.":            false,
+		"mail me at a@b.com":          false,
 	} {
 		if got := otherMention.MatchString(body); got != want {
 			t.Errorf("%q: got %v, want %v", body, got, want)
@@ -252,5 +253,20 @@ func TestNewerFrom(t *testing.T) {
 		if got := newerFrom(ns, c.id, c.login); got != c.want {
 			t.Errorf("%d %s: got %v", c.id, c.login, got)
 		}
+	}
+}
+
+func TestChatLeavesQuestionsForOthers(t *testing.T) {
+	pr := &reactPR{reacted: make(chan struct{}), release: make(chan struct{})}
+	defer close(pr.release)
+	e := &forge.Event{Kind: "pull_request_review_comment"}
+	e.Comment.Body = "What do you think (@alice)?"
+	if err := Chat(t.Context(), reactForge{pr: pr}, regexp.MustCompile(`@bot`), e); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-pr.reacted:
+		t.Fatal("Chat reacted to a question for @alice")
+	case <-time.After(100 * time.Millisecond):
 	}
 }

@@ -485,5 +485,5 @@ func mentionOf(handles ...string) *regexp.Regexp {
 	for i, h := range handles {
 		handles[i] = regexp.QuoteMeta(h)
 	}
-	return regexp.MustCompile(`(?i)(^|\s)@(` + strings.Join(handles, "|") + `)([^\w-]|$)`)
+	return regexp.MustCompile(`(?i)(^|[^\w.+-])@(` + strings.Join(handles, "|") + `)([^\w-]|$)`)
 }
