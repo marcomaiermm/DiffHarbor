@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.6.1...v0.7.0) (2026-11-05)
+
+
+### Features
+
+* dependency bumps get full tsc and an npm diff of the bumped packages ([#61](https://github.com/marcomaiermm/DiffHarbor/issues/61)) ([7886ffd](https://github.com/marcomaiermm/DiffHarbor/commit/7886ffdf8b7661830d8d6dd750b2bc0f7e9cbf98))
+
+
+### Bug Fixes
+
+* **chat:** follow-ups to [#63](https://github.com/marcomaiermm/DiffHarbor/issues/63) review ([#64](https://github.com/marcomaiermm/DiffHarbor/issues/64)) ([b86f77b](https://github.com/marcomaiermm/DiffHarbor/commit/b86f77b944d47d44d437776d0fa26df43515927b))
+* **chat:** no reply to questions for others, accept deferrals, severity by worst case ([#63](https://github.com/marcomaiermm/DiffHarbor/issues/63)) ([da3f5bd](https://github.com/marcomaiermm/DiffHarbor/commit/da3f5bdcdad072eedcb58dc287910834088717ec))
+
 ## [0.6.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.6.0...v0.6.1) (2026-11-05)
 
 
