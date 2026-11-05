@@ -295,3 +295,29 @@ func TestParseCommits(t *testing.T) {
 		t.Errorf("parseCommits %+v", got)
 	}
 }
+
+func TestBumps(t *testing.T) {
+	d := t.TempDir()
+	os.MkdirAll(filepath.Join(d, "apps/web/node_modules/better-auth"), 0o755)
+	os.WriteFile(filepath.Join(d, "apps/web/package.json"), []byte(`{"name":"web","dependencies":{"better-auth":"^1.7.0","zod":"^4.1.0","x":"workspace:*"}}`), 0o644)
+	os.WriteFile(filepath.Join(d, "apps/web/node_modules/better-auth/package.json"), []byte(`{"version":"1.7.4"}`), 0o644)
+	patch := "diff --git a/apps/web/package.json b/apps/web/package.json\n--- a/apps/web/package.json\n+++ b/apps/web/package.json\n@@ -1,6 +1,6 @@\n" +
+		"-  \"version\": \"1.0.0\",\n+  \"version\": \"1.1.0\",\n" +
+		"-    \"better-auth\": \"^1.6.3\",\n+    \"better-auth\": \"^1.7.0\",\n" +
+		"-    \"zod\": \"^4.1.0\",\n+    \"zod\": \"^4.1.0\",\n" +
+		"-    \"x\": \"workspace:^1.0.0\",\n+    \"x\": \"workspace:*\",\n"
+	if got := bumps(t.Context(), d, patch); !reflect.DeepEqual(got, []bump{{"apps/web", "better-auth", "1.6.3", "1.7.4"}}) {
+		t.Fatalf("bumps: %+v", got)
+	}
+}
+
+func TestAPIChanges(t *testing.T) {
+	d := "diff --git a/dist/index.d.mts b/dist/index.d.mts\n@@ -9,2 +9,2 @@\n" +
+		"-export { getIp, type Session as S, oidcProvider };\n+export { getIP, type Session as S };\n" +
+		"-export declare function old(): void;\n+export declare function old(): string;\n" +
+		"diff --git a/CHANGELOG.md b/CHANGELOG.md\n--- a/CHANGELOG.md\n+++ b/CHANGELOG.md\n@@ -1,0 +1,3 @@\n+## 1.7.0\n+\n+- rename getIp to getIP\n"
+	removed, added, cl := apiChanges(d)
+	if !slices.Equal(removed, []string{"getIp", "oidcProvider"}) || !slices.Equal(added, []string{"getIP"}) || cl != "## 1.7.0\n- rename getIp to getIP\n" {
+		t.Fatalf("apiChanges: %v %v %q", removed, added, cl)
+	}
+}
