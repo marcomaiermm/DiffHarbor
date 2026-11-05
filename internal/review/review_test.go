@@ -103,6 +103,10 @@ func TestVerdicts(t *testing.T) {
 	if kept, _, _, ok := verdicts([]Comment{{Existing: "a", Fix: "b"}}, nil, `{"verdicts":[{"i":0,"keep":true,"fix":false}]}`, nil); !ok || kept[0].Fix != "" {
 		t.Fatalf("fix=false kept the fix: %+v", kept)
 	}
+	two := []Comment{{Severity: "major"}, {Severity: "minor"}}
+	if kept, _, _, _ := verdicts(two, nil, `{"verdicts":[{"i":0,"keep":true,"severity":"minor"},{"i":1,"keep":true,"severity":"critical"}]}`, nil); kept[0].Severity != "minor" || kept[1].Severity != "minor" {
+		t.Fatalf("severity: %+v", kept)
+	}
 }
 
 // A decision is an object with its place; a plain string, as states before it hold, is its text.

@@ -39,6 +39,12 @@ Output JSON only: {"reply":"<markdown or empty>","learning":"<rule or empty>","s
 // the bot isn't mentioned, so it is someone else.
 var otherMention = regexp.MustCompile(`(^|[^\w.+-])@[\w.-]+`)
 
+// ack is a reply that needs no answer: no Pi run for it. Not "done" or "fixed": those claims get checked.
+var ack = regexp.MustCompile(`(?i)^(thanks?( you| a lot)?|thx|ty|danke( dir| schön)?|merci|ok(ay)?|lgtm|\+1|agreed|makes sense|sounds good|will do|mach ich|👍|🙏|❤️)[\s.!]*$`)
+
+// maxReplies is how often chat answers in one thread without being @mentioned: past it, it has said its piece.
+const maxReplies = 3
+
 // newerFrom reports whether login wrote again in notes after the note id.
 func newerFrom(notes []forge.Note, id int64, login string) bool {
 	i := slices.IndexFunc(notes, func(n forge.Note) bool { return n.ID == id })
@@ -176,6 +182,9 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		return err
 	}
 	c := e.Comment
+	if ack.MatchString(strings.TrimSpace(mention.ReplaceAllString(c.Body, ""))) {
+		return nil
+	}
 	var about, convo strings.Builder
 	ours := false     // a review thread we started: chat may resolve it
 	resolved := false // someone resolved it already
@@ -228,8 +237,14 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			fmt.Fprintf(&convo, "**@%s**: %s\n\n", n.Login, forge.Clean(n.Body))
 		}
 		if !mention.MatchString(c.Body) {
-			if !ours || otherMention.MatchString(c.Body) {
-				return nil // a thread between humans, or a question to someone else in ours
+			replies := 0
+			for _, n := range d.Notes[min(1, len(d.Notes)):] {
+				if n.Ours {
+					replies++
+				}
+			}
+			if !ours || otherMention.MatchString(c.Body) || replies >= maxReplies {
+				return nil // between humans, a question for someone else, or we said our piece: @us to go on
 			}
 			go p.React() // the server left it to us; off the worker, a slow forge would hold up the queue
 		}

@@ -270,3 +270,14 @@ func TestChatLeavesQuestionsForOthers(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+func TestAck(t *testing.T) {
+	for body, want := range map[string]bool{
+		"thanks!": true, "Danke schön": true, "LGTM": true, "👍": true, "ok.": true,
+		"ok, but why line 3?": false, "done": false, "fixed in abc123": false, "thanks, but this is wrong": false,
+	} {
+		if got := ack.MatchString(body); got != want {
+			t.Errorf("%q: got %v, want %v", body, got, want)
+		}
+	}
+}
