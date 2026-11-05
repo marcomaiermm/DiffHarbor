@@ -261,8 +261,9 @@ func proxies(f string) error {
 		}
 		// A gateway (LiteLLM, one on Bedrock) rejects the effort Pi sends as a system message mid-conversation
 		// (messages.N.output_config): the effort goes in output_config instead (pi-ai api/anthropic-messages.js).
+		// Likewise the tool_removal block Pi sends when a session goes on with other tools (messages.N.content.0: 400).
 		if p := providers[r.Name]; p != nil && r.Name == "anthropic" && os.Getenv("ANTHROPIC_BASE_URL") != "" {
-			p["compat"] = map[string]bool{"supportsMidConvoEffort": false}
+			p["compat"] = map[string]bool{"supportsMidConvoEffort": false, "supportsMidConvoToolChanges": false}
 		}
 	}
 	if len(providers) == 0 {
