@@ -97,6 +97,34 @@ func TestLearnings(t *testing.T) {
 	}
 }
 
+// `learnings` lists the repo's and the owner's; `forget` drops the owner's only for an owner or member.
+func TestLearningsCommand(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	e := &forge.Event{}
+	e.Repository.FullName = "o/r"
+	if got := learningsCommand("learnings", "bot", e); got != "No learnings yet." {
+		t.Fatalf("empty: %q", got)
+	}
+	now := time.Now()
+	addLearning("o/r", "- repo rule (@u)", now)
+	addLearning("o", "- shared rule (@u)", now)
+	if got := learningsCommand("learnings", "bot", e); !strings.Contains(got, "**This repo**\n\n- repo rule") || !strings.Contains(got, "**All `o` repos**\n\n- shared rule") {
+		t.Fatalf("list: %q", got)
+	}
+	if got := learningsCommand("forget  ru ", "bot", e); !strings.HasPrefix(got, "Forget what?") {
+		t.Fatalf("short: %q", got)
+	}
+	e.Comment.AuthorAssociation = "COLLABORATOR"
+	if got := learningsCommand("forget SHARED", "bot", e); !strings.HasPrefix(got, "No learning contains") || len(learningsOf("o")) != 1 {
+		t.Fatalf("collaborator forgot the owner's: %q", got)
+	}
+	e.Comment.AuthorAssociation = "MEMBER"
+	if got := learningsCommand("forget rule", "bot", e); !strings.Contains(got, "- repo rule") || !strings.Contains(got, "- shared rule") ||
+		len(learningsOf("o/r"))+len(learningsOf("o")) != 0 {
+		t.Fatalf("member: %q", got)
+	}
+}
+
 // A file left out keeps its last reviewed patch ID, one never reviewed gets none: the next push reviews both if changed.
 func TestReviewedPatches(t *testing.T) {
 	got := reviewedPatches(map[string]string{"a": "1", "b": "1", "gone": "1"}, map[string]string{"a": "2", "b": "2", "c": "2", "d": "2"}, []string{"a", "c"})
