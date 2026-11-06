@@ -166,9 +166,11 @@ func TestAnalyze(t *testing.T) {
 	if len(r.Comments) != 1 || !slices.Equal(r.Fixed, []int{0}) || strings.Join(calls, ",") != "review,review again,verify" {
 		t.Fatalf("confirmed fix: %+v %v %v", r.Comments, r.Fixed, calls)
 	}
-	r, calls = fixedRun(map[string][]string{"verify": {`{"verdicts":[{"i":0,"keep":true}],"fixed":[]}`}, "verify repeats": {"no json"}})
-	if len(r.Comments) != 1 || strings.Join(calls, ",") != "review,review again,verify,verify repeats" {
-		t.Fatalf("repeats failed: %+v %v", r.Comments, calls)
+	for _, bad := range []string{"no json", `{"repeats":[null]}`, `{"repeats":[0,99]}`, `{"repeats":[-1]}`} {
+		r, calls = fixedRun(map[string][]string{"verify": {`{"verdicts":[{"i":0,"keep":true}],"fixed":[]}`}, "verify repeats": {bad}})
+		if len(r.Comments) != 1 || len(r.Dropped) != 0 || strings.Join(calls, ",") != "review,review again,verify,verify repeats" {
+			t.Fatalf("repeats %s: %+v %v", bad, r.Comments, calls)
+		}
 	}
 
 	// In parts: a review pass, a second look and a verify pass each, findings merged most severe first, a failed part

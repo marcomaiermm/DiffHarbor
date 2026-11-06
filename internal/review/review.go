@@ -471,15 +471,23 @@ func repeats(ctx context.Context, in Input, name, vm string, sem chan struct{}, 
 		fmt.Sprintf(repeatsTask, findings(earlier, ids), findings(kept, nil)), vm)
 	<-sem
 	var v struct {
-		Repeats *[]int `json:"repeats"`
+		Repeats *[]*int `json:"repeats"` // *int: a null must not read as finding 0
 	}
-	if err != nil || !agent.Object(out, &v) || v.Repeats == nil {
+	ok := err == nil && agent.Object(out, &v) && v.Repeats != nil
+	var rep []int
+	for k := 0; ok && k < len(*v.Repeats); k++ { // one bad index fails the answer: no partial drops
+		i := (*v.Repeats)[k]
+		if ok = i != nil && *i >= 0 && *i < len(kept); ok {
+			rep = append(rep, *i)
+		}
+	}
+	if !ok {
 		log.Printf("verify%s repeats failed, keeping all: %v %q", name, err, text.Tail(out))
 		return kept, dropped
 	}
 	keep := []Comment{}
 	for k, c := range kept {
-		if !slices.Contains(*v.Repeats, k) {
+		if !slices.Contains(rep, k) {
 			keep = append(keep, c)
 			continue
 		}
