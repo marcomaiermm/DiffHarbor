@@ -8,8 +8,8 @@ import (
 
 // scheduler picks the queued job that runs next. Jobs of different repos run at once, up to limit; a repo's run one
 // at a time: they share its uid, which is what fences a job's PR code off from another's. So do repos of one name, a
-// recreated one and the old one's or an old version's ID-less events: they share the state and reports keyed by name
-// (Event.Key). Repos take turns, so one with many PRs doesn't hold up the others. pool.mu guards it.
+// recreated one and the old one's, or an event without the repo's id: they share the learnings and the reports from
+// before the repo id, keyed by name. Repos take turns, so one with many PRs doesn't hold up the others. pool.mu guards it.
 type scheduler struct {
 	limit   int                       // jobs at once
 	room    int                       // jobs that may still wait: past it a webhook gets a 503, GitHub's is redelivered (Redeliver)
@@ -28,7 +28,7 @@ func (s *scheduler) add(repo string, e *forge.Event) bool {
 	q, ok := s.waiting[repo]
 	if isReview(e) {
 		n := len(q)
-		q = slices.DeleteFunc(q, func(o *forge.Event) bool { return isReview(o) && o.Key() == e.Key() })
+		q = slices.DeleteFunc(q, func(o *forge.Event) bool { return isReview(o) && o.PullRequest.Number == e.PullRequest.Number })
 		s.room += n - len(q)
 	}
 	if s.room == 0 { // none replaced: q is as it was

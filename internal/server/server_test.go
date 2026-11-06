@@ -26,7 +26,7 @@ import (
 func TestStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := newPool(1, nil)
-	p.running[runKey("o/r", ev("o/r", 1, ""))] = &task{review: false, cancel: cancel}
+	p.running[prKey(ev("o/r", 1, ""))] = &task{review: false, cancel: cancel}
 	p.stop(ev("o/r", 2, ""))
 	if ctx.Err() != nil {
 		t.Fatal("stopped the wrong job")
@@ -115,7 +115,7 @@ func TestDrop(t *testing.T) {
 	if !closing(r) || r.Key() != e.Key() {
 		t.Fatalf("%+v", r)
 	}
-	newPool(1, runJob).exec(t.Context(), "", r, &task{cancel: func() {}})
+	newPool(1, runJob).exec(t.Context(), r, &task{cancel: func() {}})
 	if vs, err := job.Versions(dir); err != nil || len(vs) != 0 {
 		t.Fatal("kept its reports:", vs, err)
 	}
@@ -128,6 +128,77 @@ func TestDrop(t *testing.T) {
 	}
 	if vs, _ := job.Versions(dir); len(vs) != 1 {
 		t.Fatal("a stale close deleted the reopened PR's report")
+	}
+}
+
+// A repo deleted and recreated under its name has PRs of the old numbers. The old one's late close (Redeliver resends
+// one for hours) skips none of the new PR's reviews and deletes none of its reports, nor does one without the repo's
+// id: it has the name's.
+func TestLateCloseRecreatedRepo(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	forges["github"] = &github.Hub{}
+	defer clear(forges)
+	pr := func(id int64, action string) *forge.Event {
+		e := &forge.Event{Forge: "github", Kind: "pull_request", Action: action}
+		e.Repository.ID, e.Repository.FullName, e.PullRequest.Number = id, "o/r", 7
+		e.PullRequest.HTMLURL, e.PullRequest.Head.SHA = "https://github.com/o/r/pull/7", "abc"
+		return e
+	}
+	recreated, old, noID := pr(2, "opened"), pr(1, "closed"), pr(0, "closed")
+	ours, theirs, named := "github.com/id:2/7/"+secret, "github.com/id:1/7/"+secret, "github.com/o/r/7/"+secret
+	for _, dir := range []string{ours, theirs, named} {
+		job.Reports().Put(dir+"/versions.json", []byte(`[{"sha":"a"}]`))
+	}
+	if err := errors.Join(pushed(recreated), closed(old), closed(noID)); err != nil {
+		t.Fatal(err)
+	}
+	latest.Lock()
+	sha := latest.m[prKey(recreated)]
+	latest.Unlock()
+	if sha != "abc" || !proc.Exists(pendingFile(prKey(recreated))) {
+		t.Fatal("the old close dropped the new PR's queued review:", sha)
+	}
+	q := make(chan *forge.Event, 3)
+	if retryDrops(queue(q)); len(q) != 2 {
+		t.Fatal("deletes queued:", len(q))
+	}
+	for range 2 {
+		if err := drop(<-q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for dir, keep := range map[string]bool{ours: true, theirs: false, named: false} {
+		if vs, err := job.Versions(dir); err != nil || (len(vs) == 1) != keep {
+			t.Error(dir, "kept:", len(vs) == 1, err)
+		}
+	}
+	ran := false
+	if review(recreated, func() error { ran = true; return nil }); !ran {
+		t.Fatal("the new PR's review skipped")
+	}
+}
+
+// Pending and deleting files a restart finds named by the repo's name, from before prKey took its id, are renamed:
+// the push's review and the close's delete still run, and a later reopen or push finds them.
+func TestResumeRenamesNameKeyed(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	forges["github"] = &github.Hub{}
+	defer clear(forges)
+	push := &forge.Event{Forge: "github", Kind: "pull_request", Action: "synchronize"}
+	push.Repository.ID, push.Repository.FullName, push.PullRequest.Number, push.PullRequest.Head.SHA = 2, "o/r", 7, "abc"
+	shut := &forge.Event{Forge: "github", Kind: "pull_request", Action: "closed"}
+	shut.Repository.ID, shut.Repository.FullName, shut.PullRequest.Number = 3, "o/x", 8
+	latest.Lock()
+	save(pendingFile(push.Key()), push)
+	save(deletingFile(shut.Key()), shut)
+	latest.Unlock()
+	t.Cleanup(func() { latest.Lock(); delete(latest.m, prKey(push)); latest.Unlock() })
+	q := make(chan *forge.Event, 2)
+	resume(queue(q))
+	retryDrops(queue(q))
+	if len(q) != 2 || prKey(push) == push.Key() || proc.Exists(pendingFile(push.Key())) || proc.Exists(deletingFile(shut.Key())) ||
+		!proc.Exists(pendingFile(prKey(push))) || !proc.Exists(deletingFile(prKey(shut))) {
+		t.Fatal("not renamed:", len(q))
 	}
 }
 
@@ -152,7 +223,7 @@ func TestServeReport(t *testing.T) {
 		b, _ := json.Marshal(vs)
 		job.Reports().Put(dir+"/versions.json", b)
 	}
-	gh, gl := "/github.com/o/r/7/"+secret, "/gitlab.example.com/g/s/p/3/"+secret
+	gh, gl := "/github.com/id:5/7/"+secret, "/gitlab.example.com/g/s/p/3/"+secret // by the repo's id; by its name, from before
 	put(gh[1:], sha(5), sha(3))
 	job.Reports().Put(gl[1:]+"/"+sha(1)+".html", []byte(`<html data-sha="`+sha(1)+`">`)) // from before .html.gz
 	job.Reports().Put(gl[1:]+"/versions.json", []byte(`[{"sha":"`+sha(1)+`"}]`))         // a project in a subgroup
@@ -222,6 +293,8 @@ func TestReportRoute(t *testing.T) {
 		"github.com/o/r/7/" + secret + "/":                   "github.com/o/r/7/" + secret + " ",
 		"github.com/o/r/7/../7/" + secret:                    "!",
 		"github.com/o/r/x/" + secret:                         "!",
+		"github.com/id:5/7/" + secret:                        "github.com/id:5/7/" + secret + " ",
+		"github.com/7/" + secret:                             "!",
 	} {
 		dir, sha, ok := reportRoute(p)
 		if got := dir + " " + sha; !ok && want != "!" || ok && got != want {
@@ -266,7 +339,7 @@ func (f *fakeJobs) run(ctx context.Context, e *forge.Event) error {
 	repo := repoOf(e)
 	f.repos[repo]++
 	f.p.mu.Lock()
-	if f.repos[repo] > 1 || f.p.running[runKey(repo, e)] == nil {
+	if f.repos[repo] > 1 || f.p.running[prKey(e)] == nil {
 		f.twice = e.Key()
 	}
 	f.p.mu.Unlock()
@@ -374,7 +447,7 @@ func TestPoolPanic(t *testing.T) {
 		t.Fatal("stays pending:", err)
 	}
 	f.p.mu.Lock()
-	b := f.p.running["b b#1"]
+	b := f.p.running["b#1"]
 	f.p.mu.Unlock()
 	if b == nil {
 		t.Fatal("b's job ended with a's")
@@ -396,9 +469,9 @@ func TestPoolStop(t *testing.T) {
 	}
 	f.p.add(ev("c", 1, "")) // a push spares the answer; its review waits for it
 	f.p.stop(ev("a", 1, ""))
-	f.waitFor(t, func() bool { return f.p.running["a a#1"] == nil }) // a's job ends on its ctx
+	f.waitFor(t, func() bool { return f.p.running["a#1"] == nil }) // a's job ends on its ctx
 	f.p.mu.Lock()
-	b, c := f.p.running["b b#1"], f.p.running["c c#1"]
+	b, c := f.p.running["b#1"], f.p.running["c#1"]
 	f.p.mu.Unlock()
 	if b == nil || c == nil {
 		t.Fatal("stopped another job", b, c)
@@ -451,9 +524,9 @@ func TestPoolRecreatedRepo(t *testing.T) {
 	}
 	f.p.stop(old)
 	f.next()
-	f.waitFor(t, func() bool { return f.p.running[runKey(repoOf(old), old)] == nil })
+	f.waitFor(t, func() bool { return f.p.running[prKey(old)] == nil })
 	f.p.mu.Lock()
-	r := f.p.running[runKey(repoOf(recreated), recreated)]
+	r := f.p.running[prKey(recreated)]
 	f.p.mu.Unlock()
 	if r == nil {
 		t.Fatal("stopped the recreated repo's job")
@@ -551,7 +624,7 @@ func TestPoolPushStops(t *testing.T) {
 	f.idle(t)
 }
 
-// An old version's close without a repo id deletes too: it takes turns with its repo's reviews by name (scheduler).
+// A close without the repo's id deletes too: it takes turns with its repo's reviews by name (scheduler).
 func TestDropNoID(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "closed"}

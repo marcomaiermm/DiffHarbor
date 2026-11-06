@@ -318,12 +318,28 @@ var ReportURL string
 // maxVersions is the reports a PR keeps, one per reviewed head: the newest.
 const maxVersions = 10
 
-// reportPath is a PR's folder in Reports: its forge's host, the repository, the number. Its reports are in {secret}/
-// of it, as under /r/: a version is {sha}.html.gz, versions.json lists them newest first. Reports from before the
-// secret, right in the folder, no longer resolve and go with the PR.
+// reportPath is a PR's folder in Reports: its forge's host, the repository's ID, the number. The ID survives a rename,
+// and a repo recreated under the old name has another: the old one's close doesn't delete its reports. "id:" no repo
+// name has. Its reports are in {secret}/ of it, as under /r/: a version is {sha}.html.gz, versions.json lists them
+// newest first. An event without the ID has namePath's, not id:0 for all.
 func reportPath(e *forge.Event) string {
-	host, _, _ := strings.Cut(strings.TrimPrefix(e.PullRequest.HTMLURL, "https://"), "/")
-	return cmp.Or(host, "github.com") + "/" + e.Repository.FullName + "/" + strconv.Itoa(e.PullRequest.Number)
+	if e.Repository.ID == 0 {
+		return namePath(e)
+	}
+	return fmt.Sprintf("%s/id:%d/%d", host(e), e.Repository.ID, e.PullRequest.Number)
+}
+
+// namePath is the PR's folder before reportPath took the repo's ID: by its name, whatever repo had it. Its links, in
+// walkthroughs and shared, are served from there until the PR closes. Reports from before the secret, right in the
+// folder, no longer resolve and go with the PR.
+func namePath(e *forge.Event) string {
+	return host(e) + "/" + e.Repository.FullName + "/" + strconv.Itoa(e.PullRequest.Number)
+}
+
+// host is the host of the PR's forge, from its page.
+func host(e *forge.Event) string {
+	h, _, _ := strings.Cut(strings.TrimPrefix(e.PullRequest.HTMLURL, "https://"), "/")
+	return cmp.Or(h, "github.com")
 }
 
 // Secret is a report folder's secret, rand.Text's: 130 bits, URL-safe. Without it a report's URL is its PR's, which
@@ -372,10 +388,12 @@ func MoveReports() error {
 
 // DeleteReports deletes a PR's reports: its code shouldn't outlive the PR. With S3, those a failed MoveReports
 // left on disk too.
+// ponytail: namePath's too, by name: a recreated repo's PR of the old number loses those it had before the ID; drop
+// namePath once the PRs from before it closed.
 func DeleteReports(e *forge.Event) error {
-	err := Reports().DeleteAll(reportPath(e))
+	err := errors.Join(Reports().DeleteAll(reportPath(e)), Reports().DeleteAll(namePath(e)))
 	if ReportS3 != nil {
-		err = errors.Join(err, disk().DeleteAll(reportPath(e)))
+		err = errors.Join(err, disk().DeleteAll(reportPath(e)), disk().DeleteAll(namePath(e)))
 	}
 	return err
 }

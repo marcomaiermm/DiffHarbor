@@ -235,12 +235,12 @@ func TestReviewedPatches(t *testing.T) {
 func TestReportVersions(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	e := &forge.Event{}
-	e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = "o/r", 7, "https://github.com/o/r/pull/7"
+	e.Repository.ID, e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = 5, "o/r", 7, "https://github.com/o/r/pull/7"
 	sha := func(i int) string { return fmt.Sprintf("%040x", i) }
 	key := reportSecret("")
 	dir := reportPath(e) + "/" + key
 	for i := range maxVersions + 2 {
-		if u := writeReport(e, key, report.Data{Repo: "o/r", Number: 7, SHA: sha(i)}); u != ReportURL+"/r/github.com/o/r/7/"+key {
+		if u := writeReport(e, key, report.Data{Repo: "o/r", Number: 7, SHA: sha(i)}); u != ReportURL+"/r/github.com/id:5/7/"+key {
 			t.Fatal(u)
 		}
 	}
@@ -255,11 +255,12 @@ func TestReportVersions(t *testing.T) {
 	if _, err := Reports().Get(dir + "/" + sha(5) + ".html.gz"); err != nil {
 		t.Fatal("the newest page:", err)
 	}
-	Reports().Put(reportPath(e)+"/versions.json", []byte("[]")) // from before the secret
+	Reports().Put(namePath(e)+"/"+key+"/versions.json", []byte("[]")) // from before the id
+	Reports().Put(namePath(e)+"/versions.json", []byte("[]"))         // from before the secret
 	if err := DeleteReports(e); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{dir + "/versions.json", reportPath(e) + "/versions.json"} {
+	for _, k := range []string{dir + "/versions.json", namePath(e) + "/" + key + "/versions.json", namePath(e) + "/versions.json"} {
 		if _, err := Reports().Get(k); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatal("closed PR kept its reports:", k, err)
 		}
@@ -271,6 +272,10 @@ func TestReportVersions(t *testing.T) {
 	gl := &forge.Event{Forge: "gitlab"} // a project in a subgroup
 	gl.Repository.FullName, gl.PullRequest.Number, gl.PullRequest.HTMLURL = "g/s/p", 3, "https://gitlab.example.com/g/s/p/-/merge_requests/3"
 	if u := writeReport(gl, key, report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/g/s/p/3/"+key {
+		t.Fatal("without the repo's id, by its name:", u)
+	}
+	gl.Repository.ID = 9
+	if u := writeReport(gl, key, report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/id:9/3/"+key {
 		t.Fatal(u)
 	}
 }

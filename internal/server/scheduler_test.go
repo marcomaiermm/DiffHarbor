@@ -107,7 +107,7 @@ func TestSchedulerAnswersFirst(t *testing.T) {
 	}
 }
 
-// Repos of one name take turns, a recreated one and an old version's ID-less events: their state is keyed by name.
+// Repos of one name take turns, a recreated one and an event without the repo's id: they share what is keyed by name.
 func TestSchedulerSameName(t *testing.T) {
 	s := newScheduler(2, 100)
 	s.add("github::1", ev("o/r", 1, ""))

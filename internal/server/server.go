@@ -53,7 +53,7 @@ type task struct {
 // review runs reviewJob, a queued push's review, unless a newer push of the PR is queued. One that couldn't clean up
 // before it started stays pending: the next push or a restart retries it.
 func review(e *forge.Event, reviewJob func() error) (err error) {
-	key, queued := e.Key(), e.PullRequest.Head.SHA
+	key, queued := prKey(e), e.PullRequest.Head.SHA
 	latest.Lock()
 	current := latest.m[key] == queued
 	latest.Unlock()
@@ -93,20 +93,21 @@ func repoOf(e *forge.Event) string {
 	return e.Repo() // no id: the job fails before it runs PR code
 }
 
+// prKey names e's PR in latest, the pending and deleting files and running: its repo (repoOf) and number. A repo
+// recreated under the old name has PRs of the old numbers, a late close of the old one's must not touch them. An event
+// without the repo's id (every webhook has one), or of a forge that is off, has its name's: Event.Key.
+func prKey(e *forge.Event) string { return fmt.Sprintf("%s#%d", repoOf(e), e.PullRequest.Number) }
+
 // pool runs the queued jobs. Reports are only written by jobs, and a closed PR's delete and its review share a repo:
 // a review can't write a report after its PR's were deleted.
 type pool struct {
 	mu sync.Mutex
 	s  *scheduler
-	// The running jobs by repo and PR (runKey), at most one each: a repo's jobs run one at a time. Closing the PR stops its job, a newer
+	// The running jobs by repo and PR (prKey), at most one each: a repo's jobs run one at a time. Closing the PR stops its job, a newer
 	// push stops its review: no tokens on a dead head. The context reaches every git, check and Pi call of the job.
 	running map[string]*task
 	run     func(context.Context, *forge.Event) error // runJob, a fake in tests
 }
-
-// runKey is e's job in running: its repo (repoOf) too, as a repo recreated under the old name may run beside the
-// old one's job.
-func runKey(repo string, e *forge.Event) string { return repo + " " + e.Key() }
 
 // newPool runs up to limit jobs at once, at least one, and queues up to 100 more.
 func newPool(limit int, run func(context.Context, *forge.Event) error) *pool {
@@ -116,7 +117,7 @@ func newPool(limit int, run func(context.Context, *forge.Event) error) *pool {
 // add queues e's job; false when the queue is full. A push's review stops the PR's running one: no tokens on a dead
 // head.
 func (p *pool) add(e *forge.Event) bool {
-	repo, key := repoOf(e), e.Key()
+	repo, key := repoOf(e), prKey(e)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if isReview(e) {
@@ -128,8 +129,8 @@ func (p *pool) add(e *forge.Event) bool {
 		if known && sha != e.PullRequest.Head.SHA {
 			return true
 		}
-		if t := p.running[runKey(repo, e)]; t != nil && t.review {
-			log.Println(key, "stopping the running review")
+		if t := p.running[key]; t != nil && t.review {
+			log.Println(e.Key(), "stopping the running review")
 			t.cancel()
 		}
 	}
@@ -144,9 +145,9 @@ func (p *pool) start() {
 	for repo, e, ok := p.s.next(); ok; repo, e, ok = p.s.next() {
 		ctx, cancel := context.WithCancel(context.Background())
 		t := &task{review: e.Kind == "pull_request", cancel: cancel}
-		p.running[runKey(repo, e)] = t
+		p.running[prKey(e)] = t
 		go func() {
-			p.exec(ctx, runKey(repo, e), e, t)
+			p.exec(ctx, e, t)
 			p.mu.Lock()
 			defer p.mu.Unlock()
 			p.s.free(repo)
@@ -155,13 +156,13 @@ func (p *pool) start() {
 	}
 }
 
-// exec runs e's job, t in running at rk. A panic ends only this job, as a failed one: done drops its pending review, so a
+// exec runs e's job, t in running. A panic ends only this job, as a failed one: done drops its pending review, so a
 // restart doesn't run into it again.
-func (p *pool) exec(ctx context.Context, rk string, e *forge.Event, t *task) {
-	key := e.Key()
+func (p *pool) exec(ctx context.Context, e *forge.Event, t *task) {
+	key, rk := e.Key(), prKey(e)
 	defer func() {
 		t.cancel() // revokes the job's vault tokens: git's remote, Pi's keys
-		done(key)
+		done(rk)
 		p.mu.Lock()
 		if p.running[rk] == t {
 			delete(p.running, rk)
@@ -182,7 +183,7 @@ func closing(e *forge.Event) bool {
 // drop deletes a closed PR's reports while its deletingFile is there: none means it was reopened or done since.
 // The file stays until the delete worked, for retryDrops.
 func drop(e *forge.Event) error {
-	f := deletingFile(e.Key())
+	f := deletingFile(prKey(e))
 	if !proc.Exists(f) {
 		return nil
 	}
@@ -195,10 +196,9 @@ func drop(e *forge.Event) error {
 
 // stop cancels e's PR's running job, a review or an answer: the PR was closed.
 func (p *pool) stop(e *forge.Event) {
-	rk := runKey(repoOf(e), e)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if t := p.running[rk]; t != nil {
+	if t := p.running[prKey(e)]; t != nil {
 		log.Println(e.Key(), "stopping the running job")
 		t.cancel()
 	}
@@ -278,26 +278,14 @@ func Serve(cfg Config) {
 		human := e.Action == "created" && c.User.Type != "Bot" && !c.Ours && trusted[c.AuthorAssociation]
 		switch {
 		case closing(e):
-			latest.Lock()
-			delete(latest.m, e.Key())             // queued reviews of this PR skip
-			_ = os.Remove(pendingFile(e.Key()))   //nolint:gosec // eventFile escapes the key: no / left to leave the dir
-			err := save(deletingFile(e.Key()), e) // a full queue, a restart or a failed delete: retryDrops
-			latest.Unlock()
-			if err != nil {
+			if err := closed(e); err != nil {
 				log.Println(e.Key(), "deleting:", err)
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
 			jobs.stop(e)
 		case e.Kind == "pull_request" && actions[e.Action]:
-			latest.Lock()
-			latest.m[e.Key()] = e.PullRequest.Head.SHA
-			if e.Action == "reopened" || e.Action == "ready_for_review" { // not a late push: its close still deletes
-				_ = os.Remove(deletingFile(e.Key())) //nolint:gosec // no retry deletes its next reports; eventFile escapes
-			}
-			err := save(pendingFile(e.Key()), e)
-			latest.Unlock()
-			if err != nil {
+			if err := pushed(e); err != nil {
 				log.Println(e.Key(), "pending:", err)
 				w.WriteHeader(http.StatusInternalServerError)
 				return
@@ -331,10 +319,11 @@ func Serve(cfg Config) {
 		}
 	}
 	resume(jobs.add)
+	retryDrops(jobs.add) // before a webhook: a reopen must not miss a file it renames
 	go func() {
 		for {
-			retryDrops(jobs.add)
 			time.Sleep(30 * time.Minute)
+			retryDrops(jobs.add)
 		}
 	}()
 	log.Println("diffharbor on :3000 with", cmp.Or(agent.Model, agent.Default()+" (unless review.json picks one)"))
@@ -346,6 +335,28 @@ func Serve(cfg Config) {
 	// A client that sends its body slowly or idles holds a connection only so long. No WriteTimeout: a report is big.
 	srv := &http.Server{Addr: ":3000", ReadHeaderTimeout: 10 * time.Second, ReadTimeout: time.Minute, IdleTimeout: 2 * time.Minute}
 	log.Fatal(srv.ListenAndServe())
+}
+
+// closed marks e's PR closed before its delete is queued: its queued reviews skip, its deletingFile is saved.
+func closed(e *forge.Event) error {
+	key := prKey(e)
+	latest.Lock()
+	defer latest.Unlock()
+	delete(latest.m, key)             // queued reviews of this PR skip
+	_ = os.Remove(pendingFile(key))   //nolint:gosec // eventFile escapes the key: no / left to leave the dir
+	return save(deletingFile(key), e) // a full queue, a restart or a failed delete: retryDrops
+}
+
+// pushed makes e the PR's review to run before it is queued: older queued ones skip, its pendingFile is saved.
+func pushed(e *forge.Event) error {
+	key := prKey(e)
+	latest.Lock()
+	defer latest.Unlock()
+	latest.m[key] = e.PullRequest.Head.SHA
+	if e.Action == "reopened" || e.Action == "ready_for_review" { // not a late push: its close still deletes
+		_ = os.Remove(deletingFile(key)) //nolint:gosec // no retry deletes its next reports; eventFile escapes
+	}
+	return save(pendingFile(key), e)
 }
 
 // serveLighthouse serves the walkthrough's reviewing banner: GitHub's image proxy fetches it, on GitLab the browser.
@@ -446,7 +457,8 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 // head is a commit's full SHA: SHA-1's or SHA-256's.
 var head = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
-// reportRoute splits a path under /r/ into the reports' folder ({host}/{repo…}/{n}/{secret}, see job.reportPath) and
+// reportRoute splits a path under /r/ into the reports' folder ({host}/id:{repo id}/{n}/{secret}, see job.reportPath,
+// or {host}/{repo…}/{n}/{secret} from before the id: its links keep working until the PR closes) and
 // what of it: a version's SHA, "versions" for their list, "" for the newest. A wrong secret is a folder that isn't
 // there: a 404 like any missing report. A path without one, as before the secret, isn't a route.
 func reportRoute(p string) (dir, sha string, ok bool) {
@@ -457,7 +469,7 @@ func reportRoute(p string) (dir, sha string, ok bool) {
 	pr, secret := path.Split(dir)
 	pr = strings.TrimSuffix(pr, "/")
 	n, err := strconv.Atoi(pr[strings.LastIndexByte(pr, '/')+1:])
-	return dir, sha, job.Secret.MatchString(secret) && err == nil && n > 0 && strings.Count(pr, "/") >= 3 && fs.ValidPath(dir)
+	return dir, sha, job.Secret.MatchString(secret) && err == nil && n > 0 && strings.Count(pr, "/") >= 2 && fs.ValidPath(dir)
 }
 
 // A PR's queued review stays on disk until it ran, so a restart (deploy, crash) resumes it: GitHub got its 202.
@@ -506,16 +518,17 @@ func resume(add func(*forge.Event) bool) {
 			_ = os.Remove(f)
 			continue
 		}
-		if f != pendingFile(e.Key()) { // named before eventFile escaped keys
-			_ = os.Rename(f, pendingFile(e.Key()))
-		}
 		if forges[e.Forge] == nil { // the forge is no longer set up
 			log.Println(e.Key(), "pending for", e.Forge, "which is off")
 			continue
 		}
+		key := prKey(e)
+		if f != pendingFile(key) { // named before eventFile escaped keys, or by the repo's name
+			_ = os.Rename(f, pendingFile(key))
+		}
 		log.Println(e.Key(), "resuming the review a restart cut off")
 		latest.Lock()
-		latest.m[e.Key()] = e.PullRequest.Head.SHA
+		latest.m[key] = e.PullRequest.Head.SHA
 		latest.Unlock()
 		if !add(e) { // stays on disk for the next start
 			log.Println(e.Key(), "queue full")
@@ -534,6 +547,15 @@ func retryDrops(add func(*forge.Event) bool) {
 			continue
 		}
 		e.Action = "closed" // a delete whatever saved it: a converted_to_draft from before drafts kept the reports
+		if f != deletingFile(prKey(e)) {
+			// named by the repo's name: drop looks for it by prKey. Under latest: a reopen removes it by that.
+			latest.Lock()
+			err = os.Rename(f, deletingFile(prKey(e)))
+			latest.Unlock()
+			if err != nil {
+				continue
+			}
+		}
 		if !add(e) {
 			return // stays for the next round
 		}
