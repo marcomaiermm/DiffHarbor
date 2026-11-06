@@ -301,8 +301,9 @@ func (p *pr) publish(inline, rest, folded []forge.Finding, threads []forge.Threa
 	var d struct {
 		ID int64 `json:"id"`
 	}
-	ok := true // the summary is drafted as it goes out
-	if err := call("POST", p.mr+"/draft_notes", map[string]string{"note": inert(summary)}, &d); err != nil {
+	ok := true                         // the summary is drafted as it goes out
+	bodies := []string{inert(summary)} // what it may go out as
+	if err := call("POST", p.mr+"/draft_notes", map[string]string{"note": bodies[0]}, &d); err != nil {
 		log.Println(p.e.Key(), "draft summary:", err) // a note of its own then
 		ok = false
 	}
@@ -325,11 +326,10 @@ func (p *pr) publish(inline, rest, folded []forge.Finding, threads []forge.Threa
 		}
 	}
 	if s := forge.Summary(drafted, rest, folded, footer); ok && s != summary { // a refused finding: the summary has it
-		if err := call("PUT", fmt.Sprintf("%s/draft_notes/%d", p.mr, d.ID), map[string]string{"note": inert(s)}, nil); err != nil {
-			log.Println(p.e.Key(), "draft summary:", err) // published as it is, edited after
+		bodies = append(bodies, inert(s)) // a failed update may have gone through (a timeout)
+		if err := call("PUT", fmt.Sprintf("%s/draft_notes/%d", p.mr, d.ID), map[string]string{"note": bodies[1]}, nil); err != nil {
+			log.Println(p.e.Key(), "draft summary:", err) // published as either, edited after
 			ok = false
-		} else {
-			summary = s
 		}
 	}
 	before, beforeErr := p.newest()
@@ -342,7 +342,7 @@ func (p *pr) publish(inline, rest, folded []forge.Finding, threads []forge.Threa
 	var id int64
 	err := beforeErr
 	if err == nil {
-		id, err = p.ours(inert(summary), before)
+		id, err = p.ours(before, bodies...)
 	}
 	if err != nil {
 		log.Println(p.e.Key(), "notes:", err) // a second summary rather than an older one edited
@@ -422,8 +422,8 @@ func (p *pr) newest() (int64, error) {
 	return ns[0].ID, nil
 }
 
-// ours is the id of our note with this body after note after, 0 if there is none.
-func (p *pr) ours(body string, after int64) (int64, error) {
+// ours is the id of our note with one of these bodies after note after, 0 if there is none.
+func (p *pr) ours(after int64, bodies ...string) (int64, error) {
 	for page := 1; page <= 10; page++ { // a review's notes: up to 80 findings and their answers
 		var ns []note
 		if err := call("GET", fmt.Sprintf("%s/notes?sort=desc&order_by=created_at&per_page=100&page=%d", p.mr, page), nil, &ns); err != nil {
@@ -433,7 +433,7 @@ func (p *pr) ours(body string, after int64) (int64, error) {
 			if n.ID <= after {
 				return 0, nil
 			}
-			if n.forge().Ours && strings.TrimSpace(n.Body) == strings.TrimSpace(body) {
+			if n.forge().Ours && slices.ContainsFunc(bodies, func(b string) bool { return strings.TrimSpace(b) == strings.TrimSpace(n.Body) }) {
 				return n.ID, nil
 			}
 		}

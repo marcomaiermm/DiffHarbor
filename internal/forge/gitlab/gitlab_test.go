@@ -79,6 +79,7 @@ type fakeMR struct {
 	fail        bool           // a finding's draft fails (5xx)
 	failSummary bool           // the summary's draft fails
 	failEdit    bool           // editing a draft fails
+	lostEdit    bool           // editing a draft goes through, its answer fails (a timeout)
 	failThreads bool           // the discussions don't read after publishing
 	failAnswer  bool           // an answer's draft fails
 	failPublish bool           // bulk_publish fails
@@ -115,12 +116,13 @@ func (f *fakeMR) serve() *pr {
 		out := func(v any) { json.NewEncoder(w).Encode(v) }
 		mr := "/projects/5/merge_requests/3"
 		if id, ok := strings.CutPrefix(r.URL.Path, mr+"/draft_notes/"); ok && r.Method == "PUT" { // a draft's id: its index + 1
-			if f.failEdit {
-				w.WriteHeader(500)
-				return
+			if !f.failEdit {
+				n, _ := strconv.Atoi(id)
+				f.drafts[n-1]["note"] = b["note"]
 			}
-			n, _ := strconv.Atoi(id)
-			f.drafts[n-1]["note"] = b["note"]
+			if f.failEdit || f.lostEdit {
+				w.WriteHeader(500)
+			}
 			return
 		}
 		switch r.Method + " " + r.URL.Path {
@@ -259,6 +261,17 @@ func TestPostSummaryNotUpdated(t *testing.T) {
 	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx, postFix}}, nil, postDiff, "f")
 	if err != nil || n != 2 || f.published != 1 || f.notes != nil || strings.Contains(f.summary(), "not posted inline") ||
 		!strings.Contains(f.edited, "Comments not posted inline (2)") {
+		t.Fatalf("post: %d %v %v\n%s", n, err, f.notes, f.edited)
+	}
+}
+
+// The summary's draft updated though GitLab's answer failed, and a finding dropped: the published summary, as
+// updated, is edited, not a second one posted.
+func TestPostSummaryUpdateLost(t *testing.T) {
+	f := &fakeMR{t: t, fail: true, lostEdit: true}
+	p := f.serve()
+	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx, postFix}}, nil, postDiff, "f")
+	if err != nil || n != 2 || f.published != 1 || f.notes != nil || !strings.Contains(f.edited, "Comments not posted inline (2)") {
 		t.Fatalf("post: %d %v %v\n%s", n, err, f.notes, f.edited)
 	}
 }
