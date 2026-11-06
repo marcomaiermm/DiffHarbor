@@ -32,7 +32,7 @@ func TestPlace(t *testing.T) {
 	cs := []review.Comment{{Path: "a.go", Line: 11, Existing: "nope\n\n", Fix: "y\n\n"}, {Path: "a.go", Line: 40, Existing: "nope\n\n", Fix: "y\n\n"}, {Path: "a.go", Line: 41, Existing: "x\n", Fix: "x"},
 		{Path: "a.go", Line: 42, Existing: "x", Fix: "\n"}, {Path: "a.go", Line: 11, Existing: "\tif x {\n", Fix: "\n"}}
 	inline, rest, _ := Split(review.Result{Comments: cs}, nil, lines)
-	if len(inline) != 2 || len(rest) != 3 {
+	if len(inline) != 2 || len(rest) != 3 || !inline[0].OnDiff || rest[0].OnDiff { // OnDiff: what a forge refuses heads apart
 		t.Fatalf("split: %d inline, %d rest", len(inline), len(rest))
 	}
 	want := "````diff\n-nope\n-\n+y\n+\n````"
