@@ -53,6 +53,9 @@ type Settings struct {
 	InstallScripts bool `json:"install_scripts"`
 	// Base branches besides the default branch whose PRs get reviewed without asking, as globs ("release/*").
 	BaseBranches []string `json:"base_branches"`
+	// Draft PRs: "manual" (default) reviewed when asked; "opt_in" once asked, every push too, like any PR;
+	// "off" never.
+	Drafts string `json:"drafts"`
 	// How GitLab gets the findings: "review" as one review, one email; "discussions" an email each. Unset: the
 	// server's GITLAB_FINDINGS.
 	GitLabFindings string `json:"gitlab_findings"`
@@ -202,6 +205,11 @@ func (cfg Settings) Reviews(base, defaultBranch string) bool {
 	})
 }
 
+// ReviewsDraft reports whether a draft PR gets reviewed: asked for now (manual), or on a push once asked before.
+func (cfg Settings) ReviewsDraft(manual, asked bool) bool {
+	return cfg.Drafts != "off" && (manual || asked && cfg.Drafts == "opt_in")
+}
+
 // Asks reports whether a review cut short offers the box for all parts.
 func (cfg Settings) Asks() bool { return cfg.LargePR == "ask" }
 
@@ -341,6 +349,9 @@ func LoadSettings(s string) (Settings, error) {
 		if _, err := path.Match(g, ""); err != nil {
 			return Settings{}, fmt.Errorf("base_branches %q: %w", g, err)
 		}
+	}
+	if !slices.Contains([]string{"", "manual", "opt_in", "off"}, cfg.Drafts) {
+		return Settings{}, fmt.Errorf("drafts %q: want manual, opt_in or off", cfg.Drafts)
 	}
 	if f := cfg.GitLabFindings; f != "" && f != "review" && f != "discussions" {
 		return Settings{}, fmt.Errorf("gitlab_findings %q: want review or discussions", f)

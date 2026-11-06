@@ -45,20 +45,32 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	if err := p.Refresh(); err != nil {
 		return err
 	}
-	if e.PullRequest.State != "open" || e.PullRequest.Draft {
+	if e.PullRequest.State != "open" {
 		return nil
 	}
 	pr, sha := e.PullRequest, e.PullRequest.Head.SHA
+	manual := e.Action == "manual" || e.Action == "large"
+	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
+	p.Configure(cfg)
+	// A draft's push reads the walkthrough only under opt_in, for whether someone asked.
+	if pr.Draft && !cfg.ReviewsDraft(manual, cfg.Drafts == "opt_in") {
+		if manual { // drafts: off, asked anyway: say why nothing comes
+			return p.Reply("⏭️ Drafts get no review in this repo (`drafts` in review.json). Mark the PR ready for review for one.\n\n" + forge.Mark)
+		}
+		return nil // ready_for_review brings the review
+	}
 	s, err := forge.LoadSticky(p)
 	if err != nil {
 		return err
 	}
-	manual := e.Action == "manual" || e.Action == "large"
 	if s.State.SHA == sha && !manual {
 		return nil // reviewed already, e.g. a redelivered event; `@app review` forces one
 	}
-	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
-	p.Configure(cfg)
+	if pr.Draft && !cfg.ReviewsDraft(manual, s.State.Drafts) {
+		return nil // opt_in, nobody asked yet
+	}
+	// Only under opt_in: a later switch to it doesn't start reviewing drafts asked about before.
+	s.State.Drafts = s.State.Drafts || pr.Draft && manual && cfg.Drafts == "opt_in" // kept by the walkthrough's first write below
 	// Like a bot author: green, and `@app review` still reviews. A broken review.json reviews, its note says why.
 	if !manual && cfgErr == nil && !cfg.Reviews(pr.Base.Ref, e.Repository.DefaultBranch) {
 		s.Write(fmt.Sprintf("⏭️ **Review skipped:** base branch `%s` is not the default branch or in `base_branches`. Comment `@%s review` for one.", pr.Base.Ref, f.Bot()), "")

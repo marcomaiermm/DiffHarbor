@@ -67,7 +67,7 @@ docker compose up -d
 - Up to 60k characters per pass: code first, then tests, data, stylesheets and docs. Larger PRs can be reviewed [in parts](#large-prs).
 - Left out: lockfiles, build output, vendored code, binaries and generated code (by name, Drizzle's migration snapshots or a "Code generated … DO NOT EDIT" header).
 
-**Drafts** aren't reviewed until they are marked ready.
+**Drafts** aren't reviewed until they are marked ready, unless someone asks with `@<bot> review`; [`drafts`](#per-repo-settings) can also review a draft's pushes once asked, or never.
 
 **Skipped PRs** get a green status. `@<bot> review` still reviews them.
 
@@ -289,6 +289,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
   "tickets": ["ABC"],
   "install_scripts": false,
   "base_branches": ["develop", "release/*"],
+  "drafts": "manual",
   "learnings": {"max": 30, "max_age_days": 180},
   "gitlab_findings": "review",
   "checks": [".review/checks.sh"],
@@ -312,6 +313,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
 | `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
 | `base_branches` | Globs of base branches whose PRs get reviewed, besides the default branch. A PR into any other (`main` → `prod`) is skipped with a green status. `@<bot> review` still reviews it. |
+| `drafts` | `manual` (default): a draft PR gets a review on `@<bot> review`, then once marked ready. `opt_in`: once someone asked with `@<bot> review`, every later push of the draft gets one too, like any PR. `off`: never; `@<bot> review` says so. |
 | `learnings` | `max`: how many of the newest learnings of the repo and of the owner a review and the chat follow, each. `0` is none, at most 100, default 30. `max_age_days`: older ones are left out. Default: any age. A learning saved before dates were kept never ages. Both only hide, nothing is deleted. |
 | `gitlab_findings` | `review`: the findings, the answers to fixed threads and the summary are one review, one email; a suggestion GitLab can't place goes into the summary as code. `discussions`: each on its own, an email each; a refused suggestion is retried as plain code on its line. Default: the server's `GITLAB_FINDINGS`. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
