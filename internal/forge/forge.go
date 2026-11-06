@@ -65,8 +65,13 @@ type PR interface {
 	Note(id int64, body string) (int64, error)
 	// Threads are our inline findings on the PR.
 	Threads() ([]Thread, error)
-	// Resolve answers a thread whose finding sha fixed, then resolves it.
+	// Configure takes the repo's review.json, before Resolve and Post.
+	Configure(cfg review.Settings)
+	// Resolve answers a thread whose finding sha fixed, then resolves it. On GitLab the answer may wait for Post or
+	// Publish, to go out with the review.
 	Resolve(t Thread, sha string)
+	// Publish sends what Resolve held back when no Post follows.
+	Publish()
 	// Post sends the findings of a review of sha: on lines of the PR's diff raw inline, the rest in one comment.
 	// Returns how many it posted.
 	Post(sha string, r review.Result, threads []Thread, raw, footer string) (int, error)

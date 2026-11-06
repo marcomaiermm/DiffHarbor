@@ -9,6 +9,12 @@ import (
 	"slices"
 )
 
+// Configure: GitHub posts the same for every repo.
+func (*pr) Configure(review.Settings) {}
+
+// Publish has nothing to send: Resolve answers at once.
+func (*pr) Publish() {}
+
 // Post sends one review: findings on diff lines inline, the rest in the body. Returns how many findings it posted.
 func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, footer string) (int, error) {
 	inline, rest := forge.Split(r, threads, diff.NewLines(raw))

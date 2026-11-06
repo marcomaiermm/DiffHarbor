@@ -68,8 +68,194 @@ func TestOlds(t *testing.T) {
 	}
 }
 
-// The note comes first. A suggestion GitLab refuses goes without it, a line it refuses into the note.
+// fakeMR is merge request 3's notes API: what a review sends, and what GitLab makes of it.
+type fakeMR struct {
+	t           *testing.T
+	stale       string         // a draft there before, its note
+	drop        func(int) bool // the drafts GitLab doesn't place, by index
+	reject      bool           // a finding's draft refused (4xx)
+	fail        bool           // a finding's draft fails (5xx)
+	failSummary bool           // the summary's draft fails
+	failThreads bool           // the discussions don't read after publishing
+	drafts      []map[string]any
+	discussions []map[string]any
+	notes       []string // posted on their own
+	published   int
+	states      []any // bulk_publish's reviewer_state
+	edited      string
+	deleted     bool
+	answered    []string // threads answered and resolved on their own
+}
+
+// summary is the published summary draft, "" if none.
+func (f *fakeMR) summary() string {
+	if f.published == 0 {
+		return ""
+	}
+	for _, d := range f.drafts {
+		if d["position"] == nil && d["in_reply_to_discussion_id"] == nil {
+			return d["note"].(string)
+		}
+	}
+	return ""
+}
+
+func (f *fakeMR) serve() *pr {
+	f.t.Helper()
+	serve(f.t, func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		json.NewDecoder(r.Body).Decode(&b)
+		bot := map[string]string{"username": "review-bot"}
+		out := func(v any) { json.NewEncoder(w).Encode(v) }
+		mr := "/projects/5/merge_requests/3"
+		switch r.Method + " " + r.URL.Path {
+		case "GET " + mr + "/draft_notes":
+			if f.stale != "" {
+				out([]map[string]any{{"id": 4, "note": f.stale}})
+			} else {
+				out([]any{})
+			}
+		case "DELETE " + mr + "/draft_notes/4":
+			f.deleted = true
+		case "POST " + mr + "/draft_notes":
+			switch {
+			case b["position"] != nil && f.reject:
+				w.WriteHeader(400)
+			case b["position"] != nil && f.fail, b["position"] == nil && b["in_reply_to_discussion_id"] == nil && f.failSummary:
+				w.WriteHeader(500)
+			default:
+				f.drafts = append(f.drafts, b)
+			}
+		case "POST " + mr + "/draft_notes/bulk_publish":
+			f.published++
+			f.states = append(f.states, b["reviewer_state"])
+		case "POST " + mr + "/discussions":
+			f.discussions = append(f.discussions, b)
+		case "GET " + mr + "/discussions":
+			if f.failThreads {
+				w.WriteHeader(500)
+				return
+			}
+			var ds []map[string]any
+			for i, d := range f.drafts {
+				if d["position"] == nil {
+					continue
+				}
+				if ds == nil { // an older thread of ours with the body of the first finding, on its line: not this review's
+					ds = append(ds, map[string]any{"id": "d0", "notes": []map[string]any{{"id": 2, "body": d["note"], "author": bot, "position": d["position"]}}})
+				}
+				if f.drop == nil || !f.drop(i) {
+					ds = append(ds, map[string]any{"id": fmt.Sprint("n", i), "notes": []map[string]any{{"id": 20 + i, "body": d["note"], "author": bot, "position": d["position"]}}})
+				}
+			}
+			out(ds)
+		case "GET " + mr + "/notes":
+			ns := []map[string]any{{"id": 1, "body": "before", "author": bot}}
+			if s := f.summary(); s != "" && r.URL.Query().Get("per_page") != "1" {
+				ns = append([]map[string]any{{"id": 9, "body": s, "author": bot}}, ns...)
+			}
+			out(ns)
+		case "POST " + mr + "/notes":
+			f.notes = append(f.notes, b["body"].(string))
+			out(map[string]any{"id": 10})
+		case "POST " + mr + "/discussions/d7/notes":
+			f.answered = append(f.answered, "d7")
+		case "PUT " + mr + "/discussions/d7":
+		case "PUT " + mr + "/notes/9":
+			f.edited = b["body"].(string)
+		default:
+			f.t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	})
+	e := &forge.Event{Forge: "gitlab"}
+	e.Repository.ID, e.PullRequest.Number = 5, 3
+	o, _ := (&Hub{}).Open(e)
+	p := o.(*pr)
+	p.refs = [3]string{"b", "s", "abcdef1"}
+	return p
+}
+
+const postDiff = "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +10,4 @@\n ctx\n-old\n+\tif x {\n+\t\treturn\n ctx2\n"
+
+var (
+	postFix = review.Comment{Path: "a.go", Line: 11, Severity: "major", Body: "fix body", Existing: "\tif x {\n\t\treturn\n", Fix: "\tif x != nil {\n\t\treturn\n"}
+	postCtx = review.Comment{Path: "a.go", Line: 13, Body: "context line"}
+)
+
+// One review: the stale draft dropped; the answer, the findings and the summary drafted, published once. GitLab
+// doesn't place the first finding: an older thread with its body on its line doesn't count, the summary gets it
+// as plain code.
 func TestPost(t *testing.T) {
+	f := &fakeMR{t: t, stale: "old " + forge.Mark, drop: func(i int) bool { return i == 1 }}
+	p := f.serve()
+	p.Resolve(forge.Thread{ID: "d7"}, "abcdef1")
+	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postFix, postCtx}}, []forge.Thread{{ID: "d0"}}, postDiff, "f")
+	pos := func(i int) map[string]any { return f.drafts[i]["position"].(map[string]any) }
+	if err != nil || n != 2 || !f.deleted || len(f.drafts) != 4 || f.published != 1 || f.states[0] != "reviewed" || f.notes != nil ||
+		f.drafts[0]["in_reply_to_discussion_id"] != "d7" || f.drafts[0]["resolve_discussion"] != true ||
+		!strings.Contains(f.drafts[1]["note"].(string), "```suggestion:-1+0\n") || pos(1)["new_line"] != 12.0 ||
+		pos(2)["old_line"] != 3.0 || pos(2)["head_sha"] != "abcdef1" || !strings.Contains(f.summary(), "Actionable comments posted: 2") ||
+		!strings.Contains(f.edited, "Outside diff range comments (1)") || !strings.Contains(f.edited, "fix body") ||
+		!strings.Contains(f.edited, "Suggested fix") || strings.Contains(f.edited, "context line") {
+		t.Fatalf("post: %d %v %v %v\n%s", n, err, f.drafts, f.notes, f.edited)
+	}
+}
+
+// No summary draft: the summary comes as a note of its own. Unread threads: it repeats the findings.
+func TestPostNoSummaryDraft(t *testing.T) {
+	f := &fakeMR{t: t, failSummary: true, failThreads: true}
+	p := f.serve()
+	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx}}, nil, postDiff, "f")
+	if err != nil || n != 1 || f.published != 1 || len(f.notes) != 1 || f.edited != "" ||
+		!strings.Contains(f.notes[0], "Outside diff range comments (1)") || !strings.Contains(f.notes[0], "context line") {
+		t.Fatalf("post: %d %v %v", n, err, f.notes)
+	}
+}
+
+// Every finding's draft refused (4xx) or failing (5xx): the summary keeps them, still one review.
+func TestPostRefused(t *testing.T) {
+	for _, f := range []*fakeMR{{t: t, reject: true}, {t: t, fail: true}} {
+		p := f.serve()
+		n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx, postFix}}, nil, postDiff, "f")
+		if err != nil || n != 2 || f.published != 1 || f.notes != nil || f.edited != "" ||
+			!strings.Contains(f.summary(), "Outside diff range comments (2)") || !strings.Contains(f.summary(), "context line") {
+			t.Fatalf("post: %d %v %v\n%s", n, err, f.notes, f.summary())
+		}
+	}
+}
+
+// A person's draft (a personal token) stays and would be published: discussions instead, answers too.
+func TestPostPersonsDraft(t *testing.T) {
+	f := &fakeMR{t: t, stale: "mine"}
+	p := f.serve()
+	p.Resolve(forge.Thread{ID: "d7"}, "abcdef1")
+	p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx}}, nil, postDiff, "f")
+	if f.deleted || f.drafts != nil || f.published != 0 || len(f.discussions) != 1 || len(f.answered) != 1 {
+		t.Fatalf("drafts %v, published %d, discussions %v", f.drafts, f.published, f.discussions)
+	}
+}
+
+// Answers alone: Publish sends them, Post with no inline finding publishes them with the summary.
+func TestPublishAnswers(t *testing.T) {
+	f := &fakeMR{t: t}
+	p := f.serve()
+	p.Resolve(forge.Thread{ID: "d7"}, "abcdef1")
+	p.Publish()
+	p.Publish()
+	if len(f.drafts) != 1 || f.published != 1 || f.states[0] != "reviewed" {
+		t.Fatalf("drafts %v, published %d", f.drafts, f.published)
+	}
+	p.Resolve(forge.Thread{ID: "d8"}, "abcdef1")
+	n, err := p.Post("abcdef1", review.Result{}, nil, postDiff, "f")
+	if err != nil || n != 0 || len(f.drafts) != 3 || f.published != 2 || f.notes != nil ||
+		!strings.Contains(f.drafts[2]["note"].(string), "No actionable comments") {
+		t.Fatalf("post: %d %v %v %v", n, err, f.drafts, f.notes)
+	}
+}
+
+// gitlab_findings discussions: the note comes first. A suggestion GitLab refuses goes without it, a line it refuses
+// into the note.
+func TestPostDiscussions(t *testing.T) {
 	var discussions []map[string]any
 	var summary string
 	first := false
@@ -93,6 +279,7 @@ func TestPost(t *testing.T) {
 	e.Repository.ID, e.PullRequest.Number = 5, 3
 	f, _ := (&Hub{}).Open(e)
 	p := f.(*pr)
+	p.Configure(review.Settings{GitLabFindings: "discussions"})
 	p.refs = [3]string{"b", "s", "abcdef1"}
 	src := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +10,4 @@\n ctx\n-old\n+\tif x {\n+\t\treturn\n ctx2\n"
 	fix := review.Comment{Path: "a.go", Line: 11, Severity: "major", Body: "b", Existing: "\tif x {\n\t\treturn\n", Fix: "\tif x != nil {\n\t\treturn\n"}
@@ -109,24 +296,27 @@ func TestPost(t *testing.T) {
 	}
 }
 
-// A discussion GitLab fails: the note keeps the findings not posted.
-func TestPostFails(t *testing.T) {
+// gitlab_findings discussions, a discussion GitLab fails: the note keeps the findings not posted.
+func TestPostDiscussionsFails(t *testing.T) {
 	var summary string
 	serve(t, func(w http.ResponseWriter, r *http.Request) {
 		var b map[string]any
 		json.NewDecoder(r.Body).Decode(&b)
-		switch r.URL.Path {
-		case "/projects/5/merge_requests/3/discussions":
+		switch r.Method + " " + r.URL.Path {
+		case "POST /projects/5/merge_requests/3/discussions":
 			w.WriteHeader(500)
-		case "/projects/5/merge_requests/3/notes", "/projects/5/merge_requests/3/notes/9":
+		case "POST /projects/5/merge_requests/3/notes", "PUT /projects/5/merge_requests/3/notes/9":
 			summary = b["body"].(string)
+			fmt.Fprint(w, `{"id":9}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
-		fmt.Fprint(w, `{"id":9}`)
 	})
 	e := &forge.Event{Forge: "gitlab"}
 	e.Repository.ID, e.PullRequest.Number = 5, 3
 	f, _ := (&Hub{}).Open(e)
 	p := f.(*pr)
+	p.Configure(review.Settings{GitLabFindings: "discussions"})
 	p.refs = [3]string{"b", "s", "abcdef1"}
 	src := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,2 @@\n ctx\n+new\n"
 	c := review.Comment{Path: "a.go", Line: 2, Body: "lost?"}

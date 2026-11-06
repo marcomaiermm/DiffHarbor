@@ -58,6 +58,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		return nil // reviewed already, e.g. a redelivered event; `@app review` forces one
 	}
 	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
+	p.Configure(cfg)
 	// Like a bot author: green, and `@app review` still reviews. A broken review.json reviews, its note says why.
 	if !manual && cfgErr == nil && !cfg.Reviews(pr.Base.Ref, e.Repository.DefaultBranch) {
 		s.Write(fmt.Sprintf("⏭️ **Review skipped:** base branch `%s` is not the default branch or in `base_branches`. Comment `@%s review` for one.", pr.Base.Ref, f.Bot()), "")
@@ -227,6 +228,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 			fmt.Sprintf("%s · %s · %s · %ds", stats, kind, sha[:7], int(time.Since(started).Round(time.Second).Seconds()))); err != nil {
 			return err
 		}
+	} else {
+		p.Publish() // the answers to fixed threads
 	}
 	desc = text.Count(n, "finding")
 	if len(r.Fixed) > 0 {

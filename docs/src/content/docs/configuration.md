@@ -38,10 +38,11 @@ Add a webhook on the project or group: `https://<host>/webhook/gitlab`, with the
 | `GITLAB_TOKEN` | A bot user's token (or a project/group access token) with scope `api` and at least the Developer role. Its username is the bot: `@<username> review`. |
 | `GITLAB_READ_TOKEN` | Optional. A token with only `read_repository` for git's fetches. Without it they use the `api` token. Both stay in the server: git fetches through its proxy. |
 | `GITLAB_WEBHOOK_SECRET` | The webhook's secret token. |
+| `GITLAB_FINDINGS` | `review` (default): the findings, the answers to fixed threads and the summary are one review, one email; a suggestion GitLab can't place goes into the summary as code. `discussions`: each on its own, an email each; a refused suggestion is retried as plain code on its line. A person's own drafts on the token's user make a review fall back to `discussions`. A repo's `review.json` can say otherwise (`gitlab_findings`). |
 
 Differences to GitHub:
 
-- Findings are diff discussions and fixes are `suggestion:-N+0` blocks.
+- Findings are diff discussions, published as one review (`GITLAB_FINDINGS`), and fixes are `suggestion:-N+0` blocks.
 - A finding GitLab refuses to place goes into the summary note.
 - Large MRs in parts start with `@<bot> review all`. There is no checkbox.
 - No redelivery. GitLab retries a failed webhook only briefly.

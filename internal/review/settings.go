@@ -53,6 +53,9 @@ type Settings struct {
 	InstallScripts bool `json:"install_scripts"`
 	// Base branches besides the default branch whose PRs get reviewed without asking, as globs ("release/*").
 	BaseBranches []string `json:"base_branches"`
+	// How GitLab gets the findings: "review" as one review, one email; "discussions" an email each. Unset: the
+	// server's GITLAB_FINDINGS.
+	GitLabFindings string `json:"gitlab_findings"`
 	// What reviews and chats of this repo follow of the learnings.
 	Learnings Learnings `json:"learnings"`
 
@@ -338,6 +341,9 @@ func LoadSettings(s string) (Settings, error) {
 		if _, err := path.Match(g, ""); err != nil {
 			return Settings{}, fmt.Errorf("base_branches %q: %w", g, err)
 		}
+	}
+	if f := cfg.GitLabFindings; f != "" && f != "review" && f != "discussions" {
+		return Settings{}, fmt.Errorf("gitlab_findings %q: want review or discussions", f)
 	}
 	if cfg.MaxParts < 0 || cfg.MaxParts > 8 {
 		return Settings{}, fmt.Errorf("max_parts %d: want 1 to 8", cfg.MaxParts)

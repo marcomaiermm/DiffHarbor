@@ -30,6 +30,7 @@ type skipPR struct {
 }
 
 func (*skipPR) Refresh() error                          { return nil }
+func (*skipPR) Configure(review.Settings)               {}
 func (*skipPR) File(string, ...string) string           { return `{"base_branches":["release/*"]}` }
 func (*skipPR) Notes() ([]forge.Note, error)            { return nil, nil }
 func (p *skipPR) Status(_, state, desc string)          { p.status = state + " " + desc }

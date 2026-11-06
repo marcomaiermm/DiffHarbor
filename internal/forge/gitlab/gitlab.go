@@ -41,8 +41,9 @@ var (
 // Hub takes GitLab's webhooks.
 type Hub struct{ secret string }
 
-// Config is the bot user: GITLAB_URL, GITLAB_TOKEN, GITLAB_READ_TOKEN and GITLAB_WEBHOOK_SECRET.
-type Config struct{ URL, Token, ReadToken, Secret string }
+// Config is the bot user: GITLAB_URL, GITLAB_TOKEN, GITLAB_READ_TOKEN and GITLAB_WEBHOOK_SECRET, and
+// GITLAB_FINDINGS: review (default) or discussions.
+type Config struct{ URL, Token, ReadToken, Secret, Findings string }
 
 // Setup checks cfg and learns the bot's username. ok is false when no GITLAB_TOKEN is set.
 func Setup(cfg Config) (h *Hub, ok bool, err error) {
@@ -53,6 +54,9 @@ func Setup(cfg Config) (h *Hub, ok bool, err error) {
 	h = &Hub{cfg.Secret}
 	if h.secret == "" {
 		return nil, true, errors.New("GITLAB_WEBHOOK_SECRET is empty")
+	}
+	if Findings = cmp.Or(cfg.Findings, "review"); Findings != "review" && Findings != "discussions" {
+		return nil, true, fmt.Errorf("GITLAB_FINDINGS %q: want review or discussions", Findings)
 	}
 	readToken = cfg.ReadToken // unset: git fetches with token, which stays in the vault like this one
 	var u struct {
