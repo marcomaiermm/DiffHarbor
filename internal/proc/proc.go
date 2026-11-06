@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -119,10 +120,9 @@ func Workspace(repo string) (string, error) {
 			return "", fmt.Errorf("repo uids: %s is no repo id", repo)
 		}
 		var err error
-		if uid, err = uidOf(filepath.Join(DataDir, "uids.json"), repo); err != nil {
+		if uid, err = repoUID(repo); err != nil {
 			return "", err
 		}
-		name(uid) // node has one
 	}
 	user.uid, user.home, user.tmp = uid, "/nonexistent", ""
 	// Each job: its code may have closed its cache to itself or opened it to the other users. Chmod follows a
@@ -151,6 +151,20 @@ func Workspace(repo string) (string, error) {
 		return "", err
 	}
 	return dir, nil
+}
+
+// uidMu guards uids.json and /etc/passwd, /etc/group: two new repos' jobs at once must not get the same uid.
+var uidMu sync.Mutex
+
+// repoUID is repo's uid, named in /etc.
+func repoUID(repo string) (uint32, error) {
+	uidMu.Lock()
+	defer uidMu.Unlock()
+	uid, err := uidOf(filepath.Join(DataDir, "uids.json"), repo)
+	if err == nil {
+		name(uid) // node has one
+	}
+	return uid, err
 }
 
 // name gives uid a user and group in /etc: PR code asks who it runs as (Node's os.userInfo(), Go's user.Current()) and

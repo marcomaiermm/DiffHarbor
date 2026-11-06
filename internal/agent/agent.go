@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -178,7 +179,9 @@ func Available(provider string) bool {
 		return true
 	}
 	var logins map[string]json.RawMessage
+	tokenMu.Lock() // not while a refresh rewrites it
 	b, err := os.ReadFile(filepath.Join(AuthDir(), "auth.json"))
+	tokenMu.Unlock()
 	return p.Login && err == nil && json.Unmarshal(b, &logins) == nil && logins[provider] != nil
 }
 
@@ -471,10 +474,16 @@ func Check() error {
 	return nil
 }
 
+// tokenMu serializes OpenAIToken: Pi may rotate the refresh token, and two refreshes at once lose the login. A mutex,
+// not singleflight: each caller wants a token that outlives its own pass, and x/sync would be a new dependency.
+var tokenMu sync.Mutex
+
 // OpenAIToken is a bearer token from the ChatGPT login, valid for 20 more minutes at least.
 // Pi's ChatGPT login lives on the root-only data volume (log in once, see README). Pi runs as the job's user
 // next to PR code, so it only gets an access token that outlives the pass, never the refresh token.
 func OpenAIToken() (string, error) {
+	tokenMu.Lock()
+	defer tokenMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	c := exec.CommandContext(ctx, "pi", "auth", "print-bearer-token", "--provider", "openai", "--min-expiry", "20m")

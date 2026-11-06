@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -155,6 +156,23 @@ func TestLearnings(t *testing.T) {
 	}
 	if gone, err := forgetLearnings("o/r", "R1"); err != nil || len(gone) != 12 || strings.Contains(strings.Join(learningsOf("o/r"), ""), "r1") {
 		t.Fatalf("forget: %v %q", err, gone)
+	}
+}
+
+// An owner's file is shared by its repos' jobs, which run at once: no append is lost.
+func TestLearningsConcurrent(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	var wg sync.WaitGroup
+	for i := range 50 {
+		wg.Go(func() {
+			if err := addLearning("o", fmt.Sprintf("- r%d (@u)", i), time.Now()); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	if got := learningsOf("o"); len(got) != 50 {
+		t.Fatalf("kept %d of 50", len(got))
 	}
 }
 

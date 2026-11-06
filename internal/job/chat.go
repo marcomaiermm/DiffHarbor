@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -111,12 +112,20 @@ func learningsOf(key string) []string {
 	return strings.FieldsFunc(string(b), func(r rune) bool { return r == '\n' })
 }
 
+// learningsMu guards the read-modify-write of addLearning and forgetLearnings: an owner's file is shared by all of
+// its repos, whose jobs run at once.
+var learningsMu sync.Mutex
+
 func writeLearnings(key string, lines []string) error {
 	f := learningsFile(key)
 	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(f, []byte(strings.Join(append(lines, ""), "\n")), 0o600)
+	// Through a rename: a review reading them never sees half a file.
+	if err := os.WriteFile(f+".tmp", []byte(strings.Join(append(lines, ""), "\n")), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(f+".tmp", f)
 }
 
 // learnedRe is the date addLearning ends an entry with; entries from before have none and never age.
@@ -145,12 +154,16 @@ func readLearnings(owner, repo string, l review.Learnings) string {
 
 // addLearning appends one rule to a repo or owner, dated; the oldest past review.MaxLearnings goes.
 func addLearning(key, entry string, now time.Time) error {
+	learningsMu.Lock()
+	defer learningsMu.Unlock()
 	lines := append(learningsOf(key), strings.TrimSuffix(entry, ")")+", "+now.Format(time.DateOnly)+")")
 	return writeLearnings(key, lines[max(0, len(lines)-review.MaxLearnings):])
 }
 
 // forgetLearnings drops key's learnings containing s, any case, and returns them.
 func forgetLearnings(key, s string) ([]string, error) {
+	learningsMu.Lock()
+	defer learningsMu.Unlock()
 	var kept, gone []string
 	for _, l := range learningsOf(key) {
 		if strings.Contains(strings.ToLower(l), strings.ToLower(s)) {

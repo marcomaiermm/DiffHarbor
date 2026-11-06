@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -89,6 +91,36 @@ func TestUIDOf(t *testing.T) {
 		_ = os.WriteFile(f, []byte(bad), 0o600)
 		if _, err := uidOf(f, "o/e"); err == nil {
 			t.Fatal("no error for", bad)
+		}
+	}
+}
+
+// Two new repos' jobs at once never get the same uid, and uids.json stays whole.
+func TestRepoUIDConcurrent(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("as root name writes /etc/passwd")
+	}
+	defer func(d string) { DataDir = d }(DataDir)
+	DataDir = t.TempDir()
+	const n = 50
+	got := make([]uint32, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() {
+			var err error
+			if got[i], err = repoUID("github:api.github.com:" + strconv.Itoa(i)); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	m, err := uids(filepath.Join(DataDir, "uids.json")) // errors on a uid two repos share
+	if err != nil || len(m) != n {
+		t.Fatalf("%d repos, %v", len(m), err)
+	}
+	for i, uid := range got {
+		if m["github:api.github.com:"+strconv.Itoa(i)] != uid {
+			t.Fatalf("repo %d got %d, file says %d", i, uid, m["github:api.github.com:"+strconv.Itoa(i)])
 		}
 	}
 }
