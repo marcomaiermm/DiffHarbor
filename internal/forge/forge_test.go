@@ -27,8 +27,13 @@ func TestPlace(t *testing.T) {
 	if got := Format(Finding{Comment: review.Comment{Existing: "a ````", Fix: "b"}}, ""); !strings.HasSuffix(got, "`````diff\n-a ````\n+b\n`````") {
 		t.Fatalf("diff fence: %q", got)
 	}
-	if got := Format(Finding{Comment: review.Comment{Existing: "x\n", Fix: "x"}}, ""); strings.Contains(got, "diff") {
-		t.Fatalf("no-op diff: %q", got)
+	// Trimmed once, placed or not, inline or outside the diff: a fix's last blank line stays.
+	cs := []review.Comment{{Path: "a.go", Line: 11, Existing: "nope\n\n", Fix: "y\n\n"}, {Path: "a.go", Line: 40, Existing: "nope\n\n", Fix: "y\n\n"}, {Path: "a.go", Line: 41, Existing: "x\n", Fix: "x"}}
+	inline, rest := Split(review.Result{Comments: cs}, nil, lines)
+	want := "````diff\n-nope\n-\n+y\n+\n````"
+	if len(inline) != 1 || len(rest) != 2 || !strings.Contains(Format(inline[0], "suggestion"), want) || !strings.Contains(Format(rest[0], ""), want) ||
+		strings.Contains(Format(rest[1], ""), "diff") {
+		t.Fatalf("split: %q %q %q", Format(inline[0], "suggestion"), Format(rest[0], ""), Format(rest[1], ""))
 	}
 }
 
