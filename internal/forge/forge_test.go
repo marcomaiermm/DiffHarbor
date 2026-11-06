@@ -15,9 +15,20 @@ func TestPlace(t *testing.T) {
 	if c.Start != 11 || c.End != 12 || !strings.Contains(Format(c, "suggestion:-1+0"), "```suggestion:-1+0\n\tif x != nil {\n\t\treturn\n```") {
 		t.Fatalf("placed %d-%d: %q", c.Start, c.End, Format(c, "suggestion"))
 	}
-	far := Finding{Comment: review.Comment{Path: "a.go", Line: 40, Existing: "ctx", Fix: "y"}}
-	if Place(&far, lines); far.Start != 0 || !strings.Contains(Format(far, "suggestion"), "**Suggested fix:**") {
+	far := Finding{Comment: review.Comment{Path: "a.go", Line: 40, Existing: "ctx\nz\n", Fix: "y"}}
+	if Place(&far, lines); far.Start != 0 || !strings.Contains(Format(far, "suggestion"), "**Suggested fix:**\n\n````diff\n-ctx\n-z\n+y\n````") {
 		t.Fatalf("far: %+v", far)
+	}
+	blank := Finding{Comment: review.Comment{Path: "a.go", Line: 13, Existing: "ctx2\n\n", Fix: "y\n\n"}}
+	if Place(&blank, diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +13,2 @@\n ctx2\n \n")); blank.End != 14 ||
+		!strings.Contains(Format(blank, "suggestion"), "```suggestion\ny\n\n```") {
+		t.Fatalf("blank: %+v %q", blank, Format(blank, "suggestion"))
+	}
+	if got := Format(Finding{Comment: review.Comment{Existing: "a ````", Fix: "b"}}, ""); !strings.HasSuffix(got, "`````diff\n-a ````\n+b\n`````") {
+		t.Fatalf("diff fence: %q", got)
+	}
+	if got := Format(Finding{Comment: review.Comment{Existing: "x\n", Fix: "x"}}, ""); strings.Contains(got, "diff") {
+		t.Fatalf("no-op diff: %q", got)
 	}
 }
 
