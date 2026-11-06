@@ -77,6 +77,9 @@ type fakeMR struct {
 	fail        bool           // a finding's draft fails (5xx)
 	failSummary bool           // the summary's draft fails
 	failThreads bool           // the discussions don't read after publishing
+	failAnswer  bool           // an answer's draft fails
+	failPublish bool           // bulk_publish fails
+	failNewest  bool           // the newest note doesn't read
 	drafts      []map[string]any
 	discussions []map[string]any
 	notes       []string // posted on their own
@@ -121,12 +124,17 @@ func (f *fakeMR) serve() *pr {
 			switch {
 			case b["position"] != nil && f.reject:
 				w.WriteHeader(400)
-			case b["position"] != nil && f.fail, b["position"] == nil && b["in_reply_to_discussion_id"] == nil && f.failSummary:
+			case b["position"] != nil && f.fail, b["in_reply_to_discussion_id"] != nil && f.failAnswer,
+				b["position"] == nil && b["in_reply_to_discussion_id"] == nil && f.failSummary:
 				w.WriteHeader(500)
 			default:
 				f.drafts = append(f.drafts, b)
 			}
 		case "POST " + mr + "/draft_notes/bulk_publish":
+			if f.failPublish {
+				w.WriteHeader(500)
+				return
+			}
 			f.published++
 			f.states = append(f.states, b["reviewer_state"])
 		case "POST " + mr + "/discussions":
@@ -150,6 +158,10 @@ func (f *fakeMR) serve() *pr {
 			}
 			out(ds)
 		case "GET " + mr + "/notes":
+			if f.failNewest && r.URL.Query().Get("per_page") == "1" {
+				w.WriteHeader(500)
+				return
+			}
 			ns := []map[string]any{{"id": 1, "body": "before", "author": bot}}
 			if s := f.summary(); s != "" && r.URL.Query().Get("per_page") != "1" {
 				ns = append([]map[string]any{{"id": 9, "body": s, "author": bot}}, ns...)
@@ -212,21 +224,56 @@ func TestPostNoSummaryDraft(t *testing.T) {
 	}
 }
 
-// Every finding's draft refused (4xx) or failing (5xx): the summary keeps them, still one review.
+// Every finding's draft refused (4xx): the summary keeps them, still one review.
 func TestPostRefused(t *testing.T) {
-	for _, f := range []*fakeMR{{t: t, reject: true}, {t: t, fail: true}} {
+	f := &fakeMR{t: t, reject: true}
+	p := f.serve()
+	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx, postFix}}, nil, postDiff, "f")
+	if err != nil || n != 2 || f.published != 1 || f.notes != nil || f.edited != "" ||
+		!strings.Contains(f.summary(), "Outside diff range comments (2)") || !strings.Contains(f.summary(), "context line") {
+		t.Fatalf("post: %d %v %v\n%s", n, err, f.notes, f.summary())
+	}
+}
+
+// A finding's draft failing (5xx) may have drafted it: the rest goes into the summary, which takes it too once
+// no discussion of it shows.
+func TestPostDraftFails(t *testing.T) {
+	f := &fakeMR{t: t, fail: true}
+	p := f.serve()
+	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx, postFix}}, nil, postDiff, "f")
+	if err != nil || n != 2 || f.published != 1 || f.notes != nil ||
+		!strings.Contains(f.edited, "Outside diff range comments (2)") || !strings.Contains(f.edited, "context line") {
+		t.Fatalf("post: %d %v %v\n%s", n, err, f.notes, f.edited)
+	}
+}
+
+// The newest note unread before publishing: a summary GitLab didn't place a finding of goes as a new note, not
+// over an older one with the same text.
+func TestPostNewestUnknown(t *testing.T) {
+	f := &fakeMR{t: t, failNewest: true, drop: func(int) bool { return true }}
+	p := f.serve()
+	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx}}, []forge.Thread{{ID: "d0"}}, postDiff, "f")
+	if err != nil || n != 1 || f.edited != "" || len(f.notes) != 1 || !strings.Contains(f.notes[0], "context line") {
+		t.Fatalf("post: %d %v %v %q", n, err, f.notes, f.edited)
+	}
+}
+
+// An answer's draft or the publishing failing: the thread is answered on its own.
+func TestPublishFails(t *testing.T) {
+	for _, f := range []*fakeMR{{t: t, failAnswer: true}, {t: t, failPublish: true}} {
 		p := f.serve()
-		n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx, postFix}}, nil, postDiff, "f")
-		if err != nil || n != 2 || f.published != 1 || f.notes != nil || f.edited != "" ||
-			!strings.Contains(f.summary(), "Outside diff range comments (2)") || !strings.Contains(f.summary(), "context line") {
-			t.Fatalf("post: %d %v %v\n%s", n, err, f.notes, f.summary())
+		p.Resolve(forge.Thread{ID: "d7"}, "abcdef1")
+		p.Publish()
+		if len(f.answered) != 1 || f.published != 0 {
+			t.Fatalf("answered %v, published %d", f.answered, f.published)
 		}
 	}
 }
 
-// A person's draft (a personal token) stays and would be published: discussions instead, answers too.
+// A person's draft (a personal token), one quoting ours too, stays and would be published: discussions instead,
+// answers too.
 func TestPostPersonsDraft(t *testing.T) {
-	f := &fakeMR{t: t, stale: "mine"}
+	f := &fakeMR{t: t, stale: "> " + forge.Mark + "\n\nmine"}
 	p := f.serve()
 	p.Resolve(forge.Thread{ID: "d7"}, "abcdef1")
 	p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx}}, nil, postDiff, "f")

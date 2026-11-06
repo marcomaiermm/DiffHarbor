@@ -28,7 +28,7 @@ type pr struct {
 	// findings is how this review posts (Findings, Configure), checked once batch looked at the drafts
 	findings string
 	checked  bool
-	replies  int // answers Resolve drafted, published with the review
+	answers  []answer // the answers Resolve drafted, published with the review
 }
 
 // Open needs no token per repo: GitLab's is one bot user's.
@@ -150,20 +150,29 @@ func (p *pr) resolve(id string) error {
 	return call("PUT", fmt.Sprintf("%s/discussions/%s?resolved=true", p.mr, url.PathEscape(id)), nil, nil)
 }
 
+// answer is a thread's answer waiting in a draft.
+type answer struct{ id, body string }
+
 // Resolve answers the thread and resolves it. In a review the answer is a draft that resolves it once published.
 func (p *pr) Resolve(t forge.Thread, sha string) {
 	body := fmt.Sprintf("✅ Addressed in `%s`\n\n%s", sha[:7], forge.Mark)
 	if p.batch() {
 		err := call("POST", p.mr+"/draft_notes", map[string]any{"note": body, "in_reply_to_discussion_id": t.ID, "resolve_discussion": true}, nil)
-		if !rejected(err) { // a timeout may have drafted it: the next review drops one left over
-			p.replies++
+		if err == nil {
+			p.answers = append(p.answers, answer{t.ID, body})
 			return
 		}
-		log.Println(p.e.Key(), "draft answer:", err) // answered on its own
+		// answered on its own: a timeout that drafted it anyway answers twice rather than not at all
+		log.Println(p.e.Key(), "draft answer:", err)
 	}
-	err := call("POST", fmt.Sprintf("%s/discussions/%s/notes", p.mr, url.PathEscape(t.ID)), map[string]string{"body": body}, nil)
+	p.answer(answer{t.ID, body})
+}
+
+// answer answers the thread on its own and resolves it.
+func (p *pr) answer(a answer) {
+	err := call("POST", fmt.Sprintf("%s/discussions/%s/notes", p.mr, url.PathEscape(a.id)), map[string]string{"body": a.body}, nil)
 	if err == nil {
-		err = p.resolve(t.ID)
+		err = p.resolve(a.id)
 	}
 	if err != nil {
 		log.Println("resolve:", err)
@@ -204,7 +213,7 @@ func (p *pr) dropDrafts() bool {
 	}
 	ok := true
 	for _, d := range ds {
-		if !strings.Contains(d.Note, forge.Mark) {
+		if !strings.HasSuffix(strings.TrimSpace(d.Note), forge.Mark) { // a person's quoting a note of ours stays
 			ok = false
 		} else if err := call("DELETE", fmt.Sprintf("%s/draft_notes/%d", p.mr, d.ID), nil, nil); err != nil {
 			log.Println(p.e.Key(), "drafts:", err)
@@ -216,7 +225,7 @@ func (p *pr) dropDrafts() bool {
 
 // Publish sends the answers Resolve drafted when no Post follows.
 func (p *pr) Publish() {
-	if p.replies > 0 {
+	if len(p.answers) > 0 {
 		p.bulkPublish()
 	}
 }
@@ -230,7 +239,7 @@ func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, foot
 		rest, inline = append(rest, inline...), nil
 	}
 	switch {
-	case len(inline) == 0 && p.replies == 0:
+	case len(inline) == 0 && len(p.answers) == 0:
 		_, err := p.Note(0, forge.Summary(nil, rest, footer))
 		return len(rest), err
 	case !p.batch():
@@ -288,40 +297,48 @@ func (p *pr) publish(inline, rest []forge.Finding, threads []forge.Thread, raw, 
 			rest = append(rest, c)
 			continue
 		}
-		if err != nil { // the rest isn't tried: the summary keeps them
+		drafted, keys = append(drafted, c), append(keys, key(c.Path, line, body))
+		if err != nil { // drafted or not (a timeout): its discussion tells. The rest isn't tried: the summary keeps them
 			log.Println(p.e.Key(), "draft:", err)
-			rest = append(rest, plain(inline[i:])...)
+			rest = append(rest, plain(inline[i+1:])...)
 			break
 		}
-		drafted, keys = append(drafted, c), append(keys, key(c.Path, line, body))
 	}
 	summary := forge.Summary(drafted, rest, footer)
 	err := call("POST", p.mr+"/draft_notes", map[string]string{"note": inert(summary)}, nil)
 	if err != nil {
 		log.Println(p.e.Key(), "draft summary:", err) // a note of its own then
 	}
-	before := p.newest()
+	before, beforeErr := p.newest()
 	pubErr := p.bulkPublish()
 	posted, lost := p.published(drafted, keys, threads)
 	if pubErr == nil && err == nil && len(lost) == 0 {
 		return len(posted) + len(rest), nil
 	}
-	// publishing failed (its answers may be lost: their threads stay open), no summary draft, or GitLab dropped some
-	id, err := p.ours(inert(summary), before)
+	// publishing failed, no summary draft, or GitLab dropped some: the summary says what was posted
+	var id int64
+	if err = beforeErr; err == nil {
+		id, err = p.ours(inert(summary), before)
+	}
 	if err != nil {
-		log.Println(p.e.Key(), "notes:", err) // a second summary rather than none
+		log.Println(p.e.Key(), "notes:", err) // a second summary rather than an older one edited
 	}
 	rest = append(rest, plain(lost)...)
 	_, err = p.Note(id, forge.Summary(posted, rest, footer))
 	return len(posted) + len(rest), err
 }
 
-// bulkPublish publishes the bot's drafts as one review, which marks the bot reviewed when it is a reviewer.
+// bulkPublish publishes the bot's drafts as one review, which marks the bot reviewed when it is a reviewer. Failing,
+// it answers the threads on their own: a timeout that published them anyway answers twice rather than not at all.
 func (p *pr) bulkPublish() error {
-	p.replies = 0
+	answers := p.answers
+	p.answers = nil
 	err := call("POST", p.mr+"/draft_notes/bulk_publish", map[string]string{"reviewer_state": "reviewed"}, nil)
 	if err != nil {
 		log.Println(p.e.Key(), "publish:", err)
+		for _, a := range answers {
+			p.answer(a)
+		}
 	}
 	return err
 }
@@ -372,13 +389,13 @@ func plain(fs []forge.Finding) []forge.Finding {
 	return out
 }
 
-// newest is the id of the MR's newest note, 0 if unknown.
-func (p *pr) newest() int64 {
+// newest is the id of the MR's newest note, 0 if there is none.
+func (p *pr) newest() (int64, error) {
 	var ns []note
 	if err := call("GET", p.mr+"/notes?sort=desc&order_by=created_at&per_page=1", nil, &ns); err != nil || len(ns) == 0 {
-		return 0
+		return 0, err
 	}
-	return ns[0].ID
+	return ns[0].ID, nil
 }
 
 // ours is the id of our note with this body after note after, 0 if there is none.
