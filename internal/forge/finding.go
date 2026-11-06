@@ -18,30 +18,36 @@ type Finding struct {
 }
 
 // Format renders one finding: severity, title, explanation, a folded prompt for an AI agent. suggestion opens
-// the forge's suggestion block for Start..End: "suggestion" on GitHub, "suggestion:-1+0" on GitLab.
+// the forge's suggestion block for Start..End: "suggestion" on GitHub, "suggestion:-1+0" on GitLab; "" where none
+// can go (the summary), placed or not.
 func Format(c Finding, suggestion string) string {
 	s := "_" + cmp.Or(badge[c.Severity], c.Severity) + "_"
 	if c.Title != "" {
 		s += " · **" + c.Title + "**"
 	}
 	s += "\n\n" + c.Body
-	if c.Fix != "" && c.Start > 0 { // the forge shows a button that commits the fix
-		f := "```"
-		for strings.Contains(c.Fix, f) {
-			f += "`"
+	// f is "" when the fix is a blank line: c.Fix says whether there is one.
+	e, f := trim(c.Existing), trim(c.Fix)
+	if c.Fix != "" && c.Start > 0 && suggestion != "" { // the forge shows a button that commits the fix
+		fence := "```"
+		for strings.Contains(f, fence) {
+			fence += "`"
 		}
-		s += "\n\n" + f + suggestion + "\n" + c.Fix + "\n" + f
-	} else if c.Fix != "" && c.Existing != "" && c.Existing != c.Fix { // no place for a suggestion: what it replaces too
-		d := prefixed("-", c.Existing) + "\n" + prefixed("+", c.Fix)
+		s += "\n\n" + fence + suggestion + "\n" + f + "\n" + fence
+	} else if c.Fix != "" && c.Existing != "" && e != f { // no place for a suggestion: what it replaces too
+		d := prefixed("-", e) + "\n" + prefixed("+", f)
 		s += "\n\n**Suggested fix:**\n\n" + strings.Replace(review.Fence(d), "\n", "diff\n", 1)
 	} else if c.Fix != "" {
-		s += "\n\n**Suggested fix:**\n\n" + review.Fence(c.Fix)
+		s += "\n\n**Suggested fix:**\n\n" + review.Fence(f)
 	}
 	if c.Prompt != "" {
 		s += "\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n" + review.Fence(c.Prompt) + "\n\n</details>"
 	}
 	return s
 }
+
+// trim drops the newline a model ends Existing and Fix with. Only Format and Place's match trim, once each.
+func trim(s string) string { return strings.TrimSuffix(s, "\n") }
 
 // prefixed puts p before each of s's lines.
 func prefixed(p, s string) string {
@@ -73,11 +79,10 @@ func Parse(body string) review.Comment {
 // Place finds the lines c.Existing quotes in the diff, nearest to c.Line and at most 10 lines from it, and sets
 // c.Start and c.End to them. No match leaves 0: the fix then shows as a plain code block.
 func Place(c *Finding, lines map[string]string) {
-	c.Existing, c.Fix = strings.TrimSuffix(c.Existing, "\n"), strings.TrimSuffix(c.Fix, "\n")
-	if c.Existing == "" || c.Fix == "" || c.Existing == c.Fix {
+	if c.Existing == "" || c.Fix == "" || trim(c.Existing) == trim(c.Fix) {
 		return
 	}
-	want := strings.Split(c.Existing, "\n")
+	want := strings.Split(trim(c.Existing), "\n")
 	best := 11
 	for s := c.Line - len(want) - 10; s <= c.Line+10; s++ {
 		matches := true
@@ -114,7 +119,6 @@ func Split(r review.Result, threads []Thread, lines map[string]string) (inline, 
 			Place(&c, lines)
 			inline = append(inline, c)
 		} else {
-			c.Existing, c.Fix = strings.TrimSuffix(c.Existing, "\n"), strings.TrimSuffix(c.Fix, "\n") // as Place does
 			rest = append(rest, c)
 		}
 	}
