@@ -281,10 +281,12 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		ours, resolved = d.Ours, d.Resolved
 		// unknown access: answered like a maintainer's (nothing retries a chat job), but no say on the finding
 		maintainer, err = p.CanWrite(c.User.Login)
-		if err != nil {
+		known := err == nil
+		if !known {
 			log.Println(e.Key(), "write access:", err)
+			maintainer = false // a value beside an error is no proof
 		}
-		heard := maintainer || err != nil
+		heard := maintainer || !known
 		if !answers(mention, d, c.Body, heard) || newer(mention, d, c.ID, c.User.Login, heard) {
 			return nil // between humans, for someone else, we said our piece (@us to go on), or they wrote again
 		}
@@ -295,7 +297,10 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		if resolved {
 			about.WriteString("This thread is resolved.\n\n")
 		}
-		if !maintainer {
+		switch {
+		case !known:
+			fmt.Fprintf(&about, "@%s's write access is unknown: answer normally, \"resolved\" true only when it is fixed.\n\n", c.User.Login)
+		case !maintainer:
 			fmt.Fprintf(&about, "@%s has no write access: they cannot decline or defer the finding, \"resolved\" true only when it is fixed.\n\n", c.User.Login)
 		}
 		notes := d.Notes
@@ -386,7 +391,10 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	}
 	if resolve {
 		if err := p.ResolveDiscussion(); err != nil {
-			log.Println("resolve:", err) // ponytail: the reply already says resolved; rare, the maintainer resolves it
+			log.Println("resolve:", err)
+			if body != "" { // the reply said resolved
+				return p.Reply("⚠️ _Could not resolve this thread, please resolve it by hand._\n\n" + forge.Mark)
+			}
 		}
 	}
 	return nil
