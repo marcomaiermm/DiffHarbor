@@ -393,10 +393,14 @@ func TestThanks(t *testing.T) {
 	}
 }
 
-// A failed write-access check is no "no": Chat returns it for a retry instead of dropping the reply.
-type deniedPR struct{ reactPR }
+// A failed write-access check drops no reply, also past the cap: nothing retries a chat job.
+type deniedPR struct{ skipPR }
 
 func (*deniedPR) CanWrite(string) (bool, error) { return false, errors.New("503") }
+func (*deniedPR) React()                        {}
+func (*deniedPR) Discussion() (forge.Discussion, error) {
+	return forge.Discussion{Ours: true, Notes: []forge.Note{{ID: 1, Ours: true}, {ID: 2, Ours: true}, {ID: 3, Ours: true}, {ID: 4, Ours: true}}}, nil
+}
 
 type deniedForge struct {
 	skipForge
@@ -405,10 +409,10 @@ type deniedForge struct {
 
 func (f deniedForge) Open(*forge.Event) (forge.PR, error) { return f.pr, nil }
 
-func TestChatRetriesAccessCheck(t *testing.T) {
-	e := &forge.Event{Kind: "pull_request_review_comment"}
+func TestChatAnswersOnFailedAccessCheck(t *testing.T) {
+	e := &forge.Event{Kind: "pull_request_review_comment"} // no repository id: Chat stops right after the thread check
 	e.Comment.Body = "why?"
-	if err := Chat(t.Context(), deniedForge{pr: &deniedPR{}}, regexp.MustCompile(`@bot`), e); err == nil || err.Error() != "503" {
-		t.Fatal(err)
+	if err := Chat(t.Context(), deniedForge{pr: &deniedPR{}}, regexp.MustCompile(`@bot`), e); err == nil || !strings.Contains(err.Error(), "no repository id") {
+		t.Fatal("Chat stopped elsewhere:", err)
 	}
 }

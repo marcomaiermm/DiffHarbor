@@ -279,10 +279,13 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			return err
 		}
 		ours, resolved = d.Ours, d.Resolved
-		if maintainer, err = p.CanWrite(c.User.Login); err != nil {
-			return err // unknown is no "no": the job retries
+		// unknown access: answered like a maintainer's (nothing retries a chat job), but no say on the finding
+		maintainer, err = p.CanWrite(c.User.Login)
+		if err != nil {
+			log.Println(e.Key(), "write access:", err)
 		}
-		if !answers(mention, d, c.Body, maintainer) || newer(mention, d, c.ID, c.User.Login, maintainer) {
+		heard := maintainer || err != nil
+		if !answers(mention, d, c.Body, heard) || newer(mention, d, c.ID, c.User.Login, heard) {
 			return nil // between humans, for someone else, we said our piece (@us to go on), or they wrote again
 		}
 		if !mention.MatchString(c.Body) {
@@ -366,19 +369,25 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		}
 		body = strings.TrimSpace(body + "\n\n📝 _Learning saved" + scope + ":_ " + l)
 	}
-	if a.Resolved && ours && !resolved && maintainer { // a contributor's fix: the next review resolves it
-		if err := p.ResolveDiscussion(); err != nil {
-			log.Println("resolve:", err)
-		} else if body != "" {
-			body += "\n\n✅ _Thread resolved._"
-		}
-	}
+	resolve := a.Resolved && ours && !resolved && maintainer // a contributor's fix: the next review resolves it
 	if body == "" {
 		log.Println(e.Key(), "nothing to answer", c.User.Login)
-		return nil
+	} else {
+		if resolve {
+			body += "\n\n✅ _Thread resolved._"
+		}
+		log.Println(e.Key(), "answered", c.User.Login)
+		// the commit the answer checked: a push the forge hasn't taken into the PR yet reads as "not fixed" otherwise
+		body += "\n\n🔎 _Checked at " + pr.Head.SHA[:min(7, len(pr.Head.SHA))] + "._"
+		// the answer first: a failed reply leaves the thread open, not resolved without a word
+		if err := p.Reply(body + "\n\n" + forge.Mark); err != nil {
+			return err
+		}
 	}
-	log.Println(e.Key(), "answered", c.User.Login)
-	// the commit the answer checked: a push the forge hasn't taken into the PR yet reads as "not fixed" otherwise
-	body += "\n\n🔎 _Checked at " + pr.Head.SHA[:min(7, len(pr.Head.SHA))] + "._"
-	return p.Reply(body + "\n\n" + forge.Mark)
+	if resolve {
+		if err := p.ResolveDiscussion(); err != nil {
+			log.Println("resolve:", err) // ponytail: the reply already says resolved; rare, the maintainer resolves it
+		}
+	}
+	return nil
 }
