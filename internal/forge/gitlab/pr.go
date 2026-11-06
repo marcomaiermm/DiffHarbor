@@ -134,9 +134,15 @@ func (p *pr) Threads() ([]forge.Thread, error) {
 			continue
 		}
 		n := d.Notes[0]
+		var rs []forge.Note
+		for _, r := range d.Notes[1:] {
+			if !r.System {
+				rs = append(rs, r.forge())
+			}
+		}
 		ts = append(ts, forge.Thread{
 			ID: d.ID, Comment: n.ID, Resolved: n.Resolved, Path: n.Position.NewPath,
-			Line: n.Position.NewLine, Original: n.Position.NewLine, Body: n.Body,
+			Line: n.Position.NewLine, Original: n.Position.NewLine, Body: n.Body, Replies: forge.Answers(rs),
 		})
 	}
 	return ts, err
