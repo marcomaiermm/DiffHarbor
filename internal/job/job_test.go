@@ -417,9 +417,14 @@ func TestReviewCommand(t *testing.T) {
 }
 
 // Only folded findings: an incremental review posts nothing, they'd come back on every push. A full one always posts.
+// A finding on a thread's line counts as none: Split drops it.
 func TestPosts(t *testing.T) {
-	nits := []review.Comment{{Severity: "nit", Fold: true}}
-	if posts(false, nits) || posts(false, nil) || !posts(true, nil) || !posts(false, append(nits, review.Comment{Severity: "minor"})) {
+	nits := []review.Comment{{Path: "a.go", Line: 1, Severity: "nit", Fold: true}}
+	minor := review.Comment{Path: "a.go", Line: 2, Severity: "minor"}
+	on := []forge.Thread{{Path: "a.go", Line: 2}}
+	r := func(cs ...review.Comment) review.Result { return review.Result{Comments: cs} }
+	if posts(false, r(nits...), nil) || posts(false, r(), nil) || !posts(true, r(), nil) || !posts(false, r(nits[0], minor), nil) ||
+		posts(false, r(nits[0], minor), on) {
 		t.Fatal("posts")
 	}
 }
@@ -483,6 +488,13 @@ func TestBodyProfile(t *testing.T) {
 		"~~~\nreview: quiet\n~~~\nreview: chill":       "chill",
 		"```\nreview: quiet":                           "", // unclosed: code up to the end
 		"<!-- hint\nreview: quiet":                     "",
+		"text\n\n    review: quiet":                    "", // indented: code
+		"\treview: quiet":                              "",
+		"    - [x] review: quiet":                      "quiet", // a nested list item
+		"````\n```\n````\nreview: chill":               "chill",
+		"````\n```\nreview: quiet\n```\n````":          "", // a fence inside a longer one
+		"review: quiet please, but assertive here":     "",
+		"review: quiet  ":                              "quiet",
 	} {
 		if got := bodyProfile(body); got != want {
 			t.Errorf("%q: %q, want %q", body, got, want)

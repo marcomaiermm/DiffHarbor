@@ -452,7 +452,8 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 		r.Fixed = nil // resolving threads needs proof
 		return part{r: r, found: len(r.Comments)}
 	}
-	kept = slices.DeleteFunc(kept, func(c Comment) bool { return !in.Settings.Keep(c) }) // lowered below min_severity
+	// lowered below min_severity, or to a nit past the nits' cap
+	kept = capped(slices.DeleteFunc(kept, func(c Comment) bool { return !in.Settings.Keep(c) }))
 	// claimed fixed, but not: their threads stay open
 	var rejected []int
 	for _, i := range r.Fixed {

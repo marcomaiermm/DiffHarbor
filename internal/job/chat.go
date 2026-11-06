@@ -250,17 +250,37 @@ func reviewCommand(cmd string) (large bool, profile string, ok bool) {
 }
 
 var (
-	// a PR description's line "review: quiet", plain, a list item or a ticked box, "quiet" maybe bold or code; an
-	// unticked box is no choice
-	bodyProfileRe = regexp.MustCompile("(?im)^[ \\t>]*(?:(?:[-*+]|\\d+[.)])[ \\t]+(?:\\[[xX]\\][ \\t]+)?)?review:[ \\t]*[*_`]*(quiet|chill|assertive)[*_`]*(?:[ \\t.,;!)\\r]|$)")
-	// what a PR description shows no one or only as an example: HTML comments, code blocks; unclosed, up to the end
-	hidden = regexp.MustCompile("(?ms)<!--.*?(?:-->|\\z)|^[ \\t>]*```.*?(?:^[ \\t>]*```|\\z)|^[ \\t>]*~~~.*?(?:^[ \\t>]*~~~|\\z)")
+	// a PR description's line "review: quiet", plain, a list item or a ticked box, "quiet" maybe bold or code, and
+	// nothing after but a full stop; an unticked box is no choice. Indented 4 spaces or a tab without a list marker it is a code block.
+	bodyProfileRe = regexp.MustCompile("(?im)^(?: {0,3}(?:>[ \\t]*)*|[ \\t>]*(?:[-*+]|\\d+[.)])[ \\t]+(?:\\[[xX]\\][ \\t]+)?)review:[ \\t]*[*_`]*(quiet|chill|assertive)[*_`]*\\.?[ \\t]*\\r?$")
+	// what a PR description shows no one: HTML comments; unclosed, up to the end
+	comments = regexp.MustCompile("(?s)<!--.*?(?:-->|\\z)")
+	fenceRe  = regexp.MustCompile("^[ \\t>]*(```+|~~~+)")
 )
+
+// visible is body without HTML comments and fenced code blocks: a template's hint, an example. A fence closes at
+// one of the same character at least as long; unclosed, up to the end.
+func visible(body string) string {
+	var out []string
+	fence := ""
+	for l := range strings.Lines(comments.ReplaceAllString(body, "")) {
+		m := fenceRe.FindStringSubmatch(l)
+		switch {
+		case fence == "" && m != nil:
+			fence = m[1]
+		case fence == "":
+			out = append(out, l)
+		case m != nil && m[1][0] == fence[0] && len(m[1]) >= len(fence) && strings.TrimSpace(l[len(m[0]):]) == "":
+			fence = ""
+		}
+	}
+	return strings.Join(out, "")
+}
 
 // bodyProfile is the profile a PR description names on a line of its own, "review: quiet", by hand or as a ticked
 // box of its template; the first, "" for none. HTML comments and code blocks don't count: a template's hint, an example.
 func bodyProfile(body string) string {
-	if m := bodyProfileRe.FindStringSubmatch(hidden.ReplaceAllString(body, "")); m != nil {
+	if m := bodyProfileRe.FindStringSubmatch(visible(body)); m != nil {
 		return strings.ToLower(m[1])
 	}
 	return ""
