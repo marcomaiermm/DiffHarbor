@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"diffharbor/internal/proc"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,7 +29,7 @@ func (f *fakeAgent) reply(name string) (string, error) {
 	return q[0], nil
 }
 
-func (f *fakeAgent) Run(_ context.Context, _, name, _, task, _, _ string) (string, error) {
+func (f *fakeAgent) Run(_ context.Context, _ *proc.Sandbox, name, _, task, _, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, name)
@@ -40,7 +41,7 @@ func (f *fakeAgent) Run(_ context.Context, _, name, _, task, _, _ string) (strin
 }
 
 // Continue answers a second look from name+" again", with nothing more found when none is queued.
-func (f *fakeAgent) Continue(_ context.Context, _, name, _, task, _ string) (string, error) {
+func (f *fakeAgent) Continue(_ context.Context, _ *proc.Sandbox, name, _, task, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if strings.HasPrefix(task, repeatsTask[:30]) {
@@ -78,7 +79,7 @@ func TestAnalyze(t *testing.T) {
 		if len(parts) == 0 {
 			parts = []string{md}
 		}
-		r, stats, err := Analyze(context.Background(), Input{Agent: f, Dir: dir, Title: "t", Settings: s, Parts: parts})
+		r, stats, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: dir}, Title: "t", Settings: s, Parts: parts})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -138,7 +139,7 @@ func TestAnalyze(t *testing.T) {
 	// claimed fixed one stays in its own list.
 	f := &fakeAgent{replies: map[string][]string{"review": {`{"summary":"","comments":[{"path":"a.md","line":2,"severity":"minor","title":"t","body":"b"}],"fixed":[1]}`}}}
 	prior := []Comment{{Path: "a.md", Line: 1, Body: "open race"}, {Path: "a.md", Line: 1, Body: "gone"}} // threads carry no title
-	if _, _, err := Analyze(context.Background(), Input{Agent: f, Dir: t.TempDir(), Parts: []string{md}, Prior: prior}); err != nil {
+	if _, _, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: t.TempDir()}, Parts: []string{md}, Prior: prior}); err != nil {
 		t.Fatal(err)
 	}
 	if v := f.tasks["verify"]; !strings.Contains(v, "## Earlier findings, still open (posted already: no verdicts for these)\n\n### 3 · a.md:1\n\nopen race") ||
@@ -152,7 +153,7 @@ func TestAnalyze(t *testing.T) {
 		t.Helper()
 		replies["review"] = []string{`{"summary":"","comments":[{"path":"a.md","line":2,"severity":"minor","title":"t","body":"b"}],"fixed":[0]}`}
 		f := &fakeAgent{replies: replies}
-		r, _, err := Analyze(context.Background(), Input{Agent: f, Dir: t.TempDir(), Parts: []string{md}, Prior: []Comment{{Path: "a.md", Line: 1, Body: "race"}}})
+		r, _, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: t.TempDir()}, Parts: []string{md}, Prior: []Comment{{Path: "a.md", Line: 1, Body: "race"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -224,11 +225,11 @@ func TestAnalyze(t *testing.T) {
 
 func TestExplain(t *testing.T) {
 	f := &fakeAgent{replies: map[string][]string{"explain": {`{"1":"parses the flag","3":"ignored"}`}}}
-	got := Explain(context.Background(), f, t.TempDir(), "openai/m:low", "t", []string{"a.go\nfunc A()", "b.go\nfunc B()"})
+	got := Explain(context.Background(), f, &proc.Sandbox{Dir: t.TempDir()}, "openai/m:low", "t", []string{"a.go\nfunc A()", "b.go\nfunc B()"})
 	if !slices.Equal(got, []string{"parses the flag", ""}) || !slices.Equal(f.calls, []string{"explain repair"}) {
 		t.Errorf("explain %q, calls %q", got, f.calls)
 	}
-	if got := Explain(context.Background(), f, "", "m", "t", nil); len(got) != 0 || len(f.calls) != 1 {
+	if got := Explain(context.Background(), f, nil, "m", "t", nil); len(got) != 0 || len(f.calls) != 1 {
 		t.Error("no declarations, still a call")
 	}
 }

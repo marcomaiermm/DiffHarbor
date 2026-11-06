@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -114,16 +113,17 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	if err != nil {
 		return err
 	}
-	dir, err := agent.Workspace(id)
+	sb, err := agent.Workspace(id)
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
+	defer sb.Close()
+	dir := sb.Dir
 	read, err := p.ReadToken()
 	if err != nil {
 		return err
 	}
-	raw, err := review.Checkout(ctx, filepath.Join(dir, "repo"), e.Repository.CloneURL, sha, "refs/heads/"+pr.Base.Ref, read)
+	raw, err := review.Checkout(ctx, sb, filepath.Join(dir, "repo"), e.Repository.CloneURL, sha, "refs/heads/"+pr.Base.Ref, read)
 	if err != nil {
 		return err
 	}
@@ -181,7 +181,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	for i, path := range cfg.CheckPaths() {
 		if c := p.File(pr.Base.SHA, path); c != "" {
 			f := filepath.Join(dir, fmt.Sprintf("checks-%d.sh", i))
-			if err := proc.WriteFile(f, []byte(c)); err != nil {
+			if err := sb.WriteFile(f, []byte(c)); err != nil {
 				return err
 			}
 			scripts = append(scripts, checks.Script{Name: path, File: f})
@@ -198,7 +198,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		regs, _ = checks.Registries(e.Owner()) // main checked them
 	}
 	r, stats, err := review.Analyze(ctx, review.Input{
-		Agent: agent.Pi{}, Dir: dir, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: forge.Redact(review.Messages(ctx, filepath.Join(dir, "repo"))), Ticket: tk, Parts: parts,
+		Agent: agent.Pi{}, Sandbox: sb, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: forge.Redact(review.Messages(ctx, sb, filepath.Join(dir, "repo"))), Ticket: tk, Parts: parts,
 		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings)), Checks: scripts, Registries: regs, Prior: prior, Closed: closed, Settings: cfg,
 		Guide: guide && only == nil, // an incremental review sees a few files: the last full one's reading order stays
 	})
@@ -262,9 +262,9 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		d := report.Data{
 			Repo: e.Repository.FullName, Number: pr.Number, Title: pr.Title, URL: pr.HTMLURL, SHA: pr.Head.SHA,
 			Summary: st.Summary, Diagram: st.Diagram, Effort: st.Effort, Decisions: st.Decisions, Story: st.Story, Flow: st.Flow,
-			Walkthrough: st.Files, Commits: review.Commits(ctx, repo), Outline: outline, Findings: openFindings(threads, open, r),
+			Walkthrough: st.Files, Commits: review.Commits(ctx, sb, repo), Outline: outline, Findings: openFindings(threads, open, r),
 			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(repo, raw), Themes: cfg.SyntaxTheme,
-			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, repo),
+			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, sb, repo),
 			Conflicts: pr.Mergeable != nil && !*pr.Mergeable, Forge: p.Links(),
 			Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(repo, raw),
 		}
@@ -272,7 +272,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		if keys, texts := report.Asks(d); len(keys) > 0 {
 			rm, vm := cfg.Models()
 			d.Whys = map[string]string{}
-			for i, w := range review.Explain(ctx, agent.Pi{}, dir, cmp.Or(agent.VerifyFor(rm), vm, rm), forge.Redact(pr.Title), texts) {
+			for i, w := range review.Explain(ctx, agent.Pi{}, sb, cmp.Or(agent.VerifyFor(rm), vm, rm), forge.Redact(pr.Title), texts) {
 				d.Whys[keys[i]] = w
 			}
 		}

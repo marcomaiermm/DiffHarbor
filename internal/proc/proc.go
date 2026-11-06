@@ -33,13 +33,14 @@ var (
 // firstUID is the first repo's uid and gid; the image's users are below it, node (1000) runs dry runs.
 const firstUID = 10000
 
-// user is who Command runs as when we're root, set by Workspace: the job's repo's uid, and the home and temp dir in
-// its work dir. One per process will do: the server runs one job at a time (server.work), a dry run is a process of
-// its own, and all of a job's checks run for its repo.
-var user = struct {
+// Sandbox is a job's work dir and, when we're root, who its commands run as: the repo's uid, and the home and temp
+// dir in Dir. A value per job, not one per process: jobs of different repos may run at once, and a call that should
+// run as a repo's user can't fall back to another's.
+type Sandbox struct {
+	Dir       string // the work dir: the checkout in Dir/repo, Pi's sessions, the checks' configs
 	uid       uint32
 	home, tmp string
-}{1000, "/home/node", ""}
+}
 
 // jobUser reports whether uid runs PR code: a repo's user, or node (dry runs, and every job before a uid per repo).
 func jobUser(uid int) bool { return uid == 1000 || uid >= firstUID }
@@ -50,17 +51,17 @@ func workDir() string { return filepath.Join(CacheDir, "work") }
 
 // cacheDir is the tool caches; as root the user's own: a PR's code can't change what another repo's jobs run (a
 // GOCACHE entry, a package in the pnpm store, corepack's pnpm).
-func cacheDir() string {
+func (s *Sandbox) cacheDir() string {
 	if !AsPi {
 		return CacheDir
 	}
-	return filepath.Join(CacheDir, strconv.Itoa(int(user.uid)))
+	return filepath.Join(CacheDir, strconv.Itoa(int(s.uid)))
 }
 
 // ToolEnv points the caches for installs and builds the checks and Pi's bash run at cacheDir (pnpm store and work
 // dirs share a volume: hardlinks).
-func ToolEnv() []string {
-	c := cacheDir()
+func (s *Sandbox) ToolEnv() []string {
+	c := s.cacheDir()
 	return []string{
 		"CI=1", "XDG_CACHE_HOME=" + c, "npm_config_cache=" + c + "/npm",
 		"npm_config_store_dir=" + c + "/pnpm-store", "pnpm_config_store_dir=" + c + "/pnpm-store",
@@ -72,23 +73,26 @@ func ToolEnv() []string {
 
 // Command runs as the job's user (when we're root) with only PATH, HOME, TMPDIR and extra env, so children never see
 // the App key.
-func Command(ctx context.Context, dir string, extra []string, name string, args ...string) *exec.Cmd {
+func (s *Sandbox) Command(ctx context.Context, dir string, extra []string, name string, args ...string) *exec.Cmd {
 	c := exec.CommandContext(ctx, name, args...)
 	c.Dir, c.WaitDelay = dir, 5*time.Second
 	c.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "GIT_TERMINAL_PROMPT=0"}
 	if AsPi {
-		c.Env[1] = "HOME=" + user.home
-		if user.tmp != "" {
-			c.Env = append(c.Env, "TMPDIR="+user.tmp)
+		if !jobUser(int(s.uid)) { // a Sandbox not from Workspace: uid 0 would run PR code as root
+			panic("proc: command without a job's user")
 		}
-		c.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: user.uid, Gid: user.uid}}
+		c.Env[1] = "HOME=" + s.home
+		if s.tmp != "" {
+			c.Env = append(c.Env, "TMPDIR="+s.tmp)
+		}
+		c.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: s.uid, Gid: s.uid}}
 	}
 	c.Env = append(c.Env, extra...)
 	return c
 }
 
 // Home is the job's home: Pi's config is in it.
-func Home() string { return user.home }
+func (s *Sandbox) Home() string { return s.home }
 
 // Run returns stdout; errors carry stderr but never the args.
 func Run(c *exec.Cmd) ([]byte, error) {
@@ -104,36 +108,46 @@ func Run(c *exec.Cmd) ([]byte, error) {
 // Exists reports whether p exists.
 func Exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-// Workspace is a work dir for a job on repo, a forge.RepoID, that git, checks and Pi can write. As root it makes repo's
-// user (node for "", a dry run) the one Command runs as from now on, in a fresh home (the image's: Pi's extensions) and temp dir in
-// the work dir: what a PR's code leaves there (a git hook, Pi's config, `go env -w GOFLAGS=-toolexec=…`) goes with it.
-func Workspace(repo string) (string, error) {
+// Workspace is a job's sandbox on repo, a forge.RepoID: a work dir git, checks and Pi can write. As root its commands
+// run as repo's user (node for "", a dry run), in a fresh home (the image's: Pi's extensions) and temp dir in the
+// work dir: what a PR's code leaves there (a git hook, Pi's config, `go env -w GOFLAGS=-toolexec=…`) goes with it.
+// First it kills what the user's last job left running and removes what it left in the temp dirs all share. Close
+// it when the job is done.
+func Workspace(repo string) (*Sandbox, error) {
 	if err := os.MkdirAll(workDir(), 0o755); err != nil {
-		return "", err
+		return nil, err
 	}
 	if !AsPi {
-		return os.MkdirTemp(workDir(), "review-")
+		dir, err := os.MkdirTemp(workDir(), "review-")
+		if err != nil {
+			return nil, err
+		}
+		return &Sandbox{Dir: dir, home: os.Getenv("HOME")}, nil
 	}
 	uid := uint32(1000)
 	if repo != "" {
 		if legacy(repo) { // a name: a new repo of an old one's name would get its uid and cache
-			return "", fmt.Errorf("repo uids: %s is no repo id", repo)
+			return nil, fmt.Errorf("repo uids: %s is no repo id", repo)
 		}
 		var err error
 		if uid, err = repoUID(repo); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
-	user.uid, user.home, user.tmp = uid, "/nonexistent", ""
+	s := &Sandbox{uid: uid, home: "/nonexistent"}
+	// The user's last job's leftovers would get this job's tokens and checkout, or plant files for its code.
+	if err := s.clear(); err != nil {
+		return nil, fmt.Errorf("cleaning up after uid %d's last job: %w", uid, err)
+	}
 	// Each job: its code may have closed its cache to itself or opened it to the other users. Chmod follows a
 	// symlink, but only root writes CacheDir (Clean): none can stand in for the dir.
-	c := cacheDir()
+	c := s.cacheDir()
 	if err := errors.Join(os.MkdirAll(c, 0o700), os.Lchown(c, int(uid), int(uid)), os.Chmod(c, 0o700)); err != nil {
-		return "", err
+		return nil, err
 	}
 	dir, err := os.MkdirTemp(workDir(), "review-")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	home, tmp := filepath.Join(dir, "home"), filepath.Join(dir, "tmp")
 	// As root, while the dirs are root's: their user gets them, never what a symlink points to.
@@ -142,15 +156,35 @@ func Workspace(repo string) (string, error) {
 		err = errors.Join(err, os.Lchown(d, int(uid), int(uid)))
 	}
 	if err == nil {
-		user.home, user.tmp = home, tmp
+		s.Dir, s.home, s.tmp = dir, home, tmp
 		// As the user: the files are its, and a symlink in the tar can't make root write.
-		_, err = Run(Command(context.Background(), "/", nil, "tar", "-xf", "/opt/node-home.tar", "-C", home))
+		_, err = Run(s.Command(context.Background(), "/", nil, "tar", "-xf", "/opt/node-home.tar", "-C", home))
 	}
 	if err != nil {
 		os.RemoveAll(dir)
-		return "", err
+		return nil, err
 	}
-	return dir, nil
+	return s, nil
+}
+
+// Close ends the job: its user's processes die and its files in the shared temp dirs go, so neither reaches a job of
+// another repo, and Dir is removed.
+func (s *Sandbox) Close() {
+	if err := s.clear(); err != nil {
+		log.Printf("cleaning up after uid %d: %v", s.uid, err)
+	}
+	os.RemoveAll(s.Dir) // as root: past a user's chmod 000
+}
+
+// clear kills the sandbox user's processes and removes its files in the temp dirs all share. Not node's: dry runs
+// keep theirs, node reaches no repo's files.
+func (s *Sandbox) clear() error {
+	if !AsPi || s.uid < firstUID {
+		return nil
+	}
+	same := func(uid int) bool { return uid == int(s.uid) }
+	killLeftovers(same)
+	return cleanTmp(same, tmpDirs...)
 }
 
 // uidMu guards uids.json and /etc/passwd, /etc/group: two new repos' jobs at once must not get the same uid.
@@ -282,14 +316,14 @@ const maxRead = 64 << 20
 // the server's memory. ReadFile, WriteFile and Remove touch the checkout and work dir as the job's user when we're root:
 // PR code controls what is there, and a symlink to a root-only file (the server's /proc/1/environ, the ChatGPT login) must not resolve with
 // root's rights.
-func ReadFile(ctx context.Context, p string) ([]byte, error) {
+func (s *Sandbox) ReadFile(ctx context.Context, p string) ([]byte, error) {
 	if fi, err := os.Lstat(p); err != nil {
 		return nil, err
 	} else if !fi.Mode().IsRegular() || fi.Size() > maxRead {
 		return nil, fmt.Errorf("%s: no regular file of at most %d bytes", p, maxRead)
 	}
 	// p may change after Lstat: head reads it bounded, under ctx
-	b, err := Run(Command(ctx, "/", nil, "head", "-c", strconv.Itoa(maxRead+1), "--", p))
+	b, err := Run(s.Command(ctx, "/", nil, "head", "-c", strconv.Itoa(maxRead+1), "--", p))
 	if err == nil && len(b) > maxRead {
 		return nil, fmt.Errorf("%s: over %d bytes", p, maxRead)
 	}
@@ -297,31 +331,31 @@ func ReadFile(ctx context.Context, p string) ([]byte, error) {
 }
 
 // WriteFile writes b to p, as the job's user when we're root.
-func WriteFile(p string, b []byte) error {
+func (s *Sandbox) WriteFile(p string, b []byte) error {
 	if !AsPi {
 		return os.WriteFile(p, b, 0o644)
 	}
-	c := Command(context.Background(), "/", nil, "sh", "-c", `cat > "$1"`, "sh", p)
+	c := s.Command(context.Background(), "/", nil, "sh", "-c", `cat > "$1"`, "sh", p)
 	c.Stdin = bytes.NewReader(b)
 	_, err := Run(c)
 	return err
 }
 
 // Remove removes p, as the job's user when we're root; a missing p is no error.
-func Remove(p string) error {
+func (s *Sandbox) Remove(p string) error {
 	if !AsPi {
 		if err := os.Remove(p); !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		return nil
 	}
-	_, err := Run(Command(context.Background(), "/", nil, "rm", "-f", "--", p))
+	_, err := Run(s.Command(context.Background(), "/", nil, "rm", "-f", "--", p))
 	return err
 }
 
-// Clean readies CacheDir at the server's start: what isn't a repo's cache goes, i.e. the work dirs a crash left and,
-// as root, the cache all repos shared before each got its own uid (node's: any PR's code could have changed it) and
-// the legacy entries' caches.
+// Clean readies the server's start, before any job: what isn't a repo's cache goes, i.e. the work dirs a crash left
+// and, as root, the cache all repos shared before each got its own uid (node's: any PR's code could have changed it),
+// the legacy entries' caches, and every job user's processes and files in the shared temp dirs.
 func Clean() error {
 	if !AsPi {
 		return os.RemoveAll(workDir())
@@ -332,6 +366,11 @@ func Clean() error {
 	}
 	// CacheDir was node's: root's now, or a repo's user could swap another's cache dir for a symlink.
 	if err := errors.Join(os.MkdirAll(CacheDir, 0o755), os.Lchown(CacheDir, 0, 0), os.Chmod(CacheDir, 0o755)); err != nil {
+		return err
+	}
+	// No job runs yet: every job user's processes and temp files go, also those of a repo with no job in a long while.
+	killLeftovers(jobUser)
+	if err := cleanTmp(jobUser, tmpDirs...); err != nil {
 		return err
 	}
 	m, err := uids(filepath.Join(DataDir, "uids.json"))
@@ -387,15 +426,11 @@ func resolved(p string) string {
 	return p
 }
 
-// CleanTmp drops what the users left in the temp dirs all share, before each job: the next job's code would find it.
-func CleanTmp() error {
-	if !AsPi {
-		return nil
-	}
-	return cleanTmp("/tmp", "/var/tmp", "/dev/shm")
-}
+// tmpDirs are the temp dirs all users share: TMPDIR is the job's own, but code may write to any of them.
+var tmpDirs = []string{"/tmp", "/var/tmp", "/dev/shm"}
 
-func cleanTmp(dirs ...string) error {
+// cleanTmp removes what the users whose uid is of left in dirs: the next job's code would find it.
+func cleanTmp(of func(uid int) bool, dirs ...string) error {
 	for _, dir := range dirs {
 		ds, err := os.ReadDir(dir)
 		if err != nil && !errors.Is(err, os.ErrNotExist) { // what is left there would reach the next job
@@ -403,7 +438,7 @@ func cleanTmp(dirs ...string) error {
 		}
 		for _, d := range ds {
 			p := filepath.Join(dir, d.Name())
-			if fi, err := os.Lstat(p); err != nil || !jobUser(owner(fi)) {
+			if fi, err := os.Lstat(p); err != nil || !of(owner(fi)) {
 				continue
 			}
 			if err := os.RemoveAll(p); err != nil { // as root: past a user's chmod 000, and never through a symlink
@@ -414,14 +449,10 @@ func cleanTmp(dirs ...string) error {
 	return nil
 }
 
-// KillLeftovers kills every process of the repos' users, before and after each job: what PR code left running (a
-// daemon from an install script) would read the next job's environ and checkout, i.e. its tokens, or plant files for
-// it. As each user, kill -9 -1: the kernel signals all of its processes at once, however deep they nest or fast they
-// fork. Dry runs keep theirs: node reaches no repo's files.
-func KillLeftovers() {
-	if !AsPi {
-		return
-	}
+// killLeftovers kills every process of the users whose uid is of: what PR code left running (a daemon from an
+// install script) would read a later job's environ and checkout, i.e. its tokens, or plant files for it. As each user,
+// kill -9 -1: the kernel signals all of its processes at once, however deep they nest or fast they fork.
+func killLeftovers(of func(uid int) bool) {
 	for range 5 { // the pids limit may leave the killer no pid: then one by one, and again
 		left := map[uint32][]int{}
 		ds, _ := os.ReadDir("/proc")
@@ -439,7 +470,7 @@ func KillLeftovers() {
 					zombie = f[1] == "Z" // dead already, init reaps it
 				}
 			}
-			if uid >= firstUID && !zombie {
+			if uid >= firstUID && of(uid) && !zombie { // never root's or the image's users'
 				left[uint32(uid)] = append(left[uint32(uid)], pid)
 			}
 		}

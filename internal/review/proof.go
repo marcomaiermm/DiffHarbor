@@ -16,19 +16,19 @@ import (
 const Ran = "Ran on the base: "
 
 // proofOnBase runs the test proof ("TestX/sub", Story.Proof) against the base versions of the PR's code files, in a
-// worktree of head under dir: test files stay the PR's, the checkout is untouched. A test that still passes there does
+// worktree of head in sb's dir: test files stay the PR's, the checkout is untouched. A test that still passes there does
 // not prove the change: a finding on the test. Minor, not major: the run is exact, but the proof is the model's pick
 // and the change may be covered elsewhere. Go only (go test names); tests, the run of head's tests, says whether
 // proof already fails on head. A test not found once in the changed test files, review.json turning its tests off,
 // or any error, skips it.
-func proofOnBase(ctx context.Context, repo, dir, proof string, tests map[string]string, cfg Settings) []Comment {
+func proofOnBase(ctx context.Context, sb *proc.Sandbox, repo, proof string, tests map[string]string, cfg Settings) []Comment {
 	if proof == "" || tests[proof] == "fail" {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	git := func(at string, args ...string) ([]byte, error) {
-		return proc.Run(proc.Command(ctx, at, nil, "git", args...))
+		return proc.Run(sb.Command(ctx, at, nil, "git", args...))
 	}
 	mb, err := git(repo, "merge-base", "refs/base", "HEAD")
 	if err != nil {
@@ -65,7 +65,7 @@ func proofOnBase(ctx context.Context, repo, dir, proof string, tests map[string]
 	if found != 1 || !cfg.RunsTests(testFile) && !cfg.LeftToCI(testFile) {
 		return nil
 	}
-	wt := filepath.Join(dir, "proof")
+	wt := filepath.Join(sb.Dir, "proof")
 	if _, err := git(repo, "worktree", "add", "-q", "--detach", wt, "HEAD"); err != nil {
 		log.Println("proof:", err)
 		return nil
@@ -90,7 +90,7 @@ func proofOnBase(ctx context.Context, repo, dir, proof string, tests map[string]
 		}
 	}
 	out := proc.Capped{N: 1 << 20}
-	c := proc.Command(ctx, filepath.Join(wt, filepath.Dir(testFile)), append(proc.ToolEnv(), "NO_COLOR=1"),
+	c := sb.Command(ctx, filepath.Join(wt, filepath.Dir(testFile)), append(sb.ToolEnv(), "NO_COLOR=1"),
 		"go", "test", "-v", "-short", "-count=1", "-timeout=90s", "-run", run, ".")
 	c.Stdout, c.Stderr = &out, &out
 	_ = c.Run() // a build or test failure is the proof holding

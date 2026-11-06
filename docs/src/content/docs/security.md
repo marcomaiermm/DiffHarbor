@@ -20,8 +20,8 @@ Within that:
 ## Each job
 
 - Root reads and writes in the checkout only as the repo's user. A symlink in the PR can't reach root's files.
-- All processes of the repos' users are killed before and after each job.
-- Each job gets a fresh home (git config, Pi's config and extensions) and temp dir. The users' files in `/tmp`, `/var/tmp` and `/dev/shm` go before each job.
+- All processes of the repo's user are killed before and after each job, those of all repos' users when the server starts.
+- Each job gets a fresh home (git config, Pi's config and extensions) and temp dir. The repo's user's files in `/tmp`, `/var/tmp` and `/dev/shm` go before and after each job, all repos' users' when the server starts.
 - Check output is capped.
 - The checks install dependencies without lifecycle scripts, so a malicious dependency's postinstall doesn't run. `install_scripts` in `review.json` turns them back on per repo.
 - No new privileges: a setuid binary can't make a repo's user root. Root keeps only the capabilities it needs.

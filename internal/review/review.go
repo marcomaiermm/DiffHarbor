@@ -196,15 +196,15 @@ type Routine struct {
 // Agent runs model passes in a checkout: agent.Pi in production, a fake in tests.
 type Agent interface {
 	// Run runs a pass with tools: prompt is the context, task the instruction.
-	Run(ctx context.Context, dir, name, system, prompt, task, model string) (string, error)
+	Run(ctx context.Context, sb *proc.Sandbox, name, system, prompt, task, model string) (string, error)
 	// Continue resumes the pass called name without tools.
-	Continue(ctx context.Context, dir, name, system, task, model string) (string, error)
+	Continue(ctx context.Context, sb *proc.Sandbox, name, system, task, model string) (string, error)
 }
 
 // Input is what Analyze reviews and with what.
 type Input struct {
 	Agent       Agent
-	Dir         string // temp dir, checkout in Dir/repo
+	Sandbox     *proc.Sandbox // the job's: checkout in Sandbox.Dir/repo
 	Title, Body string
 	Commits     string            // Messages(): what the author says each commit does
 	Ticket      string            // ticket.Lookup(): the linked issue, "" = none
@@ -221,7 +221,7 @@ type Input struct {
 
 // Analyze is the pipeline: checks + history as hints, then per part a review pass and a verification pass on its findings.
 func Analyze(ctx context.Context, in Input) (Result, string, error) {
-	repo := filepath.Join(in.Dir, "repo")
+	repo := filepath.Join(in.Sandbox.Dir, "repo")
 	whole := strings.Join(in.Parts, "")
 	files := diff.Paths(whole)
 	lvl := Level(whole, files)
@@ -236,37 +236,37 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	}
 	m := strings.Join(models, " + ") // the footer shows the models and level that actually ran
 	// For checks that report on the diff's lines only.
-	patch := filepath.Join(in.Dir, "pr.diff")
-	if err := proc.WriteFile(patch, []byte(whole)); err != nil {
+	patch := filepath.Join(in.Sandbox.Dir, "pr.diff")
+	if err := in.Sandbox.WriteFile(patch, []byte(whole)); err != nil {
 		return Result{}, "", err
 	}
-	in.Settings.CITests = checks.CITests(ctx, repo)
+	in.Settings.CITests = checks.CITests(ctx, in.Sandbox, repo)
 	ci := "" // the footer says why tests didn't run
 	if slices.ContainsFunc(files, in.Settings.LeftToCI) {
 		ci = in.Settings.CITests
 	}
 	var hints strings.Builder
-	found, tests := checks.Run(ctx, repo, in.Checks, patch, files, in.Settings.RunsTests, in.Settings.InstallScripts, in.Registries)
+	found, tests := checks.Run(ctx, in.Sandbox, repo, in.Checks, patch, files, in.Settings.RunsTests, in.Settings.InstallScripts, in.Registries)
 	fmt.Fprintf(&hints, "## Check results (lint, types, tests, secrets, vulnerabilities; may include issues the change didn't cause)\n\n```\n%s\n```\n\n", found)
 	gctx, cancel := context.WithTimeout(ctx, time.Minute)
-	gitLog, err := proc.Run(proc.Command(gctx, repo, nil, "git", "log", "-n", historyDepth, "--format=%x00", "--name-only", "--no-renames"))
+	gitLog, err := proc.Run(in.Sandbox.Command(gctx, repo, nil, "git", "log", "-n", historyDepth, "--format=%x00", "--name-only", "--no-renames"))
 	cancel()
 	if cc := coChanged(string(gitLog), files); err == nil && cc != "" {
 		fmt.Fprintf(&hints, "## Often changed together (git history)\n\n%s\n", cc)
 	}
-	if big := grownPast(ctx, repo, whole, 1000); len(big) > 0 {
+	if big := grownPast(ctx, in.Sandbox, repo, whole, 1000); len(big) > 0 {
 		fmt.Fprintf(&hints, "## Files this change pushes past 1000 lines\n\n%s\n\n", strings.Join(big, "\n"))
 	}
-	if st := stack(ctx, repo, files); st != "" {
+	if st := stack(ctx, in.Sandbox, repo, files); st != "" {
 		fmt.Fprintf(&hints, "## Stack (detected)\n\n%s\n\n", st)
 	}
-	hints.WriteString(depHints(ctx, repo, in.Dir, whole, in.Registries))
+	hints.WriteString(depHints(ctx, in.Sandbox, repo, whole, in.Registries))
 	// a fresh index per review, ~1 s for 100 files; codegraph reads the root's go.mod only, so a Go module below
 	// it the PR changes gets one of its own, for the report's exact uses (the root's stays the model's)
 	gctx, cancel = context.WithTimeout(ctx, 2*time.Minute)
-	_, err = proc.Run(proc.Command(gctx, repo, proc.ToolEnv(), "codegraph", "init", "-y", "."))
+	_, err = proc.Run(in.Sandbox.Command(gctx, repo, in.Sandbox.ToolEnv(), "codegraph", "init", "-y", "."))
 	for _, m := range goModules(repo, files) {
-		if _, merr := proc.Run(proc.Command(gctx, repo, proc.ToolEnv(), "codegraph", "init", "-y", m)); merr != nil {
+		if _, merr := proc.Run(in.Sandbox.Command(gctx, repo, in.Sandbox.ToolEnv(), "codegraph", "init", "-y", m)); merr != nil {
 			log.Println("codegraph", m+":", merr)
 		}
 	}
@@ -300,7 +300,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 		p := runPart(ctx, in, "", prompt, in.Parts[0], fs, vm, sem)
 		r, tag, err := merge([]part{p}, m, vm, ci)
 		r.Tests = tests
-		r.Comments = append(r.Comments, proofOnBase(ctx, repo, in.Dir, r.Story.Proof, tests.Ran, in.Settings)...)
+		r.Comments = append(r.Comments, proofOnBase(ctx, in.Sandbox, repo, r.Story.Proof, tests.Ran, in.Settings)...)
 		return r, tag, err
 	}
 	// One pass per part: each reads its files closely and its context stays small.
@@ -329,7 +329,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	wg.Wait()
 	r, tag, err := merge(ps, m, vm, ci)
 	r.Tests = tests
-	r.Comments = append(r.Comments, proofOnBase(ctx, repo, in.Dir, r.Story.Proof, tests.Ran, in.Settings)...)
+	r.Comments = append(r.Comments, proofOnBase(ctx, in.Sandbox, repo, r.Story.Proof, tests.Ran, in.Settings)...)
 	return r, tag, err
 }
 
@@ -428,11 +428,11 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 		task += "## Earlier findings, still open (posted already: no verdicts for these)\n\n" + findings(open, ids)
 	}
 	sem <- struct{}{}
-	out, err := in.Agent.Run(ctx, in.Dir, "verify"+name, verifySystem+in.Trusted, task+block,
+	out, err := in.Agent.Run(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted, task+block,
 		"Verify these findings. End with the JSON verdicts.", vm)
 	kept, dropped, fixed, ok := verdicts(r.Comments, r.Fixed, out, owns)
 	if err == nil && !ok {
-		out, err = in.Agent.Continue(ctx, in.Dir, "verify"+name, verifySystem+in.Trusted, verifyRepair, vm)
+		out, err = in.Agent.Continue(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted, verifyRepair, vm)
 		if err == nil {
 			kept, dropped, fixed, ok = verdicts(r.Comments, r.Fixed, out, owns)
 		}
@@ -467,7 +467,7 @@ func repeats(ctx context.Context, in Input, name, vm string, sem chan struct{}, 
 		earlier[k], ids[k] = in.Prior[i], len(kept)+k // numbered past the kept ones
 	}
 	sem <- struct{}{}
-	out, err := in.Agent.Continue(ctx, in.Dir, "verify"+name, verifySystem+in.Trusted,
+	out, err := in.Agent.Continue(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted,
 		fmt.Sprintf(repeatsTask, findings(earlier, ids), findings(kept, nil)), vm)
 	<-sem
 	var v struct {
@@ -595,9 +595,9 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string, again boo
 	var out string
 	var err error
 	if again {
-		out, err = in.Agent.Continue(ctx, in.Dir, name, system, againTask, m)
+		out, err = in.Agent.Continue(ctx, in.Sandbox, name, system, againTask, m)
 	} else {
-		out, err = in.Agent.Run(ctx, in.Dir, name, system, prompt,
+		out, err = in.Agent.Run(ctx, in.Sandbox, name, system, prompt,
 			"Review this pull request. End with the JSON object and nothing else.", m)
 	}
 	if err != nil {
@@ -605,7 +605,7 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string, again boo
 	}
 	r, ok := parse(out)
 	if !ok { // e.g. tool calls written as text: posting that helps nobody
-		if out, err = in.Agent.Continue(ctx, in.Dir, name, system, reviewRepair, m); err != nil {
+		if out, err = in.Agent.Continue(ctx, in.Sandbox, name, system, reviewRepair, m); err != nil {
 			return r, fmt.Errorf("review repair: %w", err)
 		}
 		r, ok = parse(out)
@@ -785,7 +785,7 @@ func coChanged(gitLog string, changed []string) string {
 }
 
 // grownPast lists changed files the diff pushes from at most limit lines to more.
-func grownPast(ctx context.Context, repo, diff string, limit int) []string {
+func grownPast(ctx context.Context, sb *proc.Sandbox, repo, diff string, limit int) []string {
 	delta := map[string]int{}
 	file, hunk := "", false
 	for _, l := range strings.Split(diff, "\n") {
@@ -804,7 +804,7 @@ func grownPast(ctx context.Context, repo, diff string, limit int) []string {
 	}
 	var out []string
 	for f, d := range delta {
-		b, err := proc.ReadFile(ctx, filepath.Join(repo, f))
+		b, err := sb.ReadFile(ctx, filepath.Join(repo, f))
 		if !filepath.IsLocal(f) || err != nil {
 			continue
 		}
@@ -828,7 +828,7 @@ func goModules(repo string, files []string) []string {
 }
 
 // stack names the ecosystems in the checkout, so the model knows which tools and conventions apply.
-func stack(ctx context.Context, repo string, files []string) string {
+func stack(ctx context.Context, sb *proc.Sandbox, repo string, files []string) string {
 	has := func(name string) bool {
 		for _, g := range []string{name, "*/" + name, "*/*/" + name} {
 			if m, _ := filepath.Glob(filepath.Join(repo, g)); len(m) > 0 {
@@ -842,10 +842,10 @@ func stack(ctx context.Context, repo string, files []string) string {
 		s = append(s, "npm (JavaScript/TypeScript)")
 	}
 	// The root package.json and those of the packages the change touches.
-	pkg, _ := proc.ReadFile(ctx, filepath.Join(repo, "package.json"))
+	pkg, _ := sb.ReadFile(ctx, filepath.Join(repo, "package.json"))
 	for _, f := range files {
 		if p := checks.Up(repo, filepath.Dir(f), "package.json"); p != "" && p != "package.json" {
-			b, _ := proc.ReadFile(ctx, filepath.Join(repo, p))
+			b, _ := sb.ReadFile(ctx, filepath.Join(repo, p))
 			pkg = append(pkg, b...)
 		}
 	}

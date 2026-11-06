@@ -42,11 +42,11 @@ esac
 	dir := t.TempDir()
 	os.Mkdir(filepath.Join(dir, "repo"), 0o755)
 	for range 2 {
-		if out, err := runPi(context.Background(), dir, "t", "sys", "openai/sol:low", false, "hi"); err != nil || out != "answer\n" {
+		if out, err := runPi(context.Background(), &proc.Sandbox{Dir: dir}, "t", "sys", "openai/sol:low", false, "hi"); err != nil || out != "answer\n" {
 			t.Fatal(out, err)
 		}
 	}
-	if out, err := runPi(context.Background(), dir, "verify", "sys", "openai/luna:high", false, "hi"); err != nil || out != "verified\n" {
+	if out, err := runPi(context.Background(), &proc.Sandbox{Dir: dir}, "verify", "sys", "openai/luna:high", false, "hi"); err != nil || out != "verified\n" {
 		t.Fatal(out, err)
 	}
 	calls, _ := os.ReadFile(filepath.Join(bin, "calls"))
@@ -113,14 +113,14 @@ func TestProxies(t *testing.T) {
 	t.Setenv("ANTHROPIC_BASE_URL", "https://llm.example.com/anthropic")
 	t.Setenv("OPENAI_BASE_URL", "")
 	t.Setenv("AZURE_BASE_URL", "https://ignored") // Azure's endpoint is AZURE_OPENAI_BASE_URL, passed per pass
-	if err := proxies(f); err != nil {
+	if err := proxies(&proc.Sandbox{}, f); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(f); string(b) != `{"providers":{"anthropic":{"baseUrl":"https://llm.example.com/anthropic","compat":{"supportsMidConvoEffort":false,"supportsMidConvoToolChanges":false}}}}` {
 		t.Fatalf("models.json: %s", b)
 	}
 	t.Setenv("ANTHROPIC_BASE_URL", "")
-	if err := proxies(f); err != nil || proc.Exists(f) {
+	if err := proxies(&proc.Sandbox{}, f); err != nil || proc.Exists(f) {
 		t.Fatalf("no proxy left, models.json stays: %v", err)
 	}
 }
@@ -172,7 +172,7 @@ func TestVaulted(t *testing.T) {
 	}
 	f := filepath.Join(t.TempDir(), "models.json")
 	t.Setenv("ANTHROPIC_BASE_URL", "https://llm.example.com/anthropic") // the vault's upstream now
-	if err := proxies(f); err != nil {
+	if err := proxies(&proc.Sandbox{}, f); err != nil {
 		t.Fatal(err)
 	}
 	want := fmt.Sprintf(`{"providers":{"anthropic":{"baseUrl":"%[1]s/anthropic","compat":{"supportsMidConvoEffort":false,"supportsMidConvoToolChanges":false}},"azure":{"baseUrl":"%[1]s/azure"}}}`, vault.URL())

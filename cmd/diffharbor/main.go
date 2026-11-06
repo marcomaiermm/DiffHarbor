@@ -34,22 +34,22 @@ import (
 var version = "dev"
 
 func dry() error {
-	dir, err := agent.Workspace("")
+	sb, err := agent.Workspace("")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
+	defer sb.Close()
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	r, stats, err := review.Tree(context.Background(), cwd, dir, "", nil, false)
+	r, stats, err := review.Tree(context.Background(), sb, cwd, "", nil, false)
 	if err != nil {
 		return err
 	}
 	b, _ := json.MarshalIndent(r, "", "  ")
 	fmt.Println(string(b), "\n"+stats)
-	fmt.Fprintln(os.Stderr, agent.Usage(dir))
+	fmt.Fprintln(os.Stderr, agent.Usage(sb.Dir))
 	return nil
 }
 

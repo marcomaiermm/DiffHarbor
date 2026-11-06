@@ -33,14 +33,14 @@ type bump struct{ dir, name, from, to string }
 // there is one.
 // ponytail: from is the old spec's first version, not the old lockfile's, and lockfile-only or catalog bumps aren't
 // seen; read the lockfiles when that misses real bumps.
-func bumps(ctx context.Context, repo, d string) []bump {
+func bumps(ctx context.Context, sb *proc.Sandbox, repo, d string) []bump {
 	var bs []bump
 	diff.EachFile(d, func(path, f string) {
 		if filepath.Base(path) != "package.json" {
 			return
 		}
 		var pkg struct{ Dependencies, DevDependencies, PeerDependencies, OptionalDependencies map[string]string }
-		b, _ := proc.ReadFile(ctx, filepath.Join(repo, path))
+		b, _ := sb.ReadFile(ctx, filepath.Join(repo, path))
 		if json.Unmarshal(b, &pkg) != nil {
 			return
 		}
@@ -59,7 +59,7 @@ func bumps(ctx context.Context, repo, d string) []bump {
 			to := cur[n]
 			if p := checks.Up(repo, dir, filepath.Join("node_modules", n, "package.json")); p != "" {
 				var inst struct{ Version string }
-				if b, _ := proc.ReadFile(ctx, filepath.Join(repo, p)); json.Unmarshal(b, &inst) == nil && depSpec.MatchString(inst.Version) {
+				if b, _ := sb.ReadFile(ctx, filepath.Join(repo, p)); json.Unmarshal(b, &inst) == nil && depSpec.MatchString(inst.Version) {
 					to = inst.Version
 				}
 			}
@@ -116,9 +116,9 @@ func apiChanges(d string) (removed, added []string, changelog string) {
 }
 
 // depHints is the prompt's section on the npm packages the change bumps: from the registry, what each version
-// change removes and adds to the package's exports and its changelog, and the whole type diff in a file in dir to grep.
-func depHints(ctx context.Context, repo, dir, d string, regs []checks.Registry) string {
-	bs := bumps(ctx, repo, d)
+// change removes and adds to the package's exports and its changelog, and the whole type diff in a file in sb's dir to grep.
+func depHints(ctx context.Context, sb *proc.Sandbox, repo, d string, regs []checks.Registry) string {
+	bs := bumps(ctx, sb, repo, d)
 	if len(bs) == 0 {
 		return ""
 	}
@@ -130,7 +130,7 @@ func depHints(ctx context.Context, repo, dir, d string, regs []checks.Registry) 
 	}
 	var s strings.Builder
 	for _, b := range bs[:min(len(bs), 5)] {
-		out, err := proc.Run(proc.Command(ctx, filepath.Join(repo, b.dir), append(proc.ToolEnv(), env...), "npm", "diff",
+		out, err := proc.Run(sb.Command(ctx, filepath.Join(repo, b.dir), append(sb.ToolEnv(), env...), "npm", "diff",
 			"--diff="+b.name+"@"+b.from, "--diff="+b.name+"@"+b.to, "--", "**/*.d.ts", "**/*.d.mts", "**/*.d.cts", "**/CHANGELOG.md"))
 		if err != nil {
 			log.Println("npm diff", b.name+":", err)
@@ -149,7 +149,7 @@ func depHints(ctx context.Context, repo, dir, d string, regs []checks.Registry) 
 		}
 		if len(out) == 0 {
 			s.WriteString("No changes to its type definitions or changelog.\n")
-		} else if f := filepath.Join(dir, "deps-"+strings.ReplaceAll(b.name, "/", "+")+".diff"); proc.WriteFile(f, out) == nil {
+		} else if f := filepath.Join(sb.Dir, "deps-"+strings.ReplaceAll(b.name, "/", "+")+".diff"); sb.WriteFile(f, out) == nil {
 			fmt.Fprintf(&s, "Type definitions diff: `%s` (grep it for the symbols this change and its callers use)\n", f)
 		}
 		s.WriteString("\n")

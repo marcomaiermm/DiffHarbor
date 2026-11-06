@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"diffharbor/internal/agent"
+	"diffharbor/internal/proc"
 	"diffharbor/internal/text"
 	"fmt"
 	"log"
@@ -21,7 +22,7 @@ const maxExplain = 24000
 // Explain asks model, without tools and in one call, what each declaration (its file, declaring line and first
 // lines) is for in the PR titled title: the report's rows that neither a doc comment nor a commit explains. A small
 // model does: it only reads what it's given. "" for each one on failure.
-func Explain(ctx context.Context, a Agent, dir, model, title string, decls []string) []string {
+func Explain(ctx context.Context, a Agent, sb *proc.Sandbox, model, title string, decls []string) []string {
 	out := make([]string, len(decls))
 	if len(decls) == 0 {
 		return out
@@ -36,7 +37,7 @@ func Explain(ctx context.Context, a Agent, dir, model, title string, decls []str
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	reply, err := a.Continue(ctx, dir, "explain", explainSystem, b.String(), agent.PassModel(model, "low"))
+	reply, err := a.Continue(ctx, sb, "explain", explainSystem, b.String(), agent.PassModel(model, "low"))
 	var got map[string]string
 	if err != nil {
 		log.Println("explain:", err)

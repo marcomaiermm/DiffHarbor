@@ -31,16 +31,16 @@ git add .; git commit -q -m pr`)
 	if out, err := c.CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	weak := proofOnBase(context.Background(), repo, t.TempDir(), "TestWeak/sub", nil, Settings{})
+	weak := proofOnBase(context.Background(), &proc.Sandbox{Dir: t.TempDir()}, repo, "TestWeak/sub", nil, Settings{})
 	if len(weak) != 1 || weak[0].Path != "f_test.go" || weak[0].Line != 5 || !strings.HasPrefix(weak[0].Evidence, Ran) {
 		t.Fatalf("passes on base: %+v", weak)
 	}
 	for _, name := range []string{"TestStrong", "TestNone"} { // fails, not found
-		if got := proofOnBase(context.Background(), repo, t.TempDir(), name, nil, Settings{}); got != nil {
+		if got := proofOnBase(context.Background(), &proc.Sandbox{Dir: t.TempDir()}, repo, name, nil, Settings{}); got != nil {
 			t.Fatalf("%s: %+v", name, got)
 		}
 	}
-	if got := proofOnBase(context.Background(), repo, t.TempDir(), "TestWeak/sub", map[string]string{"TestWeak/sub": "fail"}, Settings{}); got != nil {
+	if got := proofOnBase(context.Background(), &proc.Sandbox{Dir: t.TempDir()}, repo, "TestWeak/sub", map[string]string{"TestWeak/sub": "fail"}, Settings{}); got != nil {
 		t.Fatalf("fails on head: %+v", got)
 	}
 	for _, j := range []string{`{"tests":false}`, `{"min_severity":"major"}`} { // review.json says no
@@ -48,7 +48,7 @@ git add .; git commit -q -m pr`)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := proofOnBase(context.Background(), repo, t.TempDir(), "TestWeak/sub", nil, cfg); got != nil {
+		if got := proofOnBase(context.Background(), &proc.Sandbox{Dir: t.TempDir()}, repo, "TestWeak/sub", nil, cfg); got != nil {
 			t.Fatalf("%s: %+v", j, got)
 		}
 	}

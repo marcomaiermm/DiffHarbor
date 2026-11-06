@@ -29,15 +29,15 @@ func TestCapped(t *testing.T) {
 }
 
 func TestFiles(t *testing.T) {
-	f := filepath.Join(t.TempDir(), "f")
-	if err := WriteFile(f, []byte("x")); err != nil {
+	s, f := &Sandbox{}, filepath.Join(t.TempDir(), "f")
+	if err := s.WriteFile(f, []byte("x")); err != nil {
 		t.Fatal(err)
 	}
-	if b, err := ReadFile(t.Context(), f); err != nil || string(b) != "x" {
+	if b, err := s.ReadFile(t.Context(), f); err != nil || string(b) != "x" {
 		t.Fatal(string(b), err)
 	}
 	for range 2 { // the second time it is gone already
-		if Remove(f) != nil {
+		if s.Remove(f) != nil {
 			t.Fatal("remove")
 		}
 	}
@@ -57,7 +57,7 @@ func TestReadFileEndless(t *testing.T) {
 	defer cancel()
 	for _, f := range []string{zero, fifo} {
 		start := time.Now()
-		if b, err := ReadFile(ctx, f); err == nil || len(b) > 0 || time.Since(start) > time.Second {
+		if b, err := (&Sandbox{}).ReadFile(ctx, f); err == nil || len(b) > 0 || time.Since(start) > time.Second {
 			t.Fatalf("%s: %d bytes, %v, in %s", f, len(b), err, time.Since(start))
 		}
 	}
@@ -157,7 +157,7 @@ func TestLegacyUIDs(t *testing.T) {
 // A child gets PATH, HOME and what is passed, never the server's secrets.
 func TestCommandEnv(t *testing.T) {
 	t.Setenv("REPORT_S3_SECRET_KEY", "s3cret")
-	for _, e := range Command(t.Context(), "", []string{"X=1"}, "true").Env {
+	for _, e := range (&Sandbox{uid: firstUID}).Command(t.Context(), "", []string{"X=1"}, "true").Env {
 		if strings.Contains(e, "s3cret") {
 			t.Fatal(e)
 		}
@@ -184,7 +184,53 @@ func TestCleanTmpErrors(t *testing.T) {
 	if err := os.WriteFile(f, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if cleanTmp(filepath.Join(f, "..", "missing")) != nil || cleanTmp(f) == nil {
+	all := func(int) bool { return true }
+	if cleanTmp(all, filepath.Join(f, "..", "missing")) != nil || cleanTmp(all, f) == nil {
 		t.Error("a missing dir is clean, an unreadable one isn't")
 	}
+}
+
+// A job's cleanup removes only what its own user left: another repo's job may be running beside it.
+func TestCleanTmpScoped(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "f")
+	if err := os.WriteFile(f, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	me := os.Getuid()
+	if cleanTmp(func(uid int) bool { return uid == me+1 }, dir) != nil || !Exists(f) {
+		t.Fatal("removed another user's file")
+	}
+	if cleanTmp(func(uid int) bool { return uid == me }, dir) != nil || Exists(f) {
+		t.Fatal("kept its own file")
+	}
+}
+
+// Without root a sandbox is a work dir and this process' identity; Close removes it.
+func TestWorkspaceLocal(t *testing.T) {
+	defer func(pi bool, c string) { AsPi, CacheDir = pi, c }(AsPi, CacheDir)
+	AsPi, CacheDir = false, t.TempDir()
+	s, err := Workspace("")
+	if err != nil || !Exists(s.Dir) || filepath.Dir(s.Dir) != workDir() {
+		t.Fatal(s, err)
+	}
+	if out, err := Run(s.Command(t.Context(), s.Dir, nil, "pwd")); err != nil || strings.TrimSpace(string(out)) != s.Dir {
+		t.Fatalf("%q %v", out, err)
+	}
+	s.Close()
+	if Exists(s.Dir) {
+		t.Fatal("work dir left")
+	}
+}
+
+// As root a Sandbox not from Workspace runs nothing: its zero uid is root's.
+func TestCommandNoUser(t *testing.T) {
+	defer func(pi bool) { AsPi = pi }(AsPi)
+	AsPi = true
+	defer func() {
+		if recover() == nil {
+			t.Fatal("no panic")
+		}
+	}()
+	(&Sandbox{}).Command(t.Context(), "/", nil, "true")
 }

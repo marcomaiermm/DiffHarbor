@@ -54,7 +54,7 @@ func TestRegistryLockfile(t *testing.T) {
 	lock := filepath.Join(t.TempDir(), "package-lock.json")
 	orig := `"resolved": "https://registry.npmjs.org/a/-/a-1.0.0.tgz", "resolved": "https://art.corp/npm/internal/@corp/b/-/b-1.0.0.tgz"`
 	os.WriteFile(lock, []byte(orig), 0o644)
-	restore := pointAt(context.Background(), lock, urls)
+	restore := pointAt(context.Background(), &proc.Sandbox{}, lock, urls)
 	if b, _ := os.ReadFile(lock); string(b) != `"resolved": "https://art.corp/npm/a/-/a-1.0.0.tgz", "resolved": "http://vault/npm/internal-loan/@corp/b/-/b-1.0.0.tgz"` {
 		t.Fatalf("rewritten: %s", b)
 	}
@@ -67,7 +67,7 @@ func TestRegistryLockfile(t *testing.T) {
 	// Not a regular file: never read (a FIFO would block, /dev/zero never ends).
 	link := filepath.Join(t.TempDir(), "package-lock.json")
 	os.Symlink("/dev/zero", link)
-	if err := pointAt(context.Background(), link, urls)(); err != nil {
+	if err := pointAt(context.Background(), &proc.Sandbox{}, link, urls)(); err != nil {
 		t.Fatal(err)
 	}
 }

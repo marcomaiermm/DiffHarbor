@@ -311,17 +311,19 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	if err != nil {
 		return err
 	}
-	dir, err := agent.Workspace(id)
-	if err != nil {
+	sb, err := agent.Workspace(id)
+	if err != nil { // e.g. cleaning up after the repo's last job failed; a chat isn't kept to retry
+		_ = p.Reply("⚠️ Couldn't start: preparing the workspace failed. Ask again in a while.\n\n" + forge.Mark)
 		return err
 	}
-	defer os.RemoveAll(dir)
+	defer sb.Close()
+	dir := sb.Dir
 	read, err := p.ReadToken()
 	if err != nil {
 		return err
 	}
 	pr := e.PullRequest
-	raw, err := review.Checkout(ctx, filepath.Join(dir, "repo"), e.Repository.CloneURL, pr.Head.SHA, "refs/heads/"+pr.Base.Ref, read)
+	raw, err := review.Checkout(ctx, sb, filepath.Join(dir, "repo"), e.Repository.CloneURL, pr.Head.SHA, "refs/heads/"+pr.Base.Ref, read)
 	if err != nil {
 		return err
 	}
@@ -335,7 +337,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	system := chatSystem + review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings))
 	rm, _ := cfg.Models()
 	m := agent.PassModel(rm, "medium")
-	out, err := agent.Pi{}.Run(ctx, dir, "chat", system,
+	out, err := agent.Pi{}.Run(ctx, sb, "chat", system,
 		fmt.Sprintf("# %s\n\n%s\n\n%s## Conversation\n\n%s", forge.Redact(pr.Title), text.Truncate(forge.Redact(pr.Body), 2000), about.String(), convo.String()),
 		"Reply to the last message. End with the JSON object.", m)
 	if err != nil {
@@ -343,7 +345,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	}
 	a, ok := parseAnswer(out)
 	if !ok {
-		out, err = agent.Pi{}.Continue(ctx, dir, "chat", system, chatRepair, m)
+		out, err = agent.Pi{}.Continue(ctx, sb, "chat", system, chatRepair, m)
 		if err != nil {
 			return err
 		}

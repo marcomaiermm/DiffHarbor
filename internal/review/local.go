@@ -15,13 +15,13 @@ import (
 	"time"
 )
 
-// Tree reviews `git diff HEAD` of the checkout cwd like a PR titled title, with dir as the work dir
+// Tree reviews `git diff HEAD` of the checkout cwd like a PR titled title, in sb
 // and closed as the threads resolved before; large: in parts, as if the walkthrough's box was ticked.
-func Tree(ctx context.Context, cwd, dir, title string, closed []Comment, large bool) (Result, string, error) {
-	if err := os.Symlink(cwd, filepath.Join(dir, "repo")); err != nil {
+func Tree(ctx context.Context, sb *proc.Sandbox, cwd, title string, closed []Comment, large bool) (Result, string, error) {
+	if err := os.Symlink(cwd, filepath.Join(sb.Dir, "repo")); err != nil {
 		return Result{}, "", err
 	}
-	out, err := proc.Run(proc.Command(ctx, cwd, nil, "git", "diff", "HEAD"))
+	out, err := proc.Run(sb.Command(ctx, cwd, nil, "git", "diff", "HEAD"))
 	if err != nil {
 		return Result{}, "", err
 	}
@@ -39,10 +39,10 @@ func Tree(ctx context.Context, cwd, dir, title string, closed []Comment, large b
 	}
 	for _, d := range cfg.SkillPaths() {
 		if rd := filepath.Join(cwd, d); proc.Exists(rd) { // -L: symlinked dev skills become real copies, as from the API
-			if err := os.MkdirAll(filepath.Join(dir, "skills"), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Join(sb.Dir, "skills"), 0o755); err != nil {
 				return Result{}, "", err
 			}
-			if _, err := proc.Run(proc.Command(ctx, cwd, nil, "cp", "-rL", rd, filepath.Join(dir, "skills", "repo"))); err != nil {
+			if _, err := proc.Run(sb.Command(ctx, cwd, nil, "cp", "-rL", rd, filepath.Join(sb.Dir, "skills", "repo"))); err != nil {
 				return Result{}, "", err
 			}
 			break
@@ -55,7 +55,7 @@ func Tree(ctx context.Context, cwd, dir, title string, closed []Comment, large b
 		}
 	}
 	parts, _ := diff.Filter(string(out), cwd, nil, cfg.Ignored, cfg.Parts(large))
-	return Analyze(ctx, Input{Agent: agent.Pi{}, Dir: dir, Title: title, Parts: parts, Trusted: TrustedContext(rules, ""), Checks: scripts, Closed: closed, Settings: cfg})
+	return Analyze(ctx, Input{Agent: agent.Pi{}, Sandbox: sb, Title: title, Parts: parts, Trusted: TrustedContext(rules, ""), Checks: scripts, Closed: closed, Settings: cfg})
 }
 
 // Checkout fetches the PR head and base into repo with history but without old file contents (blob:none) for
@@ -63,7 +63,7 @@ func Tree(ctx context.Context, cwd, dir, title string, closed []Comment, large b
 // merge-base(base, head)..head, base a ref or commit of the remote. token reads the repo. As root git runs as the repo's user,
 // like the PR's code: it fetches through the vault, whose remote works until ctx is done (blob:none fetches the
 // blobs later commands need) and never holds token. Else token goes in the env (argv is world-readable).
-func Checkout(ctx context.Context, repo, cloneURL, head, base, token string) (string, error) {
+func Checkout(ctx context.Context, sb *proc.Sandbox, repo, cloneURL, head, base, token string) (string, error) {
 	remote, auth := cloneURL, []string{
 		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader",
 		"GIT_CONFIG_VALUE_0=Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token)),
@@ -78,13 +78,13 @@ func Checkout(ctx context.Context, repo, cloneURL, head, base, token string) (st
 	git := func(args ...string) (string, error) {
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		defer cancel()
-		out, err := proc.Run(proc.Command(ctx, filepath.Dir(repo), auth, "git", append([]string{"-C", repo}, args...)...))
+		out, err := proc.Run(sb.Command(ctx, filepath.Dir(repo), auth, "git", append([]string{"-C", repo}, args...)...))
 		if err != nil {
 			return "", fmt.Errorf("git %s: %w", args[0], err)
 		}
 		return string(out), nil
 	}
-	if _, err := proc.Run(proc.Command(ctx, filepath.Dir(repo), nil, "git", "init", "-q", repo)); err != nil { // as the repo's user, when we're root
+	if _, err := proc.Run(sb.Command(ctx, filepath.Dir(repo), nil, "git", "init", "-q", repo)); err != nil { // as the repo's user, when we're root
 		return "", err
 	}
 	for _, args := range [][]string{
@@ -122,10 +122,10 @@ const maxCommits = 200
 
 // Commits lists the PR's commits oldest first, from a Checkout: what head has and the base hasn't. Merges of the
 // base into the branch say nothing about the change and stay out. nil when git fails: the report goes without.
-func Commits(ctx context.Context, repo string) []Commit {
+func Commits(ctx context.Context, sb *proc.Sandbox, repo string) []Commit {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	out, err := proc.Run(proc.Command(ctx, repo, nil, "git", "log", "--reverse", "--no-merges", "--no-renames",
+	out, err := proc.Run(sb.Command(ctx, repo, nil, "git", "log", "--reverse", "--no-merges", "--no-renames",
 		"--format=%x00%H%x09%an%x09%s", "-p", "-U0", "refs/base..HEAD"))
 	if err != nil {
 		return nil
@@ -134,10 +134,10 @@ func Commits(ctx context.Context, repo string) []Commit {
 }
 
 // Messages is the PR's commit messages oldest first, from a Checkout, merges aside. "" when git fails.
-func Messages(ctx context.Context, repo string) string {
+func Messages(ctx context.Context, sb *proc.Sandbox, repo string) string {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	out, err := proc.Run(proc.Command(ctx, repo, nil, "git", "log", "--reverse", "--no-merges", "--format=- %B", "refs/base..HEAD"))
+	out, err := proc.Run(sb.Command(ctx, repo, nil, "git", "log", "--reverse", "--no-merges", "--format=- %B", "refs/base..HEAD"))
 	if err != nil {
 		return ""
 	}
@@ -146,10 +146,10 @@ func Messages(ctx context.Context, repo string) string {
 
 // Behind lists the base's commits the PR doesn't have yet, newest first, from a Checkout: what moved on under it.
 // nil when git fails.
-func Behind(ctx context.Context, repo string) []Commit {
+func Behind(ctx context.Context, sb *proc.Sandbox, repo string) []Commit {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	out, err := proc.Run(proc.Command(ctx, repo, nil, "git", "log", "--no-merges", "--no-renames", "--format=%x00%H%x09%s",
+	out, err := proc.Run(sb.Command(ctx, repo, nil, "git", "log", "--no-merges", "--no-renames", "--format=%x00%H%x09%s",
 		"--name-only", "HEAD..refs/base"))
 	if err != nil {
 		return nil

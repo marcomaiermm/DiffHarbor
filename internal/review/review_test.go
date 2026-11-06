@@ -2,6 +2,7 @@ package review
 
 import (
 	"diffharbor/internal/agent"
+	"diffharbor/internal/proc"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -61,18 +62,18 @@ func TestStack(t *testing.T) {
 		os.MkdirAll(filepath.Join(d, filepath.Dir(f)), 0o755)
 		os.WriteFile(filepath.Join(d, f), nil, 0o644)
 	}
-	if got := stack(t.Context(), d, nil); got != "npm (JavaScript/TypeScript), Go modules, World of Warcraft addon (Lua, WoW API)" {
+	if got := stack(t.Context(), &proc.Sandbox{}, d, nil); got != "npm (JavaScript/TypeScript), Go modules, World of Warcraft addon (Lua, WoW API)" {
 		t.Fatalf("stack: %q", got)
 	}
-	if got := stack(t.Context(), t.TempDir(), []string{"a.lua"}); got != "Lua" {
+	if got := stack(t.Context(), &proc.Sandbox{}, t.TempDir(), []string{"a.lua"}); got != "Lua" {
 		t.Fatalf("stack lua: %q", got)
 	}
 	os.WriteFile(filepath.Join(d, "apps/web/package.json"), []byte(`{"dependencies":{"@tanstack/react-start":"1"}}`), 0o644)
-	if got := stack(t.Context(), d, []string{"apps/web/src/a.ts"}); !strings.Contains(got, "SSR with @tanstack/react-start (") || strings.Contains(stack(t.Context(), d, nil), "SSR") {
+	if got := stack(t.Context(), &proc.Sandbox{}, d, []string{"apps/web/src/a.ts"}); !strings.Contains(got, "SSR with @tanstack/react-start (") || strings.Contains(stack(t.Context(), &proc.Sandbox{}, d, nil), "SSR") {
 		t.Fatalf("stack in a package: %q", got)
 	}
 	os.WriteFile(filepath.Join(d, "package.json"), []byte(`{"dependencies":{"@tanstack/react-start":"1"}}`), 0o644)
-	if got := stack(t.Context(), d, nil); !strings.Contains(got, "SSR with @tanstack/react-start (") {
+	if got := stack(t.Context(), &proc.Sandbox{}, d, nil); !strings.Contains(got, "SSR with @tanstack/react-start (") {
 		t.Fatalf("stack ssr: %q", got)
 	}
 }
@@ -124,7 +125,7 @@ func TestGrownPast(t *testing.T) {
 	diff := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,4 @@\n 1\n+2\n+3\n 4\n" +
 		"diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1,4 +1,4 @@\n-x\n+1\n 2\n 3\n 4\n" +
 		"diff --git a/x b/x\n+++ b/../../etc/passwd\n@@ -0,0 +1 @@\n+x\n"
-	if got := grownPast(t.Context(), repo, diff, 3); !slices.Equal(got, []string{"- a.go: 2 → 4 lines"}) {
+	if got := grownPast(t.Context(), &proc.Sandbox{}, repo, diff, 3); !slices.Equal(got, []string{"- a.go: 2 → 4 lines"}) {
 		t.Fatal(got)
 	}
 }
@@ -322,7 +323,7 @@ func TestBumps(t *testing.T) {
 		"-    \"better-auth\": \"^1.6.3\",\n+    \"better-auth\": \"^1.7.0\",\n" +
 		"-    \"zod\": \"^4.1.0\",\n+    \"zod\": \"^4.1.0\",\n" +
 		"-    \"x\": \"workspace:^1.0.0\",\n+    \"x\": \"workspace:*\",\n"
-	if got := bumps(t.Context(), d, patch); !reflect.DeepEqual(got, []bump{{"apps/web", "better-auth", "1.6.3", "1.7.4"}}) {
+	if got := bumps(t.Context(), &proc.Sandbox{}, d, patch); !reflect.DeepEqual(got, []bump{{"apps/web", "better-auth", "1.6.3", "1.7.4"}}) {
 		t.Fatalf("bumps: %+v", got)
 	}
 }

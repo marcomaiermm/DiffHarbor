@@ -83,29 +83,15 @@ func work(queue chan *forge.Event) {
 		case e.Kind != "pull_request":
 			run = func(ctx context.Context) error { return job.Chat(ctx, f, mentions[e.Forge], e) }
 		}
-		proc.KillLeftovers()   // what an earlier job's PR code left running, e.g. listening for this job's token
-		err := proc.CleanTmp() // and left in the temp dirs all share; home and caches are the job's (proc.Workspace)
 		ctx, cancel := context.WithCancel(context.Background())
 		running.Lock()
 		running.key, running.review, running.cancel = e.Key(), e.Kind == "pull_request", cancel
 		running.Unlock()
-		switch {
-		case err == nil:
-			err = run(ctx)
-		case e.Kind == "pull_request" && !closing(e): // stays pending (done keeps it): the next push or a restart retries
-			if p, err := f.Open(e); err == nil {
-				p.Status(e.PullRequest.Head.SHA, "error", "Review not started: cleanup failed, retried on the next push")
-			}
-		case e.Comment.Body != "" && mentions[e.Forge].MatchString(e.Comment.Body): // asked us: a chat isn't kept to retry
-			if p, err := f.Open(e); err == nil {
-				_ = p.Reply("⚠️ Couldn't start: cleaning up after the last job failed. Ask again in a while.\n\n" + forge.Mark)
-			}
-		}
-		if err != nil {
+		// A job that runs PR code does so in a proc.Workspace: it cleans up after the uid's last job, Close after this one.
+		if err := run(ctx); err != nil {
 			log.Println(e.Key(), err)
 		}
 		cancel() // revokes the job's vault tokens: git's remote, Pi's keys
-		proc.KillLeftovers()
 		running.Lock()
 		running.key = "" // idle: a later push or close has nothing to stop
 		running.Unlock()
@@ -182,7 +168,7 @@ func Serve(cfg Config) {
 		mentions[name] = forge.MentionOf(handles...)
 		log.Printf("%s as @%s on POST /webhook/%s", name, f.Bot(), name)
 	}
-	if err := proc.Clean(); err != nil { // a crash's work dirs, the cache all repos shared before
+	if err := proc.Clean(); err != nil { // before any job: a crash's work dirs and leftovers, the cache all repos shared before
 		log.Fatal(err)
 	}
 	queue := make(chan *forge.Event, 100)
