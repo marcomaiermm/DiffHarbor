@@ -340,11 +340,15 @@ func TestAPIChanges(t *testing.T) {
 
 // Fence is one backtick longer than the longest run in s, at least four.
 func TestFence(t *testing.T) {
-	if got := Fence("a\n`````\n``````````b"); got != "```````````\na\n`````\n``````````b\n```````````" {
-		t.Fatalf("fence: %q", got)
-	}
 	long := strings.Repeat("`", 100000)
-	if Fence("x") != "````\nx\n````" || Fence("a ``` b") != "````\na ``` b\n````" || Fence(long) != long+"`\n"+long+"\n"+long+"`" {
-		t.Fatal(Fence("a ``` b"))
+	for in, want := range map[string]string{
+		"x":                     "````\nx\n````",
+		"a ``` b":               "````\na ``` b\n````",
+		"a\n`````\n``````````b": "```````````\na\n`````\n``````````b\n```````````",
+		long:                    long + "`\n" + long + "\n" + long + "`",
+	} {
+		if got := Fence(in); got != want {
+			t.Errorf("Fence(%.20q) = %.40q (%d bytes), want %d bytes", in, got, len(got), len(want))
+		}
 	}
 }
