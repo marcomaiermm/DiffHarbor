@@ -108,6 +108,13 @@ func TestVerdicts(t *testing.T) {
 	if kept, _, _, ok := verdicts([]Comment{{Existing: "a", Fix: "b"}}, nil, `{"verdicts":[{"i":0,"keep":true,"fix":false}]}`, nil); !ok || kept[0].Fix != "" {
 		t.Fatalf("fix=false kept the fix: %+v", kept)
 	}
+	// the deploy order rules out a new frontend on an old backend, an old tab on the new backend remains
+	both := []Comment{{Body: "old tabs and old backends", Prompt: "add an adapter", Existing: "a", Fix: "b"}}
+	if kept, _, _, _ := verdicts(both, nil, `{"verdicts":[{"i":0,"keep":true,"only":"old tabs until a reload","evidence":"deploy.sh:14 rolls the backend out first","fix":true}]}`, nil); kept[0].Fix != "" ||
+		kept[0].Body != "old tabs and old backends\n\n_Only this part holds:_ old tabs until a reload\n\n_Verified:_ deploy.sh:14 rolls the backend out first" ||
+		kept[0].Prompt != "add an adapter\nOnly this part holds, fix just that: old tabs until a reload" {
+		t.Fatalf("partial: %+v", kept)
+	}
 	two := []Comment{{Severity: "major"}, {Severity: "minor"}}
 	if kept, _, _, _ := verdicts(two, nil, `{"verdicts":[{"i":0,"keep":true,"severity":"minor"},{"i":1,"keep":true,"severity":"critical"}]}`, nil); kept[0].Severity != "minor" || kept[1].Severity != "minor" {
 		t.Fatalf("severity: %+v", kept)
