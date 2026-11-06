@@ -112,6 +112,16 @@ type Thread struct {
 	Line     int // 0 when the line is outdated
 	Original int
 	Body     string
+	Replies  string // Answers(): the last replies, where a maintainer declines what the finding or our answer said
+}
+
+// Answers are a thread's last replies after its first comment, cleaned and cut short for a prompt.
+func Answers(ns []Note) string {
+	var b strings.Builder
+	for _, n := range ns[max(0, len(ns)-3):] {
+		fmt.Fprintf(&b, "\n\n**@%s**: %s", n.Login, text.Truncate(Clean(n.Body), 300))
+	}
+	return b.String()
 }
 
 // Discussion is a review thread with what it is about.
