@@ -312,6 +312,10 @@ func TestSettings(t *testing.T) {
 	if got := cfg.ReadRules(read); !strings.HasPrefix(got, "accept races") || !strings.HasSuffix(got, "use pnpm") {
 		t.Errorf("rules file and root conventions: %q", got)
 	}
+	files["docs/md"] = strings.Repeat("x", 9000)
+	if got := cfg.ReadRules(read); !strings.HasSuffix(got, "use pnpm") || len(got) > 8000+4000+100 {
+		t.Errorf("a long rules file keeps the conventions: %d chars", len(got))
+	}
 	if delete(files, "docs/md"); cfg.ReadRules(read) != "use pnpm" {
 		t.Error("no rules file: the root's AGENTS.md alone")
 	}
