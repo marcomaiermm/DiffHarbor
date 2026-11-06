@@ -471,13 +471,22 @@ func Threads(repo string, n int, token string) ([]forge.Thread, error) {
 									} `json:"author"`
 								} `json:"nodes"`
 							} `json:"comments"`
+							Replies struct {
+								Nodes []struct {
+									DatabaseID int64  `json:"databaseId"`
+									Body       string `json:"body"`
+									Author     struct {
+										Login string `json:"login"`
+									} `json:"author"`
+								} `json:"nodes"`
+							} `json:"replies"`
 						} `json:"nodes"`
 					} `json:"reviewThreads"`
 				} `json:"pullRequest"`
 			} `json:"repository"`
 		}
 		err := graphql(token, `query($o:String!,$r:String!,$n:Int!,$a:String){repository(owner:$o,name:$r){pullRequest(number:$n){
-reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{databaseId path line originalLine body author{__typename login}}}}}}}}`,
+reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{databaseId path line originalLine body author{__typename login}}} replies:comments(last:3){nodes{databaseId body author{login}}}}}}}}`,
 			map[string]any{"o": owner, "r": name, "n": n, "a": after}, &d)
 		if err != nil {
 			return nil, err
@@ -491,7 +500,13 @@ reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isRes
 			if a := c.Author; a.Type != "Bot" || strings.TrimSuffix(a.Login, "[bot]") != Slug { // the mark is copyable, the author isn't
 				continue
 			}
-			ts = append(ts, forge.Thread{ID: t.ID, Comment: c.DatabaseID, Resolved: t.IsResolved, Path: c.Path, Line: c.Line, Original: c.OriginalLine, Body: c.Body})
+			var rs []forge.Note
+			for _, r := range t.Replies.Nodes {
+				if r.DatabaseID != c.DatabaseID {
+					rs = append(rs, forge.Note{ID: r.DatabaseID, Login: r.Author.Login, Body: r.Body})
+				}
+			}
+			ts = append(ts, forge.Thread{ID: t.ID, Comment: c.DatabaseID, Resolved: t.IsResolved, Path: c.Path, Line: c.Line, Original: c.OriginalLine, Body: c.Body, Replies: forge.Answers(rs)})
 		}
 		if !rt.PageInfo.HasNextPage {
 			break
