@@ -2,6 +2,7 @@ package report
 
 import (
 	"cmp"
+	"diffharbor/internal/review"
 	"fmt"
 	"slices"
 	"strconv"
@@ -100,7 +101,7 @@ func ways(v *view, syms map[string][]Symbol) []way {
 			if end.c.State == "new" {
 				e.w.New++
 			}
-			if heavier(end.c.Sev, e.w.Sev) && end.c.Sev != "minor" {
+			if heavier(end.c.Sev, e.w.Sev) && review.Blocks(end.c.Sev) {
 				e.w.Sev, e.w.Finding = end.c.Sev, findingOf(end.f, end.c.Sev)
 			}
 			cur, add := &e.root, 0
@@ -140,7 +141,7 @@ func ways(v *view, syms map[string][]Symbol) []way {
 					case c.c.sig:
 						r.Tag = "signature"
 					}
-					if c.c.Sev == "critical" || c.c.Sev == "major" {
+					if review.Blocks(c.c.Sev) {
 						r.St, r.Sev = "major", weigh(findingsOf(c.f, c.c.Sev))
 					}
 				}
@@ -154,8 +155,7 @@ func ways(v *view, syms map[string][]Symbol) []way {
 	}
 	slices.SortStableFunc(out, func(a, b way) int {
 		route := func(w way) int { return map[bool]int{true: 1}[w.Method != "CALL"] }
-		sev := func(w way) int { return map[string]int{"critical": 2, "major": 1}[w.Sev] }
-		return cmp.Or(cmp.Compare(route(b), route(a)), cmp.Compare(sev(b), sev(a)), cmp.Compare(b.Reach, a.Reach))
+		return cmp.Or(cmp.Compare(route(b), route(a)), cmp.Compare(review.Rank(b.Sev), review.Rank(a.Sev)), cmp.Compare(b.Reach, a.Reach))
 	})
 	out = out[:min(len(out), maxWays)]
 	for i := range out {

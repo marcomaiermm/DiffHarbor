@@ -30,11 +30,13 @@ type skipPR struct {
 	notes   []string
 	replies []string
 	status  string
+	// Configure's: the profile the review got
+	settings review.Settings
 }
 
-func (*skipPR) Refresh() error            { return nil }
-func (*skipPR) Configure(review.Settings) {}
-func (p *skipPR) Reply(b string) error    { p.replies = append(p.replies, b); return nil }
+func (*skipPR) Refresh() error                  { return nil }
+func (p *skipPR) Configure(cfg review.Settings) { p.settings = cfg }
+func (p *skipPR) Reply(b string) error          { p.replies = append(p.replies, b); return nil }
 
 func (p *skipPR) File(string, ...string) string {
 	if p.cfg != "" {
@@ -60,7 +62,7 @@ func TestReviewSkipsBaseBranch(t *testing.T) {
 	e := &forge.Event{Action: "opened"}
 	e.Repository.DefaultBranch = "main"
 	e.PullRequest.State, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", strings.Repeat("a", 40), "prod"
-	if err := Review(t.Context(), f, e); err != nil || pr.status != "success Skipped: base branch" || len(pr.notes) != 1 ||
+	if err := Review(t.Context(), f, e, ""); err != nil || pr.status != "success Skipped: base branch" || len(pr.notes) != 1 ||
 		!strings.Contains(pr.notes[0], "Review skipped:** base branch `prod`") {
 		t.Fatalf("%v %q %q", err, pr.status, pr.notes)
 	}
@@ -72,7 +74,7 @@ func TestReviewSkipsDraft(t *testing.T) {
 	e := &forge.Event{Action: "opened"}
 	e.Repository.DefaultBranch = "main"
 	e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", true, strings.Repeat("a", 40), "main"
-	if err := Review(t.Context(), skipForge{pr: pr}, e); err != nil || pr.status != "" || len(pr.notes) != 0 {
+	if err := Review(t.Context(), skipForge{pr: pr}, e, ""); err != nil || pr.status != "" || len(pr.notes) != 0 {
 		t.Fatalf("%v %q %q", err, pr.status, pr.notes)
 	}
 }
@@ -82,7 +84,7 @@ func TestReviewDraftOff(t *testing.T) {
 	pr := &skipPR{cfg: `{"drafts":"off"}`}
 	e := &forge.Event{Action: "manual"}
 	e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Head.SHA = "open", true, strings.Repeat("a", 40)
-	if err := Review(t.Context(), skipForge{pr: pr}, e); err != nil || pr.status != "" || len(pr.notes) != 0 ||
+	if err := Review(t.Context(), skipForge{pr: pr}, e, ""); err != nil || pr.status != "" || len(pr.notes) != 0 ||
 		len(pr.replies) != 1 || !strings.Contains(pr.replies[0], "Drafts get no review") {
 		t.Fatalf("%v %q %q %q", err, pr.status, pr.notes, pr.replies)
 	}
@@ -96,15 +98,15 @@ func TestReviewDraftOptIn(t *testing.T) {
 	e := &forge.Event{Action: "synchronize"}
 	e.Repository.DefaultBranch = "main"
 	e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", true, strings.Repeat("a", 40), "prod"
-	if err := Review(t.Context(), f, e); err != nil || pr.status != "" {
+	if err := Review(t.Context(), f, e, ""); err != nil || pr.status != "" {
 		t.Fatalf("push before asking: %v %q", err, pr.status)
 	}
 	e.Action = "manual" // fails past the gate: the event has no repository id
-	if err := Review(t.Context(), f, e); err == nil || pr.status != "error Review failed" {
+	if err := Review(t.Context(), f, e, ""); err == nil || pr.status != "error Review failed" {
 		t.Fatalf("asked: %v %q", err, pr.status)
 	}
 	e.Action, e.PullRequest.Head.SHA = "synchronize", strings.Repeat("b", 40)
-	if err := Review(t.Context(), f, e); err != nil || pr.status != "success Skipped: base branch" {
+	if err := Review(t.Context(), f, e, ""); err != nil || pr.status != "success Skipped: base branch" {
 		t.Fatalf("push after asking: %v %q", err, pr.status)
 	}
 }
@@ -120,7 +122,7 @@ func TestReviewPanicFails(t *testing.T) {
 	e := &forge.Event{Action: "opened"}
 	e.Repository.ID, e.Repository.DefaultBranch = 1, "main"
 	e.PullRequest.State, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", strings.Repeat("a", 40), "main"
-	err := Review(t.Context(), panicForge{skipForge{pr: pr}}, e)
+	err := Review(t.Context(), panicForge{skipForge{pr: pr}}, e, "")
 	if err == nil || !strings.HasPrefix(err.Error(), "panic: boom") || pr.status != "error Review failed" {
 		t.Fatalf("%v %q", err, pr.status)
 	}
@@ -137,7 +139,7 @@ func TestReviewSkipsBotBranch(t *testing.T) {
 	} {
 		pr := &skipPR{}
 		e.PullRequest.Head.Ref, e.PullRequest.Body = c.ref, c.body
-		if err := Review(t.Context(), skipForge{pr: pr}, e); err != nil || pr.status != "success Skipped: bot author" {
+		if err := Review(t.Context(), skipForge{pr: pr}, e, ""); err != nil || pr.status != "success Skipped: bot author" {
 			t.Fatalf("%s: %v %q %q", c.ref, err, pr.status, pr.notes)
 		}
 	}
@@ -294,6 +296,7 @@ type reactPR struct {
 
 func (*reactPR) Discussion() (forge.Discussion, error) { return forge.Discussion{Ours: true}, nil }
 func (p *reactPR) React()                              { close(p.reacted); <-p.release }
+func (*reactPR) CanWrite(string) (bool, error)         { return false, nil }
 
 type reactForge struct {
 	skipForge
@@ -353,17 +356,19 @@ func TestNewer(t *testing.T) {
 		d     forge.Discussion
 		id    int64
 		login string
+		maint bool
 		want  bool
 	}{
-		{forge.Discussion{Ours: true, Notes: ours}, 2, "ann", true},  // asked again past bob's comment: that one answers both
-		{forge.Discussion{Ours: true, Notes: ours}, 4, "ann", false}, // later only a question for bob and thanks: chat answers neither, so this one
-		{forge.Discussion{Ours: true, Notes: ours}, 3, "bob", false},
-		{forge.Discussion{Ours: true, Notes: ours}, 9, "ann", false},
-		{forge.Discussion{Notes: humans}, 2, "ann", false},             // no @bot after: a human thread goes on between humans
-		{forge.Discussion{Ours: true, Notes: capped}, 2, "ann", false}, // we said our piece: "and now?" goes unanswered
-		{forge.Discussion{Ours: true, Notes: edited}, 2, "ann", false}, // "thanks" edited into a question: its edit was never queued
+		{forge.Discussion{Ours: true, Notes: ours}, 2, "ann", false, true},  // asked again past bob's comment: that one answers both
+		{forge.Discussion{Ours: true, Notes: ours}, 4, "ann", false, false}, // later only a question for bob and thanks: chat answers neither, so this one
+		{forge.Discussion{Ours: true, Notes: ours}, 3, "bob", false, false},
+		{forge.Discussion{Ours: true, Notes: ours}, 9, "ann", false, false},
+		{forge.Discussion{Notes: humans}, 2, "ann", false, false},             // no @bot after: a human thread goes on between humans
+		{forge.Discussion{Ours: true, Notes: capped}, 2, "ann", false, false}, // we said our piece: "and now?" goes unanswered
+		{forge.Discussion{Ours: true, Notes: capped}, 2, "ann", true, true},   // unless a maintainer asks: the decision is theirs
+		{forge.Discussion{Ours: true, Notes: edited}, 2, "ann", false, false}, // "thanks" edited into a question: its edit was never queued
 	} {
-		if got := newer(bot, c.d, c.id, c.login); got != c.want {
+		if got := newer(bot, c.d, c.id, c.login, c.maint); got != c.want {
 			t.Errorf("%d %s: got %v", c.id, c.login, got)
 		}
 	}
@@ -423,5 +428,143 @@ func TestThanks(t *testing.T) {
 		if got := thanks(bot, body); got != want {
 			t.Errorf("%q: got %v, want %v", body, got, want)
 		}
+	}
+}
+
+func TestReviewCommand(t *testing.T) {
+	type got struct {
+		large   bool
+		profile string
+		ok      bool
+	}
+	for cmd, want := range map[string]got{
+		"review": {ok: true}, "full review": {ok: true}, "review all": {true, "", true},
+		"review quiet": {false, "quiet", true}, "review all assertive": {true, "assertive", true}, "review chill all": {true, "chill", true},
+		"review loud": {}, "reviewer?": {}, "what is a review": {}, "reviews": {},
+		"review: quiet": {false, "quiet", true}, "review, all, chill": {true, "chill", true}, "review\tquiet": {false, "quiet", true},
+		"review quiet chill": {}, "review quiet quiet": {}, // a second profile: no command, a question
+	} {
+		large, profile, ok := reviewCommand(cmd)
+		if g := (got{large, profile, ok}); g != want {
+			t.Errorf("%q: %+v, want %+v", cmd, g, want)
+		}
+	}
+}
+
+// Only folded findings: an incremental review posts nothing, they'd come back on every push. A full one always posts.
+// A finding on a thread's line counts as none: Split drops it.
+func TestPosts(t *testing.T) {
+	nits := []review.Comment{{Path: "a.go", Line: 1, Severity: "nit", Fold: true}}
+	minor := review.Comment{Path: "a.go", Line: 2, Severity: "minor"}
+	on := []forge.Thread{{Path: "a.go", Line: 2}}
+	r := func(cs ...review.Comment) review.Result { return review.Result{Comments: cs} }
+	if posts(false, r(nits...), nil) || posts(false, r(), nil) || !posts(true, r(), nil) || !posts(false, r(nits[0], minor), nil) ||
+		posts(false, r(nits[0], minor), on) {
+		t.Fatal("posts")
+	}
+}
+
+// The profile a review gets: the comment's over the description's over review.json's. A draft with drafts off
+// stops the review right after, before any checkout.
+func TestReviewProfile(t *testing.T) {
+	inline := func(cfg review.Settings) string { // what the profile puts inline
+		switch {
+		case !cfg.Fold(review.Comment{Severity: "nit"}):
+			return "assertive"
+		case cfg.Fold(review.Comment{Severity: "minor"}):
+			return "quiet"
+		}
+		return "chill"
+	}
+	for _, c := range []struct{ cfg, cmd, body, want string }{
+		{`{"drafts":"off"}`, "", "", "chill"},
+		{`{"drafts":"off","profile":"quiet"}`, "", "", "quiet"},
+		{`{"drafts":"off","profile":"quiet"}`, "", "- [x] review: assertive", "assertive"},
+		{`{"drafts":"off","profile":"quiet"}`, "chill", "review: assertive", "chill"},
+	} {
+		pr := &skipPR{cfg: c.cfg}
+		e := &forge.Event{Action: "manual"}
+		e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Body, e.PullRequest.Head.SHA = "open", true, c.body, strings.Repeat("a", 40)
+		if err := Review(t.Context(), skipForge{pr: pr}, e, c.cmd); err != nil || inline(pr.settings) != c.want {
+			t.Errorf("%+v: %v %s", c, err, inline(pr.settings))
+		}
+	}
+}
+
+// `@bot review all quiet` reviews in parts with that profile.
+func TestChatReviewProfile(t *testing.T) {
+	pr := &skipPR{cfg: `{"drafts":"off"}`}
+	e := &forge.Event{Kind: "issue_comment", Action: "created"}
+	e.Comment.Body = "@bot review all quiet"
+	e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Head.SHA = "open", true, strings.Repeat("a", 40)
+	mention := regexp.MustCompile(`(?i)(^|[^\w.+-])@(bot)\.*([^\w.-]|$)`)
+	if err := Chat(t.Context(), skipForge{pr: pr}, mention, e); err != nil || e.Action != "large" || pr.settings.Override != "quiet" ||
+		!pr.settings.Fold(review.Comment{Severity: "minor"}) {
+		t.Fatalf("%v %q %q", err, e.Action, pr.settings.Override)
+	}
+}
+
+func TestBodyProfile(t *testing.T) {
+	for body, want := range map[string]string{
+		"Fixes x.\n\nreview: quiet":                    "quiet",
+		"Review: Assertive\n":                          "assertive",
+		"- [ ] review: quiet\n- [x] review: chill\n":   "chill",
+		"* [X] review: assertive":                      "assertive",
+		"- review: quiet":                              "quiet",
+		"- [ ] review: quiet\n- [ ] review: chill":     "",
+		"<!-- review: quiet | chill | assertive -->\n": "",
+		"code review: quiet please":                    "", // not a line of its own
+		"review: loud":                                 "",
+		"review: quiet-ish":                            "",
+		"1. [x] review: quiet\r\n2. [ ] review: chill": "quiet", // GitLab's numbered task list, CRLF
+		"review: **assertive**":                        "assertive",
+		"review: `quiet`.":                             "quiet",
+		"```markdown\n- [x] review: chill\n```\n":      "", // the README's example, pasted
+		"~~~\nreview: quiet\n~~~\nreview: chill":       "chill",
+		"```\nreview: quiet":                           "", // unclosed: code up to the end
+		"<!-- hint\nreview: quiet":                     "",
+		"text\n\n    review: quiet":                    "", // indented: code
+		"\treview: quiet":                              "",
+		"    - [x] review: quiet":                      "",      // indented: code, list-shaped or not
+		"- [ ] a\n    - [x] review: quiet":             "quiet", // a nested list item
+		"- item\n\n      - [x] review: quiet":          "",      // code in a list item
+		"- item\n\n  - [x] review: quiet":              "quiet",
+		">     review: quiet":                          "", // code in a blockquote
+		">\n> review: quiet":                           "quiet",
+		"- ```\n  review: quiet\n  ```\nreview: chill": "chill", // a fence in a list item
+		"```\n<!--\n```\nreview: quiet":                "quiet", // a comment marker in code is code
+		"text\n    review: quiet":                      "quiet", // indented, but no blank line before: the paragraph goes on
+		"````\n```\n````\nreview: chill":               "chill",
+		"````\n```\nreview: quiet\n```\n````":          "", // a fence inside a longer one
+		"review: quiet please, but assertive here":     "",
+		"review: quiet  ":                              "quiet",
+	} {
+		if got := bodyProfile(body); got != want {
+			t.Errorf("%q: %q, want %q", body, got, want)
+		}
+	}
+}
+
+// A failed write-access check drops no reply, also past the cap: nothing retries a chat job.
+type deniedPR struct{ skipPR }
+
+func (*deniedPR) CanWrite(string) (bool, error) { return false, errors.New("503") }
+func (*deniedPR) React()                        {}
+func (*deniedPR) Discussion() (forge.Discussion, error) {
+	return forge.Discussion{Ours: true, Notes: []forge.Note{{ID: 1, Ours: true}, {ID: 2, Ours: true}, {ID: 3, Ours: true}, {ID: 4, Ours: true}}}, nil
+}
+
+type deniedForge struct {
+	skipForge
+	pr *deniedPR
+}
+
+func (f deniedForge) Open(*forge.Event) (forge.PR, error) { return f.pr, nil }
+
+func TestChatAnswersOnFailedAccessCheck(t *testing.T) {
+	e := &forge.Event{Kind: "pull_request_review_comment"} // no repository id: Chat stops right after the thread check
+	e.Comment.Body = "why?"
+	if err := Chat(t.Context(), deniedForge{pr: &deniedPR{}}, regexp.MustCompile(`@bot`), e); err == nil || !strings.Contains(err.Error(), "no repository id") {
+		t.Fatal("Chat stopped elsewhere:", err)
 	}
 }

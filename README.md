@@ -82,6 +82,7 @@ docker compose up -d
 | `@<bot> <question>` | An answer about the PR, from the checkout. |
 | `@<bot> review` | A full review of the PR. |
 | `@<bot> review all` | A large PR reviewed in parts. |
+| `@<bot> review quiet` | A full review with another profile: `quiet`, `chill` or `assertive`, also after `all`. |
 | `@<bot> learnings` | Lists the saved learnings of the repo and its owner. |
 | `@<bot> forget <text>` | Drops the learnings containing the text. Only owners and members drop the owner's. |
 
@@ -278,7 +279,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 ```json
 {
   "ignore": ["drizzle/meta", "locales/*.json", "**/*.fixture.ts"],
-  "min_severity": "minor",
+  "profile": "chill",
   "tests": true,
   "review_model": "openai/gpt-6.1-sol",
   "verify_model": "anthropic/claude-haiku-5-5:low",
@@ -295,7 +296,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
   "gitlab_findings": "review",
   "checks": [".review/checks.sh"],
   "packages": {
-    "apps/web": {"min_severity": "major"},
+    "apps/web": {"min_severity": "major", "profile": "quiet"},
     "services/*": {"tests": false}
   }
 }
@@ -304,7 +305,8 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | Key | |
 |---|---|
 | `ignore` | Globs. A path without one takes its folder. `!glob` takes paths back in: `["src/ui", "!src/ui/{chip,toast}.tsx"]`. Neither the model nor a check sees these files. |
-| `min_severity` | `minor`, `major` or `critical`. Findings below are dropped. |
+| `profile` | `quiet`, `chill` (default) or `assertive`: which findings go inline and which fold into the review's summary. See [Review profiles](#review-profiles). |
+| `min_severity` | `minor`, `major` or `critical`: findings below are dropped before verification, nowhere posted. `minor` drops the nits. |
 | `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. |
 | `review_model`, `verify_model` | Apply where the server sets none. The provider's key must be on the server. |
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
@@ -325,6 +327,34 @@ Everything lives under `.review/`. `review.json` can change the paths.
 - A broken `review.json` falls back to the defaults and says so in the review footer.
 
 </details>
+
+### Review profiles
+
+Reviews can report defects (critical, major, minor) and, unless `min_severity` drops them, nits: naming, readability, a dead branch, an idiom of the codebase the change ignores, at most 5 per pass and never in place of a defect. The profile decides what goes inline as a thread and what folds into the review's summary, where nothing is lost and the prompt for AI agents still has it. Inline means on a diff line: a finding outside the diff goes into the summary whatever the profile.
+
+| `profile` | Inline | Folded into the summary |
+|---|---|---|
+| `quiet` | critical, major | minor, nits |
+| `chill` (default) | critical, major, minor | nits |
+| `assertive` | everything, nits too | |
+
+`min_severity` drops findings before that, `minor` the nits. A folded finding has no thread: a later review of its file may report it again, and an incremental review that finds only folded ones posts nothing.
+
+The first that sets a profile wins:
+
+1. `@<bot> review quiet` (also `review all assertive`): this review only.
+2. The PR description: a line `review: quiet`, typed by hand or a ticked box of the PR template. Unticked boxes and HTML comments don't count, so a template can offer all three:
+
+   ```markdown
+   - [ ] review: quiet
+   - [x] review: chill
+   - [ ] review: assertive
+   ```
+
+3. `packages` in `review.json`, by path.
+4. `profile` in `review.json`.
+
+The review footer names a profile set by the comment or the description.
 
 ### Large PRs
 

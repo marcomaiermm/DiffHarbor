@@ -139,9 +139,15 @@ func (p *pr) Threads() ([]forge.Thread, error) {
 			continue
 		}
 		n := d.Notes[0]
+		var rs []forge.Note
+		for _, r := range d.Notes[1:] {
+			if !r.System {
+				rs = append(rs, r.forge())
+			}
+		}
 		ts = append(ts, forge.Thread{
 			ID: d.ID, Comment: n.ID, Resolved: n.Resolved, Path: n.Position.NewPath,
-			Line: n.Position.NewLine, Original: n.Position.NewLine, Body: n.Body,
+			Line: n.Position.NewLine, Original: n.Position.NewLine, Body: n.Body, Replies: forge.Answers(rs),
 		})
 	}
 	return ts, err
@@ -241,20 +247,20 @@ func (p *pr) Publish() {
 // Post sends the summary and the findings on diff lines, with the answers Resolve drafted. A position GitLab
 // refuses (outdated diff, a line it doesn't show) moves the finding into the summary.
 func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, footer string) (int, error) {
-	inline, rest := forge.Split(r, threads, diff.NewLines(raw))
+	inline, rest, folded := forge.Split(r, threads, diff.NewLines(raw))
 	if p.refs[2] != sha { // GitLab hasn't built the diff of this push yet: no positions on it
 		log.Println(p.e.Key(), "diff of", sha[:7], "not ready, findings go in the note")
 		rest, inline = append(rest, inline...), nil
 	}
 	if !p.batch() {
-		return p.discussions(inline, rest, raw, footer)
+		return p.discussions(inline, rest, folded, raw, footer)
 	}
-	return p.publish(inline, rest, threads, raw, footer)
+	return p.publish(inline, rest, folded, threads, raw, footer)
 }
 
 // discussions sends the summary, then a discussion per finding: the summary heads them, as a GitHub review does.
-func (p *pr) discussions(inline, rest []forge.Finding, raw, footer string) (_ int, err error) {
-	id, err := p.Note(0, forge.Summary(inline, rest, footer))
+func (p *pr) discussions(inline, rest, folded []forge.Finding, raw, footer string) (_ int, err error) {
+	id, err := p.Note(0, forge.Summary(inline, rest, folded, footer))
 	if err != nil {
 		return 0, err
 	}
@@ -262,7 +268,7 @@ func (p *pr) discussions(inline, rest []forge.Finding, raw, footer string) (_ in
 	var posted []forge.Finding
 	defer func() { // a refused or failed discussion: the note says what was posted
 		if len(posted) < len(inline) {
-			if _, e := p.Note(id, forge.Summary(posted, rest, footer)); err == nil {
+			if _, e := p.Note(id, forge.Summary(posted, rest, folded, footer)); err == nil {
 				err = e
 			}
 		}
@@ -289,7 +295,7 @@ func (p *pr) discussions(inline, rest []forge.Finding, raw, footer string) (_ in
 // publish publishes the findings as one review with the summary and the answers as drafts, one email: GitLab's
 // own summary (bulk_publish's note) is a note of its own, an email more. GitLab checks a draft's position only on
 // publishing and drops one it can't place: a finding with no discussion afterwards goes into the summary.
-func (p *pr) publish(inline, rest []forge.Finding, threads []forge.Thread, raw, footer string) (int, error) {
+func (p *pr) publish(inline, rest, folded []forge.Finding, threads []forge.Thread, raw, footer string) (int, error) {
 	lines := olds(raw)
 	var drafted []forge.Finding
 	var keys []string
@@ -308,7 +314,7 @@ func (p *pr) publish(inline, rest []forge.Finding, threads []forge.Thread, raw, 
 			break
 		}
 	}
-	summary := forge.Summary(drafted, rest, footer)
+	summary := forge.Summary(drafted, rest, folded, footer)
 	err := call("POST", p.mr+"/draft_notes", map[string]string{"note": inert(summary)}, nil)
 	if err != nil {
 		log.Println(p.e.Key(), "draft summary:", err) // a note of its own then
@@ -328,7 +334,7 @@ func (p *pr) publish(inline, rest []forge.Finding, threads []forge.Thread, raw, 
 		log.Println(p.e.Key(), "notes:", err) // a second summary rather than an older one edited
 	}
 	rest = append(rest, plain(lost)...)
-	_, err = p.Note(id, forge.Summary(posted, rest, footer))
+	_, err = p.Note(id, forge.Summary(posted, rest, folded, footer))
 	return len(posted) + len(rest), err
 }
 

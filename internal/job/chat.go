@@ -20,17 +20,19 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const chatSystem = `You reviewed this pull request; a maintainer now asks or replies. Repo = cwd at the PR head: check the code with tools before answering.
 Reply in the language of the last message. Answer briefly and concretely: the answer, evidence as path:line, a patch snippet if a change is asked for (you cannot push).
 "Fixed" claims: check the code at HEAD. Fixed → confirm in one or two sentences. Not or only partly fixed → say what is still wrong, with evidence.
-Disagreement on whether the finding is correct: re-check it. If the maintainer is right, concede. If you are still right, push back with evidence; do not give in to be polite.
+Disagreement on whether the finding is correct: re-check it. If the maintainer is right, concede. If you are still right, push back with evidence once; do not give in to be polite.
+Pushed back once already to this same maintainer and they still decline with no new argument or evidence: the decision is theirs, concede in one or two friendly sentences, "resolved" true. If you still see a risk, put it and its evidence, briefly, in a collapsed "<details><summary>Why I still see a risk</summary>…</details>" block so they can look again; do not repeat it in the open text.
 Deferred or not worth fixing (a follow-up ticket, too unlikely, too much code): the maintainer's call, accept it, "resolved" true.
 Except the first time if merging as is loses or leaks data, opens a security hole or breaks what works today: say what and how to avoid it, "resolved" false. Pushed back once already in this thread: accept.
 Maintainers disagree with each other: your evidence if asked, the decision is theirs, "resolved" false.
 "reply" "" when the last message needs no answer (thanks, ok, agreed, will fix), or the thread is resolved and the message asks or disputes nothing.
-"resolved": true if this is a thread on one of your findings and it is now fixed, or the maintainer's reason not to fix it holds; else false.
+"resolved": true if this is a thread on one of your findings and it is now fixed, the maintainer's reason not to fix it holds, or they declined again with no new argument after your pushback; else false.
 If the maintainer corrects your review or states a project convention, write it as one general rule in "learning", else "". A decision on this one finding (deferred, not worth it here) is no rule.
 "shared": true if the rule is a team convention for every repo (language, style, process), false if it is about this repo.
 Scope: this PR, its code and its review. Anything else (general knowledge, other topics) → one sentence that you only answer about this PR, no tools, "learning" "".
@@ -65,8 +67,8 @@ func thanks(mention *regexp.Regexp, body string) bool {
 }
 
 // answers reports whether chat answers body in thread d: @us, or in our thread a reply that isn't thanks or for
-// someone else, while we haven't said our piece.
-func answers(mention *regexp.Regexp, d forge.Discussion, body string) bool {
+// someone else, while we haven't said our piece. A maintainer always gets an answer: the decision is theirs.
+func answers(mention *regexp.Regexp, d forge.Discussion, body string, maintainer bool) bool {
 	if thanks(mention, body) {
 		return false
 	}
@@ -79,13 +81,15 @@ func answers(mention *regexp.Regexp, d forge.Discussion, body string) bool {
 			replies++
 		}
 	}
-	return d.Ours && !mentionsOther(body) && replies < maxReplies
+	return d.Ours && !mentionsOther(body) && (maintainer || replies < maxReplies)
 }
 
 // newer reports whether login wrote again in d after the note id, in a comment chat answers: that one answers both.
-func newer(mention *regexp.Regexp, d forge.Discussion, id int64, login string) bool {
+func newer(mention *regexp.Regexp, d forge.Discussion, id int64, login string, maintainer bool) bool {
 	i := slices.IndexFunc(d.Notes, func(n forge.Note) bool { return n.ID == id })
-	return i >= 0 && slices.ContainsFunc(d.Notes[i+1:], func(n forge.Note) bool { return n.Login == login && !n.Edited && answers(mention, d, n.Body) })
+	return i >= 0 && slices.ContainsFunc(d.Notes[i+1:], func(n forge.Note) bool {
+		return n.Login == login && !n.Edited && answers(mention, d, n.Body, maintainer)
+	})
 }
 
 // answer is the chat pass's JSON.
@@ -100,6 +104,9 @@ type answer struct {
 func parseAnswer(out string) (a answer, ok bool) {
 	return a, agent.Object(out, &a) && a.Reply != nil
 }
+
+// chatAgent runs the chat pass: agent.Pi, a fake in tests.
+var chatAgent review.Agent = agent.Pi{}
 
 const chatRepair = "Your last message ended without the required JSON. Do not call tools. Output the JSON object with reply and learning now, using the evidence you already gathered. No prose outside the JSON."
 
@@ -234,6 +241,108 @@ func Seen(f forge.Forge, e *forge.Event) {
 	p.React()
 }
 
+// reviewCommand reads `review [all] [profile]` (or `full review …`), the words after review in any order, apart
+// by spaces, commas or a colon ("review: quiet", as in a description); ok is false for any other comment.
+func reviewCommand(cmd string) (large bool, profile string, ok bool) {
+	rest, found := strings.CutPrefix(cmd, "full review")
+	if !found {
+		rest, found = strings.CutPrefix(cmd, "review")
+	}
+	sep := func(r rune) bool { return unicode.IsSpace(r) || r == ',' || r == ':' }
+	if !found || rest != "" && !sep(rune(rest[0])) {
+		return false, "", false
+	}
+	for _, w := range strings.FieldsFunc(rest, sep) {
+		switch {
+		case w == "all":
+			large = true
+		case slices.Contains(review.Profiles, w) && profile == "":
+			profile = w
+		default: // another word or a second profile: a question, not a command
+			return false, "", false
+		}
+	}
+	return large, profile, true
+}
+
+var (
+	// a PR description's line "review: quiet", plain, a list item or a ticked box, "quiet" maybe bold or code, and
+	// nothing after but a full stop; an unticked box is no choice
+	bodyProfileRe = regexp.MustCompile("(?im)^[ \\t>]*(?:(?:[-*+]|\\d+[.)])[ \\t]+(?:\\[[xX]\\][ \\t]+)?)?review:[ \\t]*[*_`]*(quiet|chill|assertive)[*_`]*\\.?[ \\t]*\\r?$")
+	listRe        = regexp.MustCompile(`^[ \t>]*(?:[-*+]|\d+[.)])[ \t]`)
+	quoteRe       = regexp.MustCompile(`^ {0,3}(?:> ?)+`) // a blockquote's markers, each with its one space
+	fenceRe       = regexp.MustCompile("^[ \\t>]*(?:(?:[-*+]|\\d+[.)])[ \\t]+)?(```+|~~~+)")
+)
+
+// visible is what a PR description shows as text: no HTML comments, no code blocks (a template's hint, an example).
+// A fence, also in a list item, closes at one of the same character at least as long; a line indented 4 columns past
+// the list item's text (outside a list: the margin) after a blank line is code. Unclosed, up to the end.
+// ponytail: a line scan, not a Markdown parser; lazy continuations and nested quotes are guesses.
+func visible(body string) string {
+	var out strings.Builder
+	fence := "" // the open fence's backticks or tildes
+	comment, code, blank := false, false, true
+	col := 0 // where the last list item's text starts, 0 outside a list
+	for l := range strings.Lines(body) {
+		if fence != "" { // code: no comment starts in it
+			if m := fenceRe.FindStringSubmatch(l); m != nil && m[1][0] == fence[0] && len(m[1]) >= len(fence) && strings.TrimSpace(l[len(m[0]):]) == "" {
+				fence = ""
+			}
+			continue
+		}
+		var v strings.Builder // l without HTML comments, which may span lines
+		for l != "" {
+			if comment {
+				_, after, ok := strings.Cut(l, "-->")
+				l, comment = after, !ok
+				continue
+			}
+			before, after, ok := strings.Cut(l, "<!--")
+			v.WriteString(before)
+			l, comment = after, ok
+		}
+		line := strings.TrimRight(v.String(), "\r\n")
+		q := len(quoteRe.FindString(line))
+		w := 0 // the line's indent inside its blockquotes, a tab 4 columns
+		for _, r := range line[q:] {
+			if r == '\t' {
+				w += 3
+			} else if r != ' ' {
+				break
+			}
+			w++
+		}
+		if strings.TrimSpace(line[q:]) == "" {
+			blank = true
+			continue
+		}
+		if code = (code || blank) && w >= col+4; !code {
+			switch item := listRe.FindStringIndex(line); {
+			case item != nil:
+				col = item[1] - q
+			case w < col: // past the list
+				col = 0
+			}
+			if m := fenceRe.FindStringSubmatch(line); m != nil {
+				fence = m[1]
+			} else {
+				out.WriteString(line + "\n")
+			}
+		}
+		blank = false
+	}
+	return out.String()
+}
+
+// bodyProfile is the profile a PR description names on a line of its own, "review: quiet", by hand or as a ticked
+// box of its template; the first, "" for none. HTML comments and code blocks don't count: a template's hint, an example.
+func bodyProfile(body string) string {
+	if m := bodyProfileRe.FindStringSubmatch(visible(body)); m != nil {
+		return strings.ToLower(m[1])
+	}
+	return ""
+}
+
 // Chat answers the event's comment on f, or reviews the PR when it asks for one; mention matches @bot.
 //
 //nolint:gocognit // one job step by step, each step a few lines
@@ -250,8 +359,9 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		return nil
 	}
 	var about, convo strings.Builder
-	ours := false     // a review thread we started: chat may resolve it
-	resolved := false // someone resolved it already
+	ours := false       // a review thread we started: chat may resolve it
+	resolved := false   // someone resolved it already
+	maintainer := false // the commenter has write access: only they decide on a finding
 
 	if e.Kind == "issue_comment" {
 		cmd := command(mention, c.Body)
@@ -268,12 +378,14 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 				return nil
 			}
 		}
-		if large := ticked || bare == "review all"; large || bare == "review" || bare == "full review" {
+		// "review again and check …" asks for a review too: answered as a question it posts no findings
+		first, _, _ := strings.Cut(bare, " ")
+		if large, profile, ok := reviewCommand(bare); ok || ticked || first == "review" {
 			e.Action = "manual" // anything but synchronize: full review
-			if large {
+			if large || ticked {
 				e.Action = "large"
 			}
-			return Review(ctx, f, e)
+			return Review(ctx, f, e, profile)
 		}
 		if bare == "learnings" || strings.HasPrefix(cmd, "forget ") {
 			return p.Reply(learningsCommand(cmd, f.Bot(), e) + "\n\n" + forge.Mark)
@@ -291,7 +403,15 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			return err
 		}
 		ours, resolved = d.Ours, d.Resolved
-		if !answers(mention, d, c.Body) || newer(mention, d, c.ID, c.User.Login) {
+		// unknown access: answered like a maintainer's (nothing retries a chat job), but no say on the finding
+		maintainer, err = p.CanWrite(c.User.Login)
+		known := err == nil
+		if !known {
+			log.Println(e.Key(), "write access:", err)
+			maintainer = false // a value beside an error is no proof
+		}
+		heard := maintainer || !known
+		if !answers(mention, d, c.Body, heard) || newer(mention, d, c.ID, c.User.Login, heard) {
 			return nil // between humans, for someone else, we said our piece (@us to go on), or they wrote again
 		}
 		if !mention.MatchString(c.Body) {
@@ -304,6 +424,12 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		about.WriteString(d.About)
 		if resolved {
 			about.WriteString("This thread is resolved.\n\n")
+		}
+		switch {
+		case !known:
+			fmt.Fprintf(&about, "@%s's write access is unknown: answer normally, \"resolved\" true only when it is fixed.\n\n", c.User.Login)
+		case !maintainer:
+			fmt.Fprintf(&about, "@%s has no write access: they cannot decline or defer the finding, \"resolved\" true only when it is fixed.\n\n", c.User.Login)
 		}
 		notes := d.Notes
 		if i := slices.IndexFunc(notes, func(n forge.Note) bool { return n.ID == c.ID }); i >= 0 {
@@ -345,7 +471,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	system := chatSystem + review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings))
 	rm, _ := cfg.Models()
 	m := agent.PassModel(rm, "medium")
-	out, err := agent.Pi{}.Run(ctx, sb, "chat", system,
+	out, err := chatAgent.Run(ctx, sb, "chat", system,
 		fmt.Sprintf("# %s\n\n%s\n\n%s## Conversation\n\n%s", forge.Redact(pr.Title), text.Truncate(forge.Redact(pr.Body), 2000), about.String(), convo.String()),
 		"Reply to the last message. End with the JSON object.", m)
 	if err != nil {
@@ -353,7 +479,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	}
 	a, ok := parseAnswer(out)
 	if !ok {
-		out, err = agent.Pi{}.Continue(ctx, sb, "chat", system, chatRepair, m)
+		out, err = chatAgent.Continue(ctx, sb, "chat", system, chatRepair, m)
 		if err != nil {
 			return err
 		}
@@ -379,19 +505,28 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		}
 		body = strings.TrimSpace(body + "\n\n📝 _Learning saved" + scope + ":_ " + l)
 	}
-	if a.Resolved && ours && !resolved {
-		if err := p.ResolveDiscussion(); err != nil {
-			log.Println("resolve:", err)
-		} else if body != "" {
-			body += "\n\n✅ _Thread resolved._"
-		}
-	}
+	resolve := a.Resolved && ours && !resolved && maintainer // a contributor's fix: the next review resolves it
 	if body == "" {
 		log.Println(e.Key(), "nothing to answer", c.User.Login)
-		return nil
+	} else {
+		if resolve {
+			body += "\n\n✅ _Thread resolved._"
+		}
+		log.Println(e.Key(), "answered", c.User.Login)
+		// the commit the answer checked: a push the forge hasn't taken into the PR yet reads as "not fixed" otherwise
+		body += "\n\n🔎 _Checked at " + pr.Head.SHA[:min(7, len(pr.Head.SHA))] + "._"
+		// the answer first: a failed reply leaves the thread open, not resolved without a word
+		if err := p.Reply(body + "\n\n" + forge.Mark); err != nil {
+			return err
+		}
 	}
-	log.Println(e.Key(), "answered", c.User.Login)
-	// the commit the answer checked: a push the forge hasn't taken into the PR yet reads as "not fixed" otherwise
-	body += "\n\n🔎 _Checked at " + pr.Head.SHA[:min(7, len(pr.Head.SHA))] + "._"
-	return p.Reply(body + "\n\n" + forge.Mark)
+	if resolve {
+		if err := p.ResolveDiscussion(); err != nil {
+			log.Println("resolve:", err)
+			if body != "" { // the reply said resolved
+				return p.Reply("⚠️ _Could not resolve this thread, please resolve it by hand._\n\n" + forge.Mark)
+			}
+		}
+	}
+	return nil
 }

@@ -31,6 +31,7 @@ description: The steps of a DiffHarbor review and how to talk to the bot.
 | `@<bot> <question>` | An answer about the PR, from the checkout. |
 | `@<bot> review` | A full review of the PR. |
 | `@<bot> review all` | A large PR reviewed in parts. |
+| `@<bot> review quiet` | A full review with another profile: `quiet`, `chill` or `assertive`, also after `all`. |
 | `@<bot> learnings` | Lists the saved learnings of the repo and its owner. |
 | `@<bot> forget <text>` | Drops the learnings containing the text. Only owners and members drop the owner's. |
 

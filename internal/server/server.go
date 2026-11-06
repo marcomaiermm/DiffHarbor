@@ -80,7 +80,7 @@ func runJob(ctx context.Context, e *forge.Event) error {
 	case e.Kind != "pull_request":
 		return job.Chat(ctx, f, mentions[e.Forge], e)
 	}
-	return review(e, func() error { return job.Review(ctx, f, e) })
+	return review(e, func() error { return job.Review(ctx, f, e, "") })
 }
 
 // repoOf is the repo the scheduler runs e's job on: the forge.RepoID its sandbox's uid belongs to.

@@ -595,7 +595,7 @@ func prepare(d Data) view {
 			if rank := map[string]int{"changed": 1, "signature": 2, "new": 3}; rank[st] > rank[s.State] { // one name twice in a file: the most
 				s.State = st
 			}
-			if heavier(c.c.Sev, s.Sev) && c.c.Sev != "minor" {
+			if heavier(c.c.Sev, s.Sev) && review.Blocks(c.c.Sev) {
 				s.Sev = c.c.Sev
 			}
 		}
@@ -1019,13 +1019,13 @@ func changes(f *file, runs map[int]run) (cs, moves []change) {
 // rank is 1 for a file with a finding that blocks the merge, 0 for the others.
 func rank(f *file) int {
 	for _, fd := range f.Findings {
-		if fd.Severity == "critical" || fd.Severity == "major" {
+		if review.Blocks(fd.Severity) {
 			return 1
 		}
 	}
 	for _, l := range f.Lines {
 		for _, fd := range l.Findings {
-			if fd.Severity == "critical" || fd.Severity == "major" {
+			if review.Blocks(fd.Severity) {
 				return 1
 			}
 		}

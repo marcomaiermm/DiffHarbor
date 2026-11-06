@@ -211,7 +211,7 @@ func TestPost(t *testing.T) {
 		f.drafts[0]["in_reply_to_discussion_id"] != "d7" || f.drafts[0]["resolve_discussion"] != true ||
 		!strings.Contains(f.drafts[1]["note"].(string), "```suggestion:-1+0\n") || pos(1)["new_line"] != 12.0 ||
 		pos(2)["old_line"] != 3.0 || pos(2)["head_sha"] != "abcdef1" || !strings.Contains(f.summary(), "Actionable comments posted: 2") ||
-		!strings.Contains(f.edited, "Outside diff range comments (1)") || !strings.Contains(f.edited, "fix body") ||
+		!strings.Contains(f.edited, "Comments not posted inline (1)") || strings.Contains(f.edited, "Outside diff") || !strings.Contains(f.edited, "fix body") ||
 		!strings.Contains(f.edited, "Suggested fix") || strings.Contains(f.edited, "context line") {
 		t.Fatalf("post: %d %v %v %v\n%s", n, err, f.drafts, f.notes, f.edited)
 	}
@@ -223,7 +223,7 @@ func TestPostNoSummaryDraft(t *testing.T) {
 	p := f.serve()
 	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx}}, nil, postDiff, "f")
 	if err != nil || n != 1 || f.published != 1 || len(f.notes) != 1 || f.edited != "" ||
-		!strings.Contains(f.notes[0], "Outside diff range comments (1)") || !strings.Contains(f.notes[0], "context line") {
+		!strings.Contains(f.notes[0], "Comments not posted inline (1)") || !strings.Contains(f.notes[0], "context line") {
 		t.Fatalf("post: %d %v %v", n, err, f.notes)
 	}
 }
@@ -234,7 +234,7 @@ func TestPostRefused(t *testing.T) {
 	p := f.serve()
 	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx, postFix}}, nil, postDiff, "f")
 	if err != nil || n != 2 || f.published != 1 || f.notes != nil || f.edited != "" ||
-		!strings.Contains(f.summary(), "Outside diff range comments (2)") || !strings.Contains(f.summary(), "context line") {
+		!strings.Contains(f.summary(), "Comments not posted inline (2)") || strings.Contains(f.summary(), "Outside diff") || !strings.Contains(f.summary(), "context line") {
 		t.Fatalf("post: %d %v %v\n%s", n, err, f.notes, f.summary())
 	}
 }
@@ -246,7 +246,7 @@ func TestPostDraftFails(t *testing.T) {
 	p := f.serve()
 	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx, postFix}}, nil, postDiff, "f")
 	if err != nil || n != 2 || f.published != 1 || f.notes != nil ||
-		!strings.Contains(f.edited, "Outside diff range comments (2)") || !strings.Contains(f.edited, "context line") {
+		!strings.Contains(f.edited, "Comments not posted inline (2)") || strings.Contains(f.edited, "Outside diff") || !strings.Contains(f.edited, "context line") {
 		t.Fatalf("post: %d %v %v\n%s", n, err, f.notes, f.edited)
 	}
 }
@@ -311,14 +311,15 @@ func TestPostSummaryOnly(t *testing.T) {
 		f := &fakeMR{t: t}
 		p := f.serve()
 		n, err := p.Post("abcdef1", review.Result{Comments: cs}, nil, postDiff, "f")
-		if err != nil || n != len(cs) || len(f.drafts) != 1 || f.published != 1 || f.states[0] != "reviewed" || f.notes != nil {
+		if err != nil || n != len(cs) || len(f.drafts) != 1 || f.published != 1 || f.states[0] != "reviewed" || f.notes != nil ||
+			cs != nil && (!strings.Contains(f.summary(), "Outside diff range comments (1)") || strings.Contains(f.summary(), "not posted inline")) {
 			t.Fatalf("post: %d %v %v %v", n, err, f.drafts, f.notes)
 		}
 	}
 }
 
 // gitlab_findings discussions: the note comes first. A suggestion GitLab refuses goes without it, a line it refuses
-// into the note.
+// into the note under its own heading, apart from the findings outside the diff.
 func TestPostDiscussions(t *testing.T) {
 	var discussions []map[string]any
 	var summary string
@@ -348,14 +349,16 @@ func TestPostDiscussions(t *testing.T) {
 	src := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +10,4 @@\n ctx\n-old\n+\tif x {\n+\t\treturn\n ctx2\n"
 	fix := review.Comment{Path: "a.go", Line: 11, Severity: "major", Body: "b", Existing: "\tif x {\n\t\treturn\n", Fix: "\tif x != nil {\n\t\treturn\n"}
 	ctx := review.Comment{Path: "a.go", Line: 13, Body: "context line"}
-	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{fix, ctx}}, nil, src, "f")
+	out := review.Comment{Path: "b.go", Line: 1, Body: "elsewhere"}
+	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{fix, ctx, out}}, nil, src, "f")
 	pos := func(i int) map[string]any { return discussions[i]["position"].(map[string]any) }
-	if err != nil || n != 2 || len(discussions) != 3 || !first ||
+	if err != nil || n != 3 || len(discussions) != 3 || !first ||
 		!strings.Contains(discussions[0]["body"].(string), "```suggestion:-1+0\n") || pos(0)["new_line"] != 12.0 ||
 		strings.Contains(discussions[1]["body"].(string), "suggestion") || pos(1)["new_line"] != 11.0 || pos(1)["old_line"] != nil ||
 		pos(2)["old_line"] != 3.0 || pos(2)["head_sha"] != "abcdef1" ||
-		!strings.Contains(summary, "Actionable comments posted: 2") || !strings.Contains(summary, "<summary><b>⚠️ Outside diff range comments (1)</b></summary>") ||
-		!strings.Contains(summary, "context line") {
+		!strings.Contains(summary, "Actionable comments posted: 3") || !strings.Contains(summary, "<summary><b>⚠️ Outside diff range comments (1)</b></summary>") ||
+		!strings.Contains(summary, "<summary><b>💬 Comments not posted inline (1)</b></summary>") ||
+		strings.Index(summary, "elsewhere") > strings.Index(summary, "Comments not posted inline") || !strings.Contains(summary, "context line") {
 		t.Fatalf("post: %d %v %v\n%s", n, err, discussions, summary)
 	}
 }
@@ -385,7 +388,7 @@ func TestPostDiscussionsFails(t *testing.T) {
 	src := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,2 @@\n ctx\n+new\n"
 	c := review.Comment{Path: "a.go", Line: 2, Body: "lost?"}
 	if _, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{c}}, nil, src, "f"); err == nil ||
-		!strings.Contains(summary, "Outside diff range comments (1)") || !strings.Contains(summary, "lost?") {
+		!strings.Contains(summary, "Comments not posted inline (1)") || strings.Contains(summary, "Outside diff") || !strings.Contains(summary, "lost?") {
 		t.Fatalf("post: %v\n%s", err, summary)
 	}
 }
@@ -492,5 +495,32 @@ func TestInert(t *testing.T) {
 	if !strings.Contains(bodies[0], "```suggestion:-1+0\n// keep\nx := 1\n```") || strings.Contains(bodies[1], "suggestion") ||
 		!strings.Contains(bodies[1], "\\/approve") || !strings.Contains(bodies[0], "\\/merge") {
 		t.Fatalf("%q", bodies)
+	}
+}
+
+// A folded finding on a diff line gets no draft of its own: the summary has it, folded, and it doesn't count.
+func TestPostFolded(t *testing.T) {
+	f := &fakeMR{t: t}
+	p := f.serve()
+	nit := review.Comment{Path: "a.go", Line: 13, Severity: "nit", Title: "name", Body: "b", Fold: true}
+	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postFix, nit}}, nil, postDiff, "f")
+	if err != nil || n != 1 || len(f.drafts) != 2 || !strings.Contains(f.summary(), "🧹 Nitpicks (1)") ||
+		!strings.Contains(f.summary(), "Actionable comments posted: 1") {
+		t.Fatalf("post: %d %v %v\n%s", n, err, f.drafts, f.summary())
+	}
+}
+
+// A resolved thread keeps the maintainer's answer, so a declined point isn't reported again; system notes stay out.
+func TestThreadsReplies(t *testing.T) {
+	serve(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `[{"id":"d1","notes":[{"id":1,"body":"finding","resolved":true,"author":{"username":"review-bot"},"position":{"new_path":"a.ts","new_line":3}},`+
+			`{"id":2,"body":"changed this line","system":true},{"id":3,"body":"won't split","author":{"username":"kev"}}]}]`)
+	})
+	e := &forge.Event{Forge: "gitlab"}
+	e.Repository.ID, e.PullRequest.Number = 5, 3
+	p, _ := (&Hub{}).Open(e)
+	ts, err := p.Threads()
+	if err != nil || len(ts) != 1 || !ts[0].Resolved || ts[0].Replies != "\n\n**@kev**: won't split" {
+		t.Fatalf("%+v %v", ts, err)
 	}
 }
