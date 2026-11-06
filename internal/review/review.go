@@ -882,9 +882,15 @@ func TrustedContext(rules, learnings string) string {
 
 // Fence wraps s in a code block that its own backticks can't close: the fence is longer than any run in s.
 func Fence(s string) string {
-	f := "````"
-	for strings.Contains(s, f) {
-		f += "`"
+	longest, run := 3, 0
+	for i := range len(s) {
+		if s[i] != '`' {
+			run = 0
+			continue
+		}
+		run++
+		longest = max(longest, run)
 	}
+	f := strings.Repeat("`", longest+1)
 	return f + "\n" + s + "\n" + f
 }
