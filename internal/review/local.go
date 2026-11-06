@@ -117,8 +117,8 @@ func gitAuth(token string) []string {
 }
 
 // Since is the diff from an earlier head from to the head Checkout put in repo, with the same ctx and token: what
-// a push changed. "" when from can't be fetched, e.g. gone in a force push.
-func Since(ctx context.Context, repo, from, token string) string {
+// a push changed. "" when from can't be fetched, e.g. gone in a force push; an error when it was and git still failed.
+func Since(ctx context.Context, repo, from, token string) (string, error) {
 	git := func(args ...string) (string, error) {
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		defer cancel()
@@ -127,14 +127,14 @@ func Since(ctx context.Context, repo, from, token string) string {
 	}
 	if _, err := git("cat-file", "-e", from+"^{commit}"); err != nil { // older than the fetched history
 		if _, err := git("fetch", "-q", "--filter=blob:none", "--depth=1", "origin", from); err != nil {
-			return ""
+			return "", nil
 		}
 	}
 	out, err := git("diff", "-M", from, "HEAD")
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("git diff since %s: %w", from, err)
 	}
-	return out
+	return out, nil
 }
 
 // Commit is one commit of the PR: its subject and size.

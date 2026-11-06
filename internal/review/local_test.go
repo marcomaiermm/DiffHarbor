@@ -57,10 +57,10 @@ git rev-parse pr`)
 	if _, err := Checkout(context.Background(), repo, "file://"+origin, next, "refs/heads/main", "t"); err != nil {
 		t.Fatal(err)
 	}
-	if d := Since(context.Background(), repo, head, "t"); strings.Join(diff.Paths(d), ",") != "b.txt" || !strings.Contains(d, "+3") {
+	if d, err := Since(context.Background(), repo, head, "t"); err != nil || strings.Join(diff.Paths(d), ",") != "b.txt" || !strings.Contains(d, "+3") {
 		t.Fatalf("Since:\n%s", d)
 	}
-	if d := Since(context.Background(), repo, strings.Repeat("ab", 20), "t"); d != "" {
+	if d, err := Since(context.Background(), repo, strings.Repeat("ab", 20), "t"); d != "" || err != nil {
 		t.Fatalf("Since an unknown head: %q", d)
 	}
 }

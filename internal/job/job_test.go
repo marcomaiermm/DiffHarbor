@@ -417,14 +417,16 @@ func TestReviewCommand(t *testing.T) {
 }
 
 // Only folded findings: an incremental review posts nothing, they'd come back on every push. A full one always posts.
-// A finding on a thread's line counts as none: Split drops it.
+// A finding on a thread's line counts as none, an inline one within 5 lines of it too: Split drops them.
 func TestPosts(t *testing.T) {
 	nits := []review.Comment{{Path: "a.go", Line: 1, Severity: "nit", Fold: true}}
 	minor := review.Comment{Path: "a.go", Line: 2, Severity: "minor"}
 	on := []forge.Thread{{Path: "a.go", Line: 2}}
 	r := func(cs ...review.Comment) review.Result { return review.Result{Comments: cs} }
-	if posts(false, r(nits...), nil) || posts(false, r(), nil) || !posts(true, r(), nil) || !posts(false, r(nits[0], minor), nil) ||
-		posts(false, r(nits[0], minor), on) {
+	near := review.Comment{Path: "a.go", Line: 5, Severity: "minor"}
+	lines := map[string]string{"a.go:5": "x"}
+	if posts(false, r(nits...), nil, nil) || posts(false, r(), nil, nil) || !posts(true, r(), nil, nil) || !posts(false, r(nits[0], minor), nil, nil) ||
+		posts(false, r(nits[0], minor), on, nil) || posts(false, r(near), on, lines) || !posts(false, r(near), on, nil) {
 		t.Fatal("posts")
 	}
 }
