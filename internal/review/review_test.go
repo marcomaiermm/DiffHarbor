@@ -325,3 +325,11 @@ func TestAPIChanges(t *testing.T) {
 		t.Fatalf("apiChanges: %v %v %q", removed, added, cl)
 	}
 }
+
+// Fence is one backtick longer than the longest run in s, at least four.
+func TestFence(t *testing.T) {
+	long := strings.Repeat("`", 100000)
+	if Fence("x") != "````\nx\n````" || Fence("a ``` b") != "````\na ``` b\n````" || Fence(long) != long+"`\n"+long+"\n"+long+"`" {
+		t.Fatal(Fence("a ``` b"))
+	}
+}

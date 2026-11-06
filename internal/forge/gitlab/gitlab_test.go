@@ -220,7 +220,7 @@ func TestInert(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 	var bodies []string
-	serve(t, func(w http.ResponseWriter, r *http.Request) {
+	serve(t, func(_ http.ResponseWriter, r *http.Request) {
 		var b map[string]any
 		json.NewDecoder(r.Body).Decode(&b)
 		bodies = append(bodies, b["body"].(string))
