@@ -368,5 +368,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		return nil
 	}
 	log.Println(e.Key(), "answered", c.User.Login)
+	// the commit the answer checked: a push the forge hasn't taken into the PR yet reads as "not fixed" otherwise
+	body += "\n\n🔎 _Checked at " + pr.Head.SHA[:min(7, len(pr.Head.SHA))] + "._"
 	return p.Reply(body + "\n\n" + forge.Mark)
 }
