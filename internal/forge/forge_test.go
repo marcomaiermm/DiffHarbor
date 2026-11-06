@@ -28,12 +28,17 @@ func TestPlace(t *testing.T) {
 		t.Fatalf("diff fence: %q", got)
 	}
 	// Trimmed once, placed or not, inline or outside the diff: a fix's last blank line stays.
-	cs := []review.Comment{{Path: "a.go", Line: 11, Existing: "nope\n\n", Fix: "y\n\n"}, {Path: "a.go", Line: 40, Existing: "nope\n\n", Fix: "y\n\n"}, {Path: "a.go", Line: 41, Existing: "x\n", Fix: "x"}}
+	// A fix that is a blank line stays one, placed or not.
+	cs := []review.Comment{{Path: "a.go", Line: 11, Existing: "nope\n\n", Fix: "y\n\n"}, {Path: "a.go", Line: 40, Existing: "nope\n\n", Fix: "y\n\n"}, {Path: "a.go", Line: 41, Existing: "x\n", Fix: "x"},
+		{Path: "a.go", Line: 42, Existing: "x", Fix: "\n"}, {Path: "a.go", Line: 11, Existing: "\tif x {\n", Fix: "\n"}}
 	inline, rest := Split(review.Result{Comments: cs}, nil, lines)
+	if len(inline) != 2 || len(rest) != 3 {
+		t.Fatalf("split: %d inline, %d rest", len(inline), len(rest))
+	}
 	want := "````diff\n-nope\n-\n+y\n+\n````"
-	if len(inline) != 1 || len(rest) != 2 || !strings.Contains(Format(inline[0], "suggestion"), want) || !strings.Contains(Format(rest[0], ""), want) ||
-		strings.Contains(Format(rest[1], ""), "diff") {
-		t.Fatalf("split: %q %q %q", Format(inline[0], "suggestion"), Format(rest[0], ""), Format(rest[1], ""))
+	if !strings.Contains(Format(inline[0], "suggestion"), want) || !strings.Contains(Format(rest[0], ""), want) || strings.Contains(Format(rest[1], ""), "diff") ||
+		!strings.Contains(Format(rest[2], ""), "````diff\n-x\n+\n````") || !strings.HasSuffix(Format(inline[1], "suggestion"), "```suggestion\n\n```") {
+		t.Fatalf("split: %q %q %q %q %q", Format(inline[0], "suggestion"), Format(rest[0], ""), Format(rest[1], ""), Format(rest[2], ""), Format(inline[1], "suggestion"))
 	}
 }
 
