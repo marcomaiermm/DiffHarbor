@@ -142,18 +142,19 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	if err != nil {
 		return err
 	}
-	// Earlier findings on the files under review: the model must not repeat them and may report open ones fixed.
-	// Closed ones were fixed or declined; without them a declined finding comes back on the next push.
+	// Earlier findings on the PR's files, also the ones this push left alone: findings go on the whole PR diff. The
+	// model must not repeat them and may report open ones fixed. Closed ones were fixed or declined; without them a
+	// declined finding comes back on the next push.
 	files := diff.Paths(d)
 	var open []forge.Thread
 	var prior, closed []review.Comment
 	for _, t := range threads {
-		if !slices.Contains(files, t.Path) {
+		if !slices.Contains(prFiles, t.Path) {
 			continue
 		}
-		c := review.Comment{Path: t.Path, Line: cmp.Or(t.Line, t.Original), Body: text.Truncate(strings.ReplaceAll(forge.Redact(t.Body), forge.Mark, ""), 600)}
-		if t.Resolved { // with the replies: a point declined there would come back as a new finding
-			c.Body += t.Replies
+		// with the replies: a point declined there would come back as a new finding
+		c := review.Comment{Path: t.Path, Line: cmp.Or(t.Line, t.Original), Body: text.Truncate(strings.ReplaceAll(forge.Redact(t.Body), forge.Mark, ""), 600) + t.Replies}
+		if t.Resolved {
 			closed = append(closed, c)
 		} else {
 			open = append(open, t)
@@ -191,6 +192,14 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	}
 	for _, i := range r.Fixed {
 		p.Resolve(open[i], sha)
+	}
+	if only != nil { // a push: minor findings only on what it changed, else every push finds new edge cases
+		if since := review.Since(ctx, filepath.Join(dir, "repo"), s.State.SHA, read); since != "" {
+			n := len(r.Comments)
+			if r.Comments = review.Fresh(r.Comments, diff.RightLines(since, true)); n > len(r.Comments) {
+				log.Println(key, n-len(r.Comments), "minor findings off the push dropped")
+			}
+		}
 	}
 
 	kind := "full"

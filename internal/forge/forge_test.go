@@ -29,6 +29,16 @@ func TestPlace(t *testing.T) {
 	}
 }
 
+// A finding a few lines off an open or closed thread is its repeat; past 5 lines or in another file it is new.
+func TestSplitNearThread(t *testing.T) {
+	lines := map[string]string{"a.ts:120": "x", "a.ts:122": "x", "b.ts:116": "x"}
+	r := review.Result{Comments: []review.Comment{{Path: "a.ts", Line: 115}, {Path: "a.ts", Line: 122}, {Path: "b.ts", Line: 116}, {Path: "a.ts", Line: 120}}}
+	inline, rest := Split(r, []Thread{{Path: "a.ts", Line: 118, Resolved: true}, {Path: "a.ts", Line: 127}}, lines)
+	if len(inline) != 1 || inline[0].Path != "b.ts" || len(rest) != 0 {
+		t.Fatalf("inline %+v rest %+v", inline, rest)
+	}
+}
+
 func TestFormat(t *testing.T) {
 	c := Finding{Comment: review.Comment{Severity: "major", Title: "t", Body: "b", Prompt: "In a.go around line 3, use ````x````"}}
 	got := Format(c, "suggestion")

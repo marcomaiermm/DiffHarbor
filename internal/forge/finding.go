@@ -97,20 +97,15 @@ func Place(c *Finding, lines map[string]string) {
 }
 
 // Split sorts a review's findings: the ones on diff lines (lines) to post inline, placed, and the rest. Lines
-// that already have one of threads get nothing new.
+// within 5 of one of threads get nothing new: a repeat lands a line or two off the first.
+// ponytail: by position only, a different finding next to a thread goes too; compare titles if that bites.
 func Split(r review.Result, threads []Thread, lines map[string]string) (inline, rest []Finding) {
-	seen := map[string]bool{}
-	for _, t := range threads {
-		if t.Line > 0 {
-			seen[fmt.Sprintf("%s:%d", t.Path, t.Line)] = true
-		}
-	}
 	for _, rc := range r.Comments { // review.Analyze caps them: 10 per part
 		c := Finding{Comment: rc}
-		at := fmt.Sprintf("%s:%d", c.Path, c.Line)
-		if seen[at] {
+		if slices.ContainsFunc(threads, func(t Thread) bool { return t.Line > 0 && t.Path == c.Path && abs(t.Line-c.Line) <= 5 }) {
 			continue
 		}
+		at := fmt.Sprintf("%s:%d", c.Path, c.Line)
 		if _, ok := lines[at]; ok {
 			Place(&c, lines)
 			inline = append(inline, c)
@@ -160,3 +155,5 @@ func Summary(inline, rest []Finding, footer string) string {
 	parts = append(parts, "<details>\n<summary>ℹ️ Review info</summary>\n\n<sub>"+footer+"</sub>\n\n</details>\n\n"+Mark)
 	return strings.Join(parts, "\n\n")
 }
+
+func abs(n int) int { return max(n, -n) }

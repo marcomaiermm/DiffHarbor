@@ -51,4 +51,16 @@ git rev-parse pr`)
 	if m := Messages(context.Background(), repo); m != "- pr" {
 		t.Fatalf("Messages: %q", m)
 	}
+	// a push on top: Since is its change only; a head it can't fetch, none
+	next := sh("git checkout -q pr; echo 3 > b.txt; git commit -q -am push; git rev-parse HEAD")
+	repo = filepath.Join(t.TempDir(), "repo")
+	if _, err := Checkout(context.Background(), repo, "file://"+origin, next, "refs/heads/main", "t"); err != nil {
+		t.Fatal(err)
+	}
+	if d := Since(context.Background(), repo, head, "t"); strings.Join(diff.Paths(d), ",") != "b.txt" || !strings.Contains(d, "+3") {
+		t.Fatalf("Since:\n%s", d)
+	}
+	if d := Since(context.Background(), repo, strings.Repeat("ab", 20), "t"); d != "" {
+		t.Fatalf("Since an unknown head: %q", d)
+	}
 }

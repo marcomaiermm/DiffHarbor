@@ -2,6 +2,7 @@ package review
 
 import (
 	"diffharbor/internal/agent"
+	"diffharbor/internal/diff"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -150,6 +151,11 @@ func TestSettings(t *testing.T) {
 	}
 	if cfg.Keep(Comment{Severity: "minor"}) || !cfg.Keep(Comment{Severity: "critical"}) || !(Settings{}).Keep(Comment{Severity: "minor"}) {
 		t.Error("keep")
+	}
+	// a push: a minor finding stays on what it touched, a major one anywhere
+	near := diff.RightLines("diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -10,2 +10,3 @@\n ctx\n+new\n ctx\n", true)
+	if got := Fresh([]Comment{{Path: "a.ts", Line: 11, Severity: "minor"}, {Path: "a.ts", Line: 260, Severity: "minor"}, {Path: "a.ts", Line: 265, Severity: "major"}, {Path: "b.ts", Line: 11, Severity: "minor"}}, near); len(got) != 2 || got[0].Line != 11 || got[1].Line != 265 {
+		t.Errorf("fresh: %+v", got)
 	}
 	if _, err := LoadSettings(`{"min_severity":"high"}`); err == nil {
 		t.Error("min_severity high accepted")
