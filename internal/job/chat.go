@@ -102,6 +102,9 @@ func parseAnswer(out string) (a answer, ok bool) {
 	return a, agent.Object(out, &a) && a.Reply != nil
 }
 
+// chatAgent runs the chat pass: agent.Pi, a fake in tests.
+var chatAgent review.Agent = agent.Pi{}
+
 const chatRepair = "Your last message ended without the required JSON. Do not call tools. Output the JSON object with reply and learning now, using the evidence you already gathered. No prose outside the JSON."
 
 // Learnings live per repo (owner__repo.md) and per owner (owner.md, shared by all the owner's repos).
@@ -340,7 +343,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	system := chatSystem + review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings))
 	rm, _ := cfg.Models()
 	m := agent.PassModel(rm, "medium")
-	out, err := agent.Pi{}.Run(ctx, dir, "chat", system,
+	out, err := chatAgent.Run(ctx, dir, "chat", system,
 		fmt.Sprintf("# %s\n\n%s\n\n%s## Conversation\n\n%s", forge.Redact(pr.Title), text.Truncate(forge.Redact(pr.Body), 2000), about.String(), convo.String()),
 		"Reply to the last message. End with the JSON object.", m)
 	if err != nil {
@@ -348,7 +351,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	}
 	a, ok := parseAnswer(out)
 	if !ok {
-		out, err = agent.Pi{}.Continue(ctx, dir, "chat", system, chatRepair, m)
+		out, err = chatAgent.Continue(ctx, dir, "chat", system, chatRepair, m)
 		if err != nil {
 			return err
 		}
