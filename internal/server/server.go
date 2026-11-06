@@ -32,6 +32,7 @@ import (
 )
 
 var (
+	// Review decides on drafts (review.json's drafts). Turned to draft brings no new code: a running review finishes.
 	actions = map[string]bool{"opened": true, "synchronize": true, "reopened": true, "ready_for_review": true}
 	trusted = map[string]bool{"OWNER": true, "MEMBER": true, "COLLABORATOR": true}
 	// The code hosts the server takes webhooks from, at /webhook/<name>, and @bot in their comments.
@@ -112,9 +113,9 @@ func work(queue chan *forge.Event) {
 	}
 }
 
-// closing is a PR closed or turned to draft: its reports go.
+// closing is a PR closed: its reports go.
 func closing(e *forge.Event) bool {
-	return e.Kind == "pull_request" && (e.Action == "closed" || e.Action == "converted_to_draft")
+	return e.Kind == "pull_request" && e.Action == "closed"
 }
 
 // drop deletes a closed PR's reports while its deletingFile is there: none means it was reopened or done since.
@@ -225,7 +226,7 @@ func Serve(cfg Config) {
 				return
 			}
 			stop(e.Key(), false)
-		case e.Kind == "pull_request" && actions[e.Action] && !e.PullRequest.Draft:
+		case e.Kind == "pull_request" && actions[e.Action]:
 			latest.Lock()
 			latest.m[e.Key()] = e.PullRequest.Head.SHA
 			if e.Action == "reopened" || e.Action == "ready_for_review" { // not a late push: its close still deletes
@@ -472,6 +473,7 @@ func retryDrops(queue chan *forge.Event) {
 			_ = os.Remove(f)
 			continue
 		}
+		e.Action = "closed" // a delete whatever saved it: a converted_to_draft from before drafts kept the reports
 		select {
 		case queue <- e:
 		default: // stays for the next round
