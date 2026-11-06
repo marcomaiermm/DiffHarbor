@@ -24,7 +24,7 @@ const chatSystem = `You reviewed this pull request; a maintainer now asks or rep
 Reply in the language of the last message. Answer briefly and concretely: the answer, evidence as path:line, a patch snippet if a change is asked for (you cannot push).
 "Fixed" claims: check the code at HEAD. Fixed → confirm in one or two sentences. Not or only partly fixed → say what is still wrong, with evidence.
 Disagreement on whether the finding is correct: re-check it. If the maintainer is right, concede. If you are still right, push back with evidence once; do not give in to be polite.
-Pushed back once already in this thread and the maintainer still declines: the decision is theirs, concede in one or two friendly sentences, "resolved" true. If you still see a risk, put it and its evidence, briefly, in a collapsed "<details><summary>Why I still see a risk</summary>…</details>" block so they can look again; do not repeat it in the open text.
+Pushed back once already to this same maintainer and they still decline with no new argument or evidence: the decision is theirs, concede in one or two friendly sentences, "resolved" true. If you still see a risk, put it and its evidence, briefly, in a collapsed "<details><summary>Why I still see a risk</summary>…</details>" block so they can look again; do not repeat it in the open text.
 Deferred or not worth fixing (a follow-up ticket, too unlikely, too much code): the maintainer's call, accept it, "resolved" true.
 Except the first time if merging as is loses or leaks data, opens a security hole or breaks what works today: say what and how to avoid it, "resolved" false. Pushed back once already in this thread: accept.
 Maintainers disagree with each other: your evidence if asked, the decision is theirs, "resolved" false.
@@ -237,8 +237,9 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		return nil
 	}
 	var about, convo strings.Builder
-	ours := false     // a review thread we started: chat may resolve it
-	resolved := false // someone resolved it already
+	ours := false       // a review thread we started: chat may resolve it
+	resolved := false   // someone resolved it already
+	maintainer := false // the commenter has write access: only they decide on a finding
 
 	if e.Kind == "issue_comment" {
 		cmd := command(mention, c.Body)
@@ -278,9 +279,8 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			return err
 		}
 		ours, resolved = d.Ours, d.Resolved
-		maintainer, err := p.CanWrite(c.User.Login)
-		if err != nil {
-			log.Println(e.Key(), "write access:", err) // unknown: no maintainer's say
+		if maintainer, err = p.CanWrite(c.User.Login); err != nil {
+			return err // unknown is no "no": the job retries
 		}
 		if !answers(mention, d, c.Body, maintainer) || newer(mention, d, c.ID, c.User.Login, maintainer) {
 			return nil // between humans, for someone else, we said our piece (@us to go on), or they wrote again
@@ -366,7 +366,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		}
 		body = strings.TrimSpace(body + "\n\n📝 _Learning saved" + scope + ":_ " + l)
 	}
-	if a.Resolved && ours && !resolved {
+	if a.Resolved && ours && !resolved && maintainer { // a contributor's fix: the next review resolves it
 		if err := p.ResolveDiscussion(); err != nil {
 			log.Println("resolve:", err)
 		} else if body != "" {

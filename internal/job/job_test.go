@@ -392,3 +392,23 @@ func TestThanks(t *testing.T) {
 		}
 	}
 }
+
+// A failed write-access check is no "no": Chat returns it for a retry instead of dropping the reply.
+type deniedPR struct{ reactPR }
+
+func (*deniedPR) CanWrite(string) (bool, error) { return false, errors.New("503") }
+
+type deniedForge struct {
+	skipForge
+	pr *deniedPR
+}
+
+func (f deniedForge) Open(*forge.Event) (forge.PR, error) { return f.pr, nil }
+
+func TestChatRetriesAccessCheck(t *testing.T) {
+	e := &forge.Event{Kind: "pull_request_review_comment"}
+	e.Comment.Body = "why?"
+	if err := Chat(t.Context(), deniedForge{pr: &deniedPR{}}, regexp.MustCompile(`@bot`), e); err == nil || err.Error() != "503" {
+		t.Fatal(err)
+	}
+}
