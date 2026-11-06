@@ -119,11 +119,15 @@ func (p *pool) add(e *forge.Event) bool {
 	return ok
 }
 
-// start starts the jobs the scheduler lets run; the caller holds mu. A finished job frees its repo and starts the next.
+// start starts the jobs the scheduler lets run; the caller holds mu. Each is in running before mu is free: a close or
+// push stops it also before it ran. A finished job frees its repo and starts the next.
 func (p *pool) start() {
 	for repo, e, ok := p.s.next(); ok; repo, e, ok = p.s.next() {
+		ctx, cancel := context.WithCancel(context.Background())
+		t := &task{review: e.Kind == "pull_request", cancel: cancel}
+		p.running[e.Key()] = t
 		go func() {
-			p.exec(e)
+			p.exec(ctx, e, t)
 			p.mu.Lock()
 			defer p.mu.Unlock()
 			p.s.free(repo)
@@ -132,17 +136,12 @@ func (p *pool) start() {
 	}
 }
 
-// exec runs e's job, stoppable through running. A panic ends only this job, as a failed one: done drops its pending
-// review, so a restart doesn't run into it again.
-func (p *pool) exec(e *forge.Event) {
+// exec runs e's job, t in running. A panic ends only this job, as a failed one: done drops its pending review, so a
+// restart doesn't run into it again.
+func (p *pool) exec(ctx context.Context, e *forge.Event, t *task) {
 	key := e.Key()
-	ctx, cancel := context.WithCancel(context.Background())
-	t := &task{review: e.Kind == "pull_request", cancel: cancel}
-	p.mu.Lock()
-	p.running[key] = t
-	p.mu.Unlock()
 	defer func() {
-		cancel() // revokes the job's vault tokens: git's remote, Pi's keys
+		t.cancel() // revokes the job's vault tokens: git's remote, Pi's keys
 		done(key)
 		p.mu.Lock()
 		if p.running[key] == t {

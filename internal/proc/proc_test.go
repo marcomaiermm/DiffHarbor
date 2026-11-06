@@ -295,3 +295,51 @@ func TestDirtyUID(t *testing.T) {
 		t.Fatal(cleared)
 	}
 }
+
+// A rewritten file keeps its mode: a restored lockfile is the one the PR has.
+func TestWriteFileMode(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "lock")
+	if err := os.WriteFile(f, []byte("a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&Sandbox{}).WriteFile(t.Context(), f, []byte("b")); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(f); err != nil || fi.Mode().Perm() != 0o755 {
+		t.Fatal(fi.Mode(), err)
+	}
+}
+
+// A process list that can't be read is no "all dead": the uid stays dirty. One that ended since is no error.
+func TestKillLeftoversFailsClosed(t *testing.T) {
+	defer func(d string) { procDir = d }(procDir)
+	none := func(int) bool { return false }
+	procDir = filepath.Join(t.TempDir(), "missing")
+	if killLeftovers(none) == nil {
+		t.Fatal("no /proc, no error")
+	}
+	procDir = t.TempDir()
+	os.Mkdir(filepath.Join(procDir, "7"), 0o755) // ended: no status
+	if err := killLeftovers(none); err != nil {
+		t.Fatal(err)
+	}
+	os.Mkdir(filepath.Join(procDir, "7", "status"), 0o755) // there, but unreadable
+	if killLeftovers(none) == nil {
+		t.Fatal("an unread status, no error")
+	}
+}
+
+// A job's file in a world-writable dir root made goes, the dir stays.
+func TestCleanTmpNested(t *testing.T) {
+	if os.Getuid() != 0 {
+		t.Skip("needs root to own the dir and chown the file")
+	}
+	dir := t.TempDir()
+	shared, f := filepath.Join(dir, "shared"), filepath.Join(dir, "shared", "f")
+	if err := errors.Join(os.Mkdir(shared, 0o777), os.WriteFile(f, nil, 0o600), os.Lchown(f, 12345, 12345)); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanTmp(func(uid int) bool { return uid == 12345 }, dir); err != nil || Exists(f) || !Exists(shared) {
+		t.Fatal(err, Exists(f), Exists(shared))
+	}
+}

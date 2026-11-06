@@ -366,12 +366,13 @@ func (s *Sandbox) ReadFile(ctx context.Context, p string) ([]byte, error) {
 }
 
 // WriteFile writes b to p, as the job's user when we're root, a new file in its place: what PR code left there (a
-// symlink, a FIFO that would block the write and the job) is neither followed nor opened.
+// symlink, a FIFO that would block the write and the job) is neither followed nor opened. A regular file's mode stays.
 func (s *Sandbox) WriteFile(ctx context.Context, p string, b []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	// set -C creates with O_EXCL, but opens a FIFO planted after rm: the timeout ends that race's wait.
-	c := s.Command(ctx, "/", nil, "sh", "-c", `rm -f -- "$1" && set -C && cat > "$1"`, "sh", p)
+	c := s.Command(ctx, "/", nil, "sh", "-c", `m=; [ -f "$1" ] && [ ! -L "$1" ] && m=$(stat -c %a -- "$1")
+rm -f -- "$1" && set -C && cat > "$1" && { [ -z "$m" ] || chmod -- "$m" "$1"; }`, "sh", p)
 	c.Stdin = bytes.NewReader(b)
 	_, err := Run(c)
 	return err
@@ -461,6 +462,9 @@ func resolved(p string) string {
 	return p
 }
 
+// procDir lists the processes killLeftovers checks. A var: tests can't break /proc.
+var procDir = "/proc"
+
 // tmpDirs are the temp dirs all users share: TMPDIR is the job's own, but code may write to any of them.
 var tmpDirs = []string{"/tmp", "/var/tmp", "/dev/shm"}
 
@@ -469,19 +473,56 @@ func clearUsers(of func(uid int) bool) error {
 	return errors.Join(killLeftovers(of), cleanTmp(of, tmpDirs...))
 }
 
-// cleanTmp removes what the users whose uid is of left in dirs: the next job's code would find it.
+// cleanTmp removes what the users whose uid is of left in dirs, also inside a dir root or the image made
+// world-writable (/tmp/.X11-unix): the next job's code would find it.
 func cleanTmp(of func(uid int) bool, dirs ...string) error {
 	for _, dir := range dirs {
-		ds, err := os.ReadDir(dir)
-		if err != nil && !errors.Is(err, os.ErrNotExist) { // what is left there would reach the next job
+		r, err := os.OpenRoot(dir) // a dir swapped for a symlink leads nowhere outside dir
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil { // what is left there would reach the next job
 			return err
 		}
-		for _, d := range ds {
-			p := filepath.Join(dir, d.Name())
-			if fi, err := os.Lstat(p); err != nil || !of(owner(fi)) {
-				continue
+		err = cleanIn(r, of, 0)
+		r.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cleanIn(r *os.Root, of func(uid int) bool, depth int) error {
+	f, err := r.Open(".")
+	if err != nil {
+		return err
+	}
+	ds, err := f.ReadDir(-1)
+	f.Close()
+	if err != nil {
+		return err
+	}
+	for _, d := range ds {
+		fi, err := r.Lstat(d.Name())
+		switch {
+		case errors.Is(err, os.ErrNotExist): // gone since
+		case err != nil:
+			return err
+		case of(owner(fi)):
+			if err := r.RemoveAll(d.Name()); err != nil { // as root: past a user's chmod 000, and never through a symlink
+				return err
 			}
-			if err := os.RemoveAll(p); err != nil { // as root: past a user's chmod 000, and never through a symlink
+		// Not a job user's dir: those go with their own job. The depth bounds a loop of symlinks swapped in.
+		case fi.IsDir() && owner(fi) < firstUID && depth < 8:
+			sub, err := r.OpenRoot(d.Name())
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			} else if err != nil {
+				return err
+			}
+			err = cleanIn(sub, of, depth+1)
+			sub.Close()
+			if err != nil {
 				return err
 			}
 		}
@@ -496,12 +537,20 @@ func cleanTmp(of func(uid int) bool, dirs ...string) error {
 func killLeftovers(of func(uid int) bool) error {
 	for round := 0; ; round++ { // the pids limit may leave the killer no pid: then one by one, and again
 		left := map[uint32][]int{}
-		ds, _ := os.ReadDir("/proc")
+		ds, err := os.ReadDir(procDir) // none read: none checked, so never "all dead"
+		if err != nil {
+			return err
+		}
 		for _, d := range ds {
 			pid, err := strconv.Atoi(d.Name())
-			b, _ := os.ReadFile("/proc/" + d.Name() + "/status")
-			if err != nil || b == nil {
+			if err != nil {
 				continue
+			}
+			b, err := os.ReadFile(filepath.Join(procDir, d.Name(), "status"))
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) { // ended since
+				continue
+			} else if err != nil {
+				return err
 			}
 			uid, zombie := 0, false
 			for _, l := range strings.Split(string(b), "\n") {

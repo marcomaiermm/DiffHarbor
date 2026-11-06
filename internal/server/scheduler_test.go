@@ -130,3 +130,26 @@ func TestSchedulerOne(t *testing.T) {
 		s.free(want[:1])
 	}
 }
+
+// A push's review takes the place of the PR's waiting one, also in a full queue; answers and others' reviews stay.
+func TestSchedulerReplaces(t *testing.T) {
+	s := newScheduler(1, 3)
+	queued(s, ev("a", 1, ""), ev("b", 1, ""), ev("a", 1, "issue_comment"))
+	if !s.add("a", ev("a", 1, "")) || s.add("c", ev("c", 1, "")) {
+		t.Fatal("no replace, or room freed past it")
+	}
+	var got []string
+	for e := started(s); e != ""; e = started(s) {
+		got = append(got, e)
+		s.free(e[:1])
+	}
+	if want := []string{"a#1", "b#1", "a#1"}; !slices.Equal(got, want) { // a's answer, b's review, a's newest review
+		t.Fatal(got)
+	}
+	closed := ev("a", 2, "")
+	closed.Action = "closed"
+	queued(s, closed, ev("a", 2, ""))
+	if started(s); started(s) != "" || len(s.waiting["a"]) != 1 {
+		t.Fatal("a close was replaced")
+	}
+}

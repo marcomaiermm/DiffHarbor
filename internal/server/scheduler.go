@@ -20,14 +20,20 @@ func newScheduler(limit, room int) *scheduler {
 	return &scheduler{limit: limit, room: room, waiting: map[string][]*forge.Event{}, busy: map[string]bool{}}
 }
 
-// add queues e on repo; false when the queue is full.
+// add queues e on repo; false when the queue is full. A review takes the place of the PR's waiting one: only the
+// newest push's would run (review), and a PR pushed to again and again must not fill the queue.
 func (s *scheduler) add(repo string, e *forge.Event) bool {
-	if s.room == 0 {
+	q, ok := s.waiting[repo]
+	if isReview(e) {
+		n := len(q)
+		q = slices.DeleteFunc(q, func(o *forge.Event) bool { return isReview(o) && o.Key() == e.Key() })
+		s.room += n - len(q)
+	}
+	if s.room == 0 { // none replaced: q is as it was
 		return false
 	}
 	s.room--
-	q := s.waiting[repo]
-	if len(q) == 0 {
+	if !ok {
 		s.turns = append(s.turns, repo)
 	}
 	i := len(q)
@@ -64,6 +70,9 @@ func (s *scheduler) next() (string, *forge.Event, bool) {
 	}
 	return "", nil, false
 }
+
+// isReview is a push's review, not a closed PR's delete or an answer.
+func isReview(e *forge.Event) bool { return e.Kind == "pull_request" && !closing(e) }
 
 // free ends repo's running job.
 func (s *scheduler) free(repo string) { delete(s.busy, repo) }

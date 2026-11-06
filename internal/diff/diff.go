@@ -221,6 +221,10 @@ func generatedAt(root, p string) bool {
 		return false
 	}
 	defer r.Close()
+	// A symlink's diff is its target's path: the file it points to being generated says nothing about it.
+	if fi, err := r.Lstat(filepath.FromSlash(p)); err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
 	f, _, err := OpenIn(r, filepath.FromSlash(p))
 	if err != nil {
 		return false

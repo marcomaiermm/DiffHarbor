@@ -115,7 +115,7 @@ func TestDrop(t *testing.T) {
 	if !closing(r) || r.Key() != e.Key() {
 		t.Fatalf("%+v", r)
 	}
-	newPool(1, runJob).exec(r)
+	newPool(1, runJob).exec(t.Context(), r, &task{cancel: func() {}})
 	if vs, err := job.Versions(dir); err != nil || len(vs) != 0 {
 		t.Fatal("kept its reports:", vs, err)
 	}
@@ -430,4 +430,17 @@ func TestReviewCleanupKeepsPending(t *testing.T) {
 	if _, err := os.Stat(pendingFile(e.Key())); !os.IsNotExist(err) {
 		t.Fatal("kept:", err)
 	}
+}
+
+// A job is stoppable from the moment it is picked: a close before its goroutine ran stops it too, an answer as well.
+func TestPoolStopPicked(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	f := newFakeJobs(2)
+	f.p.add(ev("a", 1, ""))
+	f.p.add(ev("b", 1, "issue_comment"))
+	f.p.stop("a#1", false)
+	f.p.stop("b#1", false)
+	f.next()
+	f.next()
+	f.idle(t) // both end on their ctx, no finish sent
 }
