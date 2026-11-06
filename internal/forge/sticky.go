@@ -21,8 +21,9 @@ type State struct {
 	Files   map[string]string `json:"files"`
 	Diagram string            `json:"diagram"`
 	Effort  int               `json:"effort"`
-	Patches map[string]string `json:"patches"`         // diff.PatchIDs at SHA: what a push has to change to get reviewed
-	Large   bool              `json:"large,omitempty"` // someone asked for all parts: later pushes get them too
+	Patches map[string]string `json:"patches"`          // diff.PatchIDs at SHA: what a push has to change to get reviewed
+	Large   bool              `json:"large,omitempty"`  // someone asked for all parts: later pushes get them too
+	Drafts  bool              `json:"drafts,omitempty"` // someone asked for a review of the draft: drafts opt_in reviews its pushes
 	// The report's reading order and the questions for a person, from the last full review that asked for them.
 	Flow      []review.Step     `json:"flow,omitempty"`
 	Decisions []review.Decision `json:"decisions,omitempty"`

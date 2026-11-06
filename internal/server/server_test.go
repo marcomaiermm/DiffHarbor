@@ -66,6 +66,21 @@ func TestPendingResume(t *testing.T) {
 	}
 }
 
+// A deletingFile a converted_to_draft saved before drafts kept the reports is still a delete, not a review that never
+// drains it.
+func TestRetryDropsOldDraft(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "converted_to_draft"}
+	e.Repository.FullName, e.PullRequest.Number = "o/r", 7
+	latest.Lock()
+	save(deletingFile(e.Key()), e)
+	latest.Unlock()
+	q := make(chan *forge.Event, 1)
+	if retryDrops(q); len(q) != 1 || !closing(<-q) {
+		t.Fatal("not queued as a delete")
+	}
+}
+
 // A closed PR's reports go through the worker; its deletingFile stays until they did, for retryDrops, and without
 // it (reopened since) a close deletes nothing.
 func TestDrop(t *testing.T) {

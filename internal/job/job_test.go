@@ -25,13 +25,29 @@ func (f skipForge) Open(*forge.Event) (forge.PR, error) { return f.pr, nil }
 // The PR methods the base-branch skip reaches; anything past it panics on the nil forge.PR.
 type skipPR struct {
 	forge.PR
-	notes  []string
-	status string
+	cfg     string // review.json; unset: base_branches release/*
+	notes   []string
+	replies []string
+	status  string
 }
 
-func (*skipPR) Refresh() error                          { return nil }
-func (*skipPR) File(string, ...string) string           { return `{"base_branches":["release/*"]}` }
-func (*skipPR) Notes() ([]forge.Note, error)            { return nil, nil }
+func (*skipPR) Refresh() error         { return nil }
+func (p *skipPR) Reply(b string) error { p.replies = append(p.replies, b); return nil }
+
+func (p *skipPR) File(string, ...string) string {
+	if p.cfg != "" {
+		return p.cfg
+	}
+	return `{"base_branches":["release/*"]}`
+}
+
+// Notes is the walkthrough as last written: its state carries over to the next review.
+func (p *skipPR) Notes() ([]forge.Note, error) {
+	if len(p.notes) == 0 {
+		return nil, nil
+	}
+	return []forge.Note{{ID: 1, Body: p.notes[len(p.notes)-1], Ours: true}}, nil
+}
 func (p *skipPR) Status(_, state, desc string)          { p.status = state + " " + desc }
 func (p *skipPR) Note(_ int64, b string) (int64, error) { p.notes = append(p.notes, b); return 1, nil }
 
@@ -45,6 +61,49 @@ func TestReviewSkipsBaseBranch(t *testing.T) {
 	if err := Review(t.Context(), f, e); err != nil || pr.status != "success Skipped: base branch" || len(pr.notes) != 1 ||
 		!strings.Contains(pr.notes[0], "Review skipped:** base branch `prod`") {
 		t.Fatalf("%v %q %q", err, pr.status, pr.notes)
+	}
+}
+
+// A draft gets no review on open by default: no status, no comment, ready_for_review brings it.
+func TestReviewSkipsDraft(t *testing.T) {
+	pr := &skipPR{}
+	e := &forge.Event{Action: "opened"}
+	e.Repository.DefaultBranch = "main"
+	e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", true, strings.Repeat("a", 40), "main"
+	if err := Review(t.Context(), skipForge{pr: pr}, e); err != nil || pr.status != "" || len(pr.notes) != 0 {
+		t.Fatalf("%v %q %q", err, pr.status, pr.notes)
+	}
+}
+
+// drafts off: asked anyway, the bot says why instead of reviewing.
+func TestReviewDraftOff(t *testing.T) {
+	pr := &skipPR{cfg: `{"drafts":"off"}`}
+	e := &forge.Event{Action: "manual"}
+	e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Head.SHA = "open", true, strings.Repeat("a", 40)
+	if err := Review(t.Context(), skipForge{pr: pr}, e); err != nil || pr.status != "" || len(pr.notes) != 0 ||
+		len(pr.replies) != 1 || !strings.Contains(pr.replies[0], "Drafts get no review") {
+		t.Fatalf("%v %q %q %q", err, pr.status, pr.notes, pr.replies)
+	}
+}
+
+// drafts opt_in: a draft's pushes get no review until someone asks, then they do. Into prod, so a push that gets
+// past the draft gate stops at the base-branch skip.
+func TestReviewDraftOptIn(t *testing.T) {
+	pr := &skipPR{cfg: `{"drafts":"opt_in"}`}
+	f := skipForge{pr: pr}
+	e := &forge.Event{Action: "synchronize"}
+	e.Repository.DefaultBranch = "main"
+	e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", true, strings.Repeat("a", 40), "prod"
+	if err := Review(t.Context(), f, e); err != nil || pr.status != "" {
+		t.Fatalf("push before asking: %v %q", err, pr.status)
+	}
+	e.Action = "manual" // fails past the gate: the event has no repository id
+	if err := Review(t.Context(), f, e); err == nil || pr.status != "error Review failed" {
+		t.Fatalf("asked: %v %q", err, pr.status)
+	}
+	e.Action, e.PullRequest.Head.SHA = "synchronize", strings.Repeat("b", 40)
+	if err := Review(t.Context(), f, e); err != nil || pr.status != "success Skipped: base branch" {
+		t.Fatalf("push after asking: %v %q", err, pr.status)
 	}
 }
 
