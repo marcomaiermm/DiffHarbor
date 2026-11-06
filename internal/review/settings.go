@@ -434,15 +434,15 @@ func (cfg Settings) RulePaths() []string {
 }
 
 // ReadRules reads the rules with read (the first of names that exists, "" if none): the rules file, then the root's
-// AGENTS.md or CLAUDE.md too. A rules file says what to report, the root's conventions still hold. Each is cut on
-// its own, so a long rules file can't push the conventions out.
+// AGENTS.md or CLAUDE.md too. A rules file says what to report, the root's conventions still hold. Only both are
+// cut, each on its own, so a long rules file can't push the conventions out.
 func (cfg Settings) ReadRules(read func(names ...string) string) string {
 	ps := cfg.RulePaths()
-	rules, conv := text.Truncate(read(ps[0]), 8000), text.Truncate(read(ps[1:]...), 8000)
+	rules, conv := read(ps[0]), read(ps[1:]...)
 	if rules == "" || conv == "" || rules == conv {
 		return cmp.Or(rules, conv)
 	}
-	return rules + "\n\n## Conventions (the repo root's AGENTS.md or CLAUDE.md)\n\n" + text.Truncate(conv, 4000)
+	return text.Truncate(rules, 8000) + "\n\n## Conventions (the repo root's AGENTS.md or CLAUDE.md)\n\n" + text.Truncate(conv, 4000)
 }
 
 // SkillPaths returns the candidates for the skills dir, the first that exists holds.

@@ -206,7 +206,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			scripts = append(scripts, checks.Script{Name: path, File: f})
 		}
 	}
-	rules := cfg.ReadRules(func(n ...string) string { return p.File(pr.Base.SHA, n...) }) + p.NestedRules(pr.Base.SHA, files)
+	// at most 12,100 so nested rules keep their 6000 in TrustedContext's 18,500
+	rules := text.Truncate(cfg.ReadRules(func(n ...string) string { return p.File(pr.Base.SHA, n...) }), 12_100) + p.NestedRules(pr.Base.SHA, files)
 	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(sb.Dir, "skills"))
 
 	started := time.Now()

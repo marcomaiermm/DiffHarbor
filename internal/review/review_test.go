@@ -319,6 +319,15 @@ func TestSettings(t *testing.T) {
 	if got := cfg.ReadRules(read); !strings.HasSuffix(got, "use pnpm") || len(got) > 8000+4000+100 {
 		t.Errorf("a long rules file keeps the conventions: %d chars", len(got))
 	}
+	files["AGENTS.md"] = files["docs/md"] + "use pnpm"
+	if got := cfg.ReadRules(read); !strings.HasSuffix(got, "x") || !strings.Contains(got, "## Conventions") {
+		t.Error("the same prefix, different files: both kept")
+	}
+	files["AGENTS.md"] = strings.Repeat("y", 13_000) + "use pnpm"
+	if delete(files, "docs/md"); !strings.HasSuffix(cfg.ReadRules(read), "use pnpm") {
+		t.Error("one file alone: not cut")
+	}
+	files["AGENTS.md"] = "use pnpm"
 	if delete(files, "docs/md"); cfg.ReadRules(read) != "use pnpm" {
 		t.Error("no rules file: the root's AGENTS.md alone")
 	}
