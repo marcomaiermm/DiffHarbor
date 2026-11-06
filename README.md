@@ -232,6 +232,7 @@ team-a @team-a https://art.corp/artifactory/api/npm/team-a/ <token>
 | Variable | |
 |---|---|
 | `DATA_DIR`, `CACHE_DIR` | Data (learnings, pending reviews, reports, logins, the repos' uids) and per-repo caches. `/data` and `/cache` in the image. Keep both on volumes, apart. |
+| `MAX_JOBS` | How many jobs (reviews, answers) run at once. Default `1`. Jobs of one repo always run one after another, so a higher value helps when several repos have PRs at the same time. Raise `mem_limit` and `cpus` with it. Above `1`, jobs of different repos share `/tmp`, `/var/tmp`, `/dev/shm` and the loopback network while they run, see [Jobs at once](#jobs-at-once). |
 | `DOCKER_HOST` | With the `dind` service: Docker for testcontainers in the checks, isolated with [Sysbox](https://github.com/nestybox/sysbox) (install it on the host). Drop both if your tests don't need Docker. |
 
 ### Branding the report
@@ -414,13 +415,19 @@ Within that:
 ### Each job
 
 - Root reads and writes in the checkout only as the repo's user. A symlink in the PR can't reach root's files.
-- All processes of the repos' users are killed before and after each job.
-- Each job gets a fresh home (git config, Pi's config and extensions) and temp dir. The users' files in `/tmp`, `/var/tmp` and `/dev/shm` go before each job.
+- All processes of the repo's user are killed before and after each job, those of all repos' users when the server starts.
+- Each job gets a fresh home (git config, Pi's config and extensions) and temp dir. The repo's user's files in `/tmp`, `/var/tmp` and `/dev/shm` go before and after each job, all repos' users' when the server starts.
 - Check output is capped.
 - The checks install dependencies without lifecycle scripts, so a malicious dependency's postinstall doesn't run. `install_scripts` in `review.json` turns them back on per repo.
 - No new privileges: a setuid binary can't make a repo's user root. Root keeps only the capabilities it needs.
 - Limits per container: 3 GB RAM, 2 CPUs, 4096 processes.
 - A Pi run gets 8 minutes. [`extensions/review-guard.js`](extensions/review-guard.js) refuses further tool calls after 6 minutes or at 60% context, so the pass still answers.
+
+### Jobs at once
+
+- A repo's jobs run one after another: they share its user, which could otherwise signal or read the other job's processes.
+- With `MAX_JOBS` above `1`, jobs of different repos run at the same time. Home, temp dir (`TMPDIR`), caches and uid stay per repo, but `/tmp`, `/var/tmp`, `/dev/shm` and the loopback network are shared while they run: a PR's code could leave a file for another repo's job, or talk to a port it listens on.
+- That's fine when all repos belong to one team. Keep `MAX_JOBS=1` (the default) when untrusted repos or forks of different owners are reviewed side by side.
 
 ### Each repo
 

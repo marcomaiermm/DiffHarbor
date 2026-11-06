@@ -109,6 +109,18 @@ func TestReviewDraftOptIn(t *testing.T) {
 	}
 }
 
+// A bug in a review fails it, a red status rather than a green one, and the server's other jobs run on.
+func TestReviewPanicFails(t *testing.T) {
+	pr := &skipPR{cfg: `{}`}
+	e := &forge.Event{Action: "opened"}
+	e.Repository.ID, e.Repository.DefaultBranch = 1, "main"
+	e.PullRequest.State, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", strings.Repeat("a", 40), "main"
+	err := Review(t.Context(), skipForge{pr: pr}, e) // panics past the gate: the fake forge has no Instance
+	if err == nil || !strings.HasPrefix(err.Error(), "panic: ") || pr.status != "error Review failed" {
+		t.Fatalf("%v %q", err, pr.status)
+	}
+}
+
 // A self-hosted Renovate on a user token is no Bot type, its branch or description skips the review.
 func TestReviewSkipsBotBranch(t *testing.T) {
 	e := &forge.Event{Action: "opened"}

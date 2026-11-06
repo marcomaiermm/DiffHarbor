@@ -30,6 +30,10 @@ var (
 	CacheDir = filepath.Join(os.TempDir(), "diffharbor-cache") // never the temp dir itself: as root, Clean owns it
 )
 
+// ErrCleanup is a Workspace that couldn't clean up after its user's last job: nothing of this job ran, a later
+// attempt may get past it.
+var ErrCleanup = errors.New("cleaning up after the last job failed")
+
 // firstUID is the first repo's uid and gid; the image's users are below it, node (1000) runs dry runs.
 const firstUID = 10000
 
@@ -137,7 +141,7 @@ func Workspace(repo string) (*Sandbox, error) {
 	s := &Sandbox{uid: uid, home: "/nonexistent"}
 	// The user's last job's leftovers would get this job's tokens and checkout, or plant files for its code.
 	if err := s.clear(); err != nil {
-		return nil, fmt.Errorf("cleaning up after uid %d's last job: %w", uid, err)
+		return nil, fmt.Errorf("uid %d: %w: %w", uid, ErrCleanup, err)
 	}
 	// Each job: its code may have closed its cache to itself or opened it to the other users. Chmod follows a
 	// symlink, but only root writes CacheDir (Clean): none can stand in for the dir.

@@ -25,6 +25,7 @@ import (
 	"log"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -92,8 +93,15 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	desc, state := "Review completed", "success"
 	p.Status(sha, "pending", "Review in progress")
 	defer func() {
+		v := recover() // a bug: a failed review, not a green one; the server's other jobs run on
+		if v != nil {
+			err = fmt.Errorf("panic: %v\n%s", v, debug.Stack())
+		}
 		switch {
-		case err != nil && ctx.Err() != nil: // PR closed or a newer push: that one gets the review
+		case errors.Is(err, proc.ErrCleanup): // the server keeps it pending: the next push or a restart retries
+			s.Write(fmt.Sprintf("⚠️ Review of `%s` not started: cleaning up after the last job failed. It is retried on the next push.", sha[:7]), "")
+			p.Status(sha, "error", "Review not started: cleanup failed, retried on the next push")
+		case err != nil && ctx.Err() != nil && v == nil: // PR closed or a newer push: that one gets the review
 			log.Println(key, sha[:7], "stopped")
 			s.Write(fmt.Sprintf("⏹️ Review of `%s` stopped.", sha[:7]), "")
 			p.Status(sha, "error", "Review stopped")

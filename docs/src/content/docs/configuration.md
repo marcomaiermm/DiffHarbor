@@ -142,6 +142,7 @@ team-a @team-a https://art.corp/artifactory/api/npm/team-a/ <token>
 | Variable | |
 |---|---|
 | `DATA_DIR`, `CACHE_DIR` | Data (learnings, pending reviews, reports, logins, the repos' uids) and per-repo caches. `/data` and `/cache` in the image. Keep both on volumes, apart. |
+| `MAX_JOBS` | How many jobs (reviews, answers) run at once. Default `1`. Jobs of one repo always run one after another, so a higher value helps when several repos have PRs at the same time. Raise `mem_limit` and `cpus` with it. Above `1`, jobs of different repos share `/tmp`, `/var/tmp`, `/dev/shm` and the loopback network while they run, see [Security](../security/#jobs-at-once). |
 | `DOCKER_HOST` | With the `dind` service: Docker for testcontainers in the checks, isolated with [Sysbox](https://github.com/nestybox/sysbox) (install it on the host). Drop both if your tests don't need Docker. |
 
 ## Branding the report

@@ -28,6 +28,12 @@ Within that:
 - Limits per container: 3 GB RAM, 2 CPUs, 4096 processes.
 - A Pi run gets 8 minutes. [`extensions/review-guard.js`](https://github.com/marcomaiermm/DiffHarbor/blob/main/extensions/review-guard.js) refuses further tool calls after 6 minutes or at 60% context, so the pass still answers.
 
+## Jobs at once
+
+- A repo's jobs run one after another: they share its user, which could otherwise signal or read the other job's processes.
+- With [`MAX_JOBS`](../configuration/#storage-and-docker) above `1`, jobs of different repos run at the same time. Home, temp dir (`TMPDIR`), caches and uid stay per repo, but `/tmp`, `/var/tmp`, `/dev/shm` and the loopback network are shared while they run: a PR's code could leave a file for another repo's job, or talk to a port it listens on.
+- That's fine when all repos belong to one team. Keep `MAX_JOBS=1` (the default) when untrusted repos or forks of different owners are reviewed side by side.
+
 ## Each repo
 
 - Each repo has its own cache (`/cache/<uid>`: Go build cache, module and pnpm stores). Other repos' users can't read or write it, so a PR can't change what another repo's jobs run.

@@ -1,5 +1,5 @@
-// Package server takes GitHub and GitLab webhooks and runs one job at a time: a review of a pushed PR, an answer in a
-// thread, or deleting a closed PR's reports.
+// Package server takes GitHub and GitLab webhooks and runs their jobs, up to MAX_JOBS at once and a repo's one at a
+// time: a review of a pushed PR, an answer in a thread, or deleting a closed PR's reports.
 package server
 
 import (
@@ -25,6 +25,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,18 +43,23 @@ var (
 		sync.Mutex
 		m map[string]string
 	}{m: map[string]string{}}
-	// The job the worker runs now. Closing the PR stops it, a newer push stops its review: no tokens on a dead head.
-	// Its context reaches every git, check and Pi call of the job.
+	// The running jobs by PR, at most one each: a repo's jobs run one at a time. Closing the PR stops its job, a newer
+	// push stops its review: no tokens on a dead head. The context reaches every git, check and Pi call of the job.
 	running = struct {
 		sync.Mutex
-		key    string
-		review bool
-		cancel context.CancelFunc
-	}{cancel: func() {}}
+		m map[string]*task
+	}{m: map[string]*task{}}
 )
 
-// review runs a queued push's review unless a newer push of the PR is queued.
-func review(ctx context.Context, f forge.Forge, e *forge.Event) error {
+// task is a running job: review spares a chat answer from a push's stop.
+type task struct {
+	review bool
+	cancel context.CancelFunc
+}
+
+// review runs a queued push's review, run, unless a newer push of the PR is queued. One that couldn't clean up
+// before it started stays pending: the next push or a restart retries it.
+func review(e *forge.Event, run func() error) (err error) {
 	key, queued := e.Key(), e.PullRequest.Head.SHA
 	latest.Lock()
 	current := latest.m[key] == queued
@@ -63,39 +69,105 @@ func review(ctx context.Context, f forge.Forge, e *forge.Event) error {
 	}
 	defer func() {
 		latest.Lock()
-		if latest.m[key] == queued {
+		if latest.m[key] == queued && !errors.Is(err, proc.ErrCleanup) {
 			delete(latest.m, key)
 		}
 		latest.Unlock()
 	}()
-	return job.Review(ctx, f, e)
+	return run()
 }
 
-// work runs the queue's jobs one at a time: a review, an answer in a thread, or deleting a closed PR's reports.
-// Reports are only written here, so a review can't write one after its PR's were deleted.
-func work(queue chan *forge.Event) {
-	for e := range queue {
-		f := forges[e.Forge]
-		run := func(ctx context.Context) error { return review(ctx, f, e) }
-		switch {
-		case closing(e):
-			run = func(context.Context) error { return drop(e) }
-		case e.Kind != "pull_request":
-			run = func(ctx context.Context) error { return job.Chat(ctx, f, mentions[e.Forge], e) }
+// run runs e's job: a review, an answer in a thread, or deleting a closed PR's reports. A job that runs PR code does
+// so in a proc.Workspace: it cleans up after its repo's last job, Close after this one.
+func run(ctx context.Context, e *forge.Event) error {
+	f := forges[e.Forge]
+	switch {
+	case closing(e):
+		return drop(e)
+	case e.Kind != "pull_request":
+		return job.Chat(ctx, f, mentions[e.Forge], e)
+	}
+	return review(e, func() error { return job.Review(ctx, f, e) })
+}
+
+// repoOf is the repo the scheduler runs e's job on: the forge.RepoID its sandbox's uid belongs to.
+func repoOf(e *forge.Event) string {
+	if f := forges[e.Forge]; f != nil {
+		if id, err := forge.RepoID(f, e); err == nil {
+			return id
 		}
-		ctx, cancel := context.WithCancel(context.Background())
-		running.Lock()
-		running.key, running.review, running.cancel = e.Key(), e.Kind == "pull_request", cancel
-		running.Unlock()
-		// A job that runs PR code does so in a proc.Workspace: it cleans up after the uid's last job, Close after this one.
-		if err := run(ctx); err != nil {
-			log.Println(e.Key(), err)
+	}
+	return e.Repo() // no id: the job fails before it runs PR code
+}
+
+// pool runs the queued jobs. One dispatcher goroutine owns the scheduler: webhooks queue through it and are told
+// whether the queue took the job, finished jobs free their repo through it. Reports are only written by jobs, and a
+// closed PR's delete and its review share a repo: a review can't write a report after its PR's were deleted.
+type pool struct {
+	submit chan submission
+	run    func(context.Context, *forge.Event) error // run, a fake in tests
+}
+
+type submission struct {
+	e  *forge.Event
+	ok chan bool
+}
+
+// newPool runs up to limit jobs at once and queues up to 100 more, as many as the channel before it.
+func newPool(limit int, run func(context.Context, *forge.Event) error) *pool {
+	p := &pool{submit: make(chan submission), run: run}
+	go p.dispatch(newScheduler(limit, 100))
+	return p
+}
+
+// add queues e's job; false when the queue is full.
+func (p *pool) add(e *forge.Event) bool {
+	ok := make(chan bool)
+	p.submit <- submission{e, ok}
+	return <-ok
+}
+
+func (p *pool) dispatch(s *scheduler) {
+	finished := make(chan string)
+	for {
+		for repo, e, ok := s.next(); ok; repo, e, ok = s.next() {
+			go func() {
+				defer func() { finished <- repo }()
+				p.exec(e)
+			}()
+		}
+		select {
+		case sub := <-p.submit:
+			sub.ok <- s.add(repoOf(sub.e), sub.e)
+		case repo := <-finished:
+			s.free(repo)
+		}
+	}
+}
+
+// exec runs e's job, stoppable through running. A panic ends only this job, as a failed one: done drops its pending
+// review, so a restart doesn't run into it again.
+func (p *pool) exec(e *forge.Event) {
+	key := e.Key()
+	ctx, cancel := context.WithCancel(context.Background())
+	t := &task{review: e.Kind == "pull_request", cancel: cancel}
+	running.Lock()
+	running.m[key] = t
+	running.Unlock()
+	defer func() {
+		if v := recover(); v != nil {
+			log.Printf("%s panic: %v\n%s", key, v, debug.Stack())
 		}
 		cancel() // revokes the job's vault tokens: git's remote, Pi's keys
+		done(key)
 		running.Lock()
-		running.key = "" // idle: a later push or close has nothing to stop
+		if running.m[key] == t {
+			delete(running.m, key)
+		}
 		running.Unlock()
-		done(e.Key())
+	}()
+	if err := p.run(ctx, e); err != nil {
+		log.Println(key, err)
 	}
 }
 
@@ -122,16 +194,18 @@ func drop(e *forge.Event) error {
 func stop(key string, reviewOnly bool) {
 	running.Lock()
 	defer running.Unlock()
-	if running.key == key && (running.review || !reviewOnly) {
+	if t := running.m[key]; t != nil && (t.review || !reviewOnly) {
 		log.Println(key, "stopping the running job")
-		running.cancel()
+		t.cancel()
 	}
 }
 
-// Config is the forges the server takes webhooks from; one without credentials stays off.
+// Config is the forges the server takes webhooks from, one without credentials stays off, and how many jobs run at
+// once (MAX_JOBS).
 type Config struct {
-	GitHub github.Config
-	GitLab gitlab.Config
+	GitHub  github.Config
+	GitLab  gitlab.Config
+	MaxJobs int
 }
 
 // Serve listens on :3000 until the process dies.
@@ -171,8 +245,7 @@ func Serve(cfg Config) {
 	if err := proc.Clean(); err != nil { // before any job: a crash's work dirs and leftovers, the cache all repos shared before
 		log.Fatal(err)
 	}
-	queue := make(chan *forge.Event, 100)
-	go work(queue)
+	jobs := newPool(cmp.Or(cfg.MaxJobs, 1), run)
 	http.HandleFunc("POST /webhook/{forge}", func(w http.ResponseWriter, r *http.Request) {
 		f := forges[r.PathValue("forge")]
 		if f == nil {
@@ -235,16 +308,15 @@ func Serve(cfg Config) {
 		default:
 			return
 		}
-		select {
-		case queue <- e:
-			w.WriteHeader(http.StatusAccepted)
-			// a reply without @bot may be in a thread between humans: Chat reacts once it knows the thread is ours
-			if e.Kind != "pull_request" && (e.Kind != "pull_request_review_comment" || mention.MatchString(c.Body)) {
-				go job.Seen(f, e)
-			}
-		default:
+		if !jobs.add(e) {
 			log.Println(e.Key(), "queue full") // GitHub: Redeliver resends it
 			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		// a reply without @bot may be in a thread between humans: Chat reacts once it knows the thread is ours
+		if e.Kind != "pull_request" && (e.Kind != "pull_request_review_comment" || mention.MatchString(c.Body)) {
+			go job.Seen(f, e)
 		}
 	})
 	if job.ReportURL != "" {
@@ -254,10 +326,10 @@ func Serve(cfg Config) {
 			http.HandleFunc("GET /"+name, serveLighthouse)
 		}
 	}
-	resume(queue)
+	resume(jobs.add)
 	go func() {
 		for {
-			retryDrops(queue)
+			retryDrops(jobs.add)
 			time.Sleep(30 * time.Minute)
 		}
 	}()
@@ -421,7 +493,7 @@ func done(key string) {
 }
 
 // resume queues the reviews a restart cut off.
-func resume(queue chan *forge.Event) {
+func resume(add func(*forge.Event) bool) {
 	fs, _ := filepath.Glob(filepath.Join(proc.DataDir, "pending", "*.json"))
 	for _, f := range fs {
 		e := &forge.Event{Kind: "pull_request"}
@@ -441,16 +513,14 @@ func resume(queue chan *forge.Event) {
 		latest.Lock()
 		latest.m[e.Key()] = e.PullRequest.Head.SHA
 		latest.Unlock()
-		select {
-		case queue <- e:
-		default: // stays on disk for the next start
+		if !add(e) { // stays on disk for the next start
 			log.Println(e.Key(), "queue full")
 		}
 	}
 }
 
 // retryDrops queues the closed PRs whose reports a full queue, a restart or a failed delete left.
-func retryDrops(queue chan *forge.Event) {
+func retryDrops(add func(*forge.Event) bool) {
 	fs, _ := filepath.Glob(filepath.Join(proc.DataDir, "deleting", "*.json"))
 	for _, f := range fs {
 		e := &forge.Event{Kind: "pull_request"}
@@ -460,10 +530,8 @@ func retryDrops(queue chan *forge.Event) {
 			continue
 		}
 		e.Action = "closed" // a delete whatever saved it: a converted_to_draft from before drafts kept the reports
-		select {
-		case queue <- e:
-		default: // stays for the next round
-			return
+		if !add(e) {
+			return // stays for the next round
 		}
 	}
 }
