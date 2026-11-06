@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.8.1...v0.9.0) (2026-11-06)
+
+
+### Features
+
+* **chat:** learnings keep their reason and PR, skip repeats and one-offs ([#89](https://github.com/marcomaiermm/DiffHarbor/issues/89)) ([ec9fd05](https://github.com/marcomaiermm/DiffHarbor/commit/ec9fd05d35de1995ad1b423001e2fe64c910bc01))
+
+
+### Bug Fixes
+
+* **review:** check a finding's premise outside the diff ([#87](https://github.com/marcomaiermm/DiffHarbor/issues/87)) ([c1160fd](https://github.com/marcomaiermm/DiffHarbor/commit/c1160fd56070ad39d13faec2c0df332b14ca4c55))
+
 ## [0.8.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.8.0...v0.8.1) (2026-11-06)
 
 
