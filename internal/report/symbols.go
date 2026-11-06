@@ -89,10 +89,11 @@ var (
 	}
 )
 
-// Symbols indexes the checkout at repo for the names the diff shows: their declarations (Go parsed, other languages
+// Symbols indexes sb's checkout for the names the diff shows: their declarations (Go parsed, other languages
 // by the line that declares them) and who names them: codegraph's resolved edges where the review indexed the
 // checkout, else the lines that name them, by name. The index's queries run in sb, as the repo's user.
-func Symbols(sb *proc.Sandbox, repo, diffText string) map[string][]Symbol {
+func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
+	repo := sb.Repo()
 	wanted := map[string]bool{}
 	for l := range strings.SplitSeq(diffText, "\n") {
 		if strings.HasPrefix(l, "@@") { // the declaration a hunk is in
@@ -125,7 +126,7 @@ func Symbols(sb *proc.Sandbox, repo, diffText string) map[string][]Symbol {
 		if !codeExt[path.Ext(rel)] || n >= maxFiles {
 			return nil
 		}
-		src, err := readIn(root, rel, maxSize)
+		src, err := diff.ReadIn(root, rel, maxSize)
 		if err != nil {
 			return nil //nolint:nilerr // left out, like a large file
 		}

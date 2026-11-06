@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,9 +31,17 @@ var (
 	CacheDir = filepath.Join(os.TempDir(), "diffharbor-cache") // never the temp dir itself: as root, Clean owns it
 )
 
-// ErrCleanup is a Workspace that couldn't clean up after its user's last job: nothing of this job ran, a later
-// attempt may get past it.
+// ErrCleanup is a Workspace that couldn't clean up after a job, its user's last or another repo's: nothing of this
+// job ran, a later attempt may get past it.
 var ErrCleanup = errors.New("cleaning up after the last job failed")
+
+// Recovered, deferred to run first in a job's goroutine, turns its panic into fail's error: a bug fails that job or
+// part, not the server and the other repos' jobs running beside it. In proc: server, job and review all import it.
+func Recovered(fail func(error)) {
+	if v := recover(); v != nil {
+		fail(fmt.Errorf("panic: %v\n%s", v, debug.Stack()))
+	}
+}
 
 // firstUID is the first repo's uid and gid; the image's users are below it, node (1000) runs dry runs.
 const firstUID = 10000
@@ -98,6 +107,9 @@ func (s *Sandbox) Command(ctx context.Context, dir string, extra []string, name 
 // Home is the job's home: Pi's config is in it.
 func (s *Sandbox) Home() string { return s.home }
 
+// Repo is the job's checkout.
+func (s *Sandbox) Repo() string { return filepath.Join(s.Dir, "repo") }
+
 // Run returns stdout; errors carry stderr but never the args.
 func Run(c *exec.Cmd) ([]byte, error) {
 	var out bytes.Buffer
@@ -118,9 +130,6 @@ func Exists(p string) bool { _, err := os.Stat(p); return err == nil }
 // First it kills what the user's last job left running and removes what it left in the temp dirs all share. Close
 // it when the job is done.
 func Workspace(repo string) (*Sandbox, error) {
-	if err := cleanDirty(); err != nil { // no job runs beside what another's couldn't clean up
-		return nil, fmt.Errorf("%w: %w", ErrCleanup, err)
-	}
 	if err := os.MkdirAll(workDir(), 0o755); err != nil {
 		return nil, err
 	}
@@ -141,11 +150,12 @@ func Workspace(repo string) (*Sandbox, error) {
 			return nil, err
 		}
 	}
-	s := &Sandbox{uid: uid, home: "/nonexistent"}
-	// The user's last job's leftovers would get this job's tokens and checkout, or plant files for its code.
-	if err := clearUser(uid); err != nil {
-		return nil, fmt.Errorf("uid %d: %w: %w", uid, ErrCleanup, err)
+	// The user's last job's leftovers would get this job's tokens and checkout, or plant files for its code; no job
+	// runs beside what another's couldn't clean up.
+	if err := clean(uid); err != nil {
+		return nil, err
 	}
+	s := &Sandbox{uid: uid, home: "/nonexistent"}
 	// Each job: its code may have closed its cache to itself or opened it to the other users. Chmod follows a
 	// symlink, but only root writes CacheDir (Clean): none can stand in for the dir.
 	c := s.cacheDir()
@@ -177,57 +187,39 @@ func Workspace(repo string) (*Sandbox, error) {
 // Close ends the job: its user's processes die and its files in the shared temp dirs go, so neither reaches a job of
 // another repo, and Dir is removed. When that fails no other job starts until a retry gets through (Workspace).
 func (s *Sandbox) Close() {
-	if err := clearUser(s.uid); err != nil {
-		log.Printf("cleaning up after uid %d: %v", s.uid, err)
+	if err := clean(s.uid); err != nil {
+		log.Print(err)
 	}
 	os.RemoveAll(s.Dir) // as root: past a user's chmod 000
 }
 
 var (
 	dirtyMu sync.Mutex
-	dirty   = map[uint32]bool{} // the uids clearUser failed for: their leftovers may still run
+	dirty   = map[uint32]bool{} // the uids a clean failed for: their leftovers may still run
 	// clearUID kills uid's processes and removes its files in the temp dirs all share. A var: tests run without root.
-	clearUID = func(uid uint32) error {
-		same := func(u int) bool { return u == int(uid) }
-		var err error
-		if killLeftovers(same) {
-			err = errors.New("processes survived kill -9")
-		}
-		return errors.Join(err, cleanTmp(same, tmpDirs...))
-	}
+	clearUID = func(uid uint32) error { return clearUsers(func(u int) bool { return u == int(uid) }) }
 )
 
-// clearUser runs clearUID for a repo's uid, as root (not node's: dry runs keep theirs, node reaches no repo's files) and
-// keeps it dirty while that fails.
-func clearUser(uid uint32) error {
-	if !AsPi || uid < firstUID {
-		return nil
-	}
-	err := clearUID(uid)
+// clean clears uid (a repo's, as root) and every uid a clean failed for before; while one stays dirty no job starts.
+// Node's isn't cleared: dry runs keep theirs, node reaches no repo's files.
+func clean(uid uint32) error {
 	dirtyMu.Lock()
 	defer dirtyMu.Unlock()
-	if err != nil {
+	if AsPi && uid >= firstUID {
 		dirty[uid] = true
-	} else {
-		delete(dirty, uid)
 	}
-	return err
-}
-
-// cleanDirty clears the dirty uids again; an error while one stays dirty. Before this server ran jobs at once the
-// next job's clean covered all users and didn't start when it failed: so it still doesn't.
-func cleanDirty() error {
-	dirtyMu.Lock()
-	defer dirtyMu.Unlock()
 	var errs []error
-	for uid := range dirty {
-		if err := clearUID(uid); err != nil {
-			errs = append(errs, fmt.Errorf("uid %d: %w", uid, err))
+	for u := range dirty {
+		if err := clearUID(u); err != nil {
+			errs = append(errs, fmt.Errorf("uid %d: %w", u, err))
 		} else {
-			delete(dirty, uid)
+			delete(dirty, u)
 		}
 	}
-	return errors.Join(errs...)
+	if len(errs) > 0 {
+		return fmt.Errorf("%w: %w", ErrCleanup, errors.Join(errs...))
+	}
+	return nil
 }
 
 // uidMu guards uids.json and /etc/passwd, /etc/group: two new repos' jobs at once must not get the same uid.
@@ -373,12 +365,13 @@ func (s *Sandbox) ReadFile(ctx context.Context, p string) ([]byte, error) {
 	return b, err
 }
 
-// WriteFile writes b to p, as the job's user when we're root.
-func (s *Sandbox) WriteFile(p string, b []byte) error {
-	if !AsPi {
-		return os.WriteFile(p, b, 0o644)
-	}
-	c := s.Command(context.Background(), "/", nil, "sh", "-c", `cat > "$1"`, "sh", p)
+// WriteFile writes b to p, as the job's user when we're root, a new file in its place: what PR code left there (a
+// symlink, a FIFO that would block the write and the job) is neither followed nor opened.
+func (s *Sandbox) WriteFile(ctx context.Context, p string, b []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	// set -C creates with O_EXCL, but opens a FIFO planted after rm: the timeout ends that race's wait.
+	c := s.Command(ctx, "/", nil, "sh", "-c", `rm -f -- "$1" && set -C && cat > "$1"`, "sh", p)
 	c.Stdin = bytes.NewReader(b)
 	_, err := Run(c)
 	return err
@@ -412,10 +405,7 @@ func Clean() error {
 		return err
 	}
 	// No job runs yet: every job user's processes and temp files go, also those of a repo with no job in a long while.
-	if killLeftovers(jobUser) {
-		return errors.New("job users' processes survived kill -9")
-	}
-	if err := cleanTmp(jobUser, tmpDirs...); err != nil {
+	if err := clearUsers(jobUser); err != nil {
 		return err
 	}
 	m, err := uids(filepath.Join(DataDir, "uids.json"))
@@ -474,6 +464,11 @@ func resolved(p string) string {
 // tmpDirs are the temp dirs all users share: TMPDIR is the job's own, but code may write to any of them.
 var tmpDirs = []string{"/tmp", "/var/tmp", "/dev/shm"}
 
+// clearUsers kills the processes of the users whose uid is of and removes their files in the temp dirs all share.
+func clearUsers(of func(uid int) bool) error {
+	return errors.Join(killLeftovers(of), cleanTmp(of, tmpDirs...))
+}
+
 // cleanTmp removes what the users whose uid is of left in dirs: the next job's code would find it.
 func cleanTmp(of func(uid int) bool, dirs ...string) error {
 	for _, dir := range dirs {
@@ -496,9 +491,9 @@ func cleanTmp(of func(uid int) bool, dirs ...string) error {
 
 // killLeftovers kills every process of the users whose uid is of: what PR code left running (a daemon from an
 // install script) would read a later job's environ and checkout, i.e. its tokens, or plant files for it. As each user,
-// kill -9 -1: the kernel signals all of its processes at once, however deep they nest or fast they fork. True when
+// kill -9 -1: the kernel signals all of its processes at once, however deep they nest or fast they fork. An error when
 // some still run after 5 rounds.
-func killLeftovers(of func(uid int) bool) bool {
+func killLeftovers(of func(uid int) bool) error {
 	for round := 0; ; round++ { // the pids limit may leave the killer no pid: then one by one, and again
 		left := map[uint32][]int{}
 		ds, _ := os.ReadDir("/proc")
@@ -521,10 +516,10 @@ func killLeftovers(of func(uid int) bool) bool {
 			}
 		}
 		if len(left) == 0 {
-			return false
+			return nil
 		}
 		if round == 5 {
-			return true
+			return errors.New("processes survived kill -9")
 		}
 		for uid, pids := range left {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

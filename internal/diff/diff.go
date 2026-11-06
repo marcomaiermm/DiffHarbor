@@ -221,17 +221,51 @@ func generatedAt(root, p string) bool {
 		return false
 	}
 	defer r.Close()
-	f, err := r.OpenFile(filepath.FromSlash(p), os.O_RDONLY|syscall.O_NONBLOCK, 0) // a FIFO in the file's place: no blocked open
+	f, _, err := OpenIn(r, filepath.FromSlash(p))
 	if err != nil {
 		return false
 	}
 	defer f.Close()
-	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
-		return false
-	}
 	b := make([]byte, 4096)
 	n, _ := io.ReadFull(f, b)
 	return generated.MatchString("@@ -1 +1 @@\n " + strings.ReplaceAll(string(b[:n]), "\n", "\n "))
+}
+
+// OpenIn opens p in root, a regular file: a FIFO or device the PR put in a file's place neither blocks the open nor
+// is read. Root code reads the checkout through os.Root (OpenIn, ReadIn) when the file must be the checkout's: no link
+// leads out, no process per file; through Sandbox.ReadFile, as the repo's user, where a link may rightly lead out of
+// it (node_modules into the pnpm store) or the file is the work dir's.
+func OpenIn(root *os.Root, p string) (*os.File, os.FileInfo, error) {
+	f, err := root.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	fi, err := f.Stat()
+	if err == nil && !fi.Mode().IsRegular() {
+		err = fmt.Errorf("%s: no regular file", p)
+	}
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	return f, fi, nil
+}
+
+// ReadIn reads p in root (see OpenIn), a regular file of at most n bytes.
+func ReadIn(root *os.Root, p string, n int64) ([]byte, error) {
+	f, fi, err := OpenIn(root, p)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if fi.Size() > n {
+		return nil, fmt.Errorf("%s: over %d bytes", p, n)
+	}
+	b, err := io.ReadAll(io.LimitReader(f, n+1))
+	if err == nil && int64(len(b)) > n {
+		err = fmt.Errorf("%s: over %d bytes", p, n)
+	}
+	return b, err
 }
 
 // Reverse puts diff's files in reverse order: a second reader starts where the first ended.

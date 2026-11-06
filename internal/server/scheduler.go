@@ -7,7 +7,7 @@ import (
 
 // scheduler picks the queued job that runs next. Jobs of different repos run at once, up to limit; a repo's run one
 // at a time: they share its uid, which is what fences a job's PR code off from another's. Repos take turns, so one
-// with many PRs doesn't hold up the others. Not safe for concurrent use: the dispatcher alone owns it.
+// with many PRs doesn't hold up the others. pool.mu guards it.
 type scheduler struct {
 	limit   int                       // jobs at once
 	room    int                       // jobs that may still wait: past it a webhook gets a 503 and is redelivered

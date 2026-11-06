@@ -99,9 +99,10 @@ func pointAt(ctx context.Context, sb *proc.Sandbox, lockfile string, urls []stri
 	if nb == orig {
 		return restore
 	}
-	if err := sb.WriteFile(lockfile, []byte(nb)); err != nil {
-		_ = sb.WriteFile(lockfile, []byte(orig)) // a failed write may have truncated it
+	back := context.WithoutCancel(ctx) // past the install's timeout too: Pi reads the PR's file; WriteFile bounds it
+	if err := sb.WriteFile(ctx, lockfile, []byte(nb)); err != nil {
+		_ = sb.WriteFile(back, lockfile, []byte(orig)) // a failed write may have removed or cut it
 		return restore
 	}
-	return func() error { return sb.WriteFile(lockfile, []byte(orig)) }
+	return func() error { return sb.WriteFile(back, lockfile, []byte(orig)) }
 }

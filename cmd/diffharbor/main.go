@@ -35,7 +35,7 @@ import (
 var version = "dev"
 
 func dry() error {
-	sb, err := agent.Workspace("")
+	sb, err := agent.Workspace(context.Background(), "")
 	if err != nil {
 		return err
 	}

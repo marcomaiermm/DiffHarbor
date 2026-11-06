@@ -27,7 +27,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -1034,24 +1033,6 @@ func rank(f *file) int {
 	return 0
 }
 
-// readIn reads p in root, a regular file of at most n bytes: the root server reads the PR's checkout, and a FIFO or
-// device put in a file's place neither blocks the open nor is read.
-func readIn(root *os.Root, p string, n int64) ([]byte, error) {
-	f, err := root.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() || fi.Size() > n {
-		return nil, fmt.Errorf("%s: no regular file of at most %d bytes", p, n)
-	}
-	b, err := io.ReadAll(io.LimitReader(f, n+1))
-	if err == nil && int64(len(b)) > n {
-		err = fmt.Errorf("%s: over %d bytes", p, n)
-	}
-	return b, err
-}
-
 // maxSource and maxSources are the bytes of one changed file and of all that a report carries for the lines
 // between hunks: past them a file shows its hunks only.
 const maxSource, maxSources = 256 << 10, 2 << 20 // ponytail: the page carries them whole; per gap if pages grow
@@ -1066,7 +1047,10 @@ func Sources(repo, diffText string) map[string]string {
 	}
 	defer root.Close()
 	diff.EachFile(diffText, func(p, _ string) {
-		b, err := readIn(root, filepath.FromSlash(p), maxSource)
+		if fi, err := root.Lstat(filepath.FromSlash(p)); err != nil || !fi.Mode().IsRegular() {
+			return // a changed symlink isn't its target's text
+		}
+		b, err := diff.ReadIn(root, filepath.FromSlash(p), maxSource)
 		if err != nil || total+len(b) > maxSources || bytes.IndexByte(b, 0) >= 0 {
 			return
 		}

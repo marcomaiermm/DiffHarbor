@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"context"
+	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
 	"encoding/json"
 	"maps"
@@ -480,7 +481,7 @@ func (fs files) lines(p string) []string {
 	if !ok {
 		var b []byte
 		if root, err := os.OpenRoot(fs.repo); err == nil { // the PR's symlinks don't reach out of the checkout
-			b, _ = readIn(root, filepath.FromSlash(p), maxSize)
+			b, _ = diff.ReadIn(root, filepath.FromSlash(p), maxSize)
 			root.Close()
 		}
 		ls = strings.Split(string(b), "\n")

@@ -25,7 +25,6 @@ import (
 	"log"
 	"path/filepath"
 	"regexp"
-	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -92,20 +91,18 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		`<img src="%[1]s.svg" width="440" alt="A lighthouse sweeping its beam"></picture><br>⏳ **Reviewing** `+"`%[2]s` …", img, sha[:7]), "")
 	desc, state := "Review completed", "success"
 	p.Status(sha, "pending", "Review in progress")
+	panicked := false
 	defer func() {
-		v := recover() // a bug: a failed review, not a green one; the server's other jobs run on
-		if v != nil {
-			err = fmt.Errorf("panic: %v\n%s", v, debug.Stack())
-		}
 		switch {
-		case errors.Is(err, proc.ErrCleanup): // a push's stays pending: the next push or a restart retries. A chat's isn't.
+		// server.review keeps a push's review queued: the next push or a restart retries it; a chat's isn't.
+		case errors.Is(err, proc.ErrCleanup):
 			retry := "retried on the next push"
 			if e.Kind != "pull_request" {
 				retry = "ask again in a while"
 			}
 			s.Write(fmt.Sprintf("⚠️ Review of `%s` not started: cleaning up after the last job failed, %s.", sha[:7], retry), "")
 			p.Status(sha, "error", "Review not started: cleanup failed, "+retry)
-		case err != nil && ctx.Err() != nil && v == nil: // PR closed or a newer push: that one gets the review
+		case err != nil && ctx.Err() != nil && !panicked: // PR closed or a newer push: that one gets the review
 			log.Println(key, sha[:7], "stopped")
 			s.Write(fmt.Sprintf("⏹️ Review of `%s` stopped.", sha[:7]), "")
 			p.Status(sha, "error", "Review stopped")
@@ -117,6 +114,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 			p.Status(sha, state, desc)
 		}
 	}()
+	defer proc.Recovered(func(pe error) { err, panicked = pe, true }) // a bug: a failed review, not a green one
 	footer := func(what string) string {
 		return fmt.Sprintf("%s · `@%s <question>` to ask, `@%s review` for a full review", what, f.Bot(), f.Bot())
 	}
@@ -125,17 +123,16 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	if err != nil {
 		return err
 	}
-	sb, err := agent.Workspace(id)
+	sb, err := agent.Workspace(ctx, id)
 	if err != nil {
 		return err
 	}
 	defer sb.Close()
-	dir := sb.Dir
 	read, err := p.ReadToken()
 	if err != nil {
 		return err
 	}
-	raw, err := review.Checkout(ctx, sb, filepath.Join(dir, "repo"), e.Repository.CloneURL, sha, "refs/heads/"+pr.Base.Ref, read)
+	raw, err := review.Checkout(ctx, sb, e.Repository.CloneURL, sha, "refs/heads/"+pr.Base.Ref, read)
 	if err != nil {
 		return err
 	}
@@ -156,7 +153,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	guide := ReportURL != "" && cfg.Reports(len(prFiles)) // a large PR: a reading order and a report
 	// A diff past diff.Max: in parts once someone asked for them on this PR, else code first up to diff.Max.
 	s.State.Large = s.State.Large || e.Action == "large"
-	parts, omitted := diff.Filter(raw, filepath.Join(dir, "repo"), only, cfg.Ignored, cfg.Parts(s.State.Large))
+	parts, omitted := diff.Filter(raw, sb.Repo(), only, cfg.Ignored, cfg.Parts(s.State.Large))
 	d := strings.Join(parts, "")
 	if strings.TrimSpace(d) == "" {
 		log.Println(key, "nothing to review")
@@ -192,15 +189,15 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	var scripts []checks.Script
 	for i, path := range cfg.CheckPaths() {
 		if c := p.File(pr.Base.SHA, path); c != "" {
-			f := filepath.Join(dir, fmt.Sprintf("checks-%d.sh", i))
-			if err := sb.WriteFile(f, []byte(c)); err != nil {
+			f := filepath.Join(sb.Dir, fmt.Sprintf("checks-%d.sh", i))
+			if err := sb.WriteFile(ctx, f, []byte(c)); err != nil {
 				return err
 			}
 			scripts = append(scripts, checks.Script{Name: path, File: f})
 		}
 	}
 	rules := text.Truncate(p.File(pr.Base.SHA, cfg.RulePaths()...), 8000) + p.NestedRules(pr.Base.SHA, files)
-	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(dir, "skills"))
+	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(sb.Dir, "skills"))
 
 	started := time.Now()
 	var tid, tk string
@@ -210,7 +207,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		regs, _ = checks.Registries(e.Owner()) // main checked them
 	}
 	r, stats, err := review.Analyze(ctx, review.Input{
-		Agent: agent.Pi{}, Sandbox: sb, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: forge.Redact(review.Messages(ctx, sb, filepath.Join(dir, "repo"))), Ticket: tk, Parts: parts,
+		Agent: agent.Pi{}, Sandbox: sb, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: forge.Redact(review.Messages(ctx, sb)), Ticket: tk, Parts: parts,
 		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings)), Checks: scripts, Registries: regs, Prior: prior, Closed: closed, Settings: cfg,
 		Guide: guide && only == nil, // an incremental review sees a few files: the last full one's reading order stays
 	})
@@ -232,7 +229,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	if len(omitted) > 0 { // the rest only by name: findings cover part of the PR
 		inline := len(slices.DeleteFunc(diff.Paths(d), func(f string) bool { return slices.Contains(omitted, f) }))
 		kind += fmt.Sprintf(" · ⚠️ inline %d of %d files", inline, inline+len(omitted))
-		if all, rest := diff.Filter(raw, filepath.Join(dir, "repo"), only, cfg.Ignored, cfg.Parts(true)); cfg.Asks() && len(all) > len(parts) {
+		if all, rest := diff.Filter(raw, sb.Repo(), only, cfg.Ignored, cfg.Parts(true)); cfg.Asks() && len(all) > len(parts) {
 			// a file with a piece still left out isn't one "review all" reviews
 			full := slices.DeleteFunc(diff.Paths(strings.Join(all, "")), func(f string) bool { return slices.Contains(rest, f) })
 			s.Ask = forge.AskLarge(len(full), inline+len(omitted), len(all), f.Boxes(), f.Bot())
@@ -269,16 +266,15 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		return slices.Contains(r.Failed, f) || slices.Contains(omitted, f)
 	}))
 	if guide {
-		repo := filepath.Join(dir, "repo")
 		st := s.State
 		d := report.Data{
 			Repo: e.Repository.FullName, Number: pr.Number, Title: pr.Title, URL: pr.HTMLURL, SHA: pr.Head.SHA,
 			Summary: st.Summary, Diagram: st.Diagram, Effort: st.Effort, Decisions: st.Decisions, Story: st.Story, Flow: st.Flow,
-			Walkthrough: st.Files, Commits: review.Commits(ctx, sb, repo), Outline: outline, Findings: openFindings(threads, open, r),
-			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(sb, repo, raw), Themes: cfg.SyntaxTheme,
-			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, sb, repo),
+			Walkthrough: st.Files, Commits: review.Commits(ctx, sb), Outline: outline, Findings: openFindings(threads, open, r),
+			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(sb, raw), Themes: cfg.SyntaxTheme,
+			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, sb),
 			Conflicts: pr.Mergeable != nil && !*pr.Mergeable, Forge: p.Links(),
-			Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(repo, raw),
+			Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(sb.Repo(), raw),
 		}
 		// what the new code is for, where no doc comment or commit says: one call, the provider's small model
 		if keys, texts := report.Asks(d); len(keys) > 0 {

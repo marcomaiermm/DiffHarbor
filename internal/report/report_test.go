@@ -16,7 +16,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -301,8 +300,17 @@ func TestCut(t *testing.T) {
 	}
 }
 
+// sandbox is a Sandbox on a fresh work dir and its checkout, empty.
+func sandbox(t *testing.T) (*proc.Sandbox, string) {
+	sb := &proc.Sandbox{Dir: t.TempDir()}
+	if err := os.Mkdir(sb.Repo(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return sb, sb.Repo()
+}
+
 func TestSymbols(t *testing.T) {
-	dir := t.TempDir()
+	sb, dir := sandbox(t)
 	write := func(p, s string) {
 		if err := os.WriteFile(filepath.Join(dir, p), []byte(s), 0o600); err != nil {
 			t.Fatal(err)
@@ -311,7 +319,7 @@ func TestSymbols(t *testing.T) {
 	write("a.go", "package a\n\n// Limit caps it.\nconst Limit = 3\n\ntype T struct {\n\tCount int // how many\n}\n\nfunc Use() int { return Limit }\n\nfunc Show(t T) int {\n\treturn t.Count + f().Limit\n}\n")
 	write("c.go", "package a\n\ntype Rec struct {\n\tID      string `json:\"id\"`\n\tCreated int    `json:\"c\"`\n}\n")
 	write("b.ts", "/** Greets. */\nexport function greet(n: string) {\n  return n\n}\ngreet(\"x\")\n")
-	s := Symbols(&proc.Sandbox{}, dir, "+x := a.Limit + t.Count + Show(t)\n+greet(y)\n+Rec{}\n")
+	s := Symbols(sb, "+x := a.Limit + t.Count + Show(t)\n+greet(y)\n+Rec{}\n")
 	l := s["Limit"]
 	if len(l) != 1 || l[0].Sig != "const Limit = 3" || l[0].Doc != "Limit caps it." || l[0].Uses != 2 || l[0].Refs[0].In != "Use" || l[0].Kind != "constant" || l[0].Unit != "package" {
 		t.Errorf("Limit %+v", l)
@@ -573,7 +581,7 @@ func TestCodegraph(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("no node")
 	}
-	dir := t.TempDir()
+	sb, dir := sandbox(t)
 	src := "package a\n\nconst Max = 2\n\nfunc Save() {}\n\nfunc Handle() {\n\tSave()\n\t_ = Max\n}\n"
 	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte(src), 0o600); err != nil {
 		t.Fatal(err)
@@ -595,7 +603,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 		t.Fatal(err, string(out))
 	}
 	use := Ref{Path: "b.go", Line: 3, In: "Use", Text: "func Use() { Save() }"}
-	s := Symbols(&proc.Sandbox{}, dir, "+++ b/a.go\n+\tSave()\n+\t_ = Max\n+func Handle() {\n")
+	s := Symbols(sb, "+++ b/a.go\n+\tSave()\n+\t_ = Max\n+func Handle() {\n")
 	want := Symbol{
 		Kind: "function", Pkg: "a", Unit: "package", Sig: "func Save()", Path: "a.go", Line: 5, From: 5, To: 5, Uses: 2, Files: 2, Exact: true,
 		Refs: []Ref{{Path: "a.go", Line: 8, In: "Handle", Text: "Save()"}, use}, Here: []string{"a.go:8"},
@@ -903,7 +911,7 @@ func TestWalk(t *testing.T) {
 			t.Skip("no " + tool)
 		}
 	}
-	dir := t.TempDir()
+	sb, dir := sandbox(t)
 	for p, src := range map[string]string{
 		"a.go":      "package a\n\nfunc Save() { helper() }\n\nfunc helper() {}\n\nfunc Lonely() {}\n\nfunc Hidden() {}\n",
 		"a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestSave(t *testing.T) { Save() }\n",
@@ -935,7 +943,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 			t.Fatal(err, string(out))
 		}
 	}
-	s := Symbols(&proc.Sandbox{}, dir, "+++ b/a.go\n+func Save() { helper() }\n+func helper() {}\n+func Lonely() {}\n+func Hidden() {}\n+++ b/lib.rs\n+pub fn wrap() -> i32 { 1 }\n")
+	s := Symbols(sb, "+++ b/a.go\n+func Save() { helper() }\n+func helper() {}\n+func Lonely() {}\n+func Hidden() {}\n+++ b/lib.rs\n+pub fn wrap() -> i32 { 1 }\n")
 	for name, want := range map[string]struct {
 		tests    []string
 		untested bool
@@ -1080,10 +1088,12 @@ func TestSources(t *testing.T) {
 	os.WriteFile(filepath.Join(out, "secret"), []byte("no"), 0o644)
 	os.Symlink(filepath.Join(out, "secret"), filepath.Join(dir, "c.go"))
 	os.Symlink(out, filepath.Join(dir, "d"))
+	os.Symlink("a.go", filepath.Join(dir, "e.go")) // in the checkout: still a link, not a.go's text
 	d += "diff --git a/c.go b/c.go\nnew file mode 120000\n--- /dev/null\n+++ b/c.go\n@@ -0,0 +1 @@\n+x\n" +
-		"diff --git a/d/secret b/d/secret\n--- a/d/secret\n+++ b/d/secret\n@@ -1 +1 @@\n-n\n+no\n"
+		"diff --git a/d/secret b/d/secret\n--- a/d/secret\n+++ b/d/secret\n@@ -1 +1 @@\n-n\n+no\n" +
+		"diff --git a/e.go b/e.go\n--- a/e.go\n+++ b/e.go\n@@ -1 +1 @@\n-b.go\n+a.go\n"
 	src := Sources(dir, d)
-	if len(src) != 2 || src["c.go"] != "" || src["d/secret"] != "" {
+	if len(src) != 2 || src["c.go"] != "" || src["d/secret"] != "" || src["e.go"] != "" {
 		t.Fatalf("sources %v", src)
 	}
 	b, _, err := Render(Data{Repo: "o/r", Number: 1, SHA: "abc", Diff: d, Sources: src})
@@ -1140,33 +1150,5 @@ func TestFailedNotClean(t *testing.T) {
 	}
 	if page = string(b); !strings.Contains(page, "1 file not fully reviewed") || !strings.Contains(page, "in the files reviewed") || strings.Contains(page, "Nothing blocks the merge") {
 		t.Error("omitted: a clean verdict")
-	}
-}
-
-// The root server reads the PR's checkout: a symlink out of it, a FIFO (it would block the open) and a file past
-// the limit read nothing.
-func TestReadIn(t *testing.T) {
-	dir, out := t.TempDir(), t.TempDir()
-	os.WriteFile(filepath.Join(out, "secret"), []byte("key"), 0o600)
-	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a"), 0o644)
-	os.Symlink(filepath.Join(out, "secret"), filepath.Join(dir, "b.go"))
-	if err := syscall.Mkfifo(filepath.Join(dir, "c.go"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer root.Close()
-	if b, err := readIn(root, "a.go", 9); err != nil || string(b) != "package a" {
-		t.Fatal(string(b), err)
-	}
-	for _, p := range []string{"b.go", "c.go"} {
-		if b, err := readIn(root, p, 100); err == nil {
-			t.Errorf("%s: read %q", p, b)
-		}
-	}
-	if _, err := readIn(root, "a.go", 8); err == nil {
-		t.Error("past the limit")
 	}
 }

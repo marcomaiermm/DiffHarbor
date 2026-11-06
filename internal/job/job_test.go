@@ -109,14 +109,19 @@ func TestReviewDraftOptIn(t *testing.T) {
 	}
 }
 
+// panicForge's bug is past the review's gates: RepoID asks for its Instance.
+type panicForge struct{ skipForge }
+
+func (panicForge) Instance() string { panic("boom") }
+
 // A bug in a review fails it, a red status rather than a green one, and the server's other jobs run on.
 func TestReviewPanicFails(t *testing.T) {
 	pr := &skipPR{cfg: `{}`}
 	e := &forge.Event{Action: "opened"}
 	e.Repository.ID, e.Repository.DefaultBranch = 1, "main"
 	e.PullRequest.State, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", strings.Repeat("a", 40), "main"
-	err := Review(t.Context(), skipForge{pr: pr}, e) // panics past the gate: the fake forge has no Instance
-	if err == nil || !strings.HasPrefix(err.Error(), "panic: ") || pr.status != "error Review failed" {
+	err := Review(t.Context(), panicForge{skipForge{pr: pr}}, e)
+	if err == nil || !strings.HasPrefix(err.Error(), "panic: boom") || pr.status != "error Review failed" {
 		t.Fatalf("%v %q", err, pr.status)
 	}
 }

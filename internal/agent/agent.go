@@ -238,12 +238,12 @@ func passEnv(ctx context.Context, provider string) ([]string, error) {
 
 // Workspace is proc.Workspace with Pi's models.json in the job's fresh home, see proxies. A local run (not root)
 // keeps its own Pi config.
-func Workspace(repo string) (*proc.Sandbox, error) {
+func Workspace(ctx context.Context, repo string) (*proc.Sandbox, error) {
 	sb, err := proc.Workspace(repo)
 	if err != nil || !proc.AsPi {
 		return sb, err
 	}
-	if err := proxies(sb, filepath.Join(sb.Home(), ".pi", "agent", "models.json")); err != nil {
+	if err := proxies(ctx, sb, filepath.Join(sb.Home(), ".pi", "agent", "models.json")); err != nil {
 		sb.Close()
 		return nil, err
 	}
@@ -253,7 +253,7 @@ func Workspace(repo string) (*proc.Sandbox, error) {
 // proxies writes Pi's models.json f: it routes built-in providers through a proxy or gateway (LiteLLM, a company's
 // AI gateway): <PROVIDER>_BASE_URL, e.g. ANTHROPIC_BASE_URL, becomes the provider's baseUrl; its models and auth stay
 // Pi's, the key is the proxy's. A provider whose key the vault keeps points at the vault, which forwards to the gateway.
-func proxies(sb *proc.Sandbox, f string) error {
+func proxies(ctx context.Context, sb *proc.Sandbox, f string) error {
 	providers := map[string]map[string]any{}
 	for _, r := range Matrix {
 		switch u := os.Getenv(envName(r.Name) + "_BASE_URL"); {
@@ -273,7 +273,7 @@ func proxies(sb *proc.Sandbox, f string) error {
 		return sb.Remove(f) // as the job's user: Pi's config dir is its
 	}
 	b, _ := json.Marshal(map[string]any{"providers": providers})
-	return sb.WriteFile(f, b)
+	return sb.WriteFile(ctx, f, b)
 }
 
 // Default is the review model when neither REVIEW_MODEL nor review.json names one: the first provider in Matrix
@@ -383,7 +383,7 @@ type Pi struct{}
 // session so a reply without JSON can be repaired without redoing the tool work.
 func (Pi) Run(ctx context.Context, sb *proc.Sandbox, name, system, prompt, task, m string) (string, error) {
 	file := filepath.Join(sb.Dir, name+".md")
-	if err := sb.WriteFile(file, []byte(prompt)); err != nil {
+	if err := sb.WriteFile(ctx, file, []byte(prompt)); err != nil {
 		return "", err
 	}
 	return runPi(ctx, sb, name, system, m, true, "", "@"+file, task) // task is ours, the same for every PR
@@ -395,9 +395,9 @@ func (Pi) Continue(ctx context.Context, sb *proc.Sandbox, name, system, task, m 
 	return runPi(ctx, sb, name, system, m, false, task)
 }
 
-// runPi runs pi with m, a full --model value (provider/id:level), stdin the message before promptArgs'. An openai/
-// pass the subscription can't serve reruns on FALLBACK_MODEL at the same level, and the next 30 minutes of passes
-// skip straight to it.
+// runPi runs pi with m, a full --model value (provider/id:level); stdin, when set, is sent to pi before promptArgs.
+// An openai/ pass the subscription can't serve reruns on FALLBACK_MODEL at the same level, and the next 30 minutes of
+// passes skip straight to it.
 func runPi(ctx context.Context, sb *proc.Sandbox, name, system, m string, tools bool, stdin string, promptArgs ...string) (string, error) {
 	// One switch for all passes: with mixed providers a failing verify model also moves the reviews to the fallback.
 	fm := FallbackFor(m, name)
@@ -432,7 +432,7 @@ func runPiOn(ctx context.Context, sb *proc.Sandbox, name, system, m string, tool
 		return "", fmt.Errorf("%s: %w", m, err)
 	}
 	sys := filepath.Join(sb.Dir, name+".system.md") // --system-prompt reads a path that exists
-	if err := sb.WriteFile(sys, []byte(system)); err != nil {
+	if err := sb.WriteFile(ctx, sys, []byte(system)); err != nil {
 		return "", err
 	}
 	// --no-approve: a .pi/ in the checkout (PR-controlled) is ignored. fff replaces grep/find.
@@ -452,8 +452,8 @@ func runPiOn(ctx context.Context, sb *proc.Sandbox, name, system, m string, tool
 	}
 	args = append(args, promptArgs...)
 	env := append(append(sb.ToolEnv(), creds...), "PI_FFF_MODE=override", deadline, fmt.Sprintf("DIFFHARBOR_MAX_TOOLS=%d", maxTools))
-	// stdin is never a terminal: pi -p waits for one's input otherwise.
-	c := sb.Command(ctx, filepath.Join(sb.Dir, "repo"), env, "pi", args...)
+	// stdin is a pipe, never a terminal: pi -p would wait for typed input otherwise.
+	c := sb.Command(ctx, sb.Repo(), env, "pi", args...)
 	c.Stdin = strings.NewReader(stdin)
 	out, err := proc.Run(c)
 	if err != nil {

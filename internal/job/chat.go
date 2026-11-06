@@ -10,12 +10,12 @@ import (
 	"diffharbor/internal/proc"
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -225,21 +225,13 @@ func learningsCommand(cmd, bot string, e *forge.Event) string {
 // Seen puts 👀 on a maintainer's comment as soon as it is queued, before the worker gets to it. e is its own copy:
 // the job changes the queued one.
 func Seen(f forge.Forge, e *forge.Event) {
-	defer logPanic(e.Key())
+	defer proc.Recovered(func(err error) { log.Println(e.Key(), err) })
 	p, err := f.Open(e)
 	if err != nil {
 		log.Println(e.Key(), "reaction:", err)
 		return
 	}
 	p.React()
-}
-
-// logPanic, deferred first in a goroutine beside a job, logs its panic: a reaction's bug ends neither the server
-// nor the jobs running.
-func logPanic(key string) {
-	if v := recover(); v != nil {
-		log.Printf("%s panic: %v\n%s", key, v, debug.Stack())
-	}
 }
 
 // Chat answers the event's comment on f, or reviews the PR when it asks for one; mention matches @bot.
@@ -305,7 +297,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		if !mention.MatchString(c.Body) {
 			key := e.Key()
 			go func() { // the server left it to us; off the worker, a slow forge would hold up the queue
-				defer logPanic(key)
+				defer proc.Recovered(func(err error) { log.Println(key, err) })
 				p.React()
 			}()
 		}
@@ -326,19 +318,20 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	if err != nil {
 		return err
 	}
-	sb, err := agent.Workspace(id)
-	if err != nil { // e.g. cleaning up after the repo's last job failed; a chat isn't kept to retry
-		_ = p.Reply("⚠️ Couldn't start: preparing the workspace failed. Ask again in a while.\n\n" + forge.Mark)
+	sb, err := agent.Workspace(ctx, id)
+	if err != nil {
+		if errors.Is(err, proc.ErrCleanup) { // a chat isn't kept to retry: the asker is
+			_ = p.Reply("⚠️ Couldn't start: preparing the workspace failed. Ask again in a while.\n\n" + forge.Mark)
+		}
 		return err
 	}
 	defer sb.Close()
-	dir := sb.Dir
 	read, err := p.ReadToken()
 	if err != nil {
 		return err
 	}
 	pr := e.PullRequest
-	raw, err := review.Checkout(ctx, sb, filepath.Join(dir, "repo"), e.Repository.CloneURL, pr.Head.SHA, "refs/heads/"+pr.Base.Ref, read)
+	raw, err := review.Checkout(ctx, sb, e.Repository.CloneURL, pr.Head.SHA, "refs/heads/"+pr.Base.Ref, read)
 	if err != nil {
 		return err
 	}
@@ -348,7 +341,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	}
 	cfg, _ := review.LoadSettings(p.File(pr.Base.SHA, "review.json")) // broken: defaults, the review says so
 	rules := p.File(pr.Base.SHA, cfg.RulePaths()...)
-	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(dir, "skills"))
+	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(sb.Dir, "skills"))
 	system := chatSystem + review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings))
 	rm, _ := cfg.Models()
 	m := agent.PassModel(rm, "medium")

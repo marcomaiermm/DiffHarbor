@@ -66,10 +66,9 @@ git rev-parse pr`)
 			t.Fatal(err)
 		}
 	}
-	work := t.TempDir()
-	repo := filepath.Join(work, "repo")
-	sb := &proc.Sandbox{Dir: work}
-	if _, err := review.Checkout(context.Background(), sb, repo, up.URL+"/o.git", head, "refs/heads/main", "ghs_read"); err != nil {
+	sb := &proc.Sandbox{Dir: t.TempDir()}
+	repo := sb.Repo()
+	if _, err := review.Checkout(context.Background(), sb, up.URL+"/o.git", head, "refs/heads/main", "ghs_read"); err != nil {
 		t.Fatal(err)
 	}
 	before := reqs.Load()

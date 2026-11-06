@@ -142,9 +142,10 @@ type Tests struct {
 // read from regs, through the vault until Run returns.
 //
 //nolint:gocognit,gocyclo // the checks step by step, each step a few lines
-func Run(ctx context.Context, sb *proc.Sandbox, repo string, scripts []Script, patch string, files []string, tests func(string) bool, installScripts bool, regs []Registry) (string, Tests) {
+func Run(ctx context.Context, sb *proc.Sandbox, scripts []Script, patch string, files []string, tests func(string) bool, installScripts bool, regs []Registry) (string, Tests) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	repo := sb.Repo()
 	started := time.Now()
 	var out strings.Builder
 	var ran Tests
@@ -201,8 +202,8 @@ func Run(ctx context.Context, sb *proc.Sandbox, repo string, scripts []Script, p
 	has := func(f string) bool { return proc.Exists(filepath.Join(repo, f)) }
 	// config writes a tool's config next to the checkout, outside the PR's files.
 	config := func(name, content string) string {
-		p := filepath.Join(filepath.Dir(repo), name)
-		if err := sb.WriteFile(p, []byte(content)); err != nil {
+		p := filepath.Join(sb.Dir, name)
+		if err := sb.WriteFile(ctx, p, []byte(content)); err != nil {
 			log.Println(name+":", err)
 		}
 		return p
@@ -811,7 +812,8 @@ var (
 
 // CITests is the CI file that runs tests on pull requests (a GitHub workflow, GitLab CI), "" = none: then the
 // review runs them. A workflow counts if a push or pull request starts it, with the reusable workflows it calls.
-func CITests(ctx context.Context, sb *proc.Sandbox, repo string) string {
+func CITests(ctx context.Context, sb *proc.Sandbox) string {
+	repo := sb.Repo()
 	read := func(f string) string {
 		b, _ := sb.ReadFile(ctx, f)
 		return yamlComment.ReplaceAllString(string(b), "")

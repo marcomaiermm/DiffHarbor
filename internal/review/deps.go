@@ -149,7 +149,7 @@ func depHints(ctx context.Context, sb *proc.Sandbox, repo, d string, regs []chec
 		}
 		if len(out) == 0 {
 			s.WriteString("No changes to its type definitions or changelog.\n")
-		} else if f := filepath.Join(sb.Dir, "deps-"+strings.ReplaceAll(b.name, "/", "+")+".diff"); sb.WriteFile(f, out) == nil {
+		} else if f := filepath.Join(sb.Dir, "deps-"+strings.ReplaceAll(b.name, "/", "+")+".diff"); sb.WriteFile(ctx, f, out) == nil {
 			fmt.Fprintf(&s, "Type definitions diff: `%s` (grep it for the symbols this change and its callers use)\n", f)
 		}
 		s.WriteString("\n")

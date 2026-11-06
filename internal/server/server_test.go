@@ -25,14 +25,14 @@ import (
 
 func TestStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	running.m["o/r#1"] = &task{review: false, cancel: cancel}
-	defer delete(running.m, "o/r#1")
-	stop("o/r#1", true) // a push spares a chat answer
-	stop("o/r#2", false)
+	p := newPool(1, nil)
+	p.running["o/r#1"] = &task{review: false, cancel: cancel}
+	p.stop("o/r#1", true) // a push spares a chat answer
+	p.stop("o/r#2", false)
 	if ctx.Err() != nil {
 		t.Fatal("stopped the wrong job")
 	}
-	stop("o/r#1", false) // closing the PR stops everything on it
+	p.stop("o/r#1", false) // closing the PR stops everything on it
 	if ctx.Err() == nil {
 		t.Fatal("not stopped")
 	}
@@ -115,7 +115,7 @@ func TestDrop(t *testing.T) {
 	if !closing(r) || r.Key() != e.Key() {
 		t.Fatalf("%+v", r)
 	}
-	(&pool{run: run}).exec(r)
+	newPool(1, runJob).exec(r)
 	if vs, err := job.Versions(dir); err != nil || len(vs) != 0 {
 		t.Fatal("kept its reports:", vs, err)
 	}
@@ -242,8 +242,9 @@ func TestServeLighthouse(t *testing.T) {
 	}
 }
 
-// fakeJobs is a pool's run that holds each job until its ctx ends or it is let go, and records what ran at once.
+// fakeJobs is p's run that holds each job until its ctx ends or it is let go, and records what ran at once.
 type fakeJobs struct {
+	p       *pool
 	mu      sync.Mutex
 	repos   map[string]int // running jobs by repo
 	most    int            // running jobs at once, at most
@@ -253,18 +254,21 @@ type fakeJobs struct {
 	panics  string     // the PR whose job panics
 }
 
-func newFakeJobs() *fakeJobs {
-	return &fakeJobs{repos: map[string]int{}, started: make(chan string, 100), finish: make(chan error)}
+// newFakeJobs runs f's jobs in a pool of limit.
+func newFakeJobs(limit int) *fakeJobs {
+	f := &fakeJobs{repos: map[string]int{}, started: make(chan string, 100), finish: make(chan error)}
+	f.p = newPool(limit, f.run)
+	return f
 }
 
 func (f *fakeJobs) run(ctx context.Context, e *forge.Event) error {
 	f.mu.Lock()
 	f.repos[e.Repo()]++
-	running.Lock()
-	if f.repos[e.Repo()] > 1 || running.m[e.Key()] == nil {
+	f.p.mu.Lock()
+	if f.repos[e.Repo()] > 1 || f.p.running[e.Key()] == nil {
 		f.twice = e.Key()
 	}
-	running.Unlock()
+	f.p.mu.Unlock()
 	n := 0
 	for _, c := range f.repos {
 		n += c
@@ -303,13 +307,13 @@ func (f *fakeJobs) within(d time.Duration) string {
 	}
 }
 
-// waitFor waits until ok, under running's lock, for seconds at most.
-func waitFor(t *testing.T, ok func() bool) {
+// waitFor waits until ok, under the pool's lock, for seconds at most.
+func (f *fakeJobs) waitFor(t *testing.T, ok func() bool) {
 	t.Helper()
 	for end := time.Now().Add(10 * time.Second); time.Now().Before(end); time.Sleep(5 * time.Millisecond) {
-		running.Lock()
+		f.p.mu.Lock()
 		yes := ok()
-		running.Unlock()
+		f.p.mu.Unlock()
 		if yes {
 			return
 		}
@@ -318,15 +322,14 @@ func waitFor(t *testing.T, ok func() bool) {
 }
 
 // idle waits until no job runs, their done included: the next test sets proc.DataDir.
-func idle(t *testing.T) { waitFor(t, func() bool { return len(running.m) == 0 }) }
+func (f *fakeJobs) idle(t *testing.T) { f.waitFor(t, func() bool { return len(f.p.running) == 0 }) }
 
 // Jobs of different repos run at once, up to the limit; a repo's never do.
 func TestPoolParallel(t *testing.T) {
 	proc.DataDir = t.TempDir()
-	f := newFakeJobs()
-	p := newPool(2, f.run)
+	f := newFakeJobs(2)
 	for _, e := range []*forge.Event{ev("a", 1, ""), ev("a", 2, ""), ev("b", 1, ""), ev("c", 1, "")} {
-		if !p.add(e) {
+		if !f.p.add(e) {
 			t.Fatal("full")
 		}
 	}
@@ -341,7 +344,7 @@ func TestPoolParallel(t *testing.T) {
 	}
 	f.finish <- nil
 	f.finish <- nil
-	idle(t)
+	f.idle(t)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.most != 2 || f.twice != "" {
@@ -353,58 +356,56 @@ func TestPoolParallel(t *testing.T) {
 // pending for the next start.
 func TestPoolPanic(t *testing.T) {
 	proc.DataDir = t.TempDir()
-	f := newFakeJobs()
+	f := newFakeJobs(2)
 	f.panics = "a#1"
-	p := newPool(2, f.run)
 	latest.Lock()
 	save(pendingFile("a#1"), ev("a", 1, ""))
 	latest.Unlock()
-	p.add(ev("b", 1, ""))
+	f.p.add(ev("b", 1, ""))
 	if b := f.next(); b != "b#1" {
 		t.Fatal(b)
 	}
-	p.add(ev("a", 1, ""))
-	p.add(ev("a", 2, ""))
+	f.p.add(ev("a", 1, ""))
+	f.p.add(ev("a", 2, ""))
 	if a1, a2 := f.next(), f.next(); a1 != "a#1" || a2 != "a#2" {
 		t.Fatal(a1, a2)
 	}
 	if _, err := os.Stat(pendingFile("a#1")); !os.IsNotExist(err) {
 		t.Fatal("stays pending:", err)
 	}
-	running.Lock()
-	b := running.m["b#1"]
-	running.Unlock()
+	f.p.mu.Lock()
+	b := f.p.running["b#1"]
+	f.p.mu.Unlock()
 	if b == nil {
 		t.Fatal("b's job ended with a's")
 	}
 	f.finish <- nil
 	f.finish <- nil
-	idle(t)
+	f.idle(t)
 }
 
 // stop cancels only its PR's job, a push's spares an answer.
 func TestPoolStop(t *testing.T) {
 	proc.DataDir = t.TempDir()
-	f := newFakeJobs()
-	p := newPool(3, f.run)
-	p.add(ev("a", 1, ""))
-	p.add(ev("b", 1, ""))
-	p.add(ev("c", 1, "issue_comment"))
+	f := newFakeJobs(3)
+	f.p.add(ev("a", 1, ""))
+	f.p.add(ev("b", 1, ""))
+	f.p.add(ev("c", 1, "issue_comment"))
 	for range 3 {
 		f.next()
 	}
-	stop("c#1", true)
-	stop("a#1", false)
-	waitFor(t, func() bool { return running.m["a#1"] == nil }) // a's job ends on its ctx
-	running.Lock()
-	b, c := running.m["b#1"], running.m["c#1"]
-	running.Unlock()
+	f.p.stop("c#1", true)
+	f.p.stop("a#1", false)
+	f.waitFor(t, func() bool { return f.p.running["a#1"] == nil }) // a's job ends on its ctx
+	f.p.mu.Lock()
+	b, c := f.p.running["b#1"], f.p.running["c#1"]
+	f.p.mu.Unlock()
 	if b == nil || c == nil {
 		t.Fatal("stopped another job", b, c)
 	}
 	f.finish <- nil
 	f.finish <- nil
-	idle(t)
+	f.idle(t)
 }
 
 // A review that couldn't clean up before it started stays pending: the next push or a restart retries it. Any other

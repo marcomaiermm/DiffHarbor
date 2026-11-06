@@ -31,7 +31,7 @@ func TestCapped(t *testing.T) {
 
 func TestFiles(t *testing.T) {
 	s, f := &Sandbox{}, filepath.Join(t.TempDir(), "f")
-	if err := s.WriteFile(f, []byte("x")); err != nil {
+	if err := s.WriteFile(t.Context(), f, []byte("x")); err != nil {
 		t.Fatal(err)
 	}
 	if b, err := s.ReadFile(t.Context(), f); err != nil || string(b) != "x" {
@@ -44,6 +44,28 @@ func TestFiles(t *testing.T) {
 	}
 	if Exists(f) {
 		t.Fatal("still there")
+	}
+}
+
+// A FIFO or symlink PR code planted where a file goes is replaced, not written through: the write never blocks.
+func TestWriteFilePlanted(t *testing.T) {
+	dir := t.TempDir()
+	fifo, link, target := filepath.Join(dir, "fifo"), filepath.Join(dir, "link"), filepath.Join(dir, "target")
+	if err := errors.Join(syscall.Mkfifo(fifo, 0o644), os.Symlink(target, link)); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	for _, f := range []string{fifo, link} {
+		if err := (&Sandbox{}).WriteFile(ctx, f, []byte("x")); err != nil {
+			t.Fatal(f, err)
+		}
+		if fi, err := os.Lstat(f); err != nil || !fi.Mode().IsRegular() {
+			t.Fatal(f, fi, err)
+		}
+	}
+	if Exists(target) {
+		t.Fatal("wrote through the symlink")
 	}
 }
 
@@ -238,30 +260,38 @@ func TestCommandNoUser(t *testing.T) {
 
 // A uid whose cleanup failed after its job stays dirty: no job of any repo starts until a retry clears it.
 func TestDirtyUID(t *testing.T) {
-	defer func(pi bool, c func(uint32) error) { AsPi, clearUID = pi, c }(AsPi, clearUID)
+	if os.Getuid() == 0 {
+		t.Skip("as root Workspace's name writes /etc/passwd")
+	}
+	defer func(pi bool, c func(uint32) error, d string) { AsPi, clearUID, DataDir = pi, c, d }(AsPi, clearUID, DataDir)
 	failing := true
 	var cleared []uint32
-	AsPi, clearUID = true, func(uid uint32) error {
+	AsPi, DataDir, clearUID = true, t.TempDir(), func(uid uint32) error {
 		cleared = append(cleared, uid)
 		if failing && uid == 10001 {
 			return errors.New("busy")
 		}
 		return nil
 	}
-	if err := clearUser(10001); err == nil || !dirty[10001] {
+	if err := clean(10003); err != nil || !slices.Equal(cleared, []uint32{10003}) || len(dirty) != 0 {
+		t.Fatal(err, cleared, dirty) // its own uid, before the sandbox exists
+	}
+	if err := clean(10001); !errors.Is(err, ErrCleanup) || !dirty[10001] {
 		t.Fatal("not dirty", err)
 	}
-	if err := clearUser(10002); err != nil || dirty[10002] {
-		t.Fatal(err)
+	if err := clean(1000); !errors.Is(err, ErrCleanup) || dirty[1000] {
+		t.Fatal("node's job started beside the leftovers, or node got cleared:", err)
 	}
 	if _, err := Workspace("github:2"); !errors.Is(err, ErrCleanup) || !strings.Contains(err.Error(), "uid 10001: busy") {
 		t.Fatal("a job started beside the leftovers:", err)
 	}
 	failing = false
-	if err := cleanDirty(); err != nil || len(dirty) != 0 {
+	if err := clean(1000); err != nil || len(dirty) != 0 {
 		t.Fatal(err, dirty)
 	}
-	if !slices.Equal(cleared, []uint32{10001, 10002, 10001, 10001}) {
-		t.Fatal(cleared) // Workspace retried it, and so did the cleanDirty after it
+	// Workspace's repo got uid 10000 and was cleared beside 10001, in either order.
+	if !slices.Equal(cleared[:3], []uint32{10003, 10001, 10001}) || !slices.Contains(cleared[3:5], 10000) ||
+		!slices.Contains(cleared[3:5], 10001) || !slices.Equal(cleared[5:], []uint32{10001}) {
+		t.Fatal(cleared)
 	}
 }

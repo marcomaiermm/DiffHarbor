@@ -17,7 +17,6 @@ import (
 	"log"
 	"path/filepath"
 	"regexp"
-	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -222,7 +221,7 @@ type Input struct {
 
 // Analyze is the pipeline: checks + history as hints, then per part a review pass and a verification pass on its findings.
 func Analyze(ctx context.Context, in Input) (Result, string, error) {
-	repo := filepath.Join(in.Sandbox.Dir, "repo")
+	repo := in.Sandbox.Repo()
 	whole := strings.Join(in.Parts, "")
 	files := diff.Paths(whole)
 	lvl := Level(whole, files)
@@ -238,16 +237,16 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	m := strings.Join(models, " + ") // the footer shows the models and level that actually ran
 	// For checks that report on the diff's lines only.
 	patch := filepath.Join(in.Sandbox.Dir, "pr.diff")
-	if err := in.Sandbox.WriteFile(patch, []byte(whole)); err != nil {
+	if err := in.Sandbox.WriteFile(ctx, patch, []byte(whole)); err != nil {
 		return Result{}, "", err
 	}
-	in.Settings.CITests = checks.CITests(ctx, in.Sandbox, repo)
+	in.Settings.CITests = checks.CITests(ctx, in.Sandbox)
 	ci := "" // the footer says why tests didn't run
 	if slices.ContainsFunc(files, in.Settings.LeftToCI) {
 		ci = in.Settings.CITests
 	}
 	var hints strings.Builder
-	found, tests := checks.Run(ctx, in.Sandbox, repo, in.Checks, patch, files, in.Settings.RunsTests, in.Settings.InstallScripts, in.Registries)
+	found, tests := checks.Run(ctx, in.Sandbox, in.Checks, patch, files, in.Settings.RunsTests, in.Settings.InstallScripts, in.Registries)
 	fmt.Fprintf(&hints, "## Check results (lint, types, tests, secrets, vulnerabilities; may include issues the change didn't cause)\n\n```\n%s\n```\n\n", found)
 	gctx, cancel := context.WithTimeout(ctx, time.Minute)
 	gitLog, err := proc.Run(in.Sandbox.Command(gctx, repo, nil, "git", "log", "-n", historyDepth, "--format=%x00", "--name-only", "--no-renames"))
@@ -309,7 +308,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	var wg sync.WaitGroup
 	for k, d := range in.Parts {
 		wg.Go(func() {
-			defer recovered(func(err error) { ps[k] = part{err: err, files: diff.Paths(d)} })
+			defer proc.Recovered(func(err error) { ps[k] = part{err: err, files: diff.Paths(d)} })
 			var docs strings.Builder // a contradiction between a doc and code in different parts went unnoticed otherwise
 			for j, o := range in.Parts {
 				if j != k {
@@ -333,14 +332,6 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	r.Tests = tests
 	r.Comments = append(r.Comments, proofOnBase(ctx, in.Sandbox, repo, r.Story.Proof, tests.Ran, in.Settings)...)
 	return r, tag, err
-}
-
-// recovered, deferred first in a goroutine of a review, turns its panic into fail's error: a bug fails that part
-// or pass, not the server and the other repos' jobs running beside it.
-func recovered(fail func(error)) {
-	if v := recover(); v != nil {
-		fail(fmt.Errorf("panic: %v\n%s", v, debug.Stack()))
-	}
 }
 
 // held runs f in one of sem's slots, given back on a panic too: the other parts' passes wait for it.
@@ -370,7 +361,7 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 	var wg sync.WaitGroup
 	for k, f := range fs {
 		wg.Go(func() {
-			defer recovered(func(err error) { errs[k] = err })
+			defer proc.Recovered(func(err error) { errs[k] = err })
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			pin, pass, pd := in, "review"+name, d

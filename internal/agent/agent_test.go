@@ -123,14 +123,14 @@ func TestProxies(t *testing.T) {
 	t.Setenv("ANTHROPIC_BASE_URL", "https://llm.example.com/anthropic")
 	t.Setenv("OPENAI_BASE_URL", "")
 	t.Setenv("AZURE_BASE_URL", "https://ignored") // Azure's endpoint is AZURE_OPENAI_BASE_URL, passed per pass
-	if err := proxies(&proc.Sandbox{}, f); err != nil {
+	if err := proxies(t.Context(), &proc.Sandbox{}, f); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(f); string(b) != `{"providers":{"anthropic":{"baseUrl":"https://llm.example.com/anthropic","compat":{"supportsMidConvoEffort":false,"supportsMidConvoToolChanges":false}}}}` {
 		t.Fatalf("models.json: %s", b)
 	}
 	t.Setenv("ANTHROPIC_BASE_URL", "")
-	if err := proxies(&proc.Sandbox{}, f); err != nil || proc.Exists(f) {
+	if err := proxies(t.Context(), &proc.Sandbox{}, f); err != nil || proc.Exists(f) {
 		t.Fatalf("no proxy left, models.json stays: %v", err)
 	}
 }
@@ -182,7 +182,7 @@ func TestVaulted(t *testing.T) {
 	}
 	f := filepath.Join(t.TempDir(), "models.json")
 	t.Setenv("ANTHROPIC_BASE_URL", "https://llm.example.com/anthropic") // the vault's upstream now
-	if err := proxies(&proc.Sandbox{}, f); err != nil {
+	if err := proxies(t.Context(), &proc.Sandbox{}, f); err != nil {
 		t.Fatal(err)
 	}
 	want := fmt.Sprintf(`{"providers":{"anthropic":{"baseUrl":"%[1]s/anthropic","compat":{"supportsMidConvoEffort":false,"supportsMidConvoToolChanges":false}},"azure":{"baseUrl":"%[1]s/azure"}}}`, vault.URL())
