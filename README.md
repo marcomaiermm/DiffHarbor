@@ -329,7 +329,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 
 ### Review profiles
 
-Every review reports defects (critical, major, minor) and nits: naming, readability, a dead branch, an idiom of the codebase the change ignores, at most 5 per pass and never in place of a defect. The profile decides what goes inline as a thread and what folds into the review's summary, where nothing is lost and the prompt for AI agents still has it:
+Every review reports defects (critical, major, minor) and nits: naming, readability, a dead branch, an idiom of the codebase the change ignores, at most 5 per pass and never in place of a defect. The profile decides what goes inline as a thread and what folds into the review's summary, where nothing is lost and the prompt for AI agents still has it. Inline means on a diff line: a finding outside the diff goes into the summary whatever the profile.
 
 | `profile` | Inline | Folded into the summary |
 |---|---|---|
