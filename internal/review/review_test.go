@@ -352,3 +352,77 @@ func TestFence(t *testing.T) {
 		}
 	}
 }
+
+// A profile moves findings between inline and the summary, by file; a PR's override wins over every file's.
+func TestProfile(t *testing.T) {
+	cfg, err := LoadSettings(`{"profile":"quiet","packages":{"web":{"profile":"assertive"},"api":{"min_severity":"minor"}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path, sev string
+		fold      bool
+	}{
+		{"a.go", "major", false}, {"a.go", "minor", true}, {"a.go", "nit", true},
+		{"web/a.ts", "minor", false}, {"web/a.ts", "nit", false},
+		{"api/a.go", "minor", true}, // the package sets no profile: the top's
+	} {
+		if got := cfg.Fold(Comment{Path: tc.path, Severity: tc.sev}); got != tc.fold {
+			t.Errorf("%s %s: fold %v", tc.path, tc.sev, got)
+		}
+	}
+	if (Settings{}).Fold(Comment{Severity: "minor"}) || !(Settings{}).Fold(Comment{Severity: "nit"}) {
+		t.Error("chill by default: minor inline, nits folded")
+	}
+	if !(Settings{}).Keep(Comment{Severity: "nit"}) || cfg.Keep(Comment{Path: "api/a.go", Severity: "nit"}) {
+		t.Error("nits kept unless min_severity drops them")
+	}
+	cfg.Override("chill")
+	if cfg.Fold(Comment{Path: "a.go", Severity: "minor"}) || !cfg.Fold(Comment{Path: "web/a.ts", Severity: "nit"}) {
+		t.Error("override")
+	}
+	for _, bad := range []string{`{"profile":"strict"}`, `{"packages":{"x":{"profile":"loud"}}}`, `{"min_severity":"nit"}`} {
+		if _, err := LoadSettings(bad); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+}
+
+func TestBodyProfile(t *testing.T) {
+	for body, want := range map[string]string{
+		"Fixes x.\n\nreview: quiet":                    "quiet",
+		"Review: Assertive\n":                          "assertive",
+		"- [ ] review: quiet\n- [x] review: chill\n":   "chill",
+		"* [X] review: assertive":                      "assertive",
+		"- review: quiet":                              "quiet",
+		"- [ ] review: quiet\n- [ ] review: chill":     "",
+		"<!-- review: quiet | chill | assertive -->\n": "",
+		"code review: quiet please":                    "", // not a line of its own
+		"review: loud":                                 "",
+	} {
+		if got := BodyProfile(body); got != want {
+			t.Errorf("%q: %q, want %q", body, got, want)
+		}
+	}
+}
+
+// Nits have their own cap: they never push out a defect.
+func TestCapped(t *testing.T) {
+	var cs []Comment
+	for range 8 {
+		cs = append(cs, Comment{Severity: "nit"})
+	}
+	for range 12 {
+		cs = append(cs, Comment{Severity: "minor"})
+	}
+	got := capped(cs)
+	n := 0
+	for _, c := range got {
+		if c.Severity == "nit" {
+			n++
+		}
+	}
+	if n != 5 || len(got)-n != 10 {
+		t.Fatalf("%d nits, %d findings", n, len(got)-n)
+	}
+}

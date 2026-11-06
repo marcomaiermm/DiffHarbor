@@ -218,6 +218,29 @@ func Seen(f forge.Forge, e *forge.Event) {
 	p.React()
 }
 
+// reviewCommand reads `review [all] [profile]` (or `full review …`), the words after review in any order; ok is
+// false for any other comment.
+func reviewCommand(cmd string) (large bool, profile string, ok bool) {
+	rest, found := strings.CutPrefix(cmd, "full review")
+	if !found {
+		rest, found = strings.CutPrefix(cmd, "review")
+	}
+	if !found || rest != "" && rest[0] != ' ' {
+		return false, "", false
+	}
+	for _, w := range strings.Fields(rest) {
+		switch {
+		case w == "all":
+			large = true
+		case slices.Contains(review.Profiles, w):
+			profile = w
+		default:
+			return false, "", false
+		}
+	}
+	return large, profile, true
+}
+
 // Chat answers the event's comment on f, or reviews the PR when it asks for one; mention matches @bot.
 //
 //nolint:gocognit // one job step by step, each step a few lines
@@ -252,9 +275,9 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 				return nil
 			}
 		}
-		if large := ticked || bare == "review all"; large || bare == "review" || bare == "full review" {
-			e.Action = "manual" // anything but synchronize: full review
-			if large {
+		if large, profile, ok := reviewCommand(bare); ok || ticked {
+			e.Action, e.Profile = "manual", profile // anything but synchronize: full review
+			if large || ticked {
 				e.Action = "large"
 			}
 			return Review(ctx, f, e)

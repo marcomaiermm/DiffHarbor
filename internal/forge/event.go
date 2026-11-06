@@ -67,6 +67,8 @@ type Event struct {
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"sender"`
+	Profile string `json:"-"` // `@bot review quiet`: this review's profile, over the description's and review.json's
+
 	Changes struct { // an edited comment's old body
 		Body struct {
 			From string `json:"from"`

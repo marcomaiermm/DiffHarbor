@@ -63,6 +63,7 @@ type Settings struct {
 	Learnings Learnings `json:"learnings"`
 
 	ignoreRe, keepRe *regexp.Regexp // ignore's globs, its "!" ones
+	override         string         // Override: this review's profile, over the top and the packages
 	CITests          string         // checks.CITests: the CI file running the tests; unless "tests" says otherwise, the review doesn't
 	pkgs             []pkgRule      // longest pattern first
 }
@@ -124,6 +125,9 @@ type Pass struct {
 type pkgSettings struct {
 	MinSeverity string `json:"min_severity"` // minor|major|critical: post nothing below it
 	Tests       *bool  `json:"tests"`        // false: don't run the tests of changed packages; unset = inherit, at the top run unless CI does
+	// What goes inline and what folds into the review's summary: "quiet" folds minor ones and nits, "chill" (default)
+	// nits, "assertive" none. min_severity drops what is below it first, "minor" the nits.
+	Profile string `json:"profile"`
 }
 
 type pkgRule struct {
@@ -132,10 +136,28 @@ type pkgRule struct {
 }
 
 var (
-	rank    = map[string]int{"minor": 1, "major": 2, "critical": 3}
+	rank    = map[string]int{"nit": 1, "minor": 2, "major": 3, "critical": 4}
 	modelRe = regexp.MustCompile(`^\w[\w.-]*/[\w.:/@-]+$`)
 	themeRe = regexp.MustCompile(`^[a-z0-9-]{1,40}$`)
+	// a PR description's line "review: quiet", plain, a list item or a ticked box; an unticked box is no choice
+	bodyProfile = regexp.MustCompile(`(?im)^[ \t>]*(?:[-*+][ \t]+(?:\[[xX]\][ \t]+)?)?review:[ \t]*(quiet|chill|assertive)\b`)
+	htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
 )
+
+// Profiles are the values of review.json's profile, least inline first.
+var Profiles = []string{"quiet", "chill", "assertive"}
+
+// BodyProfile is the profile a PR description names on a line of its own, "review: quiet", by hand or as a ticked
+// box of its template; the first, "" for none. HTML comments don't count: a template's hint lists every profile.
+func BodyProfile(body string) string {
+	if m := bodyProfile.FindStringSubmatch(htmlComment.ReplaceAllString(body, "")); m != nil {
+		return strings.ToLower(m[1])
+	}
+	return ""
+}
+
+// Override sets the profile of every file for this review, over review.json's top and packages; "" keeps theirs.
+func (cfg *Settings) Override(profile string) { cfg.override = profile }
 
 // Models returns the review and verify model: the server's env, else review.json, else agent.Matrix. An empty
 // verify model means the review model verifies.
@@ -370,8 +392,8 @@ func LoadSettings(s string) (Settings, error) {
 			return Settings{}, fmt.Errorf("suggest_split: count %q: want %s", c, strings.Join(diff.Classes, ", "))
 		}
 	}
-	if cfg.MinSeverity != "" && rank[cfg.MinSeverity] == 0 {
-		return Settings{}, fmt.Errorf("min_severity %q: want minor, major or critical", cfg.MinSeverity)
+	if err := cfg.pkgSettings.check(); err != nil {
+		return Settings{}, err
 	}
 	var err error
 	if cfg.ignoreRe, cfg.keepRe, err = globsRe(cfg.Ignore); err != nil {
@@ -383,8 +405,8 @@ func LoadSettings(s string) (Settings, error) {
 	}
 	for _, p := range slices.SortedFunc(maps.Keys(cfg.Packages), func(a, b string) int { return cmp.Compare(len(b), len(a)) }) {
 		ps := cfg.Packages[p]
-		if ps.MinSeverity != "" && rank[ps.MinSeverity] == 0 {
-			return Settings{}, fmt.Errorf("packages %q: min_severity %q: want minor, major or critical", p, ps.MinSeverity)
+		if err := ps.check(); err != nil {
+			return Settings{}, fmt.Errorf("packages %q: %w", p, err)
 		}
 		re, err := globRe(strings.TrimSuffix(p, "/"))
 		if err != nil {
@@ -393,6 +415,17 @@ func LoadSettings(s string) (Settings, error) {
 		cfg.pkgs = append(cfg.pkgs, pkgRule{re, ps})
 	}
 	return cfg, nil
+}
+
+// check validates the keys a package may override.
+func (s pkgSettings) check() error {
+	if s.MinSeverity != "" && rank[s.MinSeverity] < rank["minor"] {
+		return fmt.Errorf("min_severity %q: want minor, major or critical", s.MinSeverity)
+	}
+	if s.Profile != "" && !slices.Contains(Profiles, s.Profile) {
+		return fmt.Errorf("profile %q: want quiet, chill or assertive", s.Profile)
+	}
+	return nil
 }
 
 // RulePaths returns the candidates for the rules file, the first that exists holds.
@@ -432,7 +465,7 @@ func (cfg Settings) at(path string) pkgSettings {
 	s := cfg.pkgSettings
 	for _, r := range cfg.pkgs {
 		if r.re.MatchString(path) {
-			s.MinSeverity, s.Tests = cmp.Or(r.s.MinSeverity, s.MinSeverity), cmp.Or(r.s.Tests, s.Tests)
+			s.MinSeverity, s.Tests, s.Profile = cmp.Or(r.s.MinSeverity, s.MinSeverity), cmp.Or(r.s.Tests, s.Tests), cmp.Or(r.s.Profile, s.Profile)
 			break
 		}
 	}
@@ -453,6 +486,18 @@ func (cfg Settings) Ignored(path string) bool {
 func (cfg Settings) Keep(c Comment) bool {
 	m, _ := cfg.At(c.Path)
 	return m == "" || rank[c.Severity] >= rank[m]
+}
+
+// Fold reports whether c goes folded into the review's summary instead of inline, by its file's profile: a nit
+// unless assertive, a minor one under quiet.
+func (cfg Settings) Fold(c Comment) bool {
+	switch cmp.Or(cfg.override, cfg.at(c.Path).Profile) {
+	case "assertive":
+		return false
+	case "quiet":
+		return rank[c.Severity] < rank["major"]
+	}
+	return c.Severity == "nit"
 }
 
 // RunsTests reports whether the tests of path's package run.

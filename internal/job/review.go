@@ -51,6 +51,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	pr, sha := e.PullRequest, e.PullRequest.Head.SHA
 	manual := e.Action == "manual" || e.Action == "large"
 	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
+	profile := cmp.Or(e.Profile, review.BodyProfile(pr.Body)) // this PR's, over review.json's
+	cfg.Override(profile)
 	p.Configure(cfg)
 	// A draft's push reads the walkthrough only under opt_in, for whether someone asked.
 	if pr.Draft && !cfg.ReviewsDraft(manual, cfg.Drafts == "opt_in") {
@@ -228,6 +230,9 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	}
 	if tid != "" {
 		kind += " · ticket " + tid
+	}
+	if profile != "" {
+		kind += " · profile " + profile
 	}
 	if cfgErr != nil {
 		kind += " · ⚠️ review.json ignored: " + text.OneLine(cfgErr.Error(), 120)

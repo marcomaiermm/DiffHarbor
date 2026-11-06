@@ -390,3 +390,21 @@ func TestThanks(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewCommand(t *testing.T) {
+	type got struct {
+		large   bool
+		profile string
+		ok      bool
+	}
+	for cmd, want := range map[string]got{
+		"review": {ok: true}, "full review": {ok: true}, "review all": {true, "", true},
+		"review quiet": {false, "quiet", true}, "review all assertive": {true, "assertive", true}, "review chill all": {true, "chill", true},
+		"review loud": {}, "reviewer?": {}, "what is a review": {}, "reviews": {},
+	} {
+		large, profile, ok := reviewCommand(cmd)
+		if g := (got{large, profile, ok}); g != want {
+			t.Errorf("%q: %+v, want %+v", cmd, g, want)
+		}
+	}
+}

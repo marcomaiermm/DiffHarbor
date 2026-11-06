@@ -190,3 +190,27 @@ func TestMention(t *testing.T) {
 		}
 	}
 }
+
+// Folded findings go into the summary, folded and apart from those outside the diff, and don't count as actionable.
+func TestSummaryFolded(t *testing.T) {
+	lines := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n x\n+y\n")
+	r := review.Result{Comments: []review.Comment{
+		{Path: "a.go", Line: 2, Severity: "major", Title: "inline", Body: "b"},
+		{Path: "a.go", Line: 2, Severity: "nit", Title: "name", Body: "b", Fold: true, Prompt: "rename"},
+		{Path: "b.go", Line: 9, Severity: "minor", Title: "far", Body: "b"},
+	}}
+	inline, rest := Split(r, nil, lines)
+	s := Summary(inline, rest, "f")
+	if len(inline) != 1 || len(rest) != 2 || !strings.Contains(s, "Actionable comments posted: 2") ||
+		!strings.Contains(s, "Outside diff range comments (1)") || !strings.Contains(s, "<details>\n<summary><b>🧹 Nitpicks (1)</b></summary>") ||
+		!strings.Contains(s, "_🔵 Nit_ · **name**") || !strings.Contains(s, "rename") {
+		t.Fatalf("%d inline, %d rest:\n%s", len(inline), len(rest), s)
+	}
+	if p := Parse(Format(Finding{Comment: r.Comments[1]}, "")); p.Severity != "nit" || p.Title != "name" {
+		t.Fatalf("parse nit: %+v", p)
+	}
+	minor := []Finding{{Comment: review.Comment{Severity: "minor", Fold: true}}}
+	if s := Summary(nil, minor, "f"); !strings.Contains(s, "No actionable comments") || !strings.Contains(s, "🧹 Minor comments (1)") {
+		t.Fatal(s)
+	}
+}
