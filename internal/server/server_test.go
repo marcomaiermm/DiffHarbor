@@ -202,6 +202,47 @@ func TestResumeRenamesNameKeyed(t *testing.T) {
 	}
 }
 
+// A reopen removes a deleting file by the repo's name too: retryDrops, which may have read it already, queues no stale
+// close that deletes the reopened PR's next reports.
+func TestReopenBeatsNamedClose(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	forges["github"] = &github.Hub{}
+	defer clear(forges)
+	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "closed"}
+	e.Repository.ID, e.Repository.FullName, e.PullRequest.Number, e.PullRequest.Head.SHA = 2, "o/r", 7, "abc"
+	latest.Lock()
+	save(deletingFile(e.Key()), e)
+	latest.Unlock()
+	t.Cleanup(func() { latest.Lock(); delete(latest.m, prKey(e)); latest.Unlock() })
+	reopen := *e
+	reopen.Action = "reopened"
+	if err := pushed(&reopen); err != nil {
+		t.Fatal(err)
+	}
+	q := make(chan *forge.Event, 1)
+	if retryDrops(queue(q)); len(q) != 0 || proc.Exists(deletingFile(prKey(e))) {
+		t.Fatal("queued the stale close")
+	}
+}
+
+// A pending file by the repo's name that can't be renamed isn't queued: done would remove only the new name's, and
+// each start would run its review again.
+func TestResumeRenameFails(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	forges["github"] = &github.Hub{}
+	defer clear(forges)
+	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "synchronize"}
+	e.Repository.ID, e.Repository.FullName, e.PullRequest.Number, e.PullRequest.Head.SHA = 2, "o/r", 7, "abc"
+	latest.Lock()
+	save(pendingFile(e.Key()), e)
+	latest.Unlock()
+	os.MkdirAll(pendingFile(prKey(e))+"/x", 0o700) // a directory in the way
+	q := make(chan *forge.Event, 1)
+	if resume(queue(q)); len(q) != 0 || !proc.Exists(pendingFile(e.Key())) {
+		t.Fatal("queued without its file")
+	}
+}
+
 // A report folder's secret, as job makes them.
 const secret = "S5Z7AW3ODLIRWVDOPHJJLO772I"
 
@@ -276,6 +317,13 @@ func TestServeReport(t *testing.T) {
 	}
 	if missing.Code != 404 {
 		t.Fatal("missing:", missing.Code)
+	}
+	moved := "/github.com/o/old/7/" + secret // a link from before the repo id, its reports moved (job.adopt)
+	job.Reports().Put(moved[1:]+"/moved", []byte(gh[1:]))
+	for p, to := range map[string]string{moved: gh, moved + "/" + sha(3): gh + "/" + sha(3)} {
+		if w := get("/r" + p); w.Code != http.StatusMovedPermanently || w.Header().Get("Location") != job.ReportURL+"/r"+to {
+			t.Fatal("redirect:", p, w.Code, w.Header().Get("Location"))
+		}
 	}
 	if w := get("/r" + gl + "/" + sha(1)); w.Code != 200 || !strings.Contains(w.Body.String(), `data-sha="`+sha(1)) {
 		t.Fatal("gitlab:", w.Code)

@@ -355,6 +355,8 @@ func pushed(e *forge.Event) error {
 	latest.m[key] = e.PullRequest.Head.SHA
 	if e.Action == "reopened" || e.Action == "ready_for_review" { // not a late push: its close still deletes
 		_ = os.Remove(deletingFile(key)) //nolint:gosec // no retry deletes its next reports; eventFile escapes
+		// one by the repo's name too: retryDrops' rename of it fails, it queues no stale close
+		_ = os.Remove(deletingFile(e.Key())) //nolint:gosec // as above
 	}
 	return save(pendingFile(key), e)
 }
@@ -394,6 +396,8 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case len(vs) == 0 && job.Moved(dir) != "": // a link from before the repo id: its reports moved
+		http.Redirect(w, r, strings.TrimSuffix(job.ReportURL+"/r/"+job.Moved(dir)+"/"+sha, "/"), http.StatusMovedPermanently)
 	case len(vs) == 0:
 		http.NotFound(w, r)
 	case sha == "versions": // for the page's version picker
@@ -458,7 +462,7 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 var head = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
 // reportRoute splits a path under /r/ into the reports' folder ({host}/id:{repo id}/{n}/{secret}, see job.reportPath,
-// or {host}/{repo…}/{n}/{secret} from before the id: its links keep working until the PR closes) and
+// or {host}/{repo…}/{n}/{secret} from before the id: served, or redirected once job.adopt moved it) and
 // what of it: a version's SHA, "versions" for their list, "" for the newest. A wrong secret is a folder that isn't
 // there: a 404 like any missing report. A path without one, as before the secret, isn't a route.
 func reportRoute(p string) (dir, sha string, ok bool) {
@@ -524,7 +528,10 @@ func resume(add func(*forge.Event) bool) {
 		}
 		key := prKey(e)
 		if f != pendingFile(key) { // named before eventFile escaped keys, or by the repo's name
-			_ = os.Rename(f, pendingFile(key))
+			if err := os.Rename(f, pendingFile(key)); err != nil { // queued, done would leave f: run again on each start
+				log.Println(e.Key(), "pending:", err)
+				continue
+			}
 		}
 		log.Println(e.Key(), "resuming the review a restart cut off")
 		latest.Lock()
@@ -548,7 +555,8 @@ func retryDrops(add func(*forge.Event) bool) {
 		}
 		e.Action = "closed" // a delete whatever saved it: a converted_to_draft from before drafts kept the reports
 		if f != deletingFile(prKey(e)) {
-			// named by the repo's name: drop looks for it by prKey. Under latest: a reopen removes it by that.
+			// named by the repo's name: drop looks for it by prKey. Under latest: a reopen removes both (pushed), then
+			// this fails.
 			latest.Lock()
 			err = os.Rename(f, deletingFile(prKey(e)))
 			latest.Unlock()

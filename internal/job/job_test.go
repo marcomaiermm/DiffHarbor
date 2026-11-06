@@ -240,11 +240,11 @@ func TestReportVersions(t *testing.T) {
 	key := reportSecret("")
 	dir := reportPath(e) + "/" + key
 	for i := range maxVersions + 2 {
-		if u := writeReport(e, key, report.Data{Repo: "o/r", Number: 7, SHA: sha(i)}); u != ReportURL+"/r/github.com/id:5/7/"+key {
+		if u := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(i)}); u != ReportURL+"/r/github.com/id:5/7/"+key {
 			t.Fatal(u)
 		}
 	}
-	writeReport(e, key, report.Data{Repo: "o/r", Number: 7, SHA: sha(5)}) // reviewed again: the newest
+	writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(5)}) // reviewed again: the newest
 	vs, err := Versions(dir)
 	if err != nil || len(vs) != maxVersions || vs[0].SHA != sha(5) || vs[1].SHA != sha(maxVersions+1) || vs[0].At.IsZero() {
 		t.Fatalf("%+v", vs)
@@ -266,17 +266,60 @@ func TestReportVersions(t *testing.T) {
 		}
 	}
 	Reports().Put(dir+"/versions.json", []byte("{")) // unreadable: a report would drop the list
-	if u := writeReport(e, key, report.Data{Repo: "o/r", Number: 7, SHA: sha(1)}); u != "" {
+	if u := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(1)}); u != "" {
 		t.Fatal("wrote over an unreadable list:", u)
 	}
 	gl := &forge.Event{Forge: "gitlab"} // a project in a subgroup
 	gl.Repository.FullName, gl.PullRequest.Number, gl.PullRequest.HTMLURL = "g/s/p", 3, "https://gitlab.example.com/g/s/p/-/merge_requests/3"
-	if u := writeReport(gl, key, report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/g/s/p/3/"+key {
+	if u := writeReport(gl, key, "", report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/g/s/p/3/"+key {
 		t.Fatal("without the repo's id, by its name:", u)
 	}
 	gl.Repository.ID = 9
-	if u := writeReport(gl, key, report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/id:9/3/"+key {
+	if u := writeReport(gl, key, "", report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/id:9/3/"+key {
 		t.Fatal(u)
+	}
+}
+
+// A PR's reports from before the repo's ID move to its ID's folder on its next report, history and all, from the folder
+// its walkthrough links under a name the repo had then; the old link redirects. A link edited to another PR moves none.
+func TestAdoptNamedReports(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	e := &forge.Event{}
+	e.Repository.ID, e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = 5, "o/new", 7, "https://github.com/o/new/pull/7"
+	sha := func(i int) string { return fmt.Sprintf("%040x", i) }
+	key := reportSecret("")
+	old, other := "github.com/o/old/7/"+key, "github.com/o/old/8/"+key // renamed since; another PR's number
+	for _, dir := range []string{old, other} {
+		Reports().Put(dir+"/"+sha(1)+".html.gz", []byte("one"))
+		Reports().Put(dir+"/"+sha(2)+".html", []byte("two")) // from before .html.gz
+		Reports().Put(dir+"/versions.json", fmt.Appendf(nil, `[{"sha":"%s","at":"2026-01-02T00:00:00Z"},{"sha":"%s","at":"2026-01-01T00:00:00Z"}]`, sha(2), sha(1)))
+	}
+	dir := reportPath(e) + "/" + key
+	if u := writeReport(e, key, ReportURL+"/r/"+old, report.Data{SHA: sha(3)}); u != ReportURL+"/r/"+dir {
+		t.Fatal(u)
+	}
+	vs, err := Versions(dir)
+	if err != nil || len(vs) != 3 || vs[0].SHA != sha(3) || vs[1].SHA != sha(2) || vs[2].SHA != sha(1) {
+		t.Fatalf("%+v %v", vs, err)
+	}
+	if b, err := Reports().Get(dir + "/" + sha(2) + ".html"); string(b) != "two" {
+		t.Fatal("page not moved:", err)
+	}
+	if vs, _ := Versions(old); len(vs) != 0 || Moved(old) != dir {
+		t.Fatal("old folder:", vs, Moved(old))
+	}
+	if _, err := Reports().Get(old + "/" + sha(1) + ".html.gz"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("old page stays:", err)
+	}
+	writeReport(e, key, ReportURL+"/r/"+other, report.Data{SHA: sha(4)})
+	if vs, _ := Versions(other); len(vs) != 2 || Moved(other) != "" {
+		t.Fatal("moved another PR's reports")
+	}
+	if err := DeleteReports(e); err != nil {
+		t.Fatal(err)
+	}
+	if vs, _ := Versions(dir); len(vs) != 0 {
+		t.Fatal("the close kept the moved reports")
 	}
 }
 

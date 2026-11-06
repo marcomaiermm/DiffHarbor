@@ -302,7 +302,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			}
 		}
 		s.State.Secret = reportSecret(s.State.Secret)
-		s.State.Report = writeReport(e, s.State.Secret, d)
+		s.State.Report = writeReport(e, s.State.Secret, s.State.Report, d)
 	}
 	banner := ""
 	if n == 0 {
@@ -330,8 +330,8 @@ func reportPath(e *forge.Event) string {
 }
 
 // namePath is the PR's folder before reportPath took the repo's ID: by its name, whatever repo had it. Its links, in
-// walkthroughs and shared, are served from there until the PR closes. Reports from before the secret, right in the
-// folder, no longer resolve and go with the PR.
+// walkthroughs and shared, are served from there until the next report moves them (adopt) or the PR closes. Reports
+// from before the secret, right in the folder, no longer resolve and go with the PR.
 func namePath(e *forge.Event) string {
 	return host(e) + "/" + e.Repository.FullName + "/" + strconv.Itoa(e.PullRequest.Number)
 }
@@ -388,8 +388,8 @@ func MoveReports() error {
 
 // DeleteReports deletes a PR's reports: its code shouldn't outlive the PR. With S3, those a failed MoveReports
 // left on disk too.
-// ponytail: namePath's too, by name: a recreated repo's PR of the old number loses those it had before the ID; drop
-// namePath once the PRs from before it closed.
+// ponytail: namePath's too, by name: a recreated repo's PR of the old number loses those it had before the ID, a PR
+// closed without a report since (adopt) and renamed keeps them under the old name; drop namePath once those closed.
 func DeleteReports(e *forge.Event) error {
 	err := errors.Join(Reports().DeleteAll(reportPath(e)), Reports().DeleteAll(namePath(e)))
 	if ReportS3 != nil {
@@ -412,13 +412,95 @@ func Versions(path string) ([]report.Version, error) {
 	return vs, json.Unmarshal(b, &vs)
 }
 
+// namedDir is where the PR's reports from before the repo's ID are: the folder link names, the walkthrough's under a
+// name the repo had then, or under its name now. "" for an event without the ID: its reports are there already. A
+// link edited to another PR's folder moves nothing without that PR's secret, which is its reports' key anyway.
+func namedDir(e *forge.Event, secret, link string) string {
+	if e.Repository.ID == 0 {
+		return ""
+	}
+	p, ok := strings.CutPrefix(link, ReportURL+"/r/")
+	if !ok || !fs.ValidPath(p) || strings.Contains(p, "/id:") || !strings.HasSuffix(p, fmt.Sprintf("/%d/%s", e.PullRequest.Number, secret)) {
+		return namePath(e) + "/" + secret
+	}
+	return p
+}
+
+// adopt moves the reports in old, from before the repo's ID, into dir, newest first with dir's, and leaves a moved
+// file: /r/ redirects old's links there (Moved). A close finds them under the ID, whatever the repo was called then.
+func adopt(old, dir string) error {
+	if old == "" {
+		return nil
+	}
+	s := Reports()
+	olds, err := Versions(old)
+	if err != nil || len(olds) == 0 {
+		return err
+	}
+	vs, err := Versions(dir)
+	if err != nil {
+		return err
+	}
+	for _, v := range olds {
+		if slices.ContainsFunc(vs, func(n report.Version) bool { return n.SHA == v.SHA }) {
+			continue
+		}
+		for _, name := range []string{v.SHA + ".html.gz", v.SHA + ".html"} { // .html: from before .html.gz
+			b, err := s.Get(old + "/" + name)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err == nil {
+				err = s.Put(dir+"/"+name, b)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		vs = append(vs, v)
+	}
+	slices.SortStableFunc(vs, func(a, b report.Version) int { return b.At.Compare(a.At) }) // writeReport keeps maxVersions
+	b, err := json.Marshal(vs)
+	if err == nil {
+		err = s.Put(dir+"/versions.json", b)
+	}
+	if err == nil { // before old's list goes: its links never 404
+		err = s.Put(old+"/moved", []byte(dir))
+	}
+	if err == nil {
+		err = s.Delete(old + "/versions.json")
+	}
+	if err != nil {
+		return err
+	}
+	for _, v := range olds {
+		_ = s.Delete(old + "/" + v.SHA + ".html.gz")
+		_ = s.Delete(old + "/" + v.SHA + ".html")
+	}
+	return nil
+}
+
+// Moved is the folder the reports in dir moved to (adopt), "" when they didn't.
+func Moved(dir string) string {
+	b, err := Reports().Get(dir + "/moved")
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 // writeReport renders the PR's report into its secret's folder as the version of its head, against the newest of
 // another head, and returns its URL; "" when that fails, the review stands without it. d.Routine is this review's: an
 // incremental one has none, and the last full one's line numbers may be stale.
+// link is the walkthrough's last one: reports it names from before the repo's ID move here first (adopt).
 // ponytail: two reviews of a PR finishing at once can drop one's entry from versions.json; a lock per PR if it shows.
-func writeReport(e *forge.Event, secret string, d report.Data) string {
+func writeReport(e *forge.Event, secret, link string, d report.Data) string {
 	dir, s := reportPath(e)+"/"+secret, Reports()
-	vs, err := Versions(dir)
+	err := adopt(namedDir(e, secret, link), dir)
+	var vs []report.Version
+	if err == nil {
+		vs, err = Versions(dir)
+	}
 	if err != nil {
 		log.Println(e.Key(), "report:", Hide(err, secret))
 		return ""
