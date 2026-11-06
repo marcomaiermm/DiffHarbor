@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -221,14 +222,24 @@ func learningsCommand(cmd, bot string, e *forge.Event) string {
 	return b.String() + "_Newest last. `@" + bot + " forget <text>` drops the ones containing text; review.json's `learnings` sets how many and how old a review follows._"
 }
 
-// Seen puts 👀 on a maintainer's comment as soon as it is queued, before the worker gets to it.
+// Seen puts 👀 on a maintainer's comment as soon as it is queued, before the worker gets to it. e is its own copy:
+// the job changes the queued one.
 func Seen(f forge.Forge, e *forge.Event) {
+	defer logPanic(e.Key())
 	p, err := f.Open(e)
 	if err != nil {
 		log.Println(e.Key(), "reaction:", err)
 		return
 	}
 	p.React()
+}
+
+// logPanic, deferred first in a goroutine beside a job, logs its panic: a reaction's bug ends neither the server
+// nor the jobs running.
+func logPanic(key string) {
+	if v := recover(); v != nil {
+		log.Printf("%s panic: %v\n%s", key, v, debug.Stack())
+	}
 }
 
 // Chat answers the event's comment on f, or reviews the PR when it asks for one; mention matches @bot.
@@ -292,7 +303,11 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			return nil // between humans, for someone else, we said our piece (@us to go on), or they wrote again
 		}
 		if !mention.MatchString(c.Body) {
-			go p.React() // the server left it to us; off the worker, a slow forge would hold up the queue
+			key := e.Key()
+			go func() { // the server left it to us; off the worker, a slow forge would hold up the queue
+				defer logPanic(key)
+				p.React()
+			}()
 		}
 		about.WriteString(d.About)
 		if resolved {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -233,4 +234,34 @@ func TestCommandNoUser(t *testing.T) {
 		}
 	}()
 	(&Sandbox{}).Command(t.Context(), "/", nil, "true")
+}
+
+// A uid whose cleanup failed after its job stays dirty: no job of any repo starts until a retry clears it.
+func TestDirtyUID(t *testing.T) {
+	defer func(pi bool, c func(uint32) error) { AsPi, clearUID = pi, c }(AsPi, clearUID)
+	failing := true
+	var cleared []uint32
+	AsPi, clearUID = true, func(uid uint32) error {
+		cleared = append(cleared, uid)
+		if failing && uid == 10001 {
+			return errors.New("busy")
+		}
+		return nil
+	}
+	if err := clearUser(10001); err == nil || !dirty[10001] {
+		t.Fatal("not dirty", err)
+	}
+	if err := clearUser(10002); err != nil || dirty[10002] {
+		t.Fatal(err)
+	}
+	if _, err := Workspace("github:2"); !errors.Is(err, ErrCleanup) || !strings.Contains(err.Error(), "uid 10001: busy") {
+		t.Fatal("a job started beside the leftovers:", err)
+	}
+	failing = false
+	if err := cleanDirty(); err != nil || len(dirty) != 0 {
+		t.Fatal(err, dirty)
+	}
+	if !slices.Equal(cleared, []uint32{10001, 10002, 10001, 10001}) {
+		t.Fatal(cleared) // Workspace retried it, and so did the cleanDirty after it
+	}
 }

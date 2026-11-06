@@ -386,7 +386,7 @@ func (Pi) Run(ctx context.Context, sb *proc.Sandbox, name, system, prompt, task,
 	if err := sb.WriteFile(file, []byte(prompt)); err != nil {
 		return "", err
 	}
-	return runPi(ctx, sb, name, system, m, true, "@"+file, task)
+	return runPi(ctx, sb, name, system, m, true, "", "@"+file, task) // task is ours, the same for every PR
 }
 
 // Continue resumes the pass's session without tools, so a model that ended
@@ -395,16 +395,17 @@ func (Pi) Continue(ctx context.Context, sb *proc.Sandbox, name, system, task, m 
 	return runPi(ctx, sb, name, system, m, false, task)
 }
 
-// runPi runs pi with m, a full --model value (provider/id:level). An openai/ pass the subscription can't
-// serve reruns on FALLBACK_MODEL at the same level, and the next 30 minutes of passes skip straight to it.
-func runPi(ctx context.Context, sb *proc.Sandbox, name, system, m string, tools bool, promptArgs ...string) (string, error) {
+// runPi runs pi with m, a full --model value (provider/id:level), stdin the message before promptArgs'. An openai/
+// pass the subscription can't serve reruns on FALLBACK_MODEL at the same level, and the next 30 minutes of passes
+// skip straight to it.
+func runPi(ctx context.Context, sb *proc.Sandbox, name, system, m string, tools bool, stdin string, promptArgs ...string) (string, error) {
 	// One switch for all passes: with mixed providers a failing verify model also moves the reviews to the fallback.
 	fm := FallbackFor(m, name)
 	if fm == "" {
-		return runPiOn(ctx, sb, name, system, m, tools, promptArgs...)
+		return runPiOn(ctx, sb, name, system, m, tools, stdin, promptArgs...)
 	}
 	if time.Now().UnixMilli() >= FallbackUntil.Load() {
-		out, err := runPiOn(ctx, sb, name, system, m, tools, promptArgs...)
+		out, err := runPiOn(ctx, sb, name, system, m, tools, stdin, promptArgs...)
 		if err == nil || ctx.Err() != nil || !unavailable.MatchString(err.Error()) {
 			return out, err
 		}
@@ -416,10 +417,12 @@ func runPi(ctx context.Context, sb *proc.Sandbox, name, system, m string, tools 
 	}
 	_, lvl, _ := splitModel(m)
 	fb, _, _ := splitModel(fm)
-	return runPiOn(ctx, sb, name, system, fb+":"+reviewLevel(fm, lvl), tools, promptArgs...)
+	return runPiOn(ctx, sb, name, system, fb+":"+reviewLevel(fm, lvl), tools, stdin, promptArgs...)
 }
 
-func runPiOn(ctx context.Context, sb *proc.Sandbox, name, system, m string, tools bool, promptArgs ...string) (string, error) {
+// Private text (the system prompt's rules and learnings, a task with findings or code) goes through a file or stdin,
+// never argv: /proc/<pid>/cmdline is world-readable, also to another repo's job running at the same time.
+func runPiOn(ctx context.Context, sb *proc.Sandbox, name, system, m string, tools bool, stdin string, promptArgs ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Minute)
 	defer cancel()
 	// Soft deadline (review-guard.js refuses tool calls after it): 2 minutes left for the answer.
@@ -427,6 +430,10 @@ func runPiOn(ctx context.Context, sb *proc.Sandbox, name, system, m string, tool
 	creds, err := passEnv(ctx, providerOf(m)) // a vault token dies with ctx, when this run ends
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", m, err)
+	}
+	sys := filepath.Join(sb.Dir, name+".system.md") // --system-prompt reads a path that exists
+	if err := sb.WriteFile(sys, []byte(system)); err != nil {
+		return "", err
 	}
 	// --no-approve: a .pi/ in the checkout (PR-controlled) is ignored. fff replaces grep/find.
 	args := []string{"-p", "--session", filepath.Join(sb.Dir, name+".session"), "--no-approve", "--model", m}
@@ -436,7 +443,7 @@ func runPiOn(ctx context.Context, sb *proc.Sandbox, name, system, m string, tool
 		args = append(args, "--no-builtin-tools")
 	}
 	args = append(args, "--no-mcp", "--no-skills", "--no-context-files", "--no-prompt-templates",
-		"--system-prompt", system)
+		"--system-prompt", sys)
 	// Review skills (github.Skills): listed in both passes and repairs, so the prompt prefix stays cacheable.
 	for _, src := range []string{"repo", "owner"} { // repo first: it wins a name clash
 		if sk := filepath.Join(sb.Dir, "skills", src); proc.Exists(sk) {
@@ -445,8 +452,10 @@ func runPiOn(ctx context.Context, sb *proc.Sandbox, name, system, m string, tool
 	}
 	args = append(args, promptArgs...)
 	env := append(append(sb.ToolEnv(), creds...), "PI_FFF_MODE=override", deadline, fmt.Sprintf("DIFFHARBOR_MAX_TOOLS=%d", maxTools))
-	// stdin is /dev/null: pi -p waits for piped stdin otherwise.
-	out, err := proc.Run(sb.Command(ctx, filepath.Join(sb.Dir, "repo"), env, "pi", args...))
+	// stdin is never a terminal: pi -p waits for one's input otherwise.
+	c := sb.Command(ctx, filepath.Join(sb.Dir, "repo"), env, "pi", args...)
+	c.Stdin = strings.NewReader(stdin)
+	out, err := proc.Run(c)
 	if err != nil {
 		return "", err
 	}

@@ -63,7 +63,7 @@ services:
       REPORT_S3_REGION: ${REPORT_S3_REGION:-}
       # Optional: your logo, colors and templates for the report (README: Branding the report), with the volume below.
       # TEMPLATE_DIR: /branding
-      # Jobs at once, of different repos (README: Configuration). Raise mem_limit and cpus with it.
+      # Jobs at once, of different repos (README: Configuration). Raise mem_limit, cpus and pids_limit with it.
       MAX_JOBS: ${MAX_JOBS:-1}
       DOCKER_HOST: tcp://dind:2375 # testcontainers in the checks; drop with the dind service if you don't need them
     # Root serves and holds the forge keys; git, checks and Pi run as a uid per repo and can't read root's environ.

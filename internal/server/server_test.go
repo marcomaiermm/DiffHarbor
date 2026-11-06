@@ -288,27 +288,31 @@ func (f *fakeJobs) run(ctx context.Context, e *forge.Event) error {
 	}
 }
 
-// next is the job that starts next; none within a moment is "".
-func (f *fakeJobs) next() string {
+// next is the job that starts next, "" when none does within seconds: a loaded CI machine is slow.
+func (f *fakeJobs) next() string { return f.within(10 * time.Second) }
+
+// quiet is a job that starts within a moment, "": none, as it should be. Short: it waits whenever the test passes.
+func (f *fakeJobs) quiet() string { return f.within(200 * time.Millisecond) }
+
+func (f *fakeJobs) within(d time.Duration) string {
 	select {
 	case k := <-f.started:
 		return k
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(d):
 		return ""
 	}
 }
 
-// waitFor waits until ok, under running's lock.
+// waitFor waits until ok, under running's lock, for seconds at most.
 func waitFor(t *testing.T, ok func() bool) {
 	t.Helper()
-	for range 200 {
+	for end := time.Now().Add(10 * time.Second); time.Now().Before(end); time.Sleep(5 * time.Millisecond) {
 		running.Lock()
 		yes := ok()
 		running.Unlock()
 		if yes {
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("timed out")
 }
@@ -326,7 +330,7 @@ func TestPoolParallel(t *testing.T) {
 			t.Fatal("full")
 		}
 	}
-	if got := []string{f.next(), f.next(), f.next()}; !slices.Contains(got, "a#1") || !slices.Contains(got, "b#1") || got[2] != "" {
+	if got := []string{f.next(), f.next(), f.quiet()}; !slices.Contains(got, "a#1") || !slices.Contains(got, "b#1") || got[2] != "" {
 		t.Fatal(got) // a#2 waits for a#1, c#1 for a slot
 	}
 	for range 2 { // each one let go starts the next

@@ -5,7 +5,6 @@ import (
 	"diffharbor/internal/proc"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -55,7 +54,7 @@ func proofOnBase(ctx context.Context, sb *proc.Sandbox, repo, proof string, test
 				restore = append(restore, p)
 			}
 		case status != "D":
-			if b, err := os.ReadFile(filepath.Join(repo, p)); err == nil { //nolint:gosec // a path of the diff, in the checkout
+			if b, err := sb.ReadFile(ctx, filepath.Join(repo, p)); err == nil { // as the repo's user: the PR's symlink reads nothing of root's
 				if m := decl.FindIndex(b); m != nil {
 					testFile, line, found = p, 1+strings.Count(string(b[:m[0]]), "\n"), found+1
 				}

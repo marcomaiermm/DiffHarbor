@@ -98,9 +98,13 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 			err = fmt.Errorf("panic: %v\n%s", v, debug.Stack())
 		}
 		switch {
-		case errors.Is(err, proc.ErrCleanup): // the server keeps it pending: the next push or a restart retries
-			s.Write(fmt.Sprintf("⚠️ Review of `%s` not started: cleaning up after the last job failed. It is retried on the next push.", sha[:7]), "")
-			p.Status(sha, "error", "Review not started: cleanup failed, retried on the next push")
+		case errors.Is(err, proc.ErrCleanup): // a push's stays pending: the next push or a restart retries. A chat's isn't.
+			retry := "retried on the next push"
+			if e.Kind != "pull_request" {
+				retry = "ask again in a while"
+			}
+			s.Write(fmt.Sprintf("⚠️ Review of `%s` not started: cleaning up after the last job failed, %s.", sha[:7], retry), "")
+			p.Status(sha, "error", "Review not started: cleanup failed, "+retry)
 		case err != nil && ctx.Err() != nil && v == nil: // PR closed or a newer push: that one gets the review
 			log.Println(key, sha[:7], "stopped")
 			s.Write(fmt.Sprintf("⏹️ Review of `%s` stopped.", sha[:7]), "")
@@ -271,7 +275,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 			Repo: e.Repository.FullName, Number: pr.Number, Title: pr.Title, URL: pr.HTMLURL, SHA: pr.Head.SHA,
 			Summary: st.Summary, Diagram: st.Diagram, Effort: st.Effort, Decisions: st.Decisions, Story: st.Story, Flow: st.Flow,
 			Walkthrough: st.Files, Commits: review.Commits(ctx, sb, repo), Outline: outline, Findings: openFindings(threads, open, r),
-			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(repo, raw), Themes: cfg.SyntaxTheme,
+			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(sb, repo, raw), Themes: cfg.SyntaxTheme,
 			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, sb, repo),
 			Conflicts: pr.Mergeable != nil && !*pr.Mergeable, Forge: p.Links(),
 			Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(repo, raw),

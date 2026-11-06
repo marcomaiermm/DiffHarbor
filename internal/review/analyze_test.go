@@ -18,6 +18,7 @@ type fakeAgent struct {
 	replies map[string][]string
 	calls   []string
 	tasks   map[string]string // the last task per pass name
+	panics  []string          // the passes whose Run panics
 }
 
 func (f *fakeAgent) reply(name string) (string, error) {
@@ -37,6 +38,9 @@ func (f *fakeAgent) Run(_ context.Context, _ *proc.Sandbox, name, _, task, _, _ 
 		f.tasks = map[string]string{}
 	}
 	f.tasks[name] = task
+	if slices.Contains(f.panics, name) {
+		panic("boom")
+	}
 	return f.reply(name)
 }
 
@@ -57,6 +61,30 @@ func (f *fakeAgent) Continue(_ context.Context, _ *proc.Sandbox, name, _, task, 
 		return `{"summary":"","comments":[]}`, nil
 	}
 	return f.reply(name + " again")
+}
+
+// A panic in a pass or a part fails that part, with its stack: the server and the other parts go on, and the slot the
+// verify pass held is free again.
+func TestAnalyzePanic(t *testing.T) {
+	const (
+		md      = "diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1 +1,2 @@\n x\n+y\n"
+		finding = `{"summary":"s","comments":[{"path":"a.md","line":1,"severity":"major","title":"t","body":"b"}]}`
+		keep    = `{"verdicts":[{"i":0,"keep":true}]}`
+	)
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "repo"), 0o755)
+	os.WriteFile(filepath.Join(dir, "repo", "a.md"), []byte("x\ny\n"), 0o644)
+	// two verify passes: with their slots kept, part 3's verify would wait forever once it comes after them
+	f := &fakeAgent{panics: []string{"verify1", "verify2"}, replies: map[string][]string{"review1": {finding}, "review2": {finding}, "review3": {finding}, "verify3": {keep}}}
+	r, stats, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: dir}, Parts: []string{md, md, md}})
+	if err != nil || len(r.Failed) != 2 || len(r.Comments) != 1 || !strings.HasSuffix(stats, "part 1 failed · part 2 failed") {
+		t.Fatalf("verify passes panic: %v %q %+v", err, stats, r)
+	}
+	f = &fakeAgent{panics: []string{"review"}, replies: map[string][]string{}}
+	_, _, err = Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: dir}, Parts: []string{md}})
+	if err == nil || !strings.Contains(err.Error(), "panic: boom") || !strings.Contains(err.Error(), "runtime/debug.Stack") {
+		t.Fatalf("a whole diff's pass panics: %v", err)
+	}
 }
 
 func TestAnalyze(t *testing.T) {

@@ -86,8 +86,9 @@ func configure() server.Config {
 		}
 		job.ReportS3 = s
 	}
-	// MAX_JOBS>1 runs jobs of different repos at once: they share /tmp, /var/tmp, /dev/shm and the loopback network.
-	// Fine when all repos are one team's; keep 1 when untrusted repos of different owners are reviewed side by side.
+	// MAX_JOBS>1 runs jobs of different repos at once: they share /tmp, /var/tmp, /dev/shm, the loopback network, the
+	// process list and the container's limits. Fine when all repos are one team's; keep 1 when untrusted repos of
+	// different owners are reviewed side by side.
 	jobs, err := strconv.Atoi(cmp.Or(os.Getenv("MAX_JOBS"), "1"))
 	if err != nil || jobs < 1 {
 		log.Fatalf("MAX_JOBS=%q: want a positive number of jobs that run at once", os.Getenv("MAX_JOBS"))

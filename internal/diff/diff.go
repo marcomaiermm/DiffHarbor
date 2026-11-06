@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // Max is the diff size a review gets; Filter cuts at files, a file past it at hunks.
@@ -215,15 +216,19 @@ func generatedAt(root, p string) bool {
 	if root == "" {
 		return false
 	}
-	fp := filepath.Join(root, p)
-	if fi, err := os.Lstat(fp); err != nil || !fi.Mode().IsRegular() { // a link may name a FIFO or a file outside
+	r, err := os.OpenRoot(root) // the PR's links don't reach out of its checkout
+	if err != nil {
 		return false
 	}
-	f, err := os.Open(fp) //nolint:gosec // a path of the diff, in its checkout
+	defer r.Close()
+	f, err := r.OpenFile(filepath.FromSlash(p), os.O_RDONLY|syscall.O_NONBLOCK, 0) // a FIFO in the file's place: no blocked open
 	if err != nil {
 		return false
 	}
 	defer f.Close()
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
 	b := make([]byte, 4096)
 	n, _ := io.ReadFull(f, b)
 	return generated.MatchString("@@ -1 +1 @@\n " + strings.ReplaceAll(string(b[:n]), "\n", "\n "))

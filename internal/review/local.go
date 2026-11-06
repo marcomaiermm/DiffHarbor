@@ -61,16 +61,29 @@ func Tree(ctx context.Context, sb *proc.Sandbox, cwd, title string, closed []Com
 // Checkout fetches the PR head and base into repo with history but without old file contents (blob:none) for
 // co-change hints, checks out head (a commit) and returns the PR's diff as GitHub shows it:
 // merge-base(base, head)..head, base a ref or commit of the remote. token reads the repo. As root git runs as the repo's user,
-// like the PR's code: it fetches through the vault, whose remote works until ctx is done (blob:none fetches the
-// blobs later commands need) and never holds token. Else token goes in the env (argv is world-readable).
+// like the PR's code: it fetches through the vault with a stand-in for token that works until ctx is done (blob:none
+// fetches the blobs later commands need). Else token goes in the env. Never in argv: /proc/<pid>/cmdline is
+// world-readable, also to another repo's job running at the same time.
 func Checkout(ctx context.Context, sb *proc.Sandbox, repo, cloneURL, head, base, token string) (string, error) {
 	remote, auth := cloneURL, []string{
 		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader",
 		"GIT_CONFIG_VALUE_0=Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token)),
 	}
+	if _, err := proc.Run(sb.Command(ctx, filepath.Dir(repo), nil, "git", "init", "-q", repo)); err != nil { // as the repo's user, when we're root
+		return "", err
+	}
 	if vault.URL() != "" {
-		r, err := vault.Git(ctx, cloneURL, token)
+		r, tok, err := vault.Git(ctx, cloneURL, token)
 		if err != nil {
+			return "", err
+		}
+		// Every git in the checkout sends the token, the fetches Pi or the PR's code start too: from a file the repo's
+		// config includes, written through stdin. Only its path is in argv.
+		f := filepath.Join(sb.Dir, "git-auth")
+		if err := sb.WriteFile(f, []byte(fmt.Sprintf("[http %q]\n\textraHeader = Authorization: Bearer %s\n", r, tok))); err != nil {
+			return "", err
+		}
+		if _, err := proc.Run(sb.Command(ctx, repo, nil, "git", "config", "include.path", f)); err != nil {
 			return "", err
 		}
 		remote, auth = r, nil
@@ -83,9 +96,6 @@ func Checkout(ctx context.Context, sb *proc.Sandbox, repo, cloneURL, head, base,
 			return "", fmt.Errorf("git %s: %w", args[0], err)
 		}
 		return string(out), nil
-	}
-	if _, err := proc.Run(sb.Command(ctx, filepath.Dir(repo), nil, "git", "init", "-q", repo)); err != nil { // as the repo's user, when we're root
-		return "", err
 	}
 	for _, args := range [][]string{
 		{"remote", "add", "origin", remote},

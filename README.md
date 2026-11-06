@@ -232,7 +232,7 @@ team-a @team-a https://art.corp/artifactory/api/npm/team-a/ <token>
 | Variable | |
 |---|---|
 | `DATA_DIR`, `CACHE_DIR` | Data (learnings, pending reviews, reports, logins, the repos' uids) and per-repo caches. `/data` and `/cache` in the image. Keep both on volumes, apart. |
-| `MAX_JOBS` | How many jobs (reviews, answers) run at once. Default `1`. Jobs of one repo always run one after another, so a higher value helps when several repos have PRs at the same time. Raise `mem_limit` and `cpus` with it. Above `1`, jobs of different repos share `/tmp`, `/var/tmp`, `/dev/shm` and the loopback network while they run, see [Jobs at once](#jobs-at-once). |
+| `MAX_JOBS` | How many jobs (reviews, answers) run at once. Default `1`. Jobs of one repo always run one after another, so a higher value helps when several repos have PRs at the same time. Raise `mem_limit`, `cpus` and `pids_limit` with it. Above `1`, jobs of different repos share `/tmp`, `/var/tmp`, `/dev/shm`, the loopback network, the process list and the container's limits while they run, see [Jobs at once](#jobs-at-once). |
 | `DOCKER_HOST` | With the `dind` service: Docker for testcontainers in the checks, isolated with [Sysbox](https://github.com/nestybox/sysbox) (install it on the host). Drop both if your tests don't need Docker. |
 
 ### Branding the report
@@ -426,7 +426,11 @@ Within that:
 ### Jobs at once
 
 - A repo's jobs run one after another: they share its user, which could otherwise signal or read the other job's processes.
-- With `MAX_JOBS` above `1`, jobs of different repos run at the same time. Home, temp dir (`TMPDIR`), caches and uid stay per repo, but `/tmp`, `/var/tmp`, `/dev/shm` and the loopback network are shared while they run: a PR's code could leave a file for another repo's job, or talk to a port it listens on.
+- With `MAX_JOBS` above `1`, jobs of different repos run at the same time. Home, temp dir (`TMPDIR`), caches and uid stay per repo. Shared while they run:
+  - `/tmp`, `/var/tmp` and `/dev/shm`: a PR's code could leave a file for another repo's job.
+  - The loopback network, abstract unix sockets included: it could talk to a port or socket another job listens on.
+  - The process list, arguments included. Tokens, prompts, rules and learnings stay out of it (git's token goes in a header from a file, npm's and the models' in the env, prompts in files and stdin), unless a repo's own scripts put them in a command's arguments. The changed files' paths, commit SHAs, test names and the bumped npm packages' names and versions are in it.
+  - The container's memory, CPUs and processes: one PR's memory hog or fork bomb can starve the other jobs or get them killed. Raise `mem_limit`, `cpus` and `pids_limit` with `MAX_JOBS`.
 - That's fine when all repos belong to one team. Keep `MAX_JOBS=1` (the default) when untrusted repos or forks of different owners are reviewed side by side.
 
 ### Each repo

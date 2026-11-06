@@ -17,6 +17,7 @@ import (
 	"log"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -308,6 +309,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	var wg sync.WaitGroup
 	for k, d := range in.Parts {
 		wg.Go(func() {
+			defer recovered(func(err error) { ps[k] = part{err: err, files: diff.Paths(d)} })
 			var docs strings.Builder // a contradiction between a doc and code in different parts went unnoticed otherwise
 			for j, o := range in.Parts {
 				if j != k {
@@ -333,6 +335,21 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	return r, tag, err
 }
 
+// recovered, deferred first in a goroutine of a review, turns its panic into fail's error: a bug fails that part
+// or pass, not the server and the other repos' jobs running beside it.
+func recovered(fail func(error)) {
+	if v := recover(); v != nil {
+		fail(fmt.Errorf("panic: %v\n%s", v, debug.Stack()))
+	}
+}
+
+// held runs f in one of sem's slots, given back on a panic too: the other parts' passes wait for it.
+func held(sem chan struct{}, f func()) {
+	sem <- struct{}{}
+	defer func() { <-sem }()
+	f()
+}
+
 // partsAtOnce is the passes a review runs at once: the subscription's rate limit, the container's memory.
 const partsAtOnce = 2
 
@@ -353,6 +370,7 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 	var wg sync.WaitGroup
 	for k, f := range fs {
 		wg.Go(func() {
+			defer recovered(func(err error) { errs[k] = err })
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			pin, pass, pd := in, "review"+name, d
@@ -427,17 +445,22 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 	if len(open) > 0 {
 		task += "## Earlier findings, still open (posted already: no verdicts for these)\n\n" + findings(open, ids)
 	}
-	sem <- struct{}{}
-	out, err := in.Agent.Run(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted, task+block,
-		"Verify these findings. End with the JSON verdicts.", vm)
-	kept, dropped, fixed, ok := verdicts(r.Comments, r.Fixed, out, owns)
-	if err == nil && !ok {
-		out, err = in.Agent.Continue(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted, verifyRepair, vm)
-		if err == nil {
-			kept, dropped, fixed, ok = verdicts(r.Comments, r.Fixed, out, owns)
+	var out string
+	var err error
+	var kept, dropped []Comment
+	var fixed []int
+	var ok bool
+	held(sem, func() {
+		out, err = in.Agent.Run(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted, task+block,
+			"Verify these findings. End with the JSON verdicts.", vm)
+		kept, dropped, fixed, ok = verdicts(r.Comments, r.Fixed, out, owns)
+		if err == nil && !ok {
+			out, err = in.Agent.Continue(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted, verifyRepair, vm)
+			if err == nil {
+				kept, dropped, fixed, ok = verdicts(r.Comments, r.Fixed, out, owns)
+			}
 		}
-	}
-	<-sem
+	})
 	if err != nil || !ok {
 		log.Printf("verification failed, posting unverified: %v %q", err, text.Tail(out))
 		r.Fixed = nil // resolving threads needs proof
@@ -466,10 +489,12 @@ func repeats(ctx context.Context, in Input, name, vm string, sem chan struct{}, 
 	for k, i := range rejected {
 		earlier[k], ids[k] = in.Prior[i], len(kept)+k // numbered past the kept ones
 	}
-	sem <- struct{}{}
-	out, err := in.Agent.Continue(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted,
-		fmt.Sprintf(repeatsTask, findings(earlier, ids), findings(kept, nil)), vm)
-	<-sem
+	var out string
+	var err error
+	held(sem, func() {
+		out, err = in.Agent.Continue(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted,
+			fmt.Sprintf(repeatsTask, findings(earlier, ids), findings(kept, nil)), vm)
+	})
 	var v struct {
 		Repeats *[]*int `json:"repeats"` // *int: a null must not read as finding 0
 	}

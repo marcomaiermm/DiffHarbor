@@ -27,6 +27,7 @@ func TestFallback(t *testing.T) {
 	bin := t.TempDir() // a fake pi: the subscription is at its usage limit, the fallback answers
 	os.WriteFile(filepath.Join(bin, "pi"), []byte(`#!/bin/sh
 echo "$*" >> "$(dirname "$0")/calls"
+cat >> "$(dirname "$0")/stdin"
 case "$*" in
 auth*) echo token ;;
 *openai/*) echo "You have hit your ChatGPT usage limit (plus). Try again in 2h." >&2; exit 1 ;;
@@ -42,16 +43,25 @@ esac
 	dir := t.TempDir()
 	os.Mkdir(filepath.Join(dir, "repo"), 0o755)
 	for range 2 {
-		if out, err := runPi(context.Background(), &proc.Sandbox{Dir: dir}, "t", "sys", "openai/sol:low", false, "hi"); err != nil || out != "answer\n" {
+		if out, err := runPi(context.Background(), &proc.Sandbox{Dir: dir}, "t", "private rules", "openai/sol:low", false, "private task"); err != nil || out != "answer\n" {
 			t.Fatal(out, err)
 		}
 	}
-	if out, err := runPi(context.Background(), &proc.Sandbox{Dir: dir}, "verify", "sys", "openai/luna:high", false, "hi"); err != nil || out != "verified\n" {
+	if out, err := runPi(context.Background(), &proc.Sandbox{Dir: dir}, "verify", "private rules", "openai/luna:high", false, "private task"); err != nil || out != "verified\n" {
 		t.Fatal(out, err)
 	}
 	calls, _ := os.ReadFile(filepath.Join(bin, "calls"))
 	if n := strings.Count(string(calls), "openai/sol"); n != 1 {
 		t.Fatalf("subscription tried %d times, want once, then 30 min on the fallback:\n%s", n, calls)
+	}
+	// the system prompt and the task in a file and stdin, not in argv: other repos' jobs read that
+	stdin, _ := os.ReadFile(filepath.Join(bin, "stdin"))
+	if sys, _ := os.ReadFile(filepath.Join(dir, "verify.system.md")); string(sys) != "private rules" {
+		t.Fatalf("system prompt file: %q", sys)
+	}
+	if strings.Contains(string(calls), "private") || strings.Count(string(stdin), "private task") != 4 ||
+		!strings.Contains(string(calls), "--system-prompt "+filepath.Join(dir, "verify.system.md")) {
+		t.Fatalf("argv:\n%s\nstdin: %q", calls, stdin)
 	}
 }
 

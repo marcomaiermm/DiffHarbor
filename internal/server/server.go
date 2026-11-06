@@ -308,6 +308,7 @@ func Serve(cfg Config) {
 		default:
 			return
 		}
+		seen := *e // the job changes e (Refresh, Chat's review): Seen reads its own
 		if !jobs.add(e) {
 			log.Println(e.Key(), "queue full") // GitHub: Redeliver resends it
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -315,8 +316,8 @@ func Serve(cfg Config) {
 		}
 		w.WriteHeader(http.StatusAccepted)
 		// a reply without @bot may be in a thread between humans: Chat reacts once it knows the thread is ours
-		if e.Kind != "pull_request" && (e.Kind != "pull_request_review_comment" || mention.MatchString(c.Body)) {
-			go job.Seen(f, e)
+		if seen.Kind != "pull_request" && (seen.Kind != "pull_request_review_comment" || mention.MatchString(c.Body)) {
+			go job.Seen(f, &seen)
 		}
 	})
 	if job.ReportURL != "" {
