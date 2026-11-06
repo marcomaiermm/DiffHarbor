@@ -37,7 +37,7 @@ const schema = `Output JSON only:
 "title":"<one line>","body":"<markdown: failing input or sequence, impact, fix with a short snippet unless fix carries it>",
 "prompt":"<for an AI agent: 'In <path> around line <n>, ...': change, edge cases, test>",
 "existing":"<only if the whole fix is one local edit: the current lines it replaces, copied exactly from the new file>","fix":"<their replacement, same indentation>"}]}
-Max 10 comments and 5 nits, [] if none.`
+At most 10 findings that aren't nits, plus at most 5 nits, [] if none.`
 
 // splitSchema asks a large PR's guide for the changes that could each merge on their own: more than one asks to split.
 const splitSchema = `
@@ -135,6 +135,7 @@ type Comment struct {
 	// review model's JSON: it must not vouch for itself.
 	Evidence string `json:"-"`
 	Fold     bool   `json:"-"` // Settings.Fold: in the review's summary, folded, not inline
+	pass     int    // the reviewer pass that reported it: capped's limits hold per pass
 }
 
 // Result is a review: the walkthrough, the findings and the earlier ones now fixed.
@@ -368,7 +369,11 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 			if k > 0 { // another model, the files the other way round: other defects. Its findings only.
 				pin.Guide, pass, pd = false, fmt.Sprintf("review%s.%d", name, k+1), diff.Reverse(d)
 			}
-			if rs[k], errs[k] = reviewPass(ctx, pin, pass, prompt(pd), f.Model, false); errs[k] != nil || f.Again != nil && !*f.Again {
+			rs[k], errs[k] = reviewPass(ctx, pin, pass, prompt(pd), f.Model, false)
+			for i := range rs[k].Comments {
+				rs[k].Comments[i].pass = 2 * k
+			}
+			if errs[k] != nil || f.Again != nil && !*f.Again {
 				return
 			}
 			// A pass reports its worst few; asked again, it reports others. Resumed without tools: its prompt and the code
@@ -376,6 +381,9 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 			if more, err := reviewPass(ctx, pin, pass, "", f.Model, true); err != nil {
 				log.Printf("%s again: %v", pass, err) // the first look stands
 			} else {
+				for i := range more.Comments {
+					more.Comments[i].pass = 2*k + 1
+				}
 				rs[k].Comments = append(rs[k].Comments, more.Comments...)
 			}
 		})
@@ -627,17 +635,18 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string, again boo
 	return r, nil
 }
 
-// capped keeps the schema's limits, per pass: the 10 most severe findings and 5 nits, so nits never push out a defect.
+// capped keeps the schema's limits per pass (Comment.pass): the 10 most severe findings and 5 nits, so nits never
+// push out a defect. After the verifier, also for the ones it lowered to nits.
 func capped(cs []Comment) []Comment {
 	slices.SortStableFunc(cs, bySeverity)
-	n, nits := 0, 0
+	n, nits := map[int]int{}, map[int]int{}
 	return slices.DeleteFunc(cs, func(c Comment) bool {
 		if c.Severity == "nit" {
-			nits++
-			return nits > 5
+			nits[c.pass]++
+			return nits[c.pass] > 5
 		}
-		n++
-		return n > 10
+		n[c.pass]++
+		return n[c.pass] > 10
 	})
 }
 

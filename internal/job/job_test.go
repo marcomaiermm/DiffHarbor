@@ -490,7 +490,11 @@ func TestBodyProfile(t *testing.T) {
 		"<!-- hint\nreview: quiet":                     "",
 		"text\n\n    review: quiet":                    "", // indented: code
 		"\treview: quiet":                              "",
-		"    - [x] review: quiet":                      "quiet", // a nested list item
+		"    - [x] review: quiet":                      "",      // indented: code, list-shaped or not
+		"- [ ] a\n    - [x] review: quiet":             "quiet", // a nested list item
+		"- ```\n  review: quiet\n  ```\nreview: chill": "chill", // a fence in a list item
+		"```\n<!--\n```\nreview: quiet":                "quiet", // a comment marker in code is code
+		"text\n    review: quiet":                      "quiet", // indented, but no blank line before: the paragraph goes on
 		"````\n```\n````\nreview: chill":               "chill",
 		"````\n```\nreview: quiet\n```\n````":          "", // a fence inside a longer one
 		"review: quiet please, but assertive here":     "",

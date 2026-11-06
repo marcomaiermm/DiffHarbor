@@ -251,30 +251,56 @@ func reviewCommand(cmd string) (large bool, profile string, ok bool) {
 
 var (
 	// a PR description's line "review: quiet", plain, a list item or a ticked box, "quiet" maybe bold or code, and
-	// nothing after but a full stop; an unticked box is no choice. Indented 4 spaces or a tab without a list marker it is a code block.
-	bodyProfileRe = regexp.MustCompile("(?im)^(?: {0,3}(?:>[ \\t]*)*|[ \\t>]*(?:[-*+]|\\d+[.)])[ \\t]+(?:\\[[xX]\\][ \\t]+)?)review:[ \\t]*[*_`]*(quiet|chill|assertive)[*_`]*\\.?[ \\t]*\\r?$")
-	// what a PR description shows no one: HTML comments; unclosed, up to the end
-	comments = regexp.MustCompile("(?s)<!--.*?(?:-->|\\z)")
-	fenceRe  = regexp.MustCompile("^[ \\t>]*(```+|~~~+)")
+	// nothing after but a full stop; an unticked box is no choice
+	bodyProfileRe = regexp.MustCompile("(?im)^[ \\t>]*(?:(?:[-*+]|\\d+[.)])[ \\t]+(?:\\[[xX]\\][ \\t]+)?)?review:[ \\t]*[*_`]*(quiet|chill|assertive)[*_`]*\\.?[ \\t]*\\r?$")
+	listRe        = regexp.MustCompile(`^[ \t>]*(?:[-*+]|\d+[.)])[ \t]`)
+	fenceRe       = regexp.MustCompile("^[ \\t>]*(?:(?:[-*+]|\\d+[.)])[ \\t]+)?(```+|~~~+)")
 )
 
-// visible is body without HTML comments and fenced code blocks: a template's hint, an example. A fence closes at
-// one of the same character at least as long; unclosed, up to the end.
+// visible is what a PR description shows as text: no HTML comments, no code blocks (a template's hint, an example).
+// A fence, also in a list item, closes at one of the same character at least as long; a line indented 4 spaces or a
+// tab after a blank line, outside a list, is code. Unclosed, up to the end.
+// ponytail: a line scan, not a Markdown parser; lazy continuations and nested quotes are guesses.
 func visible(body string) string {
-	var out []string
-	fence := ""
-	for l := range strings.Lines(comments.ReplaceAllString(body, "")) {
-		m := fenceRe.FindStringSubmatch(l)
-		switch {
-		case fence == "" && m != nil:
-			fence = m[1]
-		case fence == "":
-			out = append(out, l)
-		case m != nil && m[1][0] == fence[0] && len(m[1]) >= len(fence) && strings.TrimSpace(l[len(m[0]):]) == "":
-			fence = ""
+	var out strings.Builder
+	fence := "" // the open fence's backticks or tildes
+	comment, list, code, blank := false, false, false, true
+	for l := range strings.Lines(body) {
+		if fence != "" { // code: no comment starts in it
+			if m := fenceRe.FindStringSubmatch(l); m != nil && m[1][0] == fence[0] && len(m[1]) >= len(fence) && strings.TrimSpace(l[len(m[0]):]) == "" {
+				fence = ""
+			}
+			continue
 		}
+		var v strings.Builder // l without HTML comments, which may span lines
+		for l != "" {
+			if comment {
+				_, after, ok := strings.Cut(l, "-->")
+				l, comment = after, !ok
+				continue
+			}
+			before, after, ok := strings.Cut(l, "<!--")
+			v.WriteString(before)
+			l, comment = after, ok
+		}
+		line := strings.TrimRight(v.String(), "\r\n")
+		indented := strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t")
+		m := fenceRe.FindStringSubmatch(line)
+		switch {
+		case strings.TrimSpace(line) == "":
+			blank = true
+			continue
+		case indented && !list && (code || blank):
+			code = true
+		case m != nil:
+			fence, code, list = m[1], false, listRe.MatchString(line) || indented && list
+		default:
+			code, list = false, listRe.MatchString(line) || indented && list
+			out.WriteString(line + "\n")
+		}
+		blank = false
 	}
-	return strings.Join(out, "")
+	return out.String()
 }
 
 // bodyProfile is the profile a PR description names on a line of its own, "review: quiet", by hand or as a ticked

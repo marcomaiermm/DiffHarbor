@@ -408,4 +408,12 @@ func TestCapped(t *testing.T) {
 	if n != 5 || len(got)-n != 10 || got[0].Severity != "critical" {
 		t.Fatalf("%d nits, %d findings", n, len(got)-n)
 	}
+	// After verify: another pass keeps its own 10, the nits the verifier lowered count against their pass's 5.
+	cs = nil
+	for i := range 10 {
+		cs = append(cs, Comment{Severity: "major", pass: 1}, Comment{Severity: "nit", pass: i % 2})
+	}
+	if got := capped(append(got, cs...)); len(got) != 10+5+10+5 {
+		t.Fatalf("%d after verify", len(got))
+	}
 }
