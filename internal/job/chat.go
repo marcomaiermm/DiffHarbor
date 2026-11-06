@@ -258,13 +258,14 @@ var (
 )
 
 // visible is what a PR description shows as text: no HTML comments, no code blocks (a template's hint, an example).
-// A fence, also in a list item, closes at one of the same character at least as long; a line indented 4 spaces or a
-// tab after a blank line, outside a list, is code. Unclosed, up to the end.
+// A fence, also in a list item, closes at one of the same character at least as long; a line indented 4 columns past
+// the list item's text (outside a list: the margin) after a blank line is code. Unclosed, up to the end.
 // ponytail: a line scan, not a Markdown parser; lazy continuations and nested quotes are guesses.
 func visible(body string) string {
 	var out strings.Builder
 	fence := "" // the open fence's backticks or tildes
-	comment, list, code, blank := false, false, false, true
+	comment, code, blank := false, false, true
+	col := 0 // where the last list item's text starts, 0 outside a list
 	for l := range strings.Lines(body) {
 		if fence != "" { // code: no comment starts in it
 			if m := fenceRe.FindStringSubmatch(l); m != nil && m[1][0] == fence[0] && len(m[1]) >= len(fence) && strings.TrimSpace(l[len(m[0]):]) == "" {
@@ -284,19 +285,31 @@ func visible(body string) string {
 			l, comment = after, ok
 		}
 		line := strings.TrimRight(v.String(), "\r\n")
-		indented := strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t")
-		m := fenceRe.FindStringSubmatch(line)
-		switch {
-		case strings.TrimSpace(line) == "":
+		w := 0 // the line's indent, a tab 4 columns
+		for _, r := range line {
+			if r == '\t' {
+				w += 3
+			} else if r != ' ' {
+				break
+			}
+			w++
+		}
+		if strings.TrimSpace(line) == "" {
 			blank = true
 			continue
-		case indented && !list && (code || blank):
-			code = true
-		case m != nil:
-			fence, code, list = m[1], false, listRe.MatchString(line) || indented && list
-		default:
-			code, list = false, listRe.MatchString(line) || indented && list
-			out.WriteString(line + "\n")
+		}
+		if code = (code || blank) && w >= col+4; !code {
+			switch item := listRe.FindStringIndex(line); {
+			case item != nil:
+				col = item[1]
+			case w < col: // past the list
+				col = 0
+			}
+			if m := fenceRe.FindStringSubmatch(line); m != nil {
+				fence = m[1]
+			} else {
+				out.WriteString(line + "\n")
+			}
 		}
 		blank = false
 	}
