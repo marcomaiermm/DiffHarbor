@@ -724,13 +724,17 @@ func TestPoolStopAfterReopen(t *testing.T) {
 	pushed(reopen)
 	t.Cleanup(func() { latest.Lock(); delete(latest.m, "a#1"); latest.Unlock() })
 	f.p.add(reopen)
-	f.next()
+	if got := f.next(); got != "a#1" {
+		t.Fatalf("the reopen's review did not start: %q", got)
+	}
 	f.p.stop(e)
 	f.end(t) // still running: it takes the finish
 	f.idle(t)
 	closed(e) // closed again: stopped
 	f.p.add(ev("a", 1, ""))
-	f.next()
+	if got := f.next(); got != "a#1" {
+		t.Fatalf("the second review did not start: %q", got)
+	}
 	f.p.stop(e)
 	f.idle(t)
 }
