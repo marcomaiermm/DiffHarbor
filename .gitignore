@@ -1,2 +1,3 @@
 /diffharbor
 .impeccable/
+*_bench_test.go
