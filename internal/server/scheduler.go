@@ -12,7 +12,7 @@ import (
 // (Event.Key). Repos take turns, so one with many PRs doesn't hold up the others. pool.mu guards it.
 type scheduler struct {
 	limit   int                       // jobs at once
-	room    int                       // jobs that may still wait: past it a webhook gets a 503 and is redelivered
+	room    int                       // jobs that may still wait: past it a webhook gets a 503, GitHub's is redelivered (Redeliver)
 	waiting map[string][]*forge.Event // by repo: answers before reviews, a human waits for them; else in order
 	turns   []string                  // the repos with waiting jobs, the next turn first
 	busy    map[string]string         // the repos with a running job, to the job's repo name
