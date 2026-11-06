@@ -296,6 +296,16 @@ func (p *pr) discussions(inline, rest, folded []forge.Finding, raw, footer strin
 // own summary (bulk_publish's note) is a note of its own, an email more. GitLab checks a draft's position only on
 // publishing and drops one it can't place: a finding with no discussion afterwards goes into the summary.
 func (p *pr) publish(inline, rest, folded []forge.Finding, threads []forge.Thread, raw, footer string) (int, error) {
+	// the summary's draft first: GitLab publishes drafts in the order they were made, the summary heads the findings
+	summary := forge.Summary(inline, rest, folded, footer)
+	var d struct {
+		ID int64 `json:"id"`
+	}
+	ok := true // the summary is drafted as it goes out
+	if err := call("POST", p.mr+"/draft_notes", map[string]string{"note": inert(summary)}, &d); err != nil {
+		log.Println(p.e.Key(), "draft summary:", err) // a note of its own then
+		ok = false
+	}
 	lines := olds(raw)
 	var drafted []forge.Finding
 	var keys []string
@@ -314,20 +324,24 @@ func (p *pr) publish(inline, rest, folded []forge.Finding, threads []forge.Threa
 			break
 		}
 	}
-	summary := forge.Summary(drafted, rest, folded, footer)
-	err := call("POST", p.mr+"/draft_notes", map[string]string{"note": inert(summary)}, nil)
-	if err != nil {
-		log.Println(p.e.Key(), "draft summary:", err) // a note of its own then
+	if s := forge.Summary(drafted, rest, folded, footer); ok && s != summary { // a refused finding: the summary has it
+		if err := call("PUT", fmt.Sprintf("%s/draft_notes/%d", p.mr, d.ID), map[string]string{"note": inert(s)}, nil); err != nil {
+			log.Println(p.e.Key(), "draft summary:", err) // published as it is, edited after
+			ok = false
+		} else {
+			summary = s
+		}
 	}
 	before, beforeErr := p.newest()
 	pubErr := p.bulkPublish()
 	posted, lost := p.published(drafted, keys, threads)
-	if pubErr == nil && err == nil && len(lost) == 0 {
+	if pubErr == nil && ok && len(lost) == 0 {
 		return len(posted) + len(rest), nil
 	}
-	// publishing failed, no summary draft, or GitLab dropped some: the summary says what was posted
+	// publishing failed, the summary isn't right, or GitLab dropped some: the summary says what was posted
 	var id int64
-	if err = beforeErr; err == nil {
+	err := beforeErr
+	if err == nil {
 		id, err = p.ours(inert(summary), before)
 	}
 	if err != nil {
