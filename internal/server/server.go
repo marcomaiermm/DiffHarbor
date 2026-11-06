@@ -44,7 +44,7 @@ var (
 	}{m: map[string]string{}}
 )
 
-// task is a running job: review spares a chat answer from a push's stop.
+// task is a running job: review spares a chat answer from a push's stop (pool.add).
 type task struct {
 	review bool
 	cancel context.CancelFunc
@@ -109,18 +109,25 @@ func newPool(limit int, run func(context.Context, *forge.Event) error) *pool {
 	return &pool{s: newScheduler(max(limit, 1), 100), running: map[string]*task{}, run: run}
 }
 
-// add queues e's job; false when the queue is full.
+// add queues e's job; false when the queue is full. A push's review stops the PR's running one: no tokens on a dead
+// head.
 func (p *pool) add(e *forge.Event) bool {
-	repo := repoOf(e)
+	repo, key := repoOf(e), e.Key()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	// Under mu: a newer push's handler that queued first is not replaced by an older one's (scheduler.add). This one
-	// would skip (review).
-	latest.Lock()
-	sha, known := latest.m[e.Key()]
-	latest.Unlock()
-	if isReview(e) && known && sha != e.PullRequest.Head.SHA {
-		return true
+	if isReview(e) {
+		// Under mu: a newer push's handler that queued first is neither replaced (scheduler.add) nor stopped by an
+		// older one's. This one would skip (review).
+		latest.Lock()
+		sha, known := latest.m[key]
+		latest.Unlock()
+		if known && sha != e.PullRequest.Head.SHA {
+			return true
+		}
+		if t := p.running[key]; t != nil && t.review {
+			log.Println(key, "stopping the running review")
+			t.cancel()
+		}
 	}
 	ok := p.s.add(repo, e)
 	p.start()
@@ -175,6 +182,10 @@ func drop(e *forge.Event) error {
 	if !proc.Exists(f) {
 		return nil
 	}
+	if e.Repository.ID == 0 { // an old version's: queued apart from its repo's reviews (repoOf), one could write after it
+		_ = os.Remove(f)
+		return errors.New("no repository id: its reports stay")
+	}
 	if err := job.DeleteReports(e); err != nil {
 		return fmt.Errorf("deleting reports: %w", err)
 	}
@@ -182,11 +193,11 @@ func drop(e *forge.Event) error {
 	return nil
 }
 
-// stop cancels the running job on key; reviewOnly spares a chat answer.
-func (p *pool) stop(key string, reviewOnly bool) {
+// stop cancels the running job on key, a review or an answer: the PR was closed.
+func (p *pool) stop(key string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if t := p.running[key]; t != nil && (t.review || !reviewOnly) {
+	if t := p.running[key]; t != nil {
 		log.Println(key, "stopping the running job")
 		t.cancel()
 	}
@@ -276,7 +287,7 @@ func Serve(cfg Config) {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			jobs.stop(e.Key(), false)
+			jobs.stop(e.Key())
 		case e.Kind == "pull_request" && actions[e.Action]:
 			latest.Lock()
 			latest.m[e.Key()] = e.PullRequest.Head.SHA
@@ -290,7 +301,6 @@ func Serve(cfg Config) {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			jobs.stop(e.Key(), true)
 		case e.Kind == "issue_comment" && human && e.Issue.PullRequest != nil && mention.MatchString(c.Body):
 			e.PullRequest.Number = e.Issue.Number
 		case e.Kind == "issue_comment" && e.Action == "edited" && e.Issue.PullRequest != nil && e.Sender.Type != "Bot" &&

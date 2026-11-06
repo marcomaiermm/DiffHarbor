@@ -27,12 +27,11 @@ func TestStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := newPool(1, nil)
 	p.running["o/r#1"] = &task{review: false, cancel: cancel}
-	p.stop("o/r#1", true) // a push spares a chat answer
-	p.stop("o/r#2", false)
+	p.stop("o/r#2")
 	if ctx.Err() != nil {
 		t.Fatal("stopped the wrong job")
 	}
-	p.stop("o/r#1", false) // closing the PR stops everything on it
+	p.stop("o/r#1") // closing the PR stops everything on it, an answer too
 	if ctx.Err() == nil {
 		t.Fatal("not stopped")
 	}
@@ -103,6 +102,7 @@ func TestRetryDropsOldDraft(t *testing.T) {
 func TestDrop(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "closed"}
+	e.Repository.ID = 1
 	e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = "o/r", 7, "https://github.com/o/r/pull/7"
 	dir := "github.com/o/r/7/" + secret
 	job.Reports().Put(dir+"/versions.json", []byte(`[{"sha":"a"}]`))
@@ -336,8 +336,8 @@ func TestPoolParallel(t *testing.T) {
 	if got := []string{f.next(), f.next(), f.quiet()}; !slices.Contains(got, "a#1") || !slices.Contains(got, "b#1") || got[2] != "" {
 		t.Fatal(got) // a#2 waits for a#1, c#1 for a slot
 	}
-	f.p.stop("a#1", false) // each one let go starts the next; by key: a started one doesn't take the other's finish
-	f.p.stop("b#1", false)
+	f.p.stop("a#1") // each one let go starts the next; by key: a started one doesn't take the other's finish
+	f.p.stop("b#1")
 	if got := []string{f.next(), f.next()}; !slices.Contains(got, "c#1") || !slices.Contains(got, "a#2") {
 		t.Fatal(got)
 	}
@@ -393,8 +393,8 @@ func TestPoolStop(t *testing.T) {
 	for range 3 {
 		f.next()
 	}
-	f.p.stop("c#1", true)
-	f.p.stop("a#1", false)
+	f.p.add(ev("c", 1, "")) // a push spares the answer; its review waits for it
+	f.p.stop("a#1")
 	f.waitFor(t, func() bool { return f.p.running["a#1"] == nil }) // a's job ends on its ctx
 	f.p.mu.Lock()
 	b, c := f.p.running["b#1"], f.p.running["c#1"]
@@ -402,8 +402,9 @@ func TestPoolStop(t *testing.T) {
 	if b == nil || c == nil {
 		t.Fatal("stopped another job", b, c)
 	}
-	f.finish <- nil
-	f.finish <- nil
+	for range 3 { // b, c's answer, then c's review
+		f.finish <- nil
+	}
 	f.idle(t)
 }
 
@@ -437,8 +438,8 @@ func TestPoolStopPicked(t *testing.T) {
 	f := newFakeJobs(2)
 	f.p.add(ev("a", 1, ""))
 	f.p.add(ev("b", 1, "issue_comment"))
-	f.p.stop("a#1", false)
-	f.p.stop("b#1", false)
+	f.p.stop("a#1")
+	f.p.stop("b#1")
 	f.next()
 	f.next()
 	f.idle(t) // both end on their ctx, no finish sent
@@ -481,4 +482,56 @@ func TestPoolNoLimit(t *testing.T) {
 	}
 	f.finish <- nil
 	f.idle(t)
+}
+
+// A push stops the PR's running review, but an older push's handler that comes late neither stops nor replaces the
+// newer one's.
+func TestPoolPushStops(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	f := newFakeJobs(1)
+	push := func(sha string) *forge.Event {
+		latest.Lock()
+		latest.m["a#1"] = sha
+		latest.Unlock()
+		e := ev("a", 1, "")
+		e.PullRequest.Head.SHA = sha
+		return e
+	}
+	t.Cleanup(func() { latest.Lock(); delete(latest.m, "a#1"); latest.Unlock() })
+	old := push("old")
+	f.p.add(push("new"))
+	f.next()
+	f.p.add(old) // its handler set latest before the newer one's
+	select {
+	case f.finish <- nil:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the older push stopped the newer review")
+	}
+	f.idle(t)
+	f.p.add(push("x"))
+	f.next()
+	f.p.add(push("y"))
+	if f.next() != "a#1" { // x's review ended on its ctx, y's started
+		t.Fatal("not stopped")
+	}
+	f.finish <- nil
+	f.idle(t)
+}
+
+// An old version's close without a repo id would run beside its repo's reviews: it deletes nothing and isn't retried.
+func TestDropNoID(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "closed"}
+	e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = "o/r", 8, "https://github.com/o/r/pull/8"
+	dir := "github.com/o/r/8/" + secret
+	job.Reports().Put(dir+"/versions.json", []byte(`[{"sha":"a"}]`))
+	latest.Lock()
+	save(deletingFile(e.Key()), e)
+	latest.Unlock()
+	if drop(e) == nil || proc.Exists(deletingFile(e.Key())) {
+		t.Fatal("no error, or retried")
+	}
+	if vs, err := job.Versions(dir); err != nil || len(vs) != 1 {
+		t.Fatal("deleted:", vs, err)
+	}
 }
