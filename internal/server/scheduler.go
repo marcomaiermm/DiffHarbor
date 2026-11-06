@@ -2,22 +2,24 @@ package server
 
 import (
 	"diffharbor/internal/forge"
+	"maps"
 	"slices"
 )
 
 // scheduler picks the queued job that runs next. Jobs of different repos run at once, up to limit; a repo's run one
-// at a time: they share its uid, which is what fences a job's PR code off from another's. Repos take turns, so one
-// with many PRs doesn't hold up the others. pool.mu guards it.
+// at a time: they share its uid, which is what fences a job's PR code off from another's. So do repos of one name, a
+// recreated one and the old one's or an old version's ID-less events: they share the state and reports keyed by name
+// (Event.Key). Repos take turns, so one with many PRs doesn't hold up the others. pool.mu guards it.
 type scheduler struct {
 	limit   int                       // jobs at once
 	room    int                       // jobs that may still wait: past it a webhook gets a 503 and is redelivered
 	waiting map[string][]*forge.Event // by repo: answers before reviews, a human waits for them; else in order
 	turns   []string                  // the repos with waiting jobs, the next turn first
-	busy    map[string]bool           // the repos with a running job
+	busy    map[string]string         // the repos with a running job, to the job's repo name
 }
 
 func newScheduler(limit, room int) *scheduler {
-	return &scheduler{limit: limit, room: room, waiting: map[string][]*forge.Event{}, busy: map[string]bool{}}
+	return &scheduler{limit: limit, room: room, waiting: map[string][]*forge.Event{}, busy: map[string]string{}}
 }
 
 // add queues e on repo; false when the queue is full. A review takes the place of the PR's waiting one: only the
@@ -51,18 +53,18 @@ func (s *scheduler) next() (string, *forge.Event, bool) {
 		return "", nil, false
 	}
 	for i, repo := range s.turns {
-		if s.busy[repo] {
-			continue // keeps its place: its turn comes once its job is done
-		}
 		q := s.waiting[repo]
 		e := q[0]
+		if _, ok := s.busy[repo]; ok || slices.Contains(slices.Collect(maps.Values(s.busy)), e.Repo()) {
+			continue // keeps its place: its turn comes once its job is done
+		}
 		s.turns = slices.Delete(s.turns, i, i+1)
 		if q = slices.Delete(q, 0, 1); len(q) > 0 {
 			s.waiting[repo], s.turns = q, append(s.turns, repo) // to the back: the other repos first
 		} else {
 			delete(s.waiting, repo)
 		}
-		s.busy[repo] = true
+		s.busy[repo] = e.Repo()
 		s.room++
 		return repo, e, true
 	}

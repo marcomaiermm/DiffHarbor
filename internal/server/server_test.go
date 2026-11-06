@@ -433,8 +433,8 @@ func TestReviewCleanupKeepsPending(t *testing.T) {
 	}
 }
 
-// A repo recreated under the old name runs beside the old one's job, a PR of the same number too: a close stops
-// only its repo's.
+// A repo recreated under the old name waits for the old one's job, a PR of the same number too: they share the
+// state keyed by name. A close stops only its repo's.
 func TestPoolRecreatedRepo(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	forges["github"] = &github.Hub{}
@@ -446,8 +446,11 @@ func TestPoolRecreatedRepo(t *testing.T) {
 	f.p.add(old)
 	f.p.add(recreated)
 	f.next()
-	f.next()
+	if r := f.quiet(); r != "" {
+		t.Fatal("ran beside the old repo's job")
+	}
 	f.p.stop(old)
+	f.next()
 	f.waitFor(t, func() bool { return f.p.running[runKey(repoOf(old), old)] == nil })
 	f.p.mu.Lock()
 	r := f.p.running[runKey(repoOf(recreated), recreated)]
@@ -548,7 +551,7 @@ func TestPoolPushStops(t *testing.T) {
 	f.idle(t)
 }
 
-// An old version's close without a repo id would run beside its repo's reviews: it deletes nothing and isn't retried.
+// An old version's close without a repo id deletes too: it takes turns with its repo's reviews by name (scheduler).
 func TestDropNoID(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "closed"}
@@ -558,10 +561,10 @@ func TestDropNoID(t *testing.T) {
 	latest.Lock()
 	save(deletingFile(e.Key()), e)
 	latest.Unlock()
-	if drop(e) == nil || proc.Exists(deletingFile(e.Key())) {
-		t.Fatal("no error, or retried")
+	if err := drop(e); err != nil || proc.Exists(deletingFile(e.Key())) {
+		t.Fatal(err, "or retried")
 	}
-	if vs, err := job.Versions(dir); err != nil || len(vs) != 1 {
-		t.Fatal("deleted:", vs, err)
+	if vs, err := job.Versions(dir); err != nil || len(vs) != 0 {
+		t.Fatal("kept its reports:", vs, err)
 	}
 }

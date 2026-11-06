@@ -16,7 +16,7 @@ description: The steps of a DiffHarbor review and how to talk to the bot.
 
 **Drafts** aren't reviewed until they are marked ready, unless someone asks with `@<bot> review`; [`drafts`](../per-repo/) can also review a draft's pushes once asked, or never.
 
-**The queue.** Jobs run one at a time, or up to [`MAX_JOBS`](../configuration/#storage-and-docker) at once. A repo's jobs never run at the same time; repos take turns, so one with many PRs doesn't hold up the others. Within a repo, answers to comments go before reviews. A newer push replaces a waiting review of the same PR and stops a running one. Up to 100 jobs wait; past that GitHub's webhook is redelivered later. Waiting reviews survive a restart.
+**The queue.** Jobs run one at a time, or up to [`MAX_JOBS`](../configuration/#storage-and-docker) at once. A repo's jobs never run at the same time, nor those of a repo recreated under its name; repos take turns, so one with many PRs doesn't hold up the others. Within a repo, answers to comments go before reviews, not before an earlier close. A newer push replaces a waiting review of the same PR and stops a running one. Up to 100 jobs wait; past that GitHub's webhook is redelivered later. Waiting reviews survive a restart.
 
 **Skipped PRs** get a green status. `@<bot> review` still reviews them.
 

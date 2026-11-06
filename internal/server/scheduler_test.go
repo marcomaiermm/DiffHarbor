@@ -107,6 +107,21 @@ func TestSchedulerAnswersFirst(t *testing.T) {
 	}
 }
 
+// Repos of one name take turns, a recreated one and an old version's ID-less events: their state is keyed by name.
+func TestSchedulerSameName(t *testing.T) {
+	s := newScheduler(2, 100)
+	s.add("github::1", ev("o/r", 1, ""))
+	s.add("github::2", ev("o/r", 2, ""))
+	s.add("o/r", ev("o/r", 3, ""))
+	if started(s) != "o/r#1" || started(s) != "" {
+		t.Fatal("ran beside one of its name")
+	}
+	s.free("github::1")
+	if started(s) != "o/r#2" {
+		t.Fatal("not next")
+	}
+}
+
 // Past room waiting jobs the queue is full; a started job makes room. Running ones don't count.
 func TestSchedulerFull(t *testing.T) {
 	s := newScheduler(1, 2)

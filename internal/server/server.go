@@ -186,10 +186,6 @@ func drop(e *forge.Event) error {
 	if !proc.Exists(f) {
 		return nil
 	}
-	if e.Repository.ID == 0 { // an old version's: queued apart from its repo's reviews (repoOf), one could write after it
-		_ = os.Remove(f)
-		return errors.New("no repository id: its reports stay")
-	}
 	if err := job.DeleteReports(e); err != nil {
 		return fmt.Errorf("deleting reports: %w", err)
 	}
