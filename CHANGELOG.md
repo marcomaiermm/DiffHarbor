@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.8.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.7.1...v0.8.0) (2026-11-06)
+
+
+### Features
+
+* **gitlab:** findings, answers and summary as one review ([#73](https://github.com/marcomaiermm/DiffHarbor/issues/73)) ([197a58d](https://github.com/marcomaiermm/DiffHarbor/commit/197a58dd38a8625537a7290d159c9a93ce76b883))
+* **review:** drafts setting: manual, opt_in or off ([#71](https://github.com/marcomaiermm/DiffHarbor/issues/71)) ([7ad700f](https://github.com/marcomaiermm/DiffHarbor/commit/7ad700f9637ce0ebdb9586419f36698c998453a7))
+* **review:** review profiles fold findings, nits always reported ([#79](https://github.com/marcomaiermm/DiffHarbor/issues/79)) ([03b1610](https://github.com/marcomaiermm/DiffHarbor/commit/03b1610660f5289d71e42fb5bce22aaa1c598e46))
+* **review:** unplaced fixes show as a diff of what they replace ([#70](https://github.com/marcomaiermm/DiffHarbor/issues/70)) ([413aa9e](https://github.com/marcomaiermm/DiffHarbor/commit/413aa9e03e5e83a911de9784694ae376c1f252f7))
+* **server:** run jobs of different repos at once (MAX_JOBS) ([#81](https://github.com/marcomaiermm/DiffHarbor/issues/81)) ([e03898a](https://github.com/marcomaiermm/DiffHarbor/commit/e03898a0d4b90d7f6764749b51a9d98862480b27))
+
+
+### Bug Fixes
+
+* **chat:** concede after one pushback, keep the risk in a collapsed block ([#76](https://github.com/marcomaiermm/DiffHarbor/issues/76)) ([7543e8c](https://github.com/marcomaiermm/DiffHarbor/commit/7543e8c4de5afdb04d8bb13beab16d6b13bb4455))
+* **forge:** findings the forge didn't post inline get their own heading ([#77](https://github.com/marcomaiermm/DiffHarbor/issues/77)) ([390515c](https://github.com/marcomaiermm/DiffHarbor/commit/390515cf95c61a970a4db20de19138fc02a23cae))
+* **gitlab:** escape quick actions in posted notes ([#68](https://github.com/marcomaiermm/DiffHarbor/issues/68)) ([f091ed6](https://github.com/marcomaiermm/DiffHarbor/commit/f091ed62683a983e334d8b5d9f1e6112f2e056cc))
+* **image:** build osv-scanner and actionlint on current Go ([#78](https://github.com/marcomaiermm/DiffHarbor/issues/78)) ([2e21045](https://github.com/marcomaiermm/DiffHarbor/commit/2e210456a3413853b9ed36e241696cd2f71ae2fd))
+* **review:** a fix that is a blank line stays one ([#75](https://github.com/marcomaiermm/DiffHarbor/issues/75)) ([a9d9391](https://github.com/marcomaiermm/DiffHarbor/commit/a9d9391c90f4027c9397f5658235b9aafe4b8555))
+* **review:** closed threads keep their replies ([#80](https://github.com/marcomaiermm/DiffHarbor/issues/80)) ([0827b37](https://github.com/marcomaiermm/DiffHarbor/commit/0827b378d6b9bb6ad0cb7c460c0692a12ac2cb97))
+* **review:** Fence finds the longest backtick run in one pass ([#72](https://github.com/marcomaiermm/DiffHarbor/issues/72)) ([e7d46e5](https://github.com/marcomaiermm/DiffHarbor/commit/e7d46e56f520e5799079c0ee21ae655da77d5e68))
+* **review:** no review for an ambiguous profile, code and quoted fences in context ([#82](https://github.com/marcomaiermm/DiffHarbor/issues/82)) ([6e7b1ce](https://github.com/marcomaiermm/DiffHarbor/commit/6e7b1ce691cf60b3b916205a41e22aba3f1d6b9e))
+* **review:** pushes stop reopening declined findings ([#83](https://github.com/marcomaiermm/DiffHarbor/issues/83)) ([562a58d](https://github.com/marcomaiermm/DiffHarbor/commit/562a58dccd084dc424bd7f1cfcf5c1fd5a918bc6))
+* **review:** trim a fix's trailing newline once, in Split ([#74](https://github.com/marcomaiermm/DiffHarbor/issues/74)) ([44e912a](https://github.com/marcomaiermm/DiffHarbor/commit/44e912a96b138af50e7f68fbc62c18acf9762baa))
+
 ## [0.7.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.7.0...v0.7.1) (2026-11-06)
 
 
