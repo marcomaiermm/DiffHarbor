@@ -297,41 +297,37 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	head := fmt.Sprintf("# %s\n\n%s\n\n%s%s%s", in.Title, text.Truncate(in.Body, 2000), commits, in.Ticket, hints.String())
 	vm := cmp.Or(verify, agent.PassModel(rm, cmp.Or(map[string]string{"high": "high"}[lvl], "medium")))
 	sem := make(chan struct{}, partsAtOnce)
+	ps := make([]part, len(in.Parts))
 	if len(in.Parts) == 1 {
 		// One pass over the whole diff: about the findings of parts at a third fewer tokens, so only a diff past
 		// diff.Max splits.
 		prompt := func(d string) string { return head + fmt.Sprintf("## Diff\n\n```diff\n%s\n```\n", d) }
-		p := runPart(ctx, in, "", prompt, in.Parts[0], fs, vm, sem)
-		r, tag, err := merge([]part{p}, m, vm, ci)
-		r.Tests = tests
-		r.Comments = append(r.Comments, proofOnBase(ctx, repo, in.Dir, r.Story.Proof, tests.Ran, in.Settings)...)
-		fold(r.Comments, in.Settings)
-		return r, tag, err
-	}
-	// One pass per part: each reads its files closely and its context stays small.
-	ps := make([]part, len(in.Parts))
-	var wg sync.WaitGroup
-	for k, d := range in.Parts {
-		wg.Go(func() {
-			var docs strings.Builder // a contradiction between a doc and code in different parts went unnoticed otherwise
-			for j, o := range in.Parts {
-				if j != k {
-					docs.WriteString(diff.Docs(o))
+		ps[0] = runPart(ctx, in, "", prompt, in.Parts[0], fs, vm, sem)
+	} else {
+		// One pass per part: each reads its files closely and its context stays small.
+		var wg sync.WaitGroup
+		for k, d := range in.Parts {
+			wg.Go(func() {
+				var docs strings.Builder // a contradiction between a doc and code in different parts went unnoticed otherwise
+				for j, o := range in.Parts {
+					if j != k {
+						docs.WriteString(diff.Docs(o))
+					}
 				}
-			}
-			others := ""
-			if docs.Len() > 0 {
-				others = "\n## Changed docs and API specs in other parts (check what they claim about your files)\n\n```diff\n" + text.Truncate(docs.String(), 8000) + "\n```\n"
-			}
-			prompt := func(d string) string {
-				return fmt.Sprintf("%s## Files in this pull request\n\n%s\n\n## Diff, part %d of %d\n\nOther reviewers get the other parts. Report findings, summary and walkthrough for the files in this part only; read the others in cwd where they matter. A change here that breaks another file: report it on the line here that causes it.\n"+
-					"The summaries of all parts are joined into one paragraph: write one or two sentences on what your files change and their risk, as part of the PR's description. Do not mention parts, other reviewers, or that you found nothing.\n\n```diff\n%s\n```\n",
-					head, strings.Join(files, "\n"), k+1, len(in.Parts), d) + others
-			}
-			ps[k] = runPart(ctx, in, strconv.Itoa(k+1), prompt, d, fs, vm, sem)
-		})
+				others := ""
+				if docs.Len() > 0 {
+					others = "\n## Changed docs and API specs in other parts (check what they claim about your files)\n\n```diff\n" + text.Truncate(docs.String(), 8000) + "\n```\n"
+				}
+				prompt := func(d string) string {
+					return fmt.Sprintf("%s## Files in this pull request\n\n%s\n\n## Diff, part %d of %d\n\nOther reviewers get the other parts. Report findings, summary and walkthrough for the files in this part only; read the others in cwd where they matter. A change here that breaks another file: report it on the line here that causes it.\n"+
+						"The summaries of all parts are joined into one paragraph: write one or two sentences on what your files change and their risk, as part of the PR's description. Do not mention parts, other reviewers, or that you found nothing.\n\n```diff\n%s\n```\n",
+						head, strings.Join(files, "\n"), k+1, len(in.Parts), d) + others
+				}
+				ps[k] = runPart(ctx, in, strconv.Itoa(k+1), prompt, d, fs, vm, sem)
+			})
+		}
+		wg.Wait()
 	}
-	wg.Wait()
 	r, tag, err := merge(ps, m, vm, ci)
 	r.Tests = tests
 	r.Comments = append(r.Comments, proofOnBase(ctx, repo, in.Dir, r.Story.Proof, tests.Ran, in.Settings)...)
@@ -583,7 +579,7 @@ func merge(ps []part, m, vm, ci string) (Result, string, error) {
 	r.Decisions = r.Decisions[:min(len(r.Decisions), 3)]
 	slices.Sort(r.Fixed)
 	r.Fixed = slices.Compact(r.Fixed)
-	slices.SortStableFunc(r.Comments, func(a, b Comment) int { return rank[b.Severity] - rank[a.Severity] })
+	slices.SortStableFunc(r.Comments, bySeverity)
 	seen := map[string]bool{}
 	r.Comments = slices.DeleteFunc(r.Comments, func(c Comment) bool {
 		at := fmt.Sprintf("%s:%d", c.Path, c.Line)
@@ -632,7 +628,7 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string, again boo
 
 // capped keeps the schema's limits, per pass: the 10 most severe findings and 5 nits, so nits never push out a defect.
 func capped(cs []Comment) []Comment {
-	slices.SortStableFunc(cs, func(a, b Comment) int { return rank[b.Severity] - rank[a.Severity] })
+	slices.SortStableFunc(cs, bySeverity)
 	n, nits := 0, 0
 	return slices.DeleteFunc(cs, func(c Comment) bool {
 		if c.Severity == "nit" {
@@ -698,7 +694,7 @@ func verdicts(cs []Comment, claimed []int, text string, owns func(path string, l
 		if d.Fix != nil && !*d.Fix {
 			c.Existing, c.Fix = "", ""
 		}
-		if rank[d.Severity] > 0 && rank[d.Severity] < rank[c.Severity] { // it only lowers: the reviewer rated it already
+		if Rank(d.Severity) > 0 && Rank(d.Severity) < Rank(c.Severity) { // it only lowers: the reviewer rated it already
 			c.Severity = d.Severity
 		}
 		kept = append(kept, c)

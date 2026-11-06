@@ -377,39 +377,13 @@ func TestProfile(t *testing.T) {
 	if !(Settings{}).Keep(Comment{Severity: "nit"}) || cfg.Keep(Comment{Path: "api/a.go", Severity: "nit"}) {
 		t.Error("nits kept unless min_severity drops them")
 	}
-	cfg.Override("chill")
+	cfg.Override = "chill"
 	if cfg.Fold(Comment{Path: "a.go", Severity: "minor"}) || !cfg.Fold(Comment{Path: "web/a.ts", Severity: "nit"}) {
 		t.Error("override")
 	}
 	for _, bad := range []string{`{"profile":"strict"}`, `{"packages":{"x":{"profile":"loud"}}}`, `{"min_severity":"nit"}`} {
 		if _, err := LoadSettings(bad); err == nil {
 			t.Errorf("%s accepted", bad)
-		}
-	}
-}
-
-func TestBodyProfile(t *testing.T) {
-	for body, want := range map[string]string{
-		"Fixes x.\n\nreview: quiet":                    "quiet",
-		"Review: Assertive\n":                          "assertive",
-		"- [ ] review: quiet\n- [x] review: chill\n":   "chill",
-		"* [X] review: assertive":                      "assertive",
-		"- review: quiet":                              "quiet",
-		"- [ ] review: quiet\n- [ ] review: chill":     "",
-		"<!-- review: quiet | chill | assertive -->\n": "",
-		"code review: quiet please":                    "", // not a line of its own
-		"review: loud":                                 "",
-		"review: quiet-ish":                            "",
-		"1. [x] review: quiet\r\n2. [ ] review: chill": "quiet", // GitLab's numbered task list, CRLF
-		"review: **assertive**":                        "assertive",
-		"review: `quiet`.":                             "quiet",
-		"```markdown\n- [x] review: chill\n```\n":      "", // the README's example, pasted
-		"~~~\nreview: quiet\n~~~\nreview: chill":       "chill",
-		"```\nreview: quiet":                           "", // unclosed: code up to the end
-		"<!-- hint\nreview: quiet":                     "",
-	} {
-		if got := BodyProfile(body); got != want {
-			t.Errorf("%q: %q, want %q", body, got, want)
 		}
 	}
 }

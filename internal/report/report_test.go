@@ -1142,3 +1142,17 @@ func TestFailedNotClean(t *testing.T) {
 		t.Error("omitted: a clean verdict")
 	}
 }
+
+// A nit or a minor finding on a declaration marks no way: only what blocks the merge is "on the way".
+func TestWaysNit(t *testing.T) {
+	for _, sev := range []string{"nit", "minor"} {
+		store := &file{Path: "store.go", Changes: []change{{Name: "Save", State: "new", Sev: sev}}}
+		v := view{Steps: []step{{Files: []*file{store}}}, files: map[string]*file{"store.go": store}}
+		syms := map[string][]Symbol{"Save": {{Path: "store.go", Exact: true, Ways: []Way{
+			{Method: "GET", Route: "/x", Path: "server.go", Line: 3, Chain: []Hop{{Name: "Save", Path: "store.go", Line: 5, In: "server.go", At: 3}}},
+		}}}}
+		if ws := ways(&v, syms); len(ws) != 1 || ws[0].Sev != "" || strings.Contains(ws[0].Says(), "on the way") {
+			t.Errorf("%s: %+v", sev, ws)
+		}
+	}
+}

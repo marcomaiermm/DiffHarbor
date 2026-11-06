@@ -68,7 +68,7 @@ func review(ctx context.Context, f forge.Forge, e *forge.Event) error {
 		}
 		latest.Unlock()
 	}()
-	return job.Review(ctx, f, e)
+	return job.Review(ctx, f, e, "")
 }
 
 // work runs the queue's jobs one at a time: a review, an answer in a thread, or deleting a closed PR's reports.

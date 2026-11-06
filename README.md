@@ -279,7 +279,6 @@ Everything lives under `.review/`. `review.json` can change the paths.
 {
   "ignore": ["drizzle/meta", "locales/*.json", "**/*.fixture.ts"],
   "profile": "chill",
-  "min_severity": "minor",
   "tests": true,
   "review_model": "openai/gpt-6.1-sol",
   "verify_model": "anthropic/claude-haiku-5-5:low",

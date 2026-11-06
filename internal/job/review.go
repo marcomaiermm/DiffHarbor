@@ -39,10 +39,10 @@ func posts(full bool, cs []review.Comment) bool {
 	return full || slices.ContainsFunc(cs, func(c review.Comment) bool { return !c.Fold })
 }
 
-// Review reviews the event's PR on f.
+// Review reviews the event's PR on f; profile is `@bot review <profile>`'s, over the description's and review.json's.
 //
 //nolint:gocognit,gocyclo // one job step by step, each step a few lines
-func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
+func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) (err error) {
 	key := e.Key()
 	p, err := f.Open(e)
 	if err != nil {
@@ -58,8 +58,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	pr, sha := e.PullRequest, e.PullRequest.Head.SHA
 	manual := e.Action == "manual" || e.Action == "large"
 	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
-	profile := cmp.Or(e.Profile, review.BodyProfile(pr.Body)) // this PR's, over review.json's
-	cfg.Override(profile)
+	profile = cmp.Or(profile, bodyProfile(pr.Body))
+	cfg.Override = profile
 	p.Configure(cfg)
 	// A draft's push reads the walkthrough only under opt_in, for whether someone asked.
 	if pr.Draft && !cfg.ReviewsDraft(manual, cfg.Drafts == "opt_in") {

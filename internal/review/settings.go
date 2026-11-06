@@ -63,7 +63,7 @@ type Settings struct {
 	Learnings Learnings `json:"learnings"`
 
 	ignoreRe, keepRe *regexp.Regexp // ignore's globs, its "!" ones
-	override         string         // Override: this review's profile, over the top and the packages
+	Override         string         `json:"-"` // this review's profile (the PR's), over the top's and the packages'
 	CITests          string         // checks.CITests: the CI file running the tests; unless "tests" says otherwise, the review doesn't
 	pkgs             []pkgRule      // longest pattern first
 }
@@ -136,30 +136,24 @@ type pkgRule struct {
 }
 
 var (
-	rank    = map[string]int{"nit": 1, "minor": 2, "major": 3, "critical": 4}
 	modelRe = regexp.MustCompile(`^\w[\w.-]*/[\w.:/@-]+$`)
 	themeRe = regexp.MustCompile(`^[a-z0-9-]{1,40}$`)
-	// a PR description's line "review: quiet", plain, a list item or a ticked box, "quiet" maybe bold or code; an
-	// unticked box is no choice
-	bodyProfile = regexp.MustCompile("(?im)^[ \\t>]*(?:(?:[-*+]|\\d+[.)])[ \\t]+(?:\\[[xX]\\][ \\t]+)?)?review:[ \\t]*[*_`]*(quiet|chill|assertive)[*_`]*(?:[ \\t.,;!)\\r]|$)")
-	// what a PR description shows no one or only as an example: HTML comments, code blocks; unclosed, up to the end
-	hidden = regexp.MustCompile("(?ms)<!--.*?(?:-->|\\z)|^[ \\t>]*```.*?(?:^[ \\t>]*```|\\z)|^[ \\t>]*~~~.*?(?:^[ \\t>]*~~~|\\z)")
 )
 
 // Profiles are the values of review.json's profile, least inline first.
 var Profiles = []string{"quiet", "chill", "assertive"}
 
-// BodyProfile is the profile a PR description names on a line of its own, "review: quiet", by hand or as a ticked
-// box of its template; the first, "" for none. HTML comments don't count: a template's hint lists every profile.
-func BodyProfile(body string) string {
-	if m := bodyProfile.FindStringSubmatch(hidden.ReplaceAllString(body, "")); m != nil {
-		return strings.ToLower(m[1])
-	}
-	return ""
-}
+// Severities are a finding's, lightest first: the order is their rank.
+var Severities = []string{"nit", "minor", "major", "critical"}
 
-// Override sets the profile of every file for this review, over review.json's top and packages; "" keeps theirs.
-func (cfg *Settings) Override(profile string) { cfg.override = profile }
+// Rank is sev's weight by Severities, 0 for none or one it doesn't know.
+func Rank(sev string) int { return slices.Index(Severities, sev) + 1 }
+
+// Blocks reports whether a finding of sev blocks the merge: a critical or major one.
+func Blocks(sev string) bool { return Rank(sev) >= Rank("major") }
+
+// bySeverity orders findings most severe first.
+func bySeverity(a, b Comment) int { return Rank(b.Severity) - Rank(a.Severity) }
 
 // Models returns the review and verify model: the server's env, else review.json, else agent.Matrix. An empty
 // verify model means the review model verifies.
@@ -421,11 +415,11 @@ func LoadSettings(s string) (Settings, error) {
 
 // check validates the keys a package may override.
 func (s pkgSettings) check() error {
-	if s.MinSeverity != "" && rank[s.MinSeverity] < rank["minor"] {
+	if s.MinSeverity != "" && Rank(s.MinSeverity) < Rank("minor") {
 		return fmt.Errorf("min_severity %q: want minor, major or critical", s.MinSeverity)
 	}
 	if s.Profile != "" && !slices.Contains(Profiles, s.Profile) {
-		return fmt.Errorf("profile %q: want quiet, chill or assertive", s.Profile)
+		return fmt.Errorf("profile %q: want one of %s", s.Profile, strings.Join(Profiles, ", "))
 	}
 	return nil
 }
@@ -487,17 +481,17 @@ func (cfg Settings) Ignored(path string) bool {
 // Keep reports whether c reaches the min_severity for its file.
 func (cfg Settings) Keep(c Comment) bool {
 	m, _ := cfg.At(c.Path)
-	return m == "" || rank[c.Severity] >= rank[m]
+	return m == "" || Rank(c.Severity) >= Rank(m)
 }
 
 // Fold reports whether c goes folded into the review's summary instead of inline, by its file's profile: a nit
 // unless assertive, a minor one under quiet.
 func (cfg Settings) Fold(c Comment) bool {
-	switch cmp.Or(cfg.override, cfg.at(c.Path).Profile) {
+	switch cmp.Or(cfg.Override, cfg.at(c.Path).Profile) {
 	case "assertive":
 		return false
 	case "quiet":
-		return rank[c.Severity] < rank["major"]
+		return !Blocks(c.Severity)
 	}
 	return c.Severity == "nit"
 }

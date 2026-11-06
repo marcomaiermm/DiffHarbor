@@ -61,7 +61,7 @@ func TestReviewSkipsBaseBranch(t *testing.T) {
 	e := &forge.Event{Action: "opened"}
 	e.Repository.DefaultBranch = "main"
 	e.PullRequest.State, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", strings.Repeat("a", 40), "prod"
-	if err := Review(t.Context(), f, e); err != nil || pr.status != "success Skipped: base branch" || len(pr.notes) != 1 ||
+	if err := Review(t.Context(), f, e, ""); err != nil || pr.status != "success Skipped: base branch" || len(pr.notes) != 1 ||
 		!strings.Contains(pr.notes[0], "Review skipped:** base branch `prod`") {
 		t.Fatalf("%v %q %q", err, pr.status, pr.notes)
 	}
@@ -73,7 +73,7 @@ func TestReviewSkipsDraft(t *testing.T) {
 	e := &forge.Event{Action: "opened"}
 	e.Repository.DefaultBranch = "main"
 	e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", true, strings.Repeat("a", 40), "main"
-	if err := Review(t.Context(), skipForge{pr: pr}, e); err != nil || pr.status != "" || len(pr.notes) != 0 {
+	if err := Review(t.Context(), skipForge{pr: pr}, e, ""); err != nil || pr.status != "" || len(pr.notes) != 0 {
 		t.Fatalf("%v %q %q", err, pr.status, pr.notes)
 	}
 }
@@ -83,7 +83,7 @@ func TestReviewDraftOff(t *testing.T) {
 	pr := &skipPR{cfg: `{"drafts":"off"}`}
 	e := &forge.Event{Action: "manual"}
 	e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Head.SHA = "open", true, strings.Repeat("a", 40)
-	if err := Review(t.Context(), skipForge{pr: pr}, e); err != nil || pr.status != "" || len(pr.notes) != 0 ||
+	if err := Review(t.Context(), skipForge{pr: pr}, e, ""); err != nil || pr.status != "" || len(pr.notes) != 0 ||
 		len(pr.replies) != 1 || !strings.Contains(pr.replies[0], "Drafts get no review") {
 		t.Fatalf("%v %q %q %q", err, pr.status, pr.notes, pr.replies)
 	}
@@ -97,15 +97,15 @@ func TestReviewDraftOptIn(t *testing.T) {
 	e := &forge.Event{Action: "synchronize"}
 	e.Repository.DefaultBranch = "main"
 	e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", true, strings.Repeat("a", 40), "prod"
-	if err := Review(t.Context(), f, e); err != nil || pr.status != "" {
+	if err := Review(t.Context(), f, e, ""); err != nil || pr.status != "" {
 		t.Fatalf("push before asking: %v %q", err, pr.status)
 	}
 	e.Action = "manual" // fails past the gate: the event has no repository id
-	if err := Review(t.Context(), f, e); err == nil || pr.status != "error Review failed" {
+	if err := Review(t.Context(), f, e, ""); err == nil || pr.status != "error Review failed" {
 		t.Fatalf("asked: %v %q", err, pr.status)
 	}
 	e.Action, e.PullRequest.Head.SHA = "synchronize", strings.Repeat("b", 40)
-	if err := Review(t.Context(), f, e); err != nil || pr.status != "success Skipped: base branch" {
+	if err := Review(t.Context(), f, e, ""); err != nil || pr.status != "success Skipped: base branch" {
 		t.Fatalf("push after asking: %v %q", err, pr.status)
 	}
 }
@@ -121,7 +121,7 @@ func TestReviewSkipsBotBranch(t *testing.T) {
 	} {
 		pr := &skipPR{}
 		e.PullRequest.Head.Ref, e.PullRequest.Body = c.ref, c.body
-		if err := Review(t.Context(), skipForge{pr: pr}, e); err != nil || pr.status != "success Skipped: bot author" {
+		if err := Review(t.Context(), skipForge{pr: pr}, e, ""); err != nil || pr.status != "success Skipped: bot author" {
 			t.Fatalf("%s: %v %q %q", c.ref, err, pr.status, pr.notes)
 		}
 	}
@@ -440,9 +440,9 @@ func TestReviewProfile(t *testing.T) {
 		{`{"drafts":"off","profile":"quiet"}`, "chill", "review: assertive", "chill"},
 	} {
 		pr := &skipPR{cfg: c.cfg}
-		e := &forge.Event{Action: "manual", Profile: c.cmd}
+		e := &forge.Event{Action: "manual"}
 		e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Body, e.PullRequest.Head.SHA = "open", true, c.body, strings.Repeat("a", 40)
-		if err := Review(t.Context(), skipForge{pr: pr}, e); err != nil || inline(pr.settings) != c.want {
+		if err := Review(t.Context(), skipForge{pr: pr}, e, c.cmd); err != nil || inline(pr.settings) != c.want {
 			t.Errorf("%+v: %v %s", c, err, inline(pr.settings))
 		}
 	}
@@ -455,8 +455,34 @@ func TestChatReviewProfile(t *testing.T) {
 	e.Comment.Body = "@bot review all quiet"
 	e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Head.SHA = "open", true, strings.Repeat("a", 40)
 	mention := regexp.MustCompile(`(?i)(^|[^\w.+-])@(bot)\.*([^\w.-]|$)`)
-	if err := Chat(t.Context(), skipForge{pr: pr}, mention, e); err != nil || e.Action != "large" || e.Profile != "quiet" ||
+	if err := Chat(t.Context(), skipForge{pr: pr}, mention, e); err != nil || e.Action != "large" || pr.settings.Override != "quiet" ||
 		!pr.settings.Fold(review.Comment{Severity: "minor"}) {
-		t.Fatalf("%v %q %q", err, e.Action, e.Profile)
+		t.Fatalf("%v %q %q", err, e.Action, pr.settings.Override)
+	}
+}
+
+func TestBodyProfile(t *testing.T) {
+	for body, want := range map[string]string{
+		"Fixes x.\n\nreview: quiet":                    "quiet",
+		"Review: Assertive\n":                          "assertive",
+		"- [ ] review: quiet\n- [x] review: chill\n":   "chill",
+		"* [X] review: assertive":                      "assertive",
+		"- review: quiet":                              "quiet",
+		"- [ ] review: quiet\n- [ ] review: chill":     "",
+		"<!-- review: quiet | chill | assertive -->\n": "",
+		"code review: quiet please":                    "", // not a line of its own
+		"review: loud":                                 "",
+		"review: quiet-ish":                            "",
+		"1. [x] review: quiet\r\n2. [ ] review: chill": "quiet", // GitLab's numbered task list, CRLF
+		"review: **assertive**":                        "assertive",
+		"review: `quiet`.":                             "quiet",
+		"```markdown\n- [x] review: chill\n```\n":      "", // the README's example, pasted
+		"~~~\nreview: quiet\n~~~\nreview: chill":       "chill",
+		"```\nreview: quiet":                           "", // unclosed: code up to the end
+		"<!-- hint\nreview: quiet":                     "",
+	} {
+		if got := bodyProfile(body); got != want {
+			t.Errorf("%q: %q, want %q", body, got, want)
+		}
 	}
 }

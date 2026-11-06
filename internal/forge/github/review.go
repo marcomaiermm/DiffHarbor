@@ -17,7 +17,7 @@ func (*pr) Publish() {}
 
 // Post sends one review: findings on diff lines inline, the rest in the body. Returns how many findings it posted, the folded ones not.
 func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, footer string) (int, error) {
-	inline, rest := forge.Split(r, threads, diff.NewLines(raw))
+	inline, rest, folded := forge.Split(r, threads, diff.NewLines(raw))
 	send := func(cs []forge.Finding) error {
 		body := make([]map[string]any, 0, len(cs))
 		for _, c := range cs {
@@ -31,7 +31,7 @@ func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, foot
 			body = append(body, at)
 		}
 		return Call("POST", fmt.Sprintf("%s/pulls/%d/reviews", p.api, p.e.PullRequest.Number), p.token, map[string]any{
-			"commit_id": sha, "event": "COMMENT", "body": forge.Summary(cs, rest, footer), "comments": body,
+			"commit_id": sha, "event": "COMMENT", "body": forge.Summary(cs, rest, folded, footer), "comments": body,
 		}, nil)
 	}
 	rejected := func(err error) bool {
@@ -52,5 +52,5 @@ func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, foot
 	if err != nil {
 		return 0, err
 	}
-	return len(inline) + forge.Actionable(rest), nil
+	return len(inline) + len(rest), nil
 }

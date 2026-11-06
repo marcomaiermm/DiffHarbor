@@ -243,6 +243,23 @@ func reviewCommand(cmd string) (large bool, profile string, ok bool) {
 	return large, profile, true
 }
 
+var (
+	// a PR description's line "review: quiet", plain, a list item or a ticked box, "quiet" maybe bold or code; an
+	// unticked box is no choice
+	bodyProfileRe = regexp.MustCompile("(?im)^[ \\t>]*(?:(?:[-*+]|\\d+[.)])[ \\t]+(?:\\[[xX]\\][ \\t]+)?)?review:[ \\t]*[*_`]*(quiet|chill|assertive)[*_`]*(?:[ \\t.,;!)\\r]|$)")
+	// what a PR description shows no one or only as an example: HTML comments, code blocks; unclosed, up to the end
+	hidden = regexp.MustCompile("(?ms)<!--.*?(?:-->|\\z)|^[ \\t>]*```.*?(?:^[ \\t>]*```|\\z)|^[ \\t>]*~~~.*?(?:^[ \\t>]*~~~|\\z)")
+)
+
+// bodyProfile is the profile a PR description names on a line of its own, "review: quiet", by hand or as a ticked
+// box of its template; the first, "" for none. HTML comments and code blocks don't count: a template's hint, an example.
+func bodyProfile(body string) string {
+	if m := bodyProfileRe.FindStringSubmatch(hidden.ReplaceAllString(body, "")); m != nil {
+		return strings.ToLower(m[1])
+	}
+	return ""
+}
+
 // Chat answers the event's comment on f, or reviews the PR when it asks for one; mention matches @bot.
 //
 //nolint:gocognit // one job step by step, each step a few lines
@@ -278,11 +295,11 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			}
 		}
 		if large, profile, ok := reviewCommand(bare); ok || ticked {
-			e.Action, e.Profile = "manual", profile // anything but synchronize: full review
+			e.Action = "manual" // anything but synchronize: full review
 			if large || ticked {
 				e.Action = "large"
 			}
-			return Review(ctx, f, e)
+			return Review(ctx, f, e, profile)
 		}
 		if bare == "learnings" || strings.HasPrefix(cmd, "forget ") {
 			return p.Reply(learningsCommand(cmd, f.Bot(), e) + "\n\n" + forge.Mark)

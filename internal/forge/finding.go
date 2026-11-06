@@ -100,9 +100,9 @@ func Place(c *Finding, lines map[string]string) {
 	}
 }
 
-// Split sorts a review's findings: the ones on diff lines (lines) to post inline, placed, and the rest, with the
-// folded ones (Comment.Fold), which Summary shows apart. Lines that already have one of threads get nothing new.
-func Split(r review.Result, threads []Thread, lines map[string]string) (inline, rest []Finding) {
+// Split sorts a review's findings: the ones on diff lines (lines) to post inline, placed, the ones outside the
+// diff, and the folded ones (Comment.Fold), anywhere. Lines that already have one of threads get nothing new.
+func Split(r review.Result, threads []Thread, lines map[string]string) (inline, outside, folded []Finding) {
 	seen := map[string]bool{}
 	for _, t := range threads {
 		if t.Line > 0 {
@@ -115,14 +115,18 @@ func Split(r review.Result, threads []Thread, lines map[string]string) (inline, 
 		if seen[at] {
 			continue
 		}
-		if _, ok := lines[at]; ok && !c.Fold {
+		_, ok := lines[at]
+		switch {
+		case c.Fold:
+			folded = append(folded, c)
+		case ok:
 			Place(&c, lines)
 			inline = append(inline, c)
-		} else {
-			rest = append(rest, c)
+		default:
+			outside = append(outside, c)
 		}
 	}
-	return inline, rest
+	return inline, outside, folded
 }
 
 // section lists findings in full under a heading, each in its own block; open shows them unfolded.
@@ -156,17 +160,6 @@ func foldedTitle(cs []Finding) string {
 	return "Minor comments and nitpicks"
 }
 
-// Actionable counts the findings a review posts to act on: all but the folded ones (Comment.Fold).
-func Actionable(cs []Finding) int {
-	n := 0
-	for _, c := range cs {
-		if !c.Fold {
-			n++
-		}
-	}
-	return n
-}
-
 // allPrompts folds every finding's prompt into one block to paste into an agent.
 func allPrompts(cs []Finding) string {
 	var ps []string
@@ -187,16 +180,8 @@ func allPrompts(cs []Finding) string {
 }
 
 // Summary is the review's top comment: how many findings, the ones outside the diff in full, the folded ones
-// (Comment.Fold) folded, all prompts.
-func Summary(inline, rest []Finding, footer string) string {
-	var outside, folded []Finding
-	for _, c := range rest {
-		if c.Fold {
-			folded = append(folded, c)
-		} else {
-			outside = append(outside, c)
-		}
-	}
+// folded, all prompts.
+func Summary(inline, outside, folded []Finding, footer string) string {
 	parts := []string{fmt.Sprintf("**Actionable comments posted: %d**", len(inline)+len(outside))}
 	if len(inline)+len(outside) == 0 {
 		parts[0] = "**No actionable comments were generated in this review.**"
@@ -208,7 +193,7 @@ func Summary(inline, rest []Finding, footer string) string {
 	if len(folded) > 0 {
 		parts = append(parts, section(fmt.Sprintf("🧹 %s (%d)", foldedTitle(folded), len(folded)), folded, false))
 	}
-	if p := allPrompts(append(slices.Clone(inline), rest...)); p != "" {
+	if p := allPrompts(slices.Concat(inline, outside, folded)); p != "" {
 		parts = append(parts, p)
 	}
 	parts = append(parts, "<details>\n<summary>ℹ️ Review info</summary>\n\n<sub>"+footer+"</sub>\n\n</details>\n\n"+Mark)
