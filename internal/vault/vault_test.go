@@ -86,7 +86,7 @@ func TestKey(t *testing.T) {
 		{"GET", "/anthropic/v1/messages", "X-Api-Key", ant, 403},
 		{"POST", "/anthropic/v1/messages/../files", "X-Api-Key", ant, 403},
 		{"POST", "/anthropic/v1/%2e%2e/v1/messages", "X-Api-Key", ant, 403},
-		{"POST", "/git/" + ant + "/git-upload-pack", "", "", 401},
+		{"POST", "/git/git-upload-pack", "Authorization", "Bearer " + ant, 401},                         // a model key's token on the git route
 		{"POST", "/amazon-bedrock/model/%2e%2e/converse-stream", "Authorization", "Bearer " + brk, 403}, // * is one segment, never ..
 	} {
 		if got := send(t, c.method, base+c.path, c.header, c.tok); got != c.want {
@@ -106,27 +106,41 @@ func TestGit(t *testing.T) {
 	start(t)
 	u, got := up(t)
 	ctx, revoke := context.WithCancel(context.Background())
-	defer revoke()
-	remote, err := Git(ctx, u.URL+"/o/r.git", "ghs_read")
-	if err != nil || !strings.HasPrefix(remote, base+"/git/") {
-		t.Fatal(remote, err)
+	remote, tok, err := Git(ctx, u.URL+"/o/r.git", "ghs_read")
+	if err != nil || remote != base+"/git" || strings.Contains(remote, tok) {
+		t.Fatal(remote, err) // the token never in the URL: argv is world-readable
 	}
-	if c := send(t, "GET", remote+"/info/refs?service=git-upload-pack"); c != 200 {
+	auth := "Bearer " + tok
+	if c := send(t, "GET", remote+"/info/refs?service=git-upload-pack", "Authorization", auth); c != 200 {
 		t.Fatalf("info/refs: %d", c)
 	}
 	r := <-got
 	if want := "Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:ghs_read")); r.URL.Path != "/o/r.git/info/refs" || r.Header.Get("Authorization") != want {
 		t.Fatalf("upstream got %s %q", r.URL, r.Header.Get("Authorization"))
 	}
-	if c := send(t, "POST", remote+"/git-upload-pack"); c != 200 {
+	if c := send(t, "POST", remote+"/git-upload-pack", "Authorization", auth); c != 200 {
 		t.Fatalf("upload-pack: %d", c)
 	}
 	<-got
 	for _, p := range []string{"GET /info/refs?service=git-receive-pack", "POST /git-receive-pack", "GET /info/refs", "GET /HEAD", "GET /../../x/y.git/info/refs?service=git-upload-pack"} {
 		m, path, _ := strings.Cut(p, " ")
-		if c := send(t, m, remote+path); c != 403 {
+		if c := send(t, m, remote+path, "Authorization", auth); c != 403 {
 			t.Errorf("%s: %d, want 403", p, c)
 		}
+	}
+	for _, c := range []struct{ path, header, val string }{
+		{"/git/info/refs?service=git-upload-pack", "", ""},                      // no header
+		{"/git/info/refs?service=git-upload-pack", "Authorization", "Bearer x"}, // not a loan
+		{"/git/" + tok + "/info/refs?service=git-upload-pack", "", ""},          // the token in the path is no way in
+		{"/openai/responses", "Authorization", auth},                            // another route
+	} {
+		if got := send(t, "GET", base+c.path, c.header, c.val); got != 401 {
+			t.Errorf("%s with %q: %d, want 401", c.path, c.val, got)
+		}
+	}
+	revoke()
+	if c := send(t, "GET", remote+"/info/refs?service=git-upload-pack", "Authorization", auth); c != 401 {
+		t.Fatalf("revoked: %d", c)
 	}
 	if len(got) != 0 {
 		t.Fatalf("a refused request reached upstream: %s", (<-got).URL)

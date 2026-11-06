@@ -8,6 +8,7 @@ import (
 	"diffharbor/internal/proc"
 	"diffharbor/internal/vault"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,13 +16,13 @@ import (
 	"time"
 )
 
-// Tree reviews `git diff HEAD` of the checkout cwd like a PR titled title, with dir as the work dir
-// and closed as the threads resolved before; large: in parts, as if the walkthrough's box was ticked.
-func Tree(ctx context.Context, cwd, dir, title string, closed []Comment, large bool) (Result, string, error) {
-	if err := os.Symlink(cwd, filepath.Join(dir, "repo")); err != nil {
+// Tree reviews `git diff HEAD` of the checkout cwd like a PR titled title, in sb, with closed as the threads resolved
+// before; large: in parts, as if the walkthrough's box was ticked.
+func Tree(ctx context.Context, sb *proc.Sandbox, cwd, title string, closed []Comment, large bool) (Result, string, error) {
+	if err := errors.Join(os.Symlink(cwd, sb.Repo()), sb.Pin()); err != nil {
 		return Result{}, "", err
 	}
-	out, err := proc.Run(proc.Command(ctx, cwd, nil, "git", "diff", "HEAD"))
+	out, err := proc.Run(sb.Command(ctx, cwd, nil, "git", "diff", "HEAD"))
 	if err != nil {
 		return Result{}, "", err
 	}
@@ -39,10 +40,10 @@ func Tree(ctx context.Context, cwd, dir, title string, closed []Comment, large b
 	}
 	for _, d := range cfg.SkillPaths() {
 		if rd := filepath.Join(cwd, d); proc.Exists(rd) { // -L: symlinked dev skills become real copies, as from the API
-			if err := os.MkdirAll(filepath.Join(dir, "skills"), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Join(sb.Dir, "skills"), 0o755); err != nil {
 				return Result{}, "", err
 			}
-			if _, err := proc.Run(proc.Command(ctx, cwd, nil, "cp", "-rL", rd, filepath.Join(dir, "skills", "repo"))); err != nil {
+			if _, err := proc.Run(sb.Command(ctx, cwd, nil, "cp", "-rL", rd, filepath.Join(sb.Dir, "skills", "repo"))); err != nil {
 				return Result{}, "", err
 			}
 			break
@@ -55,19 +56,36 @@ func Tree(ctx context.Context, cwd, dir, title string, closed []Comment, large b
 		}
 	}
 	parts, _ := diff.Filter(string(out), cwd, nil, cfg.Ignored, cfg.Parts(large))
-	return Analyze(ctx, Input{Agent: agent.Pi{}, Dir: dir, Title: title, Parts: parts, Trusted: TrustedContext(rules, ""), Checks: scripts, Closed: closed, Settings: cfg})
+	return Analyze(ctx, Input{Agent: agent.Pi{}, Sandbox: sb, Title: title, Parts: parts, Trusted: TrustedContext(rules, ""), Checks: scripts, Closed: closed, Settings: cfg})
 }
 
-// Checkout fetches the PR head and base into repo with history but without old file contents (blob:none) for
+// Checkout fetches the PR head and base into sb's Repo with history but without old file contents (blob:none) for
 // co-change hints, checks out head (a commit) and returns the PR's diff as GitHub shows it:
 // merge-base(base, head)..head, base a ref or commit of the remote. token reads the repo. As root git runs as the repo's user,
-// like the PR's code: it fetches through the vault, whose remote works until ctx is done (blob:none fetches the
-// blobs later commands need) and never holds token. Else token goes in the env (argv is world-readable).
-func Checkout(ctx context.Context, repo, cloneURL, head, base, token string) (string, error) {
+// like the PR's code: it fetches through the vault with a stand-in for token that works until ctx is done (blob:none
+// fetches the blobs later commands need). Else token goes in the env. Never in argv: /proc/<pid>/cmdline is
+// world-readable, also to another repo's job running at the same time.
+func Checkout(ctx context.Context, sb *proc.Sandbox, cloneURL, head, base, token string) (string, error) {
+	repo := sb.Repo()
 	remote, auth := cloneURL, gitAuth(token)
+	if _, err := proc.Run(sb.Command(ctx, sb.Dir, nil, "git", "init", "-q", repo)); err != nil { // as the repo's user, when we're root
+		return "", err
+	}
+	if err := sb.Pin(); err != nil { // before the PR's code: a check could swap repo for a symlink
+		return "", err
+	}
 	if vault.URL() != "" {
-		r, err := vault.Git(ctx, cloneURL, token)
+		r, tok, err := vault.Git(ctx, cloneURL, token)
 		if err != nil {
+			return "", err
+		}
+		// Every git in the checkout sends the token, the fetches Pi or the PR's code start too: from a file the repo's
+		// config includes, written through stdin. Only its path is in argv.
+		f := filepath.Join(sb.Dir, "git-auth")
+		if err := sb.WriteFile(ctx, f, []byte(fmt.Sprintf("[http %q]\n\textraHeader = Authorization: Bearer %s\n", r, tok))); err != nil {
+			return "", err
+		}
+		if _, err := proc.Run(sb.Command(ctx, repo, nil, "git", "config", "include.path", f)); err != nil {
 			return "", err
 		}
 		remote = r
@@ -75,14 +93,11 @@ func Checkout(ctx context.Context, repo, cloneURL, head, base, token string) (st
 	git := func(args ...string) (string, error) {
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		defer cancel()
-		out, err := proc.Run(proc.Command(ctx, filepath.Dir(repo), auth, "git", append([]string{"-C", repo}, args...)...))
+		out, err := proc.Run(sb.Command(ctx, sb.Dir, auth, "git", append([]string{"-C", repo}, args...)...))
 		if err != nil {
 			return "", fmt.Errorf("git %s: %w", args[0], err)
 		}
 		return string(out), nil
-	}
-	if _, err := proc.Run(proc.Command(ctx, filepath.Dir(repo), nil, "git", "init", "-q", repo)); err != nil { // as the repo's user, when we're root
-		return "", err
 	}
 	for _, args := range [][]string{
 		{"remote", "add", "origin", remote},
@@ -105,7 +120,8 @@ func Checkout(ctx context.Context, repo, cloneURL, head, base, token string) (st
 	return git("diff", "-M", strings.TrimSpace(mb), head)
 }
 
-// gitAuth is the env that lets git read the repo with token; none through the vault, whose remote needs none.
+// gitAuth is the env that lets git read the repo with token; none through the vault: the checkout's config sends its
+// stand-in (Checkout).
 func gitAuth(token string) []string {
 	if vault.URL() != "" {
 		return nil
@@ -116,13 +132,13 @@ func gitAuth(token string) []string {
 	}
 }
 
-// Since is the diff from an earlier head from to the head Checkout put in repo, with the same ctx and token: what
+// Since is the diff from an earlier head from to the head Checkout put in sb's Repo, with the same ctx and token: what
 // a push changed. "" when from can't be fetched, e.g. gone in a force push; an error when it was and git still failed.
-func Since(ctx context.Context, repo, from, token string) (string, error) {
+func Since(ctx context.Context, sb *proc.Sandbox, from, token string) (string, error) {
 	git := func(args ...string) (string, error) {
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		defer cancel()
-		out, err := proc.Run(proc.Command(ctx, filepath.Dir(repo), gitAuth(token), "git", append([]string{"-C", repo}, args...)...))
+		out, err := proc.Run(sb.Command(ctx, sb.Dir, gitAuth(token), "git", append([]string{"-C", sb.Repo()}, args...)...))
 		return string(out), err
 	}
 	if _, err := git("cat-file", "-e", from+"^{commit}"); err != nil { // older than the fetched history
@@ -151,10 +167,10 @@ const maxCommits = 200
 
 // Commits lists the PR's commits oldest first, from a Checkout: what head has and the base hasn't. Merges of the
 // base into the branch say nothing about the change and stay out. nil when git fails: the report goes without.
-func Commits(ctx context.Context, repo string) []Commit {
+func Commits(ctx context.Context, sb *proc.Sandbox) []Commit {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	out, err := proc.Run(proc.Command(ctx, repo, nil, "git", "log", "--reverse", "--no-merges", "--no-renames",
+	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "log", "--reverse", "--no-merges", "--no-renames",
 		"--format=%x00%H%x09%an%x09%s", "-p", "-U0", "refs/base..HEAD"))
 	if err != nil {
 		return nil
@@ -163,10 +179,10 @@ func Commits(ctx context.Context, repo string) []Commit {
 }
 
 // Messages is the PR's commit messages oldest first, from a Checkout, merges aside. "" when git fails.
-func Messages(ctx context.Context, repo string) string {
+func Messages(ctx context.Context, sb *proc.Sandbox) string {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	out, err := proc.Run(proc.Command(ctx, repo, nil, "git", "log", "--reverse", "--no-merges", "--format=- %B", "refs/base..HEAD"))
+	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "log", "--reverse", "--no-merges", "--format=- %B", "refs/base..HEAD"))
 	if err != nil {
 		return ""
 	}
@@ -175,10 +191,10 @@ func Messages(ctx context.Context, repo string) string {
 
 // Behind lists the base's commits the PR doesn't have yet, newest first, from a Checkout: what moved on under it.
 // nil when git fails.
-func Behind(ctx context.Context, repo string) []Commit {
+func Behind(ctx context.Context, sb *proc.Sandbox) []Commit {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	out, err := proc.Run(proc.Command(ctx, repo, nil, "git", "log", "--no-merges", "--no-renames", "--format=%x00%H%x09%s",
+	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "log", "--no-merges", "--no-renames", "--format=%x00%H%x09%s",
 		"--name-only", "HEAD..refs/base"))
 	if err != nil {
 		return nil

@@ -5,13 +5,13 @@ import (
 	"bytes"
 	"cmp"
 	"diffharbor/internal/diff"
+	"diffharbor/internal/proc"
 	"go/ast"
 	"go/parser"
 	"go/printer"
 	"go/token"
 	"io/fs"
-	"os"
-	"path/filepath"
+	"path"
 	"regexp"
 	"strings"
 )
@@ -88,10 +88,10 @@ var (
 	}
 )
 
-// Symbols indexes the checkout at repo for the names the diff shows: their declarations (Go parsed, other languages
+// Symbols indexes sb's checkout for the names the diff shows: their declarations (Go parsed, other languages
 // by the line that declares them) and who names them: codegraph's resolved edges where the review indexed the
-// checkout, else the lines that name them, by name.
-func Symbols(repo, diffText string) map[string][]Symbol {
+// checkout, else the lines that name them, by name. The index's queries run in sb, as the repo's user.
+func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
 	wanted := map[string]bool{}
 	for l := range strings.SplitSeq(diffText, "\n") {
 		if strings.HasPrefix(l, "@@") { // the declaration a hunk is in
@@ -106,31 +106,30 @@ func Symbols(repo, diffText string) map[string][]Symbol {
 	syms := map[string][]Symbol{}
 	ms := mentions{refs: map[string][]Ref{}, uses: map[string]int{}, files: map[string]map[string]bool{}}
 	n := 0
-	_ = filepath.WalkDir(repo, func(p string, d fs.DirEntry, err error) error {
+	root, err := sb.Pinned() // as root, in the PR's checkout: its symlinks don't reach out of it
+	if err != nil {
+		return syms
+	}
+	defer root.Close()
+	_ = fs.WalkDir(root.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil //nolint:nilerr // an unreadable directory: index the rest
 		}
 		if d.IsDir() {
-			if p != repo && (strings.HasPrefix(d.Name(), ".") || skipDir[d.Name()]) {
-				return filepath.SkipDir
+			if rel != "." && (strings.HasPrefix(d.Name(), ".") || skipDir[d.Name()]) {
+				return fs.SkipDir
 			}
 			return nil
 		}
-		if !codeExt[filepath.Ext(p)] || n >= maxFiles {
+		if d.Type()&fs.ModeSymlink != 0 || !codeExt[path.Ext(rel)] || n >= maxFiles { // a link: its target's counted
 			return nil
 		}
-		info, err := d.Info()
-		if err != nil || info.Size() > maxSize {
+		src, err := diff.ReadIn(root, rel, maxSize)
+		if err != nil {
 			return nil //nolint:nilerr // left out, like a large file
 		}
-		src, err := os.ReadFile(p) //nolint:gosec // a file of the checkout
-		if err != nil {
-			return nil //nolint:nilerr // the same
-		}
 		n++
-		rel, _ := filepath.Rel(repo, p)
-		rel = filepath.ToSlash(rel)
-		if filepath.Ext(p) == ".go" {
+		if path.Ext(rel) == ".go" {
 			goDecls(rel, src, wanted, syms)
 		} else {
 			lineDecls(rel, src, wanted, syms)
@@ -158,13 +157,13 @@ func Symbols(repo, diffText string) map[string][]Symbol {
 		}
 	}
 	paths := diff.Paths(diffText)
-	if idx := codegraph(repo, wanted, paths); idx != nil {
+	if idx := codegraph(sb, sb.Repo(), wanted, paths); idx != nil {
 		changed := map[string]bool{}
 		for _, p := range paths {
 			changed[p] = true
 		}
-		idx.exact(repo, changed, syms)
-		idx.tests(repo, changed, syms)
+		idx.exact(root, changed, syms)
+		idx.tests(sb, root, changed, syms)
 	}
 	return syms
 }

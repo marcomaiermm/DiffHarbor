@@ -81,7 +81,7 @@ Use API keys. Pi can also log in with a ChatGPT subscription: `openai/…` witho
 
 - **What's on it:** a verdict, the findings by weight, a reading order, diffs with findings, call graphs and what the change reaches outside the PR. Before you merge: base commits the PR is behind on, conflicts, and open PRs changing the same files or lines. At the end a draft review to send from the forge yourself. The page posts nothing.
 - **Versions:** each reviewed head keeps one, the newest 10 stay. Closing the PR deletes them.
-- **Link:** `/r/<host>/<repo>/<n>/<secret>`. The secret is random per PR (130 bits) and only the PR comment holds it. Any other `/r/` path is a 404.
+- **Link:** `/r/<host>/id:<repo id>/<n>/<secret>`, by the repo's ID: a rename keeps it, a new repo under an old name gets its own. Links from before the ID (`/r/<host>/<repo>/<n>/<secret>`) keep working: the PR's next review moves its reports to the ID and redirects them. A PR that closes without one loses those under its current name; under a name the repo had before a rename they stay. The secret is random per PR (130 bits) and only the PR comment holds it. Any other `/r/` path is a 404.
 - **Older reports:** reports from before the secret no longer open. The next review writes one at the new link, closing the PR deletes the old.
 - **Reviewing banner:** while a review runs, the PR comment shows `/reviewing.svg` (and `-light`, `-dark` for GitHub's theme setting) from this server. Keep them public: GitHub fetches them through its image proxy. Without `REPORT_URL` it comes from the docs site.
 
@@ -142,6 +142,7 @@ team-a @team-a https://art.corp/artifactory/api/npm/team-a/ <token>
 | Variable | |
 |---|---|
 | `DATA_DIR`, `CACHE_DIR` | Data (learnings, pending reviews, reports, logins, the repos' uids) and per-repo caches. `/data` and `/cache` in the image. Keep both on volumes, apart. |
+| `MAX_JOBS` | How many jobs (reviews, answers) run at once. Default `1`. Jobs of one repo always run one after another, so a higher value helps when several repos have PRs at the same time. Raise `mem_limit`, `cpus` and `pids_limit` with it. Above `1`, jobs of different repos share `/tmp`, `/var/tmp`, `/dev/shm`, the loopback network, the process list and the container's limits while they run, see [Security](../security/#jobs-at-once). |
 | `DOCKER_HOST` | With the `dind` service: Docker for testcontainers in the checks, isolated with [Sysbox](https://github.com/nestybox/sysbox) (install it on the host). Drop both if your tests don't need Docker. |
 
 ## Branding the report

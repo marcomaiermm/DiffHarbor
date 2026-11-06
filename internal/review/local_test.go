@@ -5,7 +5,6 @@ import (
 	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -36,8 +35,8 @@ git checkout -q -b pr; echo 2 > a.txt; git commit -q -am pr
 git checkout -q main; echo 2 > b.txt; git commit -q -am base
 i=0; while [ $i -lt 300 ]; do git commit -q --allow-empty -m $i; i=$((i+1)); done
 git rev-parse pr`)
-	repo := filepath.Join(t.TempDir(), "repo")
-	d, err := Checkout(context.Background(), repo, "file://"+origin, head, "refs/heads/main", "t")
+	sb := &proc.Sandbox{Dir: t.TempDir()}
+	d, err := Checkout(context.Background(), sb, "file://"+origin, head, "refs/heads/main", "t")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,22 +44,22 @@ git rev-parse pr`)
 		t.Fatalf("diff:\n%s", d)
 	}
 	// the base moved on: 300 empty commits, and the one before them changed b.txt
-	if b := Behind(context.Background(), repo); len(b) != 301 || b[300].Subject != "base" || strings.Join(b[300].Paths, ",") != "b.txt" || len(b[0].Paths) > 0 {
+	if b := Behind(context.Background(), sb); len(b) != 301 || b[300].Subject != "base" || strings.Join(b[300].Paths, ",") != "b.txt" || len(b[0].Paths) > 0 {
 		t.Fatalf("Behind: %d commits, last %+v", len(b), b[len(b)-1])
 	}
-	if m := Messages(context.Background(), repo); m != "- pr" {
+	if m := Messages(context.Background(), sb); m != "- pr" {
 		t.Fatalf("Messages: %q", m)
 	}
 	// a push on top: Since is its change only; a head it can't fetch, none
 	next := sh("git checkout -q pr; echo 3 > b.txt; git commit -q -am push; git rev-parse HEAD")
-	repo = filepath.Join(t.TempDir(), "repo")
-	if _, err := Checkout(context.Background(), repo, "file://"+origin, next, "refs/heads/main", "t"); err != nil {
+	sb = &proc.Sandbox{Dir: t.TempDir()}
+	if _, err := Checkout(context.Background(), sb, "file://"+origin, next, "refs/heads/main", "t"); err != nil {
 		t.Fatal(err)
 	}
-	if d, err := Since(context.Background(), repo, head, "t"); err != nil || strings.Join(diff.Paths(d), ",") != "b.txt" || !strings.Contains(d, "+3") {
+	if d, err := Since(context.Background(), sb, head, "t"); err != nil || strings.Join(diff.Paths(d), ",") != "b.txt" || !strings.Contains(d, "+3") {
 		t.Fatalf("Since:\n%s", d)
 	}
-	if d, err := Since(context.Background(), repo, strings.Repeat("ab", 20), "t"); d != "" || err != nil {
+	if d, err := Since(context.Background(), sb, strings.Repeat("ab", 20), "t"); d != "" || err != nil {
 		t.Fatalf("Since an unknown head: %q", d)
 	}
 }

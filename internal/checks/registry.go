@@ -84,13 +84,13 @@ const maxLockfile = 64 << 20
 
 // pointAt rewrites lockfile's registry URLs (old, new pairs) and returns what puts the PR's file back for the checks
 // after the install. A lockfile that isn't a regular file (a symlink to /dev/zero, a FIFO) or is too big stays.
-func pointAt(ctx context.Context, lockfile string, urls []string) (restore func() error) {
+func pointAt(ctx context.Context, sb *proc.Sandbox, lockfile string, urls []string) (restore func() error) {
 	restore = func() error { return nil }
 	if fi, err := os.Lstat(lockfile); len(urls) == 0 || err != nil || !fi.Mode().IsRegular() || fi.Size() > maxLockfile {
 		return restore
 	}
 	// the file may change after Lstat: head reads as the repo's user, bounded
-	b, err := proc.Run(proc.Command(ctx, "/", nil, "head", "-c", strconv.Itoa(maxLockfile+1), "--", lockfile))
+	b, err := proc.Run(sb.Command(ctx, "/", nil, "head", "-c", strconv.Itoa(maxLockfile+1), "--", lockfile))
 	if err != nil || len(b) > maxLockfile {
 		return restore
 	}
@@ -99,9 +99,10 @@ func pointAt(ctx context.Context, lockfile string, urls []string) (restore func(
 	if nb == orig {
 		return restore
 	}
-	if err := proc.WriteFile(lockfile, []byte(nb)); err != nil {
-		_ = proc.WriteFile(lockfile, []byte(orig)) // a failed write may have truncated it
+	back := context.WithoutCancel(ctx) // past the install's timeout too: Pi reads the PR's file; WriteFile bounds it
+	if err := sb.WriteFile(ctx, lockfile, []byte(nb)); err != nil {
+		_ = sb.WriteFile(back, lockfile, []byte(orig)) // a failed write may have removed or cut it
 		return restore
 	}
-	return func() error { return proc.WriteFile(lockfile, []byte(orig)) }
+	return func() error { return sb.WriteFile(back, lockfile, []byte(orig)) }
 }

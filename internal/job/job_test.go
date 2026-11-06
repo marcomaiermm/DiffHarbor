@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -110,6 +111,23 @@ func TestReviewDraftOptIn(t *testing.T) {
 	}
 }
 
+// panicForge's bug is past the review's gates: RepoID asks for its Instance.
+type panicForge struct{ skipForge }
+
+func (panicForge) Instance() string { panic("boom") }
+
+// A bug in a review fails it, a red status rather than a green one, and the server's other jobs run on.
+func TestReviewPanicFails(t *testing.T) {
+	pr := &skipPR{cfg: `{}`}
+	e := &forge.Event{Action: "opened"}
+	e.Repository.ID, e.Repository.DefaultBranch = 1, "main"
+	e.PullRequest.State, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", strings.Repeat("a", 40), "main"
+	err := Review(t.Context(), panicForge{skipForge{pr: pr}}, e, "")
+	if err == nil || !strings.HasPrefix(err.Error(), "panic: boom") || pr.status != "error Review failed" {
+		t.Fatalf("%v %q", err, pr.status)
+	}
+}
+
 // A self-hosted Renovate on a user token is no Bot type, its branch or description skips the review.
 func TestReviewSkipsBotBranch(t *testing.T) {
 	e := &forge.Event{Action: "opened"}
@@ -160,6 +178,23 @@ func TestLearnings(t *testing.T) {
 	}
 }
 
+// An owner's file is shared by its repos' jobs, which run at once: no append is lost.
+func TestLearningsConcurrent(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	var wg sync.WaitGroup
+	for i := range 50 {
+		wg.Go(func() {
+			if err := addLearning("o", fmt.Sprintf("- r%d (@u)", i), time.Now()); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	if got := learningsOf("o"); len(got) != 50 {
+		t.Fatalf("kept %d of 50", len(got))
+	}
+}
+
 // `learnings` lists the repo's and the owner's; `forget` drops the owner's only for an owner or member.
 func TestLearningsCommand(t *testing.T) {
 	proc.DataDir = t.TempDir()
@@ -200,16 +235,16 @@ func TestReviewedPatches(t *testing.T) {
 func TestReportVersions(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	e := &forge.Event{}
-	e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = "o/r", 7, "https://github.com/o/r/pull/7"
+	e.Repository.ID, e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = 5, "o/r", 7, "https://github.com/o/r/pull/7"
 	sha := func(i int) string { return fmt.Sprintf("%040x", i) }
 	key := reportSecret("")
 	dir := reportPath(e) + "/" + key
 	for i := range maxVersions + 2 {
-		if u := writeReport(e, key, report.Data{Repo: "o/r", Number: 7, SHA: sha(i)}); u != ReportURL+"/r/github.com/o/r/7/"+key {
+		if u := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(i)}); u != ReportURL+"/r/github.com/id:5/7/"+key {
 			t.Fatal(u)
 		}
 	}
-	writeReport(e, key, report.Data{Repo: "o/r", Number: 7, SHA: sha(5)}) // reviewed again: the newest
+	writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(5)}) // reviewed again: the newest
 	vs, err := Versions(dir)
 	if err != nil || len(vs) != maxVersions || vs[0].SHA != sha(5) || vs[1].SHA != sha(maxVersions+1) || vs[0].At.IsZero() {
 		t.Fatalf("%+v", vs)
@@ -220,23 +255,133 @@ func TestReportVersions(t *testing.T) {
 	if _, err := Reports().Get(dir + "/" + sha(5) + ".html.gz"); err != nil {
 		t.Fatal("the newest page:", err)
 	}
-	Reports().Put(reportPath(e)+"/versions.json", []byte("[]")) // from before the secret
+	Reports().Put(namePath(e)+"/"+key+"/versions.json", []byte("[]")) // from before the id
+	Reports().Put(namePath(e)+"/versions.json", []byte("[]"))         // from before the secret
 	if err := DeleteReports(e); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{dir + "/versions.json", reportPath(e) + "/versions.json"} {
+	for _, k := range []string{dir + "/versions.json", namePath(e) + "/" + key + "/versions.json", namePath(e) + "/versions.json"} {
 		if _, err := Reports().Get(k); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatal("closed PR kept its reports:", k, err)
 		}
 	}
 	Reports().Put(dir+"/versions.json", []byte("{")) // unreadable: a report would drop the list
-	if u := writeReport(e, key, report.Data{Repo: "o/r", Number: 7, SHA: sha(1)}); u != "" {
+	if u := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(1)}); u != "" {
 		t.Fatal("wrote over an unreadable list:", u)
 	}
 	gl := &forge.Event{Forge: "gitlab"} // a project in a subgroup
 	gl.Repository.FullName, gl.PullRequest.Number, gl.PullRequest.HTMLURL = "g/s/p", 3, "https://gitlab.example.com/g/s/p/-/merge_requests/3"
-	if u := writeReport(gl, key, report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/g/s/p/3/"+key {
+	if u := writeReport(gl, key, "", report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/g/s/p/3/"+key {
+		t.Fatal("without the repo's id, by its name:", u)
+	}
+	gl.Repository.ID = 9
+	if u := writeReport(gl, key, "", report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/id:9/3/"+key {
 		t.Fatal(u)
+	}
+}
+
+// A PR's reports from before the repo's ID move to its ID's folder on its next report, history and all, from the folder
+// its walkthrough links under a name the repo had then; the old link redirects. A link edited to another PR moves none.
+func TestAdoptNamedReports(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	e := &forge.Event{}
+	e.Repository.ID, e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = 5, "o/new", 7, "https://github.com/o/new/pull/7"
+	sha := func(i int) string { return fmt.Sprintf("%040x", i) }
+	key := reportSecret("")
+	old, other := "github.com/o/old/7/"+key, "github.com/o/old/8/"+key // renamed since; another PR's number
+	for _, dir := range []string{old, other} {
+		Reports().Put(dir+"/"+sha(1)+".html.gz", []byte("one"))
+		Reports().Put(dir+"/"+sha(2)+".html", []byte("two")) // from before .html.gz
+		Reports().Put(dir+"/versions.json", fmt.Appendf(nil, `[{"sha":"%s","at":"2026-01-02T00:00:00Z"},{"sha":"%s","at":"2026-01-01T00:00:00Z"}]`, sha(2), sha(1)))
+	}
+	dir := reportPath(e) + "/" + key
+	if u := writeReport(e, key, ReportURL+"/r/"+old, report.Data{SHA: sha(3)}); u != ReportURL+"/r/"+dir {
+		t.Fatal(u)
+	}
+	vs, err := Versions(dir)
+	if err != nil || len(vs) != 3 || vs[0].SHA != sha(3) || vs[1].SHA != sha(2) || vs[2].SHA != sha(1) {
+		t.Fatalf("%+v %v", vs, err)
+	}
+	if b, err := Reports().Get(dir + "/" + sha(2) + ".html"); string(b) != "two" {
+		t.Fatal("page not moved:", err)
+	}
+	if vs, _ := Versions(old); len(vs) != 0 || Moved(old) != dir {
+		t.Fatal("old folder:", vs, Moved(old))
+	}
+	if _, err := Reports().Get(old + "/" + sha(1) + ".html.gz"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("old page stays:", err)
+	}
+	writeReport(e, key, ReportURL+"/r/"+other, report.Data{SHA: sha(4)})
+	if vs, _ := Versions(other); len(vs) != 2 || Moved(other) != "" {
+		t.Fatal("moved another PR's reports")
+	}
+	if err := DeleteReports(e); err != nil {
+		t.Fatal(err)
+	}
+	if vs, _ := Versions(dir); len(vs) != 0 {
+		t.Fatal("the close kept the moved reports")
+	}
+}
+
+// A move cut short, old's list still there, finishes on the next report without listing a version twice or one without
+// its page; a walkthrough link from another REPORT_URL still finds old; an .html page from before goes past maxVersions.
+func TestAdoptRetries(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	e := &forge.Event{}
+	e.Repository.ID, e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = 5, "o/new", 7, "https://github.com/o/new/pull/7"
+	sha := func(i int) string { return fmt.Sprintf("%040x", i) }
+	key := reportSecret("")
+	old, dir := "github.com/o/old/7/"+key, reportPath(e)+"/"+key
+	list := fmt.Appendf(nil, `[{"sha":"%s","at":"2026-01-02T00:00:00Z"},{"sha":"%s","at":"2026-01-01T00:00:00Z"},`+
+		`{"sha":"%s","at":"2025-12-01T00:00:00Z"}]`, sha(2), sha(1), sha(0)) // sha(0): its page gone
+	Reports().Put(old+"/"+sha(1)+".html.gz", []byte("one"))
+	Reports().Put(old+"/"+sha(2)+".html", []byte("two"))
+	Reports().Put(old+"/versions.json", list)
+	link := "https://before.example/r/" + old
+	writeReport(e, key, link, report.Data{SHA: sha(3)})
+	Reports().Put(old+"/versions.json", list) // cut short: one page and the list left
+	Reports().Put(old+"/"+sha(1)+".html.gz", []byte("one"))
+	writeReport(e, key, link, report.Data{SHA: sha(4)})
+	vs, err := Versions(dir)
+	if err != nil || len(vs) != 4 || vs[2].SHA != sha(2) || vs[3].SHA != sha(1) {
+		t.Fatalf("%+v %v", vs, err)
+	}
+	if v, _ := Versions(old); len(v) != 0 || Moved(old) != dir {
+		t.Fatal("not finished:", v)
+	}
+	for i := range maxVersions {
+		writeReport(e, key, "", report.Data{SHA: sha(10 + i)})
+	}
+	if _, err := Reports().Get(dir + "/" + sha(2) + ".html"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("kept an .html page past maxVersions:", err)
+	}
+}
+
+// A move whose list or moved file can't be written deletes none of old's pages: its links still serve, the walkthrough
+// keeps its link, and the next report moves them all.
+func TestAdoptPublishFails(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	e := &forge.Event{}
+	e.Repository.ID, e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = 5, "o/r", 7, "https://github.com/o/r/pull/7"
+	sha := func(i int) string { return fmt.Sprintf("%040x", i) }
+	key := reportSecret("")
+	old, dir := "github.com/o/r/7/"+key, reportPath(e)+"/"+key
+	Reports().Put(old+"/"+sha(1)+".html.gz", []byte("one"))
+	Reports().Put(old+"/versions.json", fmt.Appendf(nil, `[{"sha":"%s","at":"2026-01-01T00:00:00Z"}]`, sha(1)))
+	link := ReportURL + "/r/" + old
+	for _, block := range []string{dir + "/versions.json", old + "/moved"} { // a folder in the way
+		Reports().Put(block+"/x", nil)
+		if u := writeReport(e, key, link, report.Data{SHA: sha(2)}); u != link {
+			t.Fatal(block, u)
+		}
+		if b, err := Reports().Get(old + "/" + sha(1) + ".html.gz"); string(b) != "one" {
+			t.Fatal(block, "deleted old's page:", err)
+		}
+		Reports().DeleteAll(block)
+	}
+	writeReport(e, key, link, report.Data{SHA: sha(2)})
+	if vs, err := Versions(dir); err != nil || len(vs) != 2 || vs[1].SHA != sha(1) || Moved(old) != dir {
+		t.Fatalf("%+v %v", vs, err)
 	}
 }
 

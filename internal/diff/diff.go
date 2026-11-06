@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // Max is the diff size a review gets; Filter cuts at files, a file past it at hunks.
@@ -215,11 +216,16 @@ func generatedAt(root, p string) bool {
 	if root == "" {
 		return false
 	}
-	fp := filepath.Join(root, p)
-	if fi, err := os.Lstat(fp); err != nil || !fi.Mode().IsRegular() { // a link may name a FIFO or a file outside
+	r, err := os.OpenRoot(root) // the PR's links don't reach out of its checkout
+	if err != nil {
 		return false
 	}
-	f, err := os.Open(fp) //nolint:gosec // a path of the diff, in its checkout
+	defer r.Close()
+	// A symlink's diff is its target's path: the file it points to being generated says nothing about it.
+	if fi, err := r.Lstat(filepath.FromSlash(p)); err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	f, _, err := OpenIn(r, filepath.FromSlash(p))
 	if err != nil {
 		return false
 	}
@@ -227,6 +233,43 @@ func generatedAt(root, p string) bool {
 	b := make([]byte, 4096)
 	n, _ := io.ReadFull(f, b)
 	return generated.MatchString("@@ -1 +1 @@\n " + strings.ReplaceAll(string(b[:n]), "\n", "\n "))
+}
+
+// OpenIn opens p in root, a regular file: a FIFO or device the PR put in a file's place neither blocks the open nor
+// is read. Root code reads the checkout through os.Root (OpenIn, ReadIn) when the file must be the checkout's: no link
+// leads out, no process per file; through Sandbox.ReadFile, as the repo's user, where a link may rightly lead out of
+// it (node_modules into the pnpm store) or the file is the work dir's.
+func OpenIn(root *os.Root, p string) (*os.File, os.FileInfo, error) {
+	f, err := root.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	fi, err := f.Stat()
+	if err == nil && !fi.Mode().IsRegular() {
+		err = fmt.Errorf("%s: no regular file", p)
+	}
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	return f, fi, nil
+}
+
+// ReadIn reads p in root (see OpenIn), a regular file of at most n bytes.
+func ReadIn(root *os.Root, p string, n int64) ([]byte, error) {
+	f, fi, err := OpenIn(root, p)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if fi.Size() > n {
+		return nil, fmt.Errorf("%s: over %d bytes", p, n)
+	}
+	b, err := io.ReadAll(io.LimitReader(f, n+1))
+	if err == nil && int64(len(b)) > n {
+		err = fmt.Errorf("%s: over %d bytes", p, n)
+	}
+	return b, err
 }
 
 // Reverse puts diff's files in reverse order: a second reader starts where the first ended.

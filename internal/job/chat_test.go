@@ -15,11 +15,11 @@ import (
 // chatFake answers the chat pass with reply and keeps the prompt it got.
 type chatFake struct{ reply, prompt string }
 
-func (f *chatFake) Run(_ context.Context, _, _, _, prompt, _, _ string) (string, error) {
+func (f *chatFake) Run(_ context.Context, _ *proc.Sandbox, _, _, prompt, _, _ string) (string, error) {
 	f.prompt = prompt
 	return f.reply, nil
 }
-func (f *chatFake) Continue(context.Context, string, string, string, string, string) (string, error) {
+func (f *chatFake) Continue(context.Context, *proc.Sandbox, string, string, string, string) (string, error) {
 	return f.reply, nil
 }
 

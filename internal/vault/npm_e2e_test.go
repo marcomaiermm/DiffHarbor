@@ -64,7 +64,9 @@ func TestNpmThroughVault(t *testing.T) {
 		s := sha512.Sum512(tarballs[p])
 		return "sha512-" + base64.StdEncoding.EncodeToString(s[:])
 	}
-	repo := t.TempDir()
+	sb := &proc.Sandbox{Dir: t.TempDir()}
+	repo := sb.Repo()
+	os.Mkdir(repo, 0o755)
 	lock := `{"name":"app","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{
 "":{"name":"app","version":"1.0.0","dependencies":{"a":"1.0.0","@corp/b":"1.0.0"}},
 "node_modules/a":{"version":"1.0.0","resolved":"https://registry.npmjs.org/a/-/a-1.0.0.tgz","integrity":"` + integrity("/npm/a/-/a-1.0.0.tgz") + `"},
@@ -74,7 +76,7 @@ func TestNpmThroughVault(t *testing.T) {
 	os.WriteFile(filepath.Join(repo, "a.js"), nil, 0o644)
 
 	regs := []checks.Registry{{Scope: "", URL: up.URL + "/npm/", Token: "tokA"}, {Scope: "@corp", URL: up.URL + "/npm/internal/", Token: "tokB"}}
-	out, _ := checks.Run(context.Background(), repo, nil, "", []string{"a.js"}, func(string) bool { return false }, false, regs)
+	out, _ := checks.Run(context.Background(), sb, nil, "", []string{"a.js"}, func(string) bool { return false }, false, regs)
 	for _, p := range []string{"node_modules/a/package.json", "node_modules/@corp/b/package.json"} {
 		if _, err := os.Stat(filepath.Join(repo, p)); err != nil {
 			t.Errorf("not installed: %s\n%s", p, out)

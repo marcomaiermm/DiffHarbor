@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -102,9 +101,18 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		`<img src="%[1]s.svg" width="440" alt="A lighthouse sweeping its beam"></picture><br>⏳ **Reviewing** `+"`%[2]s` …", img, sha[:7]), "")
 	desc, state := "Review completed", "success"
 	p.Status(sha, "pending", "Review in progress")
+	panicked := false
 	defer func() {
 		switch {
-		case err != nil && ctx.Err() != nil: // PR closed or a newer push: that one gets the review
+		// server.review keeps a push's review queued: the next push or a restart retries it; a chat's isn't.
+		case errors.Is(err, proc.ErrCleanup):
+			retry := "retried on the next push"
+			if e.Kind != "pull_request" {
+				retry = "ask again in a while"
+			}
+			s.Write(fmt.Sprintf("⚠️ Review of `%s` not started: cleaning up after the last job failed, %s.", sha[:7], retry), "")
+			p.Status(sha, "error", "Review not started: cleanup failed, "+retry)
+		case err != nil && ctx.Err() != nil && !panicked: // PR closed or a newer push: that one gets the review
 			log.Println(key, sha[:7], "stopped")
 			s.Write(fmt.Sprintf("⏹️ Review of `%s` stopped.", sha[:7]), "")
 			p.Status(sha, "error", "Review stopped")
@@ -116,6 +124,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			p.Status(sha, state, desc)
 		}
 	}()
+	defer proc.Recovered(func(pe error) { err, panicked = pe, true }) // a bug: a failed review, not a green one
 	footer := func(what string) string {
 		return fmt.Sprintf("%s · `@%s <question>` to ask, `@%s review` for a full review", what, f.Bot(), f.Bot())
 	}
@@ -124,16 +133,16 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if err != nil {
 		return err
 	}
-	dir, err := agent.Workspace(id)
+	sb, err := agent.Workspace(ctx, id)
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
+	defer sb.Close()
 	read, err := p.ReadToken()
 	if err != nil {
 		return err
 	}
-	raw, err := review.Checkout(ctx, filepath.Join(dir, "repo"), e.Repository.CloneURL, sha, "refs/heads/"+pr.Base.Ref, read)
+	raw, err := review.Checkout(ctx, sb, e.Repository.CloneURL, sha, "refs/heads/"+pr.Base.Ref, read)
 	if err != nil {
 		return err
 	}
@@ -154,7 +163,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	guide := ReportURL != "" && cfg.Reports(len(prFiles)) // a large PR: a reading order and a report
 	// A diff past diff.Max: in parts once someone asked for them on this PR, else code first up to diff.Max.
 	s.State.Large = s.State.Large || e.Action == "large"
-	parts, omitted := diff.Filter(raw, filepath.Join(dir, "repo"), only, cfg.Ignored, cfg.Parts(s.State.Large))
+	parts, omitted := diff.Filter(raw, sb.Repo(), only, cfg.Ignored, cfg.Parts(s.State.Large))
 	d := strings.Join(parts, "")
 	if strings.TrimSpace(d) == "" {
 		log.Println(key, "nothing to review")
@@ -190,15 +199,15 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	var scripts []checks.Script
 	for i, path := range cfg.CheckPaths() {
 		if c := p.File(pr.Base.SHA, path); c != "" {
-			f := filepath.Join(dir, fmt.Sprintf("checks-%d.sh", i))
-			if err := proc.WriteFile(f, []byte(c)); err != nil {
+			f := filepath.Join(sb.Dir, fmt.Sprintf("checks-%d.sh", i))
+			if err := sb.WriteFile(ctx, f, []byte(c)); err != nil {
 				return err
 			}
 			scripts = append(scripts, checks.Script{Name: path, File: f})
 		}
 	}
 	rules := text.Truncate(p.File(pr.Base.SHA, cfg.RulePaths()...), 8000) + p.NestedRules(pr.Base.SHA, files)
-	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(dir, "skills"))
+	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(sb.Dir, "skills"))
 
 	started := time.Now()
 	var tid, tk string
@@ -208,15 +217,18 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		regs, _ = checks.Registries(e.Owner()) // main checked them
 	}
 	r, stats, err := review.Analyze(ctx, review.Input{
-		Agent: agent.Pi{}, Dir: dir, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: forge.Redact(review.Messages(ctx, filepath.Join(dir, "repo"))), Ticket: tk, Parts: parts,
+		Agent: agent.Pi{}, Sandbox: sb, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: forge.Redact(review.Messages(ctx, sb)), Ticket: tk, Parts: parts,
 		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings)), Checks: scripts, Registries: regs, Prior: prior, Closed: closed, Settings: cfg,
 		Guide: guide && only == nil, // an incremental review sees a few files: the last full one's reading order stays
 	})
+	if err == nil {
+		err = ctx.Err() // a push or close stopped it: its findings went unverified, for a head that's gone
+	}
 	if err != nil {
 		return err
 	}
 	if only != nil { // a push: minor findings only on what it changed, else every push finds new edge cases
-		since, err := review.Since(ctx, filepath.Join(dir, "repo"), s.State.SHA, read)
+		since, err := review.Since(ctx, sb, s.State.SHA, read)
 		if err = cmp.Or(ctx.Err(), err); err != nil { // cancelled or git failed, not a force push: post and resolve nothing
 			return err
 		}
@@ -242,7 +254,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if len(omitted) > 0 { // the rest only by name: findings cover part of the PR
 		inline := len(slices.DeleteFunc(diff.Paths(d), func(f string) bool { return slices.Contains(omitted, f) }))
 		kind += fmt.Sprintf(" · ⚠️ inline %d of %d files", inline, inline+len(omitted))
-		if all, rest := diff.Filter(raw, filepath.Join(dir, "repo"), only, cfg.Ignored, cfg.Parts(true)); cfg.Asks() && len(all) > len(parts) {
+		if all, rest := diff.Filter(raw, sb.Repo(), only, cfg.Ignored, cfg.Parts(true)); cfg.Asks() && len(all) > len(parts) {
 			// a file with a piece still left out isn't one "review all" reviews
 			full := slices.DeleteFunc(diff.Paths(strings.Join(all, "")), func(f string) bool { return slices.Contains(rest, f) })
 			s.Ask = forge.AskLarge(len(full), inline+len(omitted), len(all), f.Boxes(), f.Bot())
@@ -282,27 +294,26 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		return slices.Contains(r.Failed, f) || slices.Contains(omitted, f)
 	}))
 	if guide {
-		repo := filepath.Join(dir, "repo")
 		st := s.State
 		d := report.Data{
 			Repo: e.Repository.FullName, Number: pr.Number, Title: pr.Title, URL: pr.HTMLURL, SHA: pr.Head.SHA,
 			Summary: st.Summary, Diagram: st.Diagram, Effort: st.Effort, Decisions: st.Decisions, Story: st.Story, Flow: st.Flow,
-			Walkthrough: st.Files, Commits: review.Commits(ctx, repo), Outline: outline, Findings: openFindings(threads, open, r),
-			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(repo, raw), Themes: cfg.SyntaxTheme,
-			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, repo),
+			Walkthrough: st.Files, Commits: review.Commits(ctx, sb), Outline: outline, Findings: openFindings(threads, open, r),
+			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(sb, raw), Themes: cfg.SyntaxTheme,
+			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, sb),
 			Conflicts: pr.Mergeable != nil && !*pr.Mergeable, Forge: p.Links(),
-			Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(repo, raw),
+			Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(sb, raw),
 		}
 		// what the new code is for, where no doc comment or commit says: one call, the provider's small model
 		if keys, texts := report.Asks(d); len(keys) > 0 {
 			rm, vm := cfg.Models()
 			d.Whys = map[string]string{}
-			for i, w := range review.Explain(ctx, agent.Pi{}, dir, cmp.Or(agent.VerifyFor(rm), vm, rm), forge.Redact(pr.Title), texts) {
+			for i, w := range review.Explain(ctx, agent.Pi{}, sb, cmp.Or(agent.VerifyFor(rm), vm, rm), forge.Redact(pr.Title), texts) {
 				d.Whys[keys[i]] = w
 			}
 		}
 		s.State.Secret = reportSecret(s.State.Secret)
-		s.State.Report = writeReport(e, s.State.Secret, d)
+		s.State.Report = writeReport(e, s.State.Secret, s.State.Report, d)
 	}
 	banner := ""
 	if n == 0 {
@@ -318,12 +329,28 @@ var ReportURL string
 // maxVersions is the reports a PR keeps, one per reviewed head: the newest.
 const maxVersions = 10
 
-// reportPath is a PR's folder in Reports: its forge's host, the repository, the number. Its reports are in {secret}/
-// of it, as under /r/: a version is {sha}.html.gz, versions.json lists them newest first. Reports from before the
-// secret, right in the folder, no longer resolve and go with the PR.
+// reportPath is a PR's folder in Reports: its forge's host, the repository's ID, the number. The ID survives a rename,
+// and a repo recreated under the old name has another: the old one's close doesn't delete its reports. "id:" no repo
+// name has. Its reports are in {secret}/ of it, as under /r/: a version is {sha}.html.gz, versions.json lists them
+// newest first. An event without the ID has namePath's, not id:0 for all.
 func reportPath(e *forge.Event) string {
-	host, _, _ := strings.Cut(strings.TrimPrefix(e.PullRequest.HTMLURL, "https://"), "/")
-	return cmp.Or(host, "github.com") + "/" + e.Repository.FullName + "/" + strconv.Itoa(e.PullRequest.Number)
+	if e.Repository.ID == 0 {
+		return namePath(e)
+	}
+	return fmt.Sprintf("%s/id:%d/%d", host(e), e.Repository.ID, e.PullRequest.Number)
+}
+
+// namePath is the PR's folder before reportPath took the repo's ID: by its name, whatever repo had it. Its links, in
+// walkthroughs and shared, are served from there until the next report moves them (adopt) or the PR closes. Reports
+// from before the secret, right in the folder, no longer resolve and go with the PR.
+func namePath(e *forge.Event) string {
+	return host(e) + "/" + e.Repository.FullName + "/" + strconv.Itoa(e.PullRequest.Number)
+}
+
+// host is the host of the PR's forge, from its page.
+func host(e *forge.Event) string {
+	h, _, _ := strings.Cut(strings.TrimPrefix(e.PullRequest.HTMLURL, "https://"), "/")
+	return cmp.Or(h, "github.com")
 }
 
 // Secret is a report folder's secret, rand.Text's: 130 bits, URL-safe. Without it a report's URL is its PR's, which
@@ -372,10 +399,12 @@ func MoveReports() error {
 
 // DeleteReports deletes a PR's reports: its code shouldn't outlive the PR. With S3, those a failed MoveReports
 // left on disk too.
+// ponytail: namePath's too, by name: a recreated repo's PR of the old number loses those it had before the ID, a PR
+// closed without a report since (adopt) and renamed keeps them under the old name; drop namePath once those closed.
 func DeleteReports(e *forge.Event) error {
-	err := Reports().DeleteAll(reportPath(e))
+	err := errors.Join(Reports().DeleteAll(reportPath(e)), Reports().DeleteAll(namePath(e)))
 	if ReportS3 != nil {
-		err = errors.Join(err, disk().DeleteAll(reportPath(e)))
+		err = errors.Join(err, disk().DeleteAll(reportPath(e)), disk().DeleteAll(namePath(e)))
 	}
 	return err
 }
@@ -394,12 +423,113 @@ func Versions(path string) ([]report.Version, error) {
 	return vs, json.Unmarshal(b, &vs)
 }
 
+// namedDir is where the PR's reports from before the repo's ID are: the folder link names, the walkthrough's under a
+// name the repo had then, or under its name now. The link is read past its /r/{host}/, not REPORT_URL: that may have
+// changed since. "" for an event without the ID: its reports are there already. A link edited to another PR's folder
+// moves nothing without that PR's secret, which is its reports' key anyway.
+func namedDir(e *forge.Event, secret, link string) string {
+	if e.Repository.ID == 0 {
+		return ""
+	}
+	_, p, ok := strings.Cut(link, "/r/"+host(e)+"/")
+	p = host(e) + "/" + p
+	if !ok || !fs.ValidPath(p) || strings.Contains(p, "/id:") || !strings.HasSuffix(p, fmt.Sprintf("/%d/%s", e.PullRequest.Number, secret)) {
+		return namePath(e) + "/" + secret
+	}
+	return p
+}
+
+// adopt moves the reports in old, from before the repo's ID, into dir, newest first with dir's, and leaves a moved
+// file: /r/ redirects old's links there (Moved). A close finds them under the ID, whatever the repo was called then.
+// old's versions.json goes last: until it did, the next report retries what is left.
+func adopt(old, dir string) error {
+	if old == "" {
+		return nil
+	}
+	s := Reports()
+	olds, err := Versions(old)
+	if err != nil || len(olds) == 0 {
+		return err
+	}
+	vs, err := Versions(dir)
+	if err != nil {
+		return err
+	}
+	for _, v := range olds {
+		if slices.ContainsFunc(vs, func(n report.Version) bool { return n.SHA == v.SHA }) {
+			continue
+		}
+		// page: none when moved before a retry and dropped since past maxVersions
+		page := false
+		for _, name := range []string{v.SHA + ".html.gz", v.SHA + ".html"} { // .html: from before .html.gz
+			b, err := s.Get(old + "/" + name)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err == nil {
+				err = s.Put(dir+"/"+name, b)
+			}
+			if err != nil {
+				return err
+			}
+			page = true
+		}
+		if page {
+			vs = append(vs, v)
+		}
+	}
+	slices.SortStableFunc(vs, func(a, b report.Version) int { return b.At.Compare(a.At) }) // writeReport keeps maxVersions
+	b, err := json.Marshal(vs)
+	if err == nil {
+		err = s.Put(dir+"/versions.json", b)
+	}
+	if err == nil { // before old's pages go: its links never 404
+		err = s.Put(old+"/moved", []byte(dir))
+	}
+	if err != nil { // old's pages stay: the next report copies them again
+		return err
+	}
+	for _, v := range olds {
+		err = errors.Join(err, deletePage(s, old, v.SHA))
+	}
+	if err != nil {
+		return err
+	}
+	return s.Delete(old + "/versions.json")
+}
+
+// deletePage deletes the version sha's page in dir, an .html.gz or one from before.
+func deletePage(s store.Store, dir, sha string) error {
+	var err error
+	for _, name := range []string{sha + ".html.gz", sha + ".html"} {
+		if e := s.Delete(dir + "/" + name); !errors.Is(e, fs.ErrNotExist) {
+			err = errors.Join(err, e)
+		}
+	}
+	return err
+}
+
+// Moved is the folder the reports in dir moved to (adopt), "" when they didn't.
+func Moved(dir string) string {
+	b, err := Reports().Get(dir + "/moved")
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 // writeReport renders the PR's report into its secret's folder as the version of its head, against the newest of
 // another head, and returns its URL; "" when that fails, the review stands without it. d.Routine is this review's: an
 // incremental one has none, and the last full one's line numbers may be stale.
+// link is the walkthrough's last one: reports it names from before the repo's ID move here first (adopt). Until they
+// did, it stays the link.
 // ponytail: two reviews of a PR finishing at once can drop one's entry from versions.json; a lock per PR if it shows.
-func writeReport(e *forge.Event, secret string, d report.Data) string {
+func writeReport(e *forge.Event, secret, link string, d report.Data) string {
 	dir, s := reportPath(e)+"/"+secret, Reports()
+	if err := adopt(namedDir(e, secret, link), dir); err != nil { // the next report retries; till then link serves
+		log.Println(e.Key(), "report:", Hide(err, secret))
+		return link
+	}
 	vs, err := Versions(dir)
 	if err != nil {
 		log.Println(e.Key(), "report:", Hide(err, secret))
@@ -432,7 +562,7 @@ func writeReport(e *forge.Event, secret string, d report.Data) string {
 		return ""
 	}
 	for _, v := range vs[len(keep):] {
-		_ = s.Delete(dir + "/" + v.SHA + ".html.gz")
+		_ = deletePage(s, dir, v.SHA)
 	}
 	return ReportURL + "/r/" + dir
 }

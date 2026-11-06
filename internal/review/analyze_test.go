@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"diffharbor/internal/proc"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ type fakeAgent struct {
 	replies map[string][]string
 	calls   []string
 	tasks   map[string]string // the last task per pass name
+	panics  []string          // the passes whose Run panics
 }
 
 func (f *fakeAgent) reply(name string) (string, error) {
@@ -28,7 +30,7 @@ func (f *fakeAgent) reply(name string) (string, error) {
 	return q[0], nil
 }
 
-func (f *fakeAgent) Run(_ context.Context, _, name, _, task, _, _ string) (string, error) {
+func (f *fakeAgent) Run(_ context.Context, _ *proc.Sandbox, name, _, task, _, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, name)
@@ -36,11 +38,14 @@ func (f *fakeAgent) Run(_ context.Context, _, name, _, task, _, _ string) (strin
 		f.tasks = map[string]string{}
 	}
 	f.tasks[name] = task
+	if slices.Contains(f.panics, name) {
+		panic("boom")
+	}
 	return f.reply(name)
 }
 
 // Continue answers a second look from name+" again", with nothing more found when none is queued.
-func (f *fakeAgent) Continue(_ context.Context, _, name, _, task, _ string) (string, error) {
+func (f *fakeAgent) Continue(_ context.Context, _ *proc.Sandbox, name, _, task, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if strings.HasPrefix(task, repeatsTask[:30]) {
@@ -56,6 +61,30 @@ func (f *fakeAgent) Continue(_ context.Context, _, name, _, task, _ string) (str
 		return `{"summary":"","comments":[]}`, nil
 	}
 	return f.reply(name + " again")
+}
+
+// A panic in a pass or a part fails that part, with its stack: the server and the other parts go on, and the slot the
+// verify pass held is free again.
+func TestAnalyzePanic(t *testing.T) {
+	const (
+		md      = "diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1 +1,2 @@\n x\n+y\n"
+		finding = `{"summary":"s","comments":[{"path":"a.md","line":1,"severity":"major","title":"t","body":"b"}]}`
+		keep    = `{"verdicts":[{"i":0,"keep":true}]}`
+	)
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "repo"), 0o755)
+	os.WriteFile(filepath.Join(dir, "repo", "a.md"), []byte("x\ny\n"), 0o644)
+	// two verify passes: with their slots kept, part 3's verify would wait forever once it comes after them
+	f := &fakeAgent{panics: []string{"verify1", "verify2"}, replies: map[string][]string{"review1": {finding}, "review2": {finding}, "review3": {finding}, "verify3": {keep}}}
+	r, stats, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: dir}, Parts: []string{md, md, md}})
+	if err != nil || len(r.Failed) != 2 || len(r.Comments) != 1 || !strings.HasSuffix(stats, "part 1 failed · part 2 failed") {
+		t.Fatalf("verify passes panic: %v %q %+v", err, stats, r)
+	}
+	f = &fakeAgent{panics: []string{"review"}, replies: map[string][]string{}}
+	_, _, err = Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: dir}, Parts: []string{md}})
+	if err == nil || !strings.Contains(err.Error(), "panic: boom") || !strings.Contains(err.Error(), "runtime/debug.Stack") {
+		t.Fatalf("a whole diff's pass panics: %v", err)
+	}
 }
 
 func TestAnalyze(t *testing.T) {
@@ -78,7 +107,7 @@ func TestAnalyze(t *testing.T) {
 		if len(parts) == 0 {
 			parts = []string{md}
 		}
-		r, stats, err := Analyze(context.Background(), Input{Agent: f, Dir: dir, Title: "t", Settings: s, Parts: parts})
+		r, stats, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: dir}, Title: "t", Settings: s, Parts: parts})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -154,7 +183,7 @@ func TestAnalyze(t *testing.T) {
 	// claimed fixed one stays in its own list.
 	f := &fakeAgent{replies: map[string][]string{"review": {`{"summary":"","comments":[{"path":"a.md","line":2,"severity":"minor","title":"t","body":"b"}],"fixed":[1]}`}}}
 	prior := []Comment{{Path: "a.md", Line: 1, Body: "open race"}, {Path: "a.md", Line: 1, Body: "gone"}} // threads carry no title
-	if _, _, err := Analyze(context.Background(), Input{Agent: f, Dir: t.TempDir(), Parts: []string{md}, Prior: prior}); err != nil {
+	if _, _, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: t.TempDir()}, Parts: []string{md}, Prior: prior}); err != nil {
 		t.Fatal(err)
 	}
 	if v := f.tasks["verify"]; !strings.Contains(v, "## Earlier findings, still open (posted already: no verdicts for these)\n\n### 3 · a.md:1\n\nopen race") ||
@@ -168,7 +197,7 @@ func TestAnalyze(t *testing.T) {
 		t.Helper()
 		replies["review"] = []string{`{"summary":"","comments":[{"path":"a.md","line":2,"severity":"minor","title":"t","body":"b"}],"fixed":[0]}`}
 		f := &fakeAgent{replies: replies}
-		r, _, err := Analyze(context.Background(), Input{Agent: f, Dir: t.TempDir(), Parts: []string{md}, Prior: []Comment{{Path: "a.md", Line: 1, Body: "race"}}})
+		r, _, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: t.TempDir()}, Parts: []string{md}, Prior: []Comment{{Path: "a.md", Line: 1, Body: "race"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -240,11 +269,11 @@ func TestAnalyze(t *testing.T) {
 
 func TestExplain(t *testing.T) {
 	f := &fakeAgent{replies: map[string][]string{"explain": {`{"1":"parses the flag","3":"ignored"}`}}}
-	got := Explain(context.Background(), f, t.TempDir(), "openai/m:low", "t", []string{"a.go\nfunc A()", "b.go\nfunc B()"})
+	got := Explain(context.Background(), f, &proc.Sandbox{Dir: t.TempDir()}, "openai/m:low", "t", []string{"a.go\nfunc A()", "b.go\nfunc B()"})
 	if !slices.Equal(got, []string{"parses the flag", ""}) || !slices.Equal(f.calls, []string{"explain repair"}) {
 		t.Errorf("explain %q, calls %q", got, f.calls)
 	}
-	if got := Explain(context.Background(), f, "", "m", "t", nil); len(got) != 0 || len(f.calls) != 1 {
+	if got := Explain(context.Background(), f, nil, "m", "t", nil); len(got) != 0 || len(f.calls) != 1 {
 		t.Error("no declarations, still a call")
 	}
 }

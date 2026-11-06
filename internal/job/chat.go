@@ -10,6 +10,7 @@ import (
 	"diffharbor/internal/proc"
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -119,12 +121,20 @@ func learningsOf(key string) []string {
 	return strings.FieldsFunc(string(b), func(r rune) bool { return r == '\n' })
 }
 
+// learningsMu guards the read-modify-write of addLearning and forgetLearnings: an owner's file is shared by all of
+// its repos, whose jobs run at once.
+var learningsMu sync.Mutex
+
 func writeLearnings(key string, lines []string) error {
 	f := learningsFile(key)
 	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(f, []byte(strings.Join(append(lines, ""), "\n")), 0o600)
+	// Through a rename: a review reading them never sees half a file.
+	if err := os.WriteFile(f+".tmp", []byte(strings.Join(append(lines, ""), "\n")), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(f+".tmp", f)
 }
 
 // learnedRe is the date addLearning ends an entry with; entries from before have none and never age.
@@ -153,12 +163,16 @@ func readLearnings(owner, repo string, l review.Learnings) string {
 
 // addLearning appends one rule to a repo or owner, dated; the oldest past review.MaxLearnings goes.
 func addLearning(key, entry string, now time.Time) error {
+	learningsMu.Lock()
+	defer learningsMu.Unlock()
 	lines := append(learningsOf(key), strings.TrimSuffix(entry, ")")+", "+now.Format(time.DateOnly)+")")
 	return writeLearnings(key, lines[max(0, len(lines)-review.MaxLearnings):])
 }
 
 // forgetLearnings drops key's learnings containing s, any case, and returns them.
 func forgetLearnings(key, s string) ([]string, error) {
+	learningsMu.Lock()
+	defer learningsMu.Unlock()
 	var kept, gone []string
 	for _, l := range learningsOf(key) {
 		if strings.Contains(strings.ToLower(l), strings.ToLower(s)) {
@@ -216,8 +230,10 @@ func learningsCommand(cmd, bot string, e *forge.Event) string {
 	return b.String() + "_Newest last. `@" + bot + " forget <text>` drops the ones containing text; review.json's `learnings` sets how many and how old a review follows._"
 }
 
-// Seen puts 👀 on a maintainer's comment as soon as it is queued, before the worker gets to it.
+// Seen puts 👀 on a maintainer's comment as soon as it is queued, before the worker gets to it. e is its own copy:
+// the job changes the queued one.
 func Seen(f forge.Forge, e *forge.Event) {
+	defer proc.Recovered(func(err error) { log.Println(e.Key(), err) })
 	p, err := f.Open(e)
 	if err != nil {
 		log.Println(e.Key(), "reaction:", err)
@@ -415,7 +431,11 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			return nil // between humans, for someone else, we said our piece (@us to go on), or they wrote again
 		}
 		if !mention.MatchString(c.Body) {
-			go p.React() // the server left it to us; off the worker, a slow forge would hold up the queue
+			key := e.Key()
+			go func() { // the server left it to us; off the worker, a slow forge would hold up the queue
+				defer proc.Recovered(func(err error) { log.Println(key, err) })
+				p.React()
+			}()
 		}
 		about.WriteString(d.About)
 		if resolved {
@@ -440,17 +460,20 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	if err != nil {
 		return err
 	}
-	dir, err := agent.Workspace(id)
+	sb, err := agent.Workspace(ctx, id)
 	if err != nil {
+		if errors.Is(err, proc.ErrCleanup) { // a chat isn't kept to retry: the asker is
+			_ = p.Reply("⚠️ Couldn't start: preparing the workspace failed. Ask again in a while.\n\n" + forge.Mark)
+		}
 		return err
 	}
-	defer os.RemoveAll(dir)
+	defer sb.Close()
 	read, err := p.ReadToken()
 	if err != nil {
 		return err
 	}
 	pr := e.PullRequest
-	raw, err := review.Checkout(ctx, filepath.Join(dir, "repo"), e.Repository.CloneURL, pr.Head.SHA, "refs/heads/"+pr.Base.Ref, read)
+	raw, err := review.Checkout(ctx, sb, e.Repository.CloneURL, pr.Head.SHA, "refs/heads/"+pr.Base.Ref, read)
 	if err != nil {
 		return err
 	}
@@ -460,11 +483,11 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	}
 	cfg, _ := review.LoadSettings(p.File(pr.Base.SHA, "review.json")) // broken: defaults, the review says so
 	rules := p.File(pr.Base.SHA, cfg.RulePaths()...)
-	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(dir, "skills"))
+	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(sb.Dir, "skills"))
 	system := chatSystem + review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings))
 	rm, _ := cfg.Models()
 	m := agent.PassModel(rm, "medium")
-	out, err := chatAgent.Run(ctx, dir, "chat", system,
+	out, err := chatAgent.Run(ctx, sb, "chat", system,
 		fmt.Sprintf("# %s\n\n%s\n\n%s## Conversation\n\n%s", forge.Redact(pr.Title), text.Truncate(forge.Redact(pr.Body), 2000), about.String(), convo.String()),
 		"Reply to the last message. End with the JSON object.", m)
 	if err != nil {
@@ -472,7 +495,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	}
 	a, ok := parseAnswer(out)
 	if !ok {
-		out, err = chatAgent.Continue(ctx, dir, "chat", system, chatRepair, m)
+		out, err = chatAgent.Continue(ctx, sb, "chat", system, chatRepair, m)
 		if err != nil {
 			return err
 		}

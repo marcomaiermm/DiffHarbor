@@ -65,10 +65,13 @@ func Key(ctx context.Context, provider, upstream, key string, paths ...string) (
 	return lend(ctx, provider, upstream, key, paths)
 }
 
-// Git lends token, which reads the repo at cloneURL, until ctx is done and returns the remote git fetches it through.
-func Git(ctx context.Context, cloneURL, token string) (string, error) {
-	tok, err := lend(ctx, "git", cloneURL, token, gitPaths)
-	return base + "/git/" + tok, err
+// Git lends token, which reads the repo at cloneURL, until ctx is done and returns the remote git fetches it through
+// and the token that stands in for it, for git to send as "Authorization: Bearer <tok>" (http.extraHeader). Not in
+// the remote: a URL lands in argv (git remote add, git-remote-http), and /proc/<pid>/cmdline is world-readable, also
+// to another repo's job running at the same time.
+func Git(ctx context.Context, cloneURL, token string) (remote, tok string, err error) {
+	tok, err = lend(ctx, "git", cloneURL, token, gitPaths)
+	return base + "/git", tok, err
 }
 
 // Npm lends token, which reads the npm registry at registry, until ctx is done and returns the registry the installs
@@ -109,13 +112,14 @@ func find(route, tok string) *loan {
 	return found
 }
 
-// authHeaders are where Pi's providers put their key (pi-ai: OpenAI SDK Bearer, Anthropic SDK x-api-key, Azure api-key).
+// authHeaders are where Pi's providers put their key (pi-ai: OpenAI SDK Bearer, Anthropic SDK x-api-key, Azure api-key)
+// and git its token.
 var authHeaders = []string{"Authorization", "X-Api-Key", "Api-Key"}
 
 func serve(w http.ResponseWriter, r *http.Request) {
 	route, rest, _ := strings.Cut(strings.TrimPrefix(r.URL.EscapedPath(), "/"), "/")
 	header, tok := "", ""
-	if route == "git" || route == "npm" {
+	if route == "npm" {
 		tok, rest, _ = strings.Cut(rest, "/")
 	} else {
 		for _, h := range authHeaders {

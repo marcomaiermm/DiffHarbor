@@ -9,6 +9,7 @@ import (
 	"diffharbor/internal/assets"
 	"diffharbor/internal/checks"
 	"diffharbor/internal/diff"
+	"diffharbor/internal/proc"
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
 	"embed"
@@ -1037,21 +1038,21 @@ func rank(f *file) int {
 // between hunks: past them a file shows its hunks only.
 const maxSource, maxSources = 256 << 10, 2 << 20 // ponytail: the page carries them whole; per gap if pages grow
 
-// Sources is the text at the checkout repo of the files diffText changes and keeps, for the unchanged lines
+// Sources is the text in sb's checkout of the files diffText changes and keeps, for the unchanged lines
 // between and around hunks; a file too big, unreadable or not text stays out.
-func Sources(repo, diffText string) map[string]string {
+func Sources(sb *proc.Sandbox, diffText string) map[string]string {
 	out, total := map[string]string{}, 0
-	root, err := os.OpenRoot(repo) // the PR's symlinks don't reach out of the checkout
+	root, err := sb.Pinned() // the PR's symlinks don't reach out of the checkout
 	if err != nil {
 		return out
 	}
 	defer root.Close()
 	diff.EachFile(diffText, func(p, _ string) {
-		if fi, err := root.Lstat(filepath.FromSlash(p)); err != nil || !fi.Mode().IsRegular() || fi.Size() > maxSource {
-			return
+		if fi, err := root.Lstat(filepath.FromSlash(p)); err != nil || !fi.Mode().IsRegular() {
+			return // a changed symlink isn't its target's text
 		}
-		b, err := root.ReadFile(filepath.FromSlash(p))
-		if err != nil || len(b) > maxSource || total+len(b) > maxSources || bytes.IndexByte(b, 0) >= 0 {
+		b, err := diff.ReadIn(root, filepath.FromSlash(p), maxSource)
+		if err != nil || total+len(b) > maxSources || bytes.IndexByte(b, 0) >= 0 {
 			return
 		}
 		out[p], total = string(b), total+len(b)

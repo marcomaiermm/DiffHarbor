@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -178,7 +179,9 @@ func Available(provider string) bool {
 		return true
 	}
 	var logins map[string]json.RawMessage
+	tokenMu.Lock() // not while a refresh rewrites it
 	b, err := os.ReadFile(filepath.Join(AuthDir(), "auth.json"))
+	tokenMu.Unlock()
 	return p.Login && err == nil && json.Unmarshal(b, &logins) == nil && logins[provider] != nil
 }
 
@@ -235,22 +238,22 @@ func passEnv(ctx context.Context, provider string) ([]string, error) {
 
 // Workspace is proc.Workspace with Pi's models.json in the job's fresh home, see proxies. A local run (not root)
 // keeps its own Pi config.
-func Workspace(repo string) (string, error) {
-	dir, err := proc.Workspace(repo)
+func Workspace(ctx context.Context, repo string) (*proc.Sandbox, error) {
+	sb, err := proc.Workspace(repo)
 	if err != nil || !proc.AsPi {
-		return dir, err
+		return sb, err
 	}
-	if err := proxies(filepath.Join(proc.Home(), ".pi", "agent", "models.json")); err != nil {
-		os.RemoveAll(dir)
-		return "", err
+	if err := proxies(ctx, sb, filepath.Join(sb.Home(), ".pi", "agent", "models.json")); err != nil {
+		sb.Close()
+		return nil, err
 	}
-	return dir, nil
+	return sb, nil
 }
 
 // proxies writes Pi's models.json f: it routes built-in providers through a proxy or gateway (LiteLLM, a company's
 // AI gateway): <PROVIDER>_BASE_URL, e.g. ANTHROPIC_BASE_URL, becomes the provider's baseUrl; its models and auth stay
 // Pi's, the key is the proxy's. A provider whose key the vault keeps points at the vault, which forwards to the gateway.
-func proxies(f string) error {
+func proxies(ctx context.Context, sb *proc.Sandbox, f string) error {
 	providers := map[string]map[string]any{}
 	for _, r := range Matrix {
 		switch u := os.Getenv(envName(r.Name) + "_BASE_URL"); {
@@ -267,10 +270,10 @@ func proxies(f string) error {
 		}
 	}
 	if len(providers) == 0 {
-		return proc.Remove(f) // as the job's user: Pi's config dir is its
+		return sb.Remove(f) // as the job's user: Pi's config dir is its
 	}
 	b, _ := json.Marshal(map[string]any{"providers": providers})
-	return proc.WriteFile(f, b)
+	return sb.WriteFile(ctx, f, b)
 }
 
 // Default is the review model when neither REVIEW_MODEL nor review.json names one: the first provider in Matrix
@@ -378,45 +381,48 @@ type Pi struct{}
 
 // Run runs one agent pass with tools and returns its reply. The pass keeps a
 // session so a reply without JSON can be repaired without redoing the tool work.
-func (Pi) Run(ctx context.Context, dir, name, system, prompt, task, m string) (string, error) {
-	file := filepath.Join(dir, name+".md")
-	if err := proc.WriteFile(file, []byte(prompt)); err != nil {
+func (Pi) Run(ctx context.Context, sb *proc.Sandbox, name, system, prompt, task, m string) (string, error) {
+	file := filepath.Join(sb.Dir, name+".md")
+	if err := sb.WriteFile(ctx, file, []byte(prompt)); err != nil {
 		return "", err
 	}
-	return runPi(ctx, dir, name, system, m, true, "@"+file, task)
+	return runPi(ctx, sb, name, system, m, true, "", "@"+file, task) // task is ours, the same for every PR
 }
 
 // Continue resumes the pass's session without tools, so a model that ended
 // without JSON has to answer with text/JSON.
-func (Pi) Continue(ctx context.Context, dir, name, system, task, m string) (string, error) {
-	return runPi(ctx, dir, name, system, m, false, task)
+func (Pi) Continue(ctx context.Context, sb *proc.Sandbox, name, system, task, m string) (string, error) {
+	return runPi(ctx, sb, name, system, m, false, task)
 }
 
-// runPi runs pi with m, a full --model value (provider/id:level). An openai/ pass the subscription can't
-// serve reruns on FALLBACK_MODEL at the same level, and the next 30 minutes of passes skip straight to it.
-func runPi(ctx context.Context, dir, name, system, m string, tools bool, promptArgs ...string) (string, error) {
+// runPi runs pi with m, a full --model value (provider/id:level); stdin, when set, is sent to pi before promptArgs.
+// An openai/ pass the subscription can't serve reruns on FALLBACK_MODEL at the same level, and the next 30 minutes of
+// passes skip straight to it.
+func runPi(ctx context.Context, sb *proc.Sandbox, name, system, m string, tools bool, stdin string, promptArgs ...string) (string, error) {
 	// One switch for all passes: with mixed providers a failing verify model also moves the reviews to the fallback.
 	fm := FallbackFor(m, name)
 	if fm == "" {
-		return runPiOn(ctx, dir, name, system, m, tools, promptArgs...)
+		return runPiOn(ctx, sb, name, system, m, tools, stdin, promptArgs...)
 	}
 	if time.Now().UnixMilli() >= FallbackUntil.Load() {
-		out, err := runPiOn(ctx, dir, name, system, m, tools, promptArgs...)
+		out, err := runPiOn(ctx, sb, name, system, m, tools, stdin, promptArgs...)
 		if err == nil || ctx.Err() != nil || !unavailable.MatchString(err.Error()) {
 			return out, err
 		}
 		log.Printf("%s: %v; %s for 30 min", m, err, fm)
 		FallbackUntil.Store(time.Now().Add(30 * time.Minute).UnixMilli())
 		if tools { // a fresh pass: the failed run's session would hold the prompt twice
-			os.Remove(filepath.Join(dir, name+".session"))
+			os.Remove(filepath.Join(sb.Dir, name+".session"))
 		}
 	}
 	_, lvl, _ := splitModel(m)
 	fb, _, _ := splitModel(fm)
-	return runPiOn(ctx, dir, name, system, fb+":"+reviewLevel(fm, lvl), tools, promptArgs...)
+	return runPiOn(ctx, sb, name, system, fb+":"+reviewLevel(fm, lvl), tools, stdin, promptArgs...)
 }
 
-func runPiOn(ctx context.Context, dir, name, system, m string, tools bool, promptArgs ...string) (string, error) {
+// Private text (the system prompt's rules and learnings, a task with findings or code) goes through a file or stdin,
+// never argv: /proc/<pid>/cmdline is world-readable, also to another repo's job running at the same time.
+func runPiOn(ctx context.Context, sb *proc.Sandbox, name, system, m string, tools bool, stdin string, promptArgs ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Minute)
 	defer cancel()
 	// Soft deadline (review-guard.js refuses tool calls after it): 2 minutes left for the answer.
@@ -425,25 +431,31 @@ func runPiOn(ctx context.Context, dir, name, system, m string, tools bool, promp
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", m, err)
 	}
+	sys := filepath.Join(sb.Dir, name+".system.md") // --system-prompt reads a path that exists
+	if err := sb.WriteFile(ctx, sys, []byte(system)); err != nil {
+		return "", err
+	}
 	// --no-approve: a .pi/ in the checkout (PR-controlled) is ignored. fff replaces grep/find.
-	args := []string{"-p", "--session", filepath.Join(dir, name+".session"), "--no-approve", "--model", m}
+	args := []string{"-p", "--session", filepath.Join(sb.Dir, name+".session"), "--no-approve", "--model", m}
 	if tools {
 		args = append(args, "--tools", "read,grep,find,ls,bash")
 	} else {
 		args = append(args, "--no-builtin-tools")
 	}
 	args = append(args, "--no-mcp", "--no-skills", "--no-context-files", "--no-prompt-templates",
-		"--system-prompt", system)
+		"--system-prompt", sys)
 	// Review skills (github.Skills): listed in both passes and repairs, so the prompt prefix stays cacheable.
 	for _, src := range []string{"repo", "owner"} { // repo first: it wins a name clash
-		if sk := filepath.Join(dir, "skills", src); proc.Exists(sk) {
+		if sk := filepath.Join(sb.Dir, "skills", src); proc.Exists(sk) {
 			args = append(args, "--skill", sk)
 		}
 	}
 	args = append(args, promptArgs...)
-	env := append(append(proc.ToolEnv(), creds...), "PI_FFF_MODE=override", deadline, fmt.Sprintf("DIFFHARBOR_MAX_TOOLS=%d", maxTools))
-	// stdin is /dev/null: pi -p waits for piped stdin otherwise.
-	out, err := proc.Run(proc.Command(ctx, filepath.Join(dir, "repo"), env, "pi", args...))
+	env := append(append(sb.ToolEnv(), creds...), "PI_FFF_MODE=override", deadline, fmt.Sprintf("DIFFHARBOR_MAX_TOOLS=%d", maxTools))
+	// stdin is a pipe, never a terminal: pi -p would wait for typed input otherwise.
+	c := sb.Command(ctx, sb.Repo(), env, "pi", args...)
+	c.Stdin = strings.NewReader(stdin)
+	out, err := proc.Run(c)
 	if err != nil {
 		return "", err
 	}
@@ -471,10 +483,16 @@ func Check() error {
 	return nil
 }
 
+// tokenMu serializes OpenAIToken: Pi may rotate the refresh token, and two refreshes at once lose the login. A mutex,
+// not singleflight: each caller wants a token that outlives its own pass, and x/sync would be a new dependency.
+var tokenMu sync.Mutex
+
 // OpenAIToken is a bearer token from the ChatGPT login, valid for 20 more minutes at least.
 // Pi's ChatGPT login lives on the root-only data volume (log in once, see README). Pi runs as the job's user
 // next to PR code, so it only gets an access token that outlives the pass, never the refresh token.
 func OpenAIToken() (string, error) {
+	tokenMu.Lock()
+	defer tokenMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	c := exec.CommandContext(ctx, "pi", "auth", "print-bearer-token", "--provider", "openai", "--min-expiry", "20m")

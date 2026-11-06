@@ -20,13 +20,23 @@ Within that:
 ## Each job
 
 - Root reads and writes in the checkout only as the repo's user. A symlink in the PR can't reach root's files.
-- All processes of the repos' users are killed before and after each job.
-- Each job gets a fresh home (git config, Pi's config and extensions) and temp dir. The users' files in `/tmp`, `/var/tmp` and `/dev/shm` go before each job.
+- All processes of the repo's user are killed before and after each job, those of all repos' users when the server starts.
+- Each job gets a fresh home (git config, Pi's config and extensions) and temp dir. The repo's user's files in `/tmp`, `/var/tmp` and `/dev/shm` go before and after each job, all repos' users' when the server starts.
 - Check output is capped.
 - The checks install dependencies without lifecycle scripts, so a malicious dependency's postinstall doesn't run. `install_scripts` in `review.json` turns them back on per repo.
 - No new privileges: a setuid binary can't make a repo's user root. Root keeps only the capabilities it needs.
 - Limits per container: 3 GB RAM, 2 CPUs, 4096 processes.
 - A Pi run gets 8 minutes. [`extensions/review-guard.js`](https://github.com/marcomaiermm/DiffHarbor/blob/main/extensions/review-guard.js) refuses further tool calls after 6 minutes or at 60% context, so the pass still answers.
+
+## Jobs at once
+
+- A repo's jobs run one after another: they share its user, which could otherwise signal or read the other job's processes.
+- With [`MAX_JOBS`](../configuration/#storage-and-docker) above `1`, jobs of different repos run at the same time. Home, temp dir (`TMPDIR`), caches and uid stay per repo. Shared while they run:
+  - `/tmp`, `/var/tmp` and `/dev/shm`: a PR's code could leave a file for another repo's job.
+  - The loopback network, abstract unix sockets included: it could talk to a port or socket another job listens on.
+  - The process list, arguments included. Tokens, prompts, rules and learnings stay out of it (git's token goes in a header from a file, npm's and the models' in the env, prompts in files and stdin), unless a repo's own scripts put them in a command's arguments. The changed files' paths, commit SHAs, test names and the bumped npm packages' names and versions are in it.
+  - The container's memory, CPUs and processes: one PR's memory hog or fork bomb can starve the other jobs or get them killed. Raise `mem_limit`, `cpus` and `pids_limit` with `MAX_JOBS`.
+- That's fine when all repos belong to one team. Keep `MAX_JOBS=1` (the default) when untrusted repos or forks of different owners are reviewed side by side.
 
 ## Each repo
 

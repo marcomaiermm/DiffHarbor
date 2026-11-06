@@ -3,10 +3,11 @@ package report
 import (
 	"bytes"
 	"context"
+	"diffharbor/internal/diff"
+	"diffharbor/internal/proc"
 	"encoding/json"
 	"maps"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"slices"
@@ -60,7 +61,7 @@ type cgIndex struct {
 
 // codegraph is the indexes of the checkout at repo, the root's and those of the directories above paths, for the
 // wanted names; nil without one.
-func codegraph(repo string, wanted map[string]bool, paths []string) *cgIndex {
+func codegraph(sb *proc.Sandbox, repo string, wanted map[string]bool, paths []string) *cgIndex {
 	var dbs []cgDB
 	seen := map[string]bool{}
 	for _, p := range paths {
@@ -80,7 +81,7 @@ func codegraph(repo string, wanted map[string]bool, paths []string) *cgIndex {
 		return nil
 	}
 	idx := cgIndex{dbs: dbs}
-	if !runNode(cgQuery, map[string]any{"names": slices.Collect(maps.Keys(wanted)), "dbs": dbs}, &idx) {
+	if !runNode(sb, cgQuery, map[string]any{"names": slices.Collect(maps.Keys(wanted)), "dbs": dbs}, &idx) {
 		return nil
 	}
 	return &idx
@@ -91,12 +92,14 @@ type cgDB struct {
 	Prefix string `json:"prefix"`
 }
 
-// runNode runs script with in as its stdin, its stdout into out; false when it fails or takes past a minute.
-func runNode(script string, in, out any) bool {
+// runNode runs script with in as its stdin, its stdout into out; false when it fails or takes past a minute. In sb, as
+// the repo's user: it opens the PR's indexes and files, and their symlinks (another repo's index) reach nothing of
+// root's.
+func runNode(sb *proc.Sandbox, script string, in, out any) bool {
 	b, _ := json.Marshal(in)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "node", "-e", script)
+	cmd := sb.Command(ctx, "/", nil, "node", "-e", script)
 	cmd.Stdin = bytes.NewReader(b)
 	got, err := cmd.Output()
 	return err == nil && json.Unmarshal(got, out) == nil
@@ -105,7 +108,7 @@ func runNode(script string, in, out any) bool {
 // exact replaces what the name scan guessed with the index's resolved edges, for the declarations the index knows:
 // its lines (From, To), who names one (Refs, Uses, Files; Here, the lines of the diff's files; Outside, those of
 // the others), what it names (Calls). Those it doesn't know, a Go struct's fields, keep the scan's.
-func (idx *cgIndex) exact(repo string, changed map[string]bool, syms map[string][]Symbol) {
+func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[string][]Symbol) {
 	type key struct{ path, name string }
 	at := map[key][]*Symbol{}
 	for name, ss := range syms {
@@ -136,7 +139,7 @@ func (idx *cgIndex) exact(repo string, changed map[string]bool, syms map[string]
 			s.From, s.To = n.Line, n.End
 		}
 	}
-	lines := sources(repo)
+	lines := sources(root)
 	for _, e := range idx.Edges {
 		in := e.SName
 		if e.SKind == "file" {
@@ -371,7 +374,7 @@ process.stdout.write(JSON.stringify(out));
 
 // tests sets the Tests, Partial, Untested and Ways of the diff's declarations in the index: see cgTests. Without git or
 // node, or past a minute, none: no test listed, and no claim that none reaches.
-func (idx *cgIndex) tests(repo string, changed map[string]bool, syms map[string][]Symbol) {
+func (idx *cgIndex) tests(sb *proc.Sandbox, root *os.Root, changed map[string]bool, syms map[string][]Symbol) {
 	type start struct {
 		Path string `json:"path"`
 		Name string `json:"name"`
@@ -391,10 +394,10 @@ func (idx *cgIndex) tests(repo string, changed map[string]bool, syms map[string]
 		Partial, Untested bool
 		Ways              []Way
 	}
-	if len(starts) == 0 || !runNode(cgTests, map[string]any{"repo": repo, "dbs": idx.dbs, "starts": starts}, &got) {
+	if len(starts) == 0 || !runNode(sb, cgTests, map[string]any{"repo": sb.Repo(), "dbs": idx.dbs, "starts": starts}, &got) {
 		return
 	}
-	lines := sources(repo)
+	lines := sources(root)
 	for _, g := range got {
 		for _, w := range g.Ways {
 			for i, h := range w.Chain {
@@ -430,7 +433,7 @@ func (idx *cgIndex) tests(repo string, changed map[string]bool, syms map[string]
 
 // files is the checkout's files by line, read when first asked.
 type files struct {
-	repo string
+	root *os.Root // the PR's symlinks don't reach out of it
 	got  map[string][]string
 }
 
@@ -471,12 +474,12 @@ func callAt(line, name string) string {
 	return ""
 }
 
-func sources(repo string) files { return files{repo, map[string][]string{}} }
+func sources(root *os.Root) files { return files{root, map[string][]string{}} }
 
 func (fs files) lines(p string) []string {
 	ls, ok := fs.got[p]
 	if !ok {
-		b, _ := os.ReadFile(filepath.Join(fs.repo, filepath.FromSlash(p)))
+		b, _ := diff.ReadIn(fs.root, filepath.FromSlash(p), maxSize)
 		ls = strings.Split(string(b), "\n")
 		fs.got[p] = ls
 	}

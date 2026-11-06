@@ -1,4 +1,4 @@
-// Package store keeps the reports by slash-separated keys, like "github.com/o/r/7/{secret}/versions.json".
+// Package store keeps the reports by slash-separated keys, like "github.com/id:5/7/{secret}/versions.json".
 package store
 
 import (

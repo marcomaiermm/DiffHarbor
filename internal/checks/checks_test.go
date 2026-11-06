@@ -13,7 +13,8 @@ import (
 )
 
 func TestChecks(t *testing.T) {
-	bin, repo := t.TempDir(), t.TempDir() // fake tools print how they were called
+	sb, repo := sandbox(t)
+	bin := t.TempDir() // fake tools print how they were called
 	for _, tool := range []string{"gitleaks", "shellcheck", "actionlint", "zizmor", "osv-scanner"} {
 		os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\n[ \"$1\" = --version ] && exec cat .ver\necho \"$(basename \"$0\") $*\"\n"), 0o755)
 	}
@@ -29,7 +30,7 @@ printf '[{"file":"m.sql","line":0,"rule_name":"%s","message":"%s lines"}]' "$*" 
 		os.MkdirAll(filepath.Join(repo, filepath.Dir(f)), 0o755)
 		os.WriteFile(filepath.Join(repo, f), []byte("echo repo \"$@\"\n"), 0o644)
 	}
-	out, _ := Run(context.Background(), repo, []Script{{".review/a.sh", "repo.sh"}, {"b.sh", "repo.sh"}}, "", []string{".github/workflows/ci.yml", "a.sh", "web/package.json", "gone.go", "m.sql"}, func(string) bool { return true }, false, nil)
+	out, _ := Run(context.Background(), sb, []Script{{".review/a.sh", "repo.sh"}, {"b.sh", "repo.sh"}}, "", []string{".github/workflows/ci.yml", "a.sh", "web/package.json", "gone.go", "m.sql"}, func(string) bool { return true }, false, nil)
 	for _, want := range []string{
 		"gitleaks dir --no-banner --redact --log-level warn -v a.sh", "shellcheck -f gcc a.sh",
 		"actionlint -no-color .github/workflows/ci.yml", "zizmor -q --offline --format github .github/workflows/ci.yml", "osv-scanner scan source --format table web",
@@ -92,12 +93,12 @@ func TestUnlisted(t *testing.T) {
 		os.WriteFile(filepath.Join(repo, f), []byte(s), 0o644)
 	}
 	output := func(name string, args ...string) string {
-		b, _ := proc.Command(context.Background(), repo, nil, name, args...).CombinedOutput()
+		b, _ := (&proc.Sandbox{}).Command(context.Background(), repo, nil, name, args...).CombinedOutput()
 		return string(b)
 	}
 	output("git", "init", "-q")
 	output("git", "add", ".")
-	got := unlisted(t.Context(), repo, map[string]bool{"ci.yml:2": true, "new.md:1": true}, []string{"ci.yml", "new.md"}, output)
+	got := unlisted(t.Context(), &proc.Sandbox{}, repo, map[string]bool{"ci.yml:2": true, "new.md:1": true}, []string{"ci.yml", "new.md"}, output)
 	if want := "catalog.json:2 names AWS_KEY_ID, AWS_SECRET, CF_TOKEN but not NEW_KEY (added beside them at ci.yml:2)\n" +
 		"docs.md:2 names AWS_KEY_ID, AWS_SECRET, CF_TOKEN but not NEW_KEY (added beside them at ci.yml:2)"; got != want {
 		t.Errorf("unlisted:\n%s", got)
@@ -105,7 +106,8 @@ func TestUnlisted(t *testing.T) {
 }
 
 func TestMonorepoChecks(t *testing.T) {
-	bin, repo := t.TempDir(), t.TempDir() // fake tools print where and how they were called
+	sb, repo := sandbox(t)
+	bin := t.TempDir() // fake tools print where and how they were called
 	for _, tool := range []string{"gofmt", "go", "staticcheck", "oxlint", "fallow", "pnpm"} {
 		os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\n[ \"$1\" = --version ] && exec cat .ver\necho \"$(basename \"$0\") @$(basename \"$PWD\") $*\"\n"), 0o755)
 	}
@@ -126,7 +128,7 @@ func TestMonorepoChecks(t *testing.T) {
 	}
 	patch := filepath.Join(t.TempDir(), "pr.diff")
 	os.WriteFile(patch, []byte("diff --git a/svc/b.go b/svc/b.go\n--- a/svc/b.go\n+++ b/svc/b.go\n@@ -1 +1 @@\n-x\n+package svc\n"), 0o644)
-	out, _ := Run(context.Background(), repo, nil, patch, []string{"svc/cmd/a.go", "svc/b.go", "apps/web/src/a.ts"}, func(f string) bool { return f != "svc/b.go" }, false, nil)
+	out, _ := Run(context.Background(), sb, nil, patch, []string{"svc/cmd/a.go", "svc/b.go", "apps/web/src/a.ts"}, func(f string) bool { return f != "svc/b.go" }, false, nil)
 	for _, want := range []string{
 		"pnpm @" + filepath.Base(repo) + " install", "gofmt @svc -l cmd/a.go b.go", "go @svc vet ./. ./cmd",
 		"go @svc test -json -short -count=1 -timeout=4m ./cmd", "vitest @web related --run --reporter=dot src/a.ts",
@@ -149,7 +151,8 @@ func TestMonorepoChecks(t *testing.T) {
 
 // A bump alone installs and type-checks its whole package: it breaks code it doesn't touch.
 func TestBumpChecks(t *testing.T) {
-	bin, repo := t.TempDir(), t.TempDir() // fake tools print how they were called
+	sb, repo := sandbox(t)
+	bin := t.TempDir() // fake tools print how they were called
 	for _, tool := range []string{"gitleaks", "oxlint", "fallow", "pnpm"} {
 		os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\necho \"$(basename \"$0\") $*\"\n"), 0o755)
 	}
@@ -168,7 +171,7 @@ func TestBumpChecks(t *testing.T) {
 	for line, want := range map[string]bool{"-    \"better-auth\": \"^1.6.3\",\n+    \"better-auth\": \"^1.7.0\",\n": true, "-  \"version\": \"1.0.0\",\n+  \"version\": \"1.1.0\",\n": false} {
 		patch := filepath.Join(t.TempDir(), "pr.diff")
 		os.WriteFile(patch, []byte(head+line), 0o644)
-		out, _ := Run(context.Background(), repo, nil, patch, []string{"apps/web/package.json"}, func(string) bool { return true }, false, nil)
+		out, _ := Run(context.Background(), sb, nil, patch, []string{"apps/web/package.json"}, func(string) bool { return true }, false, nil)
 		got := strings.Contains(out, "pnpm install") && strings.Contains(out, "### tsc --noEmit (whole package: the change bumps its dependencies; errors may predate it) in apps/web/ (paths relative to it)\nsrc/old.ts(3,1): error TS2305")
 		if got != want || strings.Contains(out, "eslint") || strings.Contains(out, "oxlint") {
 			t.Errorf("bump %v:\n%s", want, out)
@@ -187,19 +190,28 @@ func TestFallowSecurity(t *testing.T) {
 	}
 }
 
+// sandbox is a Sandbox on a fresh work dir and its checkout, empty.
+func sandbox(t *testing.T) (*proc.Sandbox, string) {
+	sb := &proc.Sandbox{Dir: t.TempDir()}
+	if err := os.Mkdir(sb.Repo(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return sb, sb.Repo()
+}
+
 func TestCITests(t *testing.T) {
-	repo := t.TempDir()
+	sb, repo := sandbox(t)
 	wf := filepath.Join(repo, ".github", "workflows")
 	os.MkdirAll(wf, 0o755)
 	write := func(name, y string) { os.WriteFile(filepath.Join(wf, name), []byte(y), 0o644) }
 	write("lint.yml", "on: [push, pull_request]\njobs:\n  lint:\n    steps:\n      - run: pnpm lint # pnpm test once it is fast\n#      - run: go test ./...\n")
 	write("nightly.yml", "on:\n  schedule:\n    - cron: '0 3 * * *'\n  workflow_dispatch:\n    inputs:\n      push-image: {}\njobs:\n  t:\n    steps:\n      - run: go test ./...\n")
 	write("tests.yml", "on: workflow_call\njobs:\n  check:\n    steps:\n      - run: |\n          pnpm test:unit --run\n")
-	if got := CITests(t.Context(), repo); got != "" {
+	if got := CITests(t.Context(), sb); got != "" {
 		t.Fatalf("lint, a commented test, nightly tests and a workflow no pull request calls: %q", got)
 	}
 	write("pr.yml", "\"on\":\n  push:\n    branches: [main]\n\n  pull_request:\njobs:\n  tests:\n    uses: ./.github/workflows/tests.yml\n")
-	if got := CITests(t.Context(), repo); got != "pr.yml" {
+	if got := CITests(t.Context(), sb); got != "pr.yml" {
 		t.Fatalf("pull requests run tests.yml: %q", got)
 	}
 	for _, run := range []string{"pnpm run test", "pnpm -r test", "pnpm --filter web run test:unit", "npm test -- --run", "turbo run test", "nx affected -t test"} {
@@ -229,13 +241,13 @@ func TestInstallScripts(t *testing.T) {
 		{"yarn.lock", "", "yarn install --immutable --silent --ignore-scripts", "yarn install --immutable --silent"}, // unknown: the flag
 		{"yarn.lock", "! Corepack is about to download yarn\n4.9.2\n", "yarn install --immutable --silent --mode=skip-build", "yarn install --immutable --silent"},
 	} {
-		repo := t.TempDir()
+		sb, repo := sandbox(t)
 		os.WriteFile(filepath.Join(repo, "package.json"), []byte("{}"), 0o644)
 		os.WriteFile(filepath.Join(repo, "a.ts"), nil, 0o644)
 		os.WriteFile(filepath.Join(repo, c.lock), nil, 0o644)
 		os.WriteFile(filepath.Join(repo, ".ver"), []byte(c.version), 0o644)
 		for scripts, want := range map[bool]string{false: c.off, true: c.on} {
-			out, _ := Run(context.Background(), repo, nil, "", []string{"a.ts"}, func(string) bool { return false }, scripts, nil)
+			out, _ := Run(context.Background(), sb, nil, "", []string{"a.ts"}, func(string) bool { return false }, scripts, nil)
 			if !strings.Contains(out, "\n"+want+"\n") {
 				t.Errorf("%s (%q) with scripts=%v, want %q in:\n%s", c.lock, c.version, scripts, want, out)
 			}

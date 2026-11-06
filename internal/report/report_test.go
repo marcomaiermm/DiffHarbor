@@ -3,7 +3,9 @@ package report
 import (
 	"diffharbor/internal/checks"
 	"diffharbor/internal/diff"
+	"diffharbor/internal/proc"
 	"diffharbor/internal/review"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -299,8 +301,18 @@ func TestCut(t *testing.T) {
 	}
 }
 
+// sandbox is a Sandbox on a fresh work dir and its checkout, empty.
+func sandbox(t *testing.T) (*proc.Sandbox, string) {
+	sb := &proc.Sandbox{Dir: t.TempDir()}
+	if err := errors.Join(os.Mkdir(sb.Repo(), 0o755), sb.Pin()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sb.Close)
+	return sb, sb.Repo()
+}
+
 func TestSymbols(t *testing.T) {
-	dir := t.TempDir()
+	sb, dir := sandbox(t)
 	write := func(p, s string) {
 		if err := os.WriteFile(filepath.Join(dir, p), []byte(s), 0o600); err != nil {
 			t.Fatal(err)
@@ -309,7 +321,7 @@ func TestSymbols(t *testing.T) {
 	write("a.go", "package a\n\n// Limit caps it.\nconst Limit = 3\n\ntype T struct {\n\tCount int // how many\n}\n\nfunc Use() int { return Limit }\n\nfunc Show(t T) int {\n\treturn t.Count + f().Limit\n}\n")
 	write("c.go", "package a\n\ntype Rec struct {\n\tID      string `json:\"id\"`\n\tCreated int    `json:\"c\"`\n}\n")
 	write("b.ts", "/** Greets. */\nexport function greet(n: string) {\n  return n\n}\ngreet(\"x\")\n")
-	s := Symbols(dir, "+x := a.Limit + t.Count + Show(t)\n+greet(y)\n+Rec{}\n")
+	s := Symbols(sb, "+x := a.Limit + t.Count + Show(t)\n+greet(y)\n+Rec{}\n")
 	l := s["Limit"]
 	if len(l) != 1 || l[0].Sig != "const Limit = 3" || l[0].Doc != "Limit caps it." || l[0].Uses != 2 || l[0].Refs[0].In != "Use" || l[0].Kind != "constant" || l[0].Unit != "package" {
 		t.Errorf("Limit %+v", l)
@@ -571,7 +583,7 @@ func TestCodegraph(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("no node")
 	}
-	dir := t.TempDir()
+	sb, dir := sandbox(t)
 	src := "package a\n\nconst Max = 2\n\nfunc Save() {}\n\nfunc Handle() {\n\tSave()\n\t_ = Max\n}\n"
 	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte(src), 0o600); err != nil {
 		t.Fatal(err)
@@ -593,7 +605,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 		t.Fatal(err, string(out))
 	}
 	use := Ref{Path: "b.go", Line: 3, In: "Use", Text: "func Use() { Save() }"}
-	s := Symbols(dir, "+++ b/a.go\n+\tSave()\n+\t_ = Max\n+func Handle() {\n")
+	s := Symbols(sb, "+++ b/a.go\n+\tSave()\n+\t_ = Max\n+func Handle() {\n")
 	want := Symbol{
 		Kind: "function", Pkg: "a", Unit: "package", Sig: "func Save()", Path: "a.go", Line: 5, From: 5, To: 5, Uses: 2, Files: 2, Exact: true,
 		Refs: []Ref{{Path: "a.go", Line: 8, In: "Handle", Text: "Save()"}, use}, Here: []string{"a.go:8"},
@@ -903,7 +915,7 @@ func TestWalk(t *testing.T) {
 			t.Skip("no " + tool)
 		}
 	}
-	dir := t.TempDir()
+	sb, dir := sandbox(t)
 	for p, src := range map[string]string{
 		"a.go":      "package a\n\nfunc Save() { helper() }\n\nfunc helper() {}\n\nfunc Lonely() {}\n\nfunc Hidden() {}\n",
 		"a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestSave(t *testing.T) { Save() }\n",
@@ -935,7 +947,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 			t.Fatal(err, string(out))
 		}
 	}
-	s := Symbols(dir, "+++ b/a.go\n+func Save() { helper() }\n+func helper() {}\n+func Lonely() {}\n+func Hidden() {}\n+++ b/lib.rs\n+pub fn wrap() -> i32 { 1 }\n")
+	s := Symbols(sb, "+++ b/a.go\n+func Save() { helper() }\n+func helper() {}\n+func Lonely() {}\n+func Hidden() {}\n+++ b/lib.rs\n+pub fn wrap() -> i32 { 1 }\n")
 	for name, want := range map[string]struct {
 		tests    []string
 		untested bool
@@ -1070,8 +1082,23 @@ func TestStepTests(t *testing.T) {
 }
 
 // The text of a changed file goes with it for the lines between hunks, once and quoted; a new file has none to show.
+// A check that swaps the checkout for a symlink doesn't move root's reads: Sources reads the checkout pinned before.
+func TestSourcesPinned(t *testing.T) {
+	sb, dir := sandbox(t)
+	out := t.TempDir()
+	err := errors.Join(os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n"), 0o644),
+		os.WriteFile(filepath.Join(out, "a.go"), []byte("secret\n"), 0o644),
+		os.Rename(dir, dir+".old"), os.Symlink(out, dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src := Sources(sb, "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-x\n+package a\n"); src["a.go"] != "package a\n" {
+		t.Fatalf("sources %v", src)
+	}
+}
+
 func TestSources(t *testing.T) {
-	dir := t.TempDir()
+	sb, dir := sandbox(t)
 	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n\n// </script> stays text\nfunc A() {}\n"), 0o644)
 	d := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -4 +4 @@\n-func A() { }\n+func A() {}\n" +
 		"diff --git a/b.go b/b.go\nnew file mode 100644\n--- /dev/null\n+++ b/b.go\n@@ -0,0 +1 @@\n+package a\n"
@@ -1080,10 +1107,12 @@ func TestSources(t *testing.T) {
 	os.WriteFile(filepath.Join(out, "secret"), []byte("no"), 0o644)
 	os.Symlink(filepath.Join(out, "secret"), filepath.Join(dir, "c.go"))
 	os.Symlink(out, filepath.Join(dir, "d"))
+	os.Symlink("a.go", filepath.Join(dir, "e.go")) // in the checkout: still a link, not a.go's text
 	d += "diff --git a/c.go b/c.go\nnew file mode 120000\n--- /dev/null\n+++ b/c.go\n@@ -0,0 +1 @@\n+x\n" +
-		"diff --git a/d/secret b/d/secret\n--- a/d/secret\n+++ b/d/secret\n@@ -1 +1 @@\n-n\n+no\n"
-	src := Sources(dir, d)
-	if len(src) != 2 || src["c.go"] != "" || src["d/secret"] != "" {
+		"diff --git a/d/secret b/d/secret\n--- a/d/secret\n+++ b/d/secret\n@@ -1 +1 @@\n-n\n+no\n" +
+		"diff --git a/e.go b/e.go\n--- a/e.go\n+++ b/e.go\n@@ -1 +1 @@\n-b.go\n+a.go\n"
+	src := Sources(sb, d)
+	if len(src) != 2 || src["c.go"] != "" || src["d/secret"] != "" || src["e.go"] != "" {
 		t.Fatalf("sources %v", src)
 	}
 	b, _, err := Render(Data{Repo: "o/r", Number: 1, SHA: "abc", Diff: d, Sources: src})
