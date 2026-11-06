@@ -347,7 +347,9 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 				return nil
 			}
 		}
-		if large, profile, ok := reviewCommand(bare); ok || ticked {
+		// "review again and check …" asks for a review too: answered as a question it posts no findings
+		first, _, _ := strings.Cut(bare, " ")
+		if large, profile, ok := reviewCommand(bare); ok || ticked || first == "review" {
 			e.Action = "manual" // anything but synchronize: full review
 			if large || ticked {
 				e.Action = "large"

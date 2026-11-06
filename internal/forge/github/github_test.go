@@ -223,7 +223,8 @@ func TestThreadsOurs(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		node := func(id, typ, login string) string {
 			return `{"id":"` + id + `","comments":{"nodes":[{"databaseId":1,"path":"a.go","line":1,"body":"x ` + forge.Mark +
-				`","author":{"__typename":"` + typ + `","login":"` + login + `"}}]}}`
+				`","author":{"__typename":"` + typ + `","login":"` + login + `"}}]},"replies":{"nodes":[{"databaseId":1,"body":"x"},` +
+				`{"databaseId":2,"body":"won't split","author":{"login":"kev"}}]}}`
 		}
 		fmt.Fprint(w, `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[`+node("ours", "Bot", "app")+","+
 			node("copy", "User", "app")+","+node("other", "Bot", "else")+`]}}}}}`)
@@ -231,8 +232,8 @@ func TestThreadsOurs(t *testing.T) {
 	defer srv.Close()
 	APIURL, Slug = srv.URL, "app"
 	ts, err := Threads("o/r", 1, "t")
-	if err != nil || len(ts) != 1 || ts[0].ID != "ours" {
-		t.Fatalf("threads %v %v", ts, err)
+	if err != nil || len(ts) != 1 || ts[0].ID != "ours" || ts[0].Replies != "\n\n**@kev**: won't split" { // the first comment once
+		t.Fatalf("threads %+v %v", ts, err)
 	}
 }
 

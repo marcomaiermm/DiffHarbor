@@ -509,3 +509,18 @@ func TestPostFolded(t *testing.T) {
 		t.Fatalf("post: %d %v %v\n%s", n, err, f.drafts, f.summary())
 	}
 }
+
+// A resolved thread keeps the maintainer's answer, so a declined point isn't reported again; system notes stay out.
+func TestThreadsReplies(t *testing.T) {
+	serve(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `[{"id":"d1","notes":[{"id":1,"body":"finding","resolved":true,"author":{"username":"review-bot"},"position":{"new_path":"a.ts","new_line":3}},`+
+			`{"id":2,"body":"changed this line","system":true},{"id":3,"body":"won't split","author":{"username":"kev"}}]}]`)
+	})
+	e := &forge.Event{Forge: "gitlab"}
+	e.Repository.ID, e.PullRequest.Number = 5, 3
+	p, _ := (&Hub{}).Open(e)
+	ts, err := p.Threads()
+	if err != nil || len(ts) != 1 || !ts[0].Resolved || ts[0].Replies != "\n\n**@kev**: won't split" {
+		t.Fatalf("%+v %v", ts, err)
+	}
+}

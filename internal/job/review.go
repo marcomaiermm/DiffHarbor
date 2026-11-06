@@ -179,7 +179,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			continue
 		}
 		c := review.Comment{Path: t.Path, Line: cmp.Or(t.Line, t.Original), Body: text.Truncate(strings.ReplaceAll(forge.Redact(t.Body), forge.Mark, ""), 600)}
-		if t.Resolved {
+		if t.Resolved { // with the replies: a point declined there would come back as a new finding
+			c.Body += t.Replies
 			closed = append(closed, c)
 		} else {
 			open = append(open, t)
