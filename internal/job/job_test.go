@@ -405,9 +405,9 @@ func TestReviewCommand(t *testing.T) {
 	for cmd, want := range map[string]got{
 		"review": {ok: true}, "full review": {ok: true}, "review all": {true, "", true},
 		"review quiet": {false, "quiet", true}, "review all assertive": {true, "assertive", true}, "review chill all": {true, "chill", true},
-		"review loud": {}, "reviewer?": {}, "what is a review": {}, "reviews": {},
+		"review loud": {ok: true}, "review again and check x": {ok: true}, "review all and x": {ok: true}, "review\u00a0quiet": {false, "quiet", true}, "reviewer?": {}, "what is a review": {}, "reviews": {},
 		"review: quiet": {false, "quiet", true}, "review, all, chill": {true, "chill", true}, "review\tquiet": {false, "quiet", true},
-		"review quiet chill": {}, "review quiet quiet": {}, // a second profile: no command, a question
+		"review quiet chill": {}, "review quiet quiet": {}, "review again, quiet": {}, // a second profile, or one in prose: a question
 	} {
 		large, profile, ok := reviewCommand(cmd)
 		if g := (got{large, profile, ok}); g != want {
@@ -494,6 +494,11 @@ func TestBodyProfile(t *testing.T) {
 		"- [ ] a\n    - [x] review: quiet":             "quiet", // a nested list item
 		"- item\n\n      - [x] review: quiet":          "",      // code in a list item
 		"- item\n\n  - [x] review: quiet":              "quiet",
+		"    <!--\n\nreview: quiet":                    "quiet", // a comment marker in indented code is code
+		"- a\n\n      <!--\n\nreview: quiet":           "quiet",
+		">     <!--\n\nreview: quiet":                  "quiet",
+		"> ```\nreview: quiet":                         "quiet", // a quoted fence ends with the quote
+		"> ```\n> review: quiet":                       "",
 		">     review: quiet":                          "", // code in a blockquote
 		">\n> review: quiet":                           "quiet",
 		"- ```\n  review: quiet\n  ```\nreview: chill": "chill", // a fence in a list item

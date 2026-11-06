@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 const chatSystem = `You reviewed this pull request; a maintainer now asks or replies. Repo = cwd at the PR head: check the code with tools before answering.
@@ -226,24 +227,28 @@ func Seen(f forge.Forge, e *forge.Event) {
 }
 
 // reviewCommand reads `review [all] [profile]` (or `full review …`), the words after review in any order, apart
-// by spaces, commas or a colon ("review: quiet", as in a description); ok is false for any other comment.
+// by spaces, commas or a colon ("review: quiet", as in a description). Other words ask for a plain full review
+// ("review again and check …"), unless the comment names a profile: then, like a second profile, it is a question.
+// ok is false for a comment that doesn't start with review.
 func reviewCommand(cmd string) (large bool, profile string, ok bool) {
 	rest, found := strings.CutPrefix(cmd, "full review")
 	if !found {
 		rest, found = strings.CutPrefix(cmd, "review")
 	}
 	sep := func(r rune) bool { return unicode.IsSpace(r) || r == ',' || r == ':' }
-	if !found || rest != "" && !sep(rune(rest[0])) {
+	if r, _ := utf8.DecodeRuneInString(rest); !found || rest != "" && !sep(r) {
 		return false, "", false
 	}
-	for _, w := range strings.FieldsFunc(rest, sep) {
+	ws := strings.FieldsFunc(rest, sep)
+	named := func(w string) bool { return slices.Contains(review.Profiles, w) }
+	for _, w := range ws {
 		switch {
 		case w == "all":
 			large = true
-		case slices.Contains(review.Profiles, w) && profile == "":
+		case named(w) && profile == "":
 			profile = w
-		default: // another word or a second profile: a question, not a command
-			return false, "", false
+		default:
+			return false, "", !slices.ContainsFunc(ws, named)
 		}
 	}
 	return large, profile, true
@@ -264,15 +269,22 @@ var (
 // ponytail: a line scan, not a Markdown parser; lazy continuations and nested quotes are guesses.
 func visible(body string) string {
 	var out strings.Builder
-	fence := "" // the open fence's backticks or tildes
+	fence, fenceQ := "", 0 // the open fence's backticks or tildes; fenceQ > 0: in a blockquote, it ends with it
 	comment, code, blank := false, false, true
 	col := 0 // where the last list item's text starts, 0 outside a list
 	for l := range strings.Lines(body) {
-		if fence != "" { // code: no comment starts in it
+		l = strings.TrimRight(l, "\r\n")
+		q := len(quoteRe.FindString(l))
+		if fence != "" && (fenceQ == 0 || q > 0) { // code: no comment starts in it
 			if m := fenceRe.FindStringSubmatch(l); m != nil && m[1][0] == fence[0] && len(m[1]) >= len(fence) && strings.TrimSpace(l[len(m[0]):]) == "" {
 				fence = ""
 			}
 			continue
+		}
+		fence = ""
+		if !comment && strings.TrimSpace(l[q:]) != "" && (code || blank) && indent(l[q:]) >= col+4 {
+			code, blank = true, false
+			continue // indented code: a comment marker in it is text too
 		}
 		var v strings.Builder // l without HTML comments, which may span lines
 		for l != "" {
@@ -285,37 +297,42 @@ func visible(body string) string {
 			v.WriteString(before)
 			l, comment = after, ok
 		}
-		line := strings.TrimRight(v.String(), "\r\n")
-		q := len(quoteRe.FindString(line))
-		w := 0 // the line's indent inside its blockquotes, a tab 4 columns
-		for _, r := range line[q:] {
-			if r == '\t' {
-				w += 3
-			} else if r != ' ' {
-				break
-			}
-			w++
-		}
+		line := v.String()
+		q = len(quoteRe.FindString(line))
 		if strings.TrimSpace(line[q:]) == "" {
 			blank = true
 			continue
 		}
-		if code = (code || blank) && w >= col+4; !code {
-			switch item := listRe.FindStringIndex(line); {
-			case item != nil:
-				col = item[1] - q
-			case w < col: // past the list
-				col = 0
-			}
-			if m := fenceRe.FindStringSubmatch(line); m != nil {
-				fence = m[1]
-			} else {
-				out.WriteString(line + "\n")
-			}
+		code, blank = false, false
+		switch item := listRe.FindStringIndex(line); {
+		case item != nil:
+			col = item[1] - q
+		case indent(line[q:]) < col: // past the list
+			col = 0
 		}
-		blank = false
+		if m := fenceRe.FindStringSubmatch(line); m != nil {
+			fence, fenceQ = m[1], q
+		} else {
+			out.WriteString(line + "\n")
+		}
 	}
 	return out.String()
+}
+
+// indent is s's leading whitespace in columns, a tab 4.
+func indent(s string) int {
+	w := 0
+	for _, r := range s {
+		switch r {
+		case ' ':
+			w++
+		case '\t':
+			w += 4
+		default:
+			return w
+		}
+	}
+	return w
 }
 
 // bodyProfile is the profile a PR description names on a line of its own, "review: quiet", by hand or as a ticked
@@ -363,8 +380,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			}
 		}
 		// "review again and check …" asks for a review too: answered as a question it posts no findings
-		first, _, _ := strings.Cut(bare, " ")
-		if large, profile, ok := reviewCommand(bare); ok || ticked || first == "review" {
+		if large, profile, ok := reviewCommand(bare); ok || ticked {
 			e.Action = "manual" // anything but synchronize: full review
 			if large || ticked {
 				e.Action = "large"
