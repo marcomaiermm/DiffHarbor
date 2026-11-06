@@ -98,11 +98,15 @@ func repoOf(e *forge.Event) string {
 type pool struct {
 	mu sync.Mutex
 	s  *scheduler
-	// The running jobs by PR, at most one each: a repo's jobs run one at a time. Closing the PR stops its job, a newer
+	// The running jobs by repo and PR (runKey), at most one each: a repo's jobs run one at a time. Closing the PR stops its job, a newer
 	// push stops its review: no tokens on a dead head. The context reaches every git, check and Pi call of the job.
 	running map[string]*task
 	run     func(context.Context, *forge.Event) error // runJob, a fake in tests
 }
+
+// runKey is e's job in running: its repo (repoOf) too, as a repo recreated under the old name may run beside the
+// old one's job.
+func runKey(repo string, e *forge.Event) string { return repo + " " + e.Key() }
 
 // newPool runs up to limit jobs at once, at least one, and queues up to 100 more.
 func newPool(limit int, run func(context.Context, *forge.Event) error) *pool {
@@ -124,7 +128,7 @@ func (p *pool) add(e *forge.Event) bool {
 		if known && sha != e.PullRequest.Head.SHA {
 			return true
 		}
-		if t := p.running[key]; t != nil && t.review {
+		if t := p.running[runKey(repo, e)]; t != nil && t.review {
 			log.Println(key, "stopping the running review")
 			t.cancel()
 		}
@@ -140,9 +144,9 @@ func (p *pool) start() {
 	for repo, e, ok := p.s.next(); ok; repo, e, ok = p.s.next() {
 		ctx, cancel := context.WithCancel(context.Background())
 		t := &task{review: e.Kind == "pull_request", cancel: cancel}
-		p.running[e.Key()] = t
+		p.running[runKey(repo, e)] = t
 		go func() {
-			p.exec(ctx, e, t)
+			p.exec(ctx, runKey(repo, e), e, t)
 			p.mu.Lock()
 			defer p.mu.Unlock()
 			p.s.free(repo)
@@ -151,16 +155,16 @@ func (p *pool) start() {
 	}
 }
 
-// exec runs e's job, t in running. A panic ends only this job, as a failed one: done drops its pending review, so a
+// exec runs e's job, t in running at rk. A panic ends only this job, as a failed one: done drops its pending review, so a
 // restart doesn't run into it again.
-func (p *pool) exec(ctx context.Context, e *forge.Event, t *task) {
+func (p *pool) exec(ctx context.Context, rk string, e *forge.Event, t *task) {
 	key := e.Key()
 	defer func() {
 		t.cancel() // revokes the job's vault tokens: git's remote, Pi's keys
 		done(key)
 		p.mu.Lock()
-		if p.running[key] == t {
-			delete(p.running, key)
+		if p.running[rk] == t {
+			delete(p.running, rk)
 		}
 		p.mu.Unlock()
 	}()
@@ -193,12 +197,13 @@ func drop(e *forge.Event) error {
 	return nil
 }
 
-// stop cancels the running job on key, a review or an answer: the PR was closed.
-func (p *pool) stop(key string) {
+// stop cancels e's PR's running job, a review or an answer: the PR was closed.
+func (p *pool) stop(e *forge.Event) {
+	rk := runKey(repoOf(e), e)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if t := p.running[key]; t != nil {
-		log.Println(key, "stopping the running job")
+	if t := p.running[rk]; t != nil {
+		log.Println(e.Key(), "stopping the running job")
 		t.cancel()
 	}
 }
@@ -287,7 +292,7 @@ func Serve(cfg Config) {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			jobs.stop(e.Key())
+			jobs.stop(e)
 		case e.Kind == "pull_request" && actions[e.Action]:
 			latest.Lock()
 			latest.m[e.Key()] = e.PullRequest.Head.SHA

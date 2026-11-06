@@ -5,6 +5,7 @@ import (
 	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/review"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -303,9 +304,10 @@ func TestCut(t *testing.T) {
 // sandbox is a Sandbox on a fresh work dir and its checkout, empty.
 func sandbox(t *testing.T) (*proc.Sandbox, string) {
 	sb := &proc.Sandbox{Dir: t.TempDir()}
-	if err := os.Mkdir(sb.Repo(), 0o755); err != nil {
+	if err := errors.Join(os.Mkdir(sb.Repo(), 0o755), sb.Pin()); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(sb.Close)
 	return sb, sb.Repo()
 }
 
@@ -1080,8 +1082,23 @@ func TestStepTests(t *testing.T) {
 }
 
 // The text of a changed file goes with it for the lines between hunks, once and quoted; a new file has none to show.
+// A check that swaps the checkout for a symlink doesn't move root's reads: Sources reads the checkout pinned before.
+func TestSourcesPinned(t *testing.T) {
+	sb, dir := sandbox(t)
+	out := t.TempDir()
+	err := errors.Join(os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n"), 0o644),
+		os.WriteFile(filepath.Join(out, "a.go"), []byte("secret\n"), 0o644),
+		os.Rename(dir, dir+".old"), os.Symlink(out, dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src := Sources(sb, "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-x\n+package a\n"); src["a.go"] != "package a\n" {
+		t.Fatalf("sources %v", src)
+	}
+}
+
 func TestSources(t *testing.T) {
-	dir := t.TempDir()
+	sb, dir := sandbox(t)
 	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n\n// </script> stays text\nfunc A() {}\n"), 0o644)
 	d := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -4 +4 @@\n-func A() { }\n+func A() {}\n" +
 		"diff --git a/b.go b/b.go\nnew file mode 100644\n--- /dev/null\n+++ b/b.go\n@@ -0,0 +1 @@\n+package a\n"
@@ -1094,7 +1111,7 @@ func TestSources(t *testing.T) {
 	d += "diff --git a/c.go b/c.go\nnew file mode 120000\n--- /dev/null\n+++ b/c.go\n@@ -0,0 +1 @@\n+x\n" +
 		"diff --git a/d/secret b/d/secret\n--- a/d/secret\n+++ b/d/secret\n@@ -1 +1 @@\n-n\n+no\n" +
 		"diff --git a/e.go b/e.go\n--- a/e.go\n+++ b/e.go\n@@ -1 +1 @@\n-b.go\n+a.go\n"
-	src := Sources(dir, d)
+	src := Sources(sb, d)
 	if len(src) != 2 || src["c.go"] != "" || src["d/secret"] != "" || src["e.go"] != "" {
 		t.Fatalf("sources %v", src)
 	}

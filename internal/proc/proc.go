@@ -54,6 +54,7 @@ type Sandbox struct {
 	Dir       string // the work dir: the checkout in Dir/repo, Pi's sessions, the checks' configs
 	uid       uint32
 	home, tmp string
+	pin       *os.Root // the checkout, from before the job's code ran (Pin)
 }
 
 // jobUser reports whether uid runs PR code: a repo's user, or node (dry runs, and every job before a uid per repo).
@@ -110,6 +111,24 @@ func (s *Sandbox) Home() string { return s.home }
 
 // Repo is the job's checkout.
 func (s *Sandbox) Repo() string { return filepath.Join(s.Dir, "repo") }
+
+// Pin opens the checkout for root's reads (Checkout): code of the job that swaps Repo for a symlink to / later
+// doesn't move them. Call it before that code runs.
+func (s *Sandbox) Pin() error {
+	r, err := os.OpenRoot(s.Repo())
+	if err == nil {
+		s.pin = r
+	}
+	return err
+}
+
+// Pinned is the checkout Pin opened, its symlinks kept inside it, for the caller to close.
+func (s *Sandbox) Pinned() (*os.Root, error) {
+	if s.pin == nil {
+		return nil, errors.New("checkout not pinned")
+	}
+	return s.pin.OpenRoot(".")
+}
 
 // Run returns stdout; errors carry stderr but never the args.
 func Run(c *exec.Cmd) ([]byte, error) {
@@ -188,6 +207,9 @@ func Workspace(repo string) (*Sandbox, error) {
 // Close ends the job: its user's processes die and its files in the shared temp dirs and Dir go, so none reaches a
 // job of another repo. When that fails no other job starts until a retry gets through (Workspace).
 func (s *Sandbox) Close() {
+	if s.pin != nil {
+		s.pin.Close()
+	}
 	if err := clean(s.uid); err != nil {
 		log.Print(err)
 	}
@@ -478,6 +500,7 @@ func clearUsers(of func(uid int) bool) error {
 // cleanTmp removes what the users whose uid is of left in dirs, also inside a dir root or the image made
 // world-writable (/tmp/.X11-unix): the next job's code would find it.
 func cleanTmp(of func(uid int) bool, dirs ...string) error {
+	cache, _ := os.Stat(CacheDir) // in /tmp by default: the users' caches stay, workDir in it is one of dirs
 	for _, dir := range dirs {
 		r, err := os.OpenRoot(dir) // a dir swapped for a symlink leads nowhere outside dir
 		if errors.Is(err, os.ErrNotExist) {
@@ -485,7 +508,7 @@ func cleanTmp(of func(uid int) bool, dirs ...string) error {
 		} else if err != nil { // what is left there would reach the next job
 			return err
 		}
-		err = cleanIn(r, of, 0)
+		err = cleanIn(r, of, cache, 0)
 		r.Close()
 		if err != nil {
 			return err
@@ -494,7 +517,7 @@ func cleanTmp(of func(uid int) bool, dirs ...string) error {
 	return nil
 }
 
-func cleanIn(r *os.Root, of func(uid int) bool, depth int) error {
+func cleanIn(r *os.Root, of func(uid int) bool, cache os.FileInfo, depth int) error {
 	f, err := r.Open(".")
 	if err != nil {
 		return err
@@ -510,6 +533,7 @@ func cleanIn(r *os.Root, of func(uid int) bool, depth int) error {
 		case errors.Is(err, os.ErrNotExist): // gone since
 		case err != nil:
 			return err
+		case cache != nil && os.SameFile(fi, cache):
 		case of(owner(fi)):
 			if err := r.RemoveAll(d.Name()); err != nil { // as root: past a user's chmod 000, and never through a symlink
 				return err
@@ -522,7 +546,7 @@ func cleanIn(r *os.Root, of func(uid int) bool, depth int) error {
 			} else if err != nil {
 				return err
 			}
-			err = cleanIn(sub, of, depth+1)
+			err = cleanIn(sub, of, cache, depth+1)
 			sub.Close()
 			if err != nil {
 				return err

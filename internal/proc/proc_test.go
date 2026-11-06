@@ -343,3 +343,18 @@ func TestCleanTmpNested(t *testing.T) {
 		t.Fatal(err, Exists(f), Exists(shared))
 	}
 }
+
+// CacheDir in a temp dir isn't a job's leftover: the users' caches stay.
+func TestCleanTmpKeepsCache(t *testing.T) {
+	dir, me := t.TempDir(), os.Getuid()
+	old := CacheDir
+	CacheDir = filepath.Join(dir, "cache")
+	t.Cleanup(func() { CacheDir = old })
+	left := filepath.Join(dir, "left")
+	if err := errors.Join(os.Mkdir(CacheDir, 0o700), os.WriteFile(left, nil, 0o600)); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanTmp(func(uid int) bool { return uid == me }, dir); err != nil || Exists(left) || !Exists(CacheDir) {
+		t.Fatal(err, Exists(left), Exists(CacheDir))
+	}
+}

@@ -11,7 +11,6 @@ import (
 	"go/printer"
 	"go/token"
 	"io/fs"
-	"os"
 	"path"
 	"regexp"
 	"strings"
@@ -93,7 +92,6 @@ var (
 // by the line that declares them) and who names them: codegraph's resolved edges where the review indexed the
 // checkout, else the lines that name them, by name. The index's queries run in sb, as the repo's user.
 func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
-	repo := sb.Repo()
 	wanted := map[string]bool{}
 	for l := range strings.SplitSeq(diffText, "\n") {
 		if strings.HasPrefix(l, "@@") { // the declaration a hunk is in
@@ -108,7 +106,7 @@ func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
 	syms := map[string][]Symbol{}
 	ms := mentions{refs: map[string][]Ref{}, uses: map[string]int{}, files: map[string]map[string]bool{}}
 	n := 0
-	root, err := os.OpenRoot(repo) // as root, in the PR's checkout: its symlinks don't reach out of it
+	root, err := sb.Pinned() // as root, in the PR's checkout: its symlinks don't reach out of it
 	if err != nil {
 		return syms
 	}
@@ -123,7 +121,7 @@ func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
 			}
 			return nil
 		}
-		if !codeExt[path.Ext(rel)] || n >= maxFiles {
+		if d.Type()&fs.ModeSymlink != 0 || !codeExt[path.Ext(rel)] || n >= maxFiles { // a link: its target's counted
 			return nil
 		}
 		src, err := diff.ReadIn(root, rel, maxSize)
@@ -159,13 +157,13 @@ func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
 		}
 	}
 	paths := diff.Paths(diffText)
-	if idx := codegraph(sb, repo, wanted, paths); idx != nil {
+	if idx := codegraph(sb, sb.Repo(), wanted, paths); idx != nil {
 		changed := map[string]bool{}
 		for _, p := range paths {
 			changed[p] = true
 		}
-		idx.exact(repo, changed, syms)
-		idx.tests(sb, repo, changed, syms)
+		idx.exact(root, changed, syms)
+		idx.tests(sb, root, changed, syms)
 	}
 	return syms
 }

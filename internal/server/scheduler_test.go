@@ -86,19 +86,22 @@ func TestSchedulerTurns(t *testing.T) {
 	}
 }
 
-// Answers go before reviews within a repo, each in order; a drop is a review's kind and keeps its place.
+// Answers go before reviews within a repo, each in order; not before a close queued earlier: later comments don't
+// hold up its delete.
 func TestSchedulerAnswersFirst(t *testing.T) {
 	s := newScheduler(1, 100)
 	closed := ev("a", 3, "")
 	closed.Action = "closed"
-	queued(s, ev("a", 1, ""), ev("a", 1, "issue_comment"), closed, ev("a", 2, "pull_request_review_comment"))
+	queued(s, ev("a", 1, ""), ev("a", 1, "issue_comment"), closed, ev("a", 5, ""),
+		ev("a", 2, "pull_request_review_comment"), ev("a", 4, "issue_comment"))
 	var got []string
-	for range 4 {
+	for range 6 {
 		_, e, _ := s.next()
 		got = append(got, e.Kind+" "+e.Key())
 		s.free("a")
 	}
-	want := []string{"issue_comment a#1", "pull_request_review_comment a#2", "pull_request a#1", "pull_request a#3"}
+	want := []string{"issue_comment a#1", "pull_request a#1", "pull_request a#3", "pull_request_review_comment a#2",
+		"issue_comment a#4", "pull_request a#5"}
 	if !slices.Equal(got, want) {
 		t.Fatal(got)
 	}

@@ -108,7 +108,7 @@ func runNode(sb *proc.Sandbox, script string, in, out any) bool {
 // exact replaces what the name scan guessed with the index's resolved edges, for the declarations the index knows:
 // its lines (From, To), who names one (Refs, Uses, Files; Here, the lines of the diff's files; Outside, those of
 // the others), what it names (Calls). Those it doesn't know, a Go struct's fields, keep the scan's.
-func (idx *cgIndex) exact(repo string, changed map[string]bool, syms map[string][]Symbol) {
+func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[string][]Symbol) {
 	type key struct{ path, name string }
 	at := map[key][]*Symbol{}
 	for name, ss := range syms {
@@ -139,7 +139,7 @@ func (idx *cgIndex) exact(repo string, changed map[string]bool, syms map[string]
 			s.From, s.To = n.Line, n.End
 		}
 	}
-	lines := sources(repo)
+	lines := sources(root)
 	for _, e := range idx.Edges {
 		in := e.SName
 		if e.SKind == "file" {
@@ -374,7 +374,7 @@ process.stdout.write(JSON.stringify(out));
 
 // tests sets the Tests, Partial, Untested and Ways of the diff's declarations in the index: see cgTests. Without git or
 // node, or past a minute, none: no test listed, and no claim that none reaches.
-func (idx *cgIndex) tests(sb *proc.Sandbox, repo string, changed map[string]bool, syms map[string][]Symbol) {
+func (idx *cgIndex) tests(sb *proc.Sandbox, root *os.Root, changed map[string]bool, syms map[string][]Symbol) {
 	type start struct {
 		Path string `json:"path"`
 		Name string `json:"name"`
@@ -394,10 +394,10 @@ func (idx *cgIndex) tests(sb *proc.Sandbox, repo string, changed map[string]bool
 		Partial, Untested bool
 		Ways              []Way
 	}
-	if len(starts) == 0 || !runNode(sb, cgTests, map[string]any{"repo": repo, "dbs": idx.dbs, "starts": starts}, &got) {
+	if len(starts) == 0 || !runNode(sb, cgTests, map[string]any{"repo": sb.Repo(), "dbs": idx.dbs, "starts": starts}, &got) {
 		return
 	}
-	lines := sources(repo)
+	lines := sources(root)
 	for _, g := range got {
 		for _, w := range g.Ways {
 			for i, h := range w.Chain {
@@ -433,7 +433,7 @@ func (idx *cgIndex) tests(sb *proc.Sandbox, repo string, changed map[string]bool
 
 // files is the checkout's files by line, read when first asked.
 type files struct {
-	repo string
+	root *os.Root // the PR's symlinks don't reach out of it
 	got  map[string][]string
 }
 
@@ -474,16 +474,12 @@ func callAt(line, name string) string {
 	return ""
 }
 
-func sources(repo string) files { return files{repo, map[string][]string{}} }
+func sources(root *os.Root) files { return files{root, map[string][]string{}} }
 
 func (fs files) lines(p string) []string {
 	ls, ok := fs.got[p]
 	if !ok {
-		var b []byte
-		if root, err := os.OpenRoot(fs.repo); err == nil { // the PR's symlinks don't reach out of the checkout
-			b, _ = diff.ReadIn(root, filepath.FromSlash(p), maxSize)
-			root.Close()
-		}
+		b, _ := diff.ReadIn(fs.root, filepath.FromSlash(p), maxSize)
 		ls = strings.Split(string(b), "\n")
 		fs.got[p] = ls
 	}

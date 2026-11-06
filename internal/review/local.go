@@ -8,6 +8,7 @@ import (
 	"diffharbor/internal/proc"
 	"diffharbor/internal/vault"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ import (
 // Tree reviews `git diff HEAD` of the checkout cwd like a PR titled title, in sb, with closed as the threads resolved
 // before; large: in parts, as if the walkthrough's box was ticked.
 func Tree(ctx context.Context, sb *proc.Sandbox, cwd, title string, closed []Comment, large bool) (Result, string, error) {
-	if err := os.Symlink(cwd, sb.Repo()); err != nil {
+	if err := errors.Join(os.Symlink(cwd, sb.Repo()), sb.Pin()); err != nil {
 		return Result{}, "", err
 	}
 	out, err := proc.Run(sb.Command(ctx, cwd, nil, "git", "diff", "HEAD"))
@@ -71,6 +72,9 @@ func Checkout(ctx context.Context, sb *proc.Sandbox, cloneURL, head, base, token
 		"GIT_CONFIG_VALUE_0=Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token)),
 	}
 	if _, err := proc.Run(sb.Command(ctx, sb.Dir, nil, "git", "init", "-q", repo)); err != nil { // as the repo's user, when we're root
+		return "", err
+	}
+	if err := sb.Pin(); err != nil { // before the PR's code: a check could swap repo for a symlink
 		return "", err
 	}
 	if vault.URL() != "" {

@@ -26,12 +26,12 @@ import (
 func TestStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := newPool(1, nil)
-	p.running["o/r#1"] = &task{review: false, cancel: cancel}
-	p.stop("o/r#2")
+	p.running[runKey("o/r", ev("o/r", 1, ""))] = &task{review: false, cancel: cancel}
+	p.stop(ev("o/r", 2, ""))
 	if ctx.Err() != nil {
 		t.Fatal("stopped the wrong job")
 	}
-	p.stop("o/r#1") // closing the PR stops everything on it, an answer too
+	p.stop(ev("o/r", 1, "")) // closing the PR stops everything on it, an answer too
 	if ctx.Err() == nil {
 		t.Fatal("not stopped")
 	}
@@ -115,7 +115,7 @@ func TestDrop(t *testing.T) {
 	if !closing(r) || r.Key() != e.Key() {
 		t.Fatalf("%+v", r)
 	}
-	newPool(1, runJob).exec(t.Context(), r, &task{cancel: func() {}})
+	newPool(1, runJob).exec(t.Context(), "", r, &task{cancel: func() {}})
 	if vs, err := job.Versions(dir); err != nil || len(vs) != 0 {
 		t.Fatal("kept its reports:", vs, err)
 	}
@@ -263,9 +263,10 @@ func newFakeJobs(limit int) *fakeJobs {
 
 func (f *fakeJobs) run(ctx context.Context, e *forge.Event) error {
 	f.mu.Lock()
-	f.repos[e.Repo()]++
+	repo := repoOf(e)
+	f.repos[repo]++
 	f.p.mu.Lock()
-	if f.repos[e.Repo()] > 1 || f.p.running[e.Key()] == nil {
+	if f.repos[repo] > 1 || f.p.running[runKey(repo, e)] == nil {
 		f.twice = e.Key()
 	}
 	f.p.mu.Unlock()
@@ -277,7 +278,7 @@ func (f *fakeJobs) run(ctx context.Context, e *forge.Event) error {
 	f.mu.Unlock()
 	defer func() {
 		f.mu.Lock()
-		f.repos[e.Repo()]--
+		f.repos[repo]--
 		f.mu.Unlock()
 	}()
 	f.started <- e.Key()
@@ -336,8 +337,8 @@ func TestPoolParallel(t *testing.T) {
 	if got := []string{f.next(), f.next(), f.quiet()}; !slices.Contains(got, "a#1") || !slices.Contains(got, "b#1") || got[2] != "" {
 		t.Fatal(got) // a#2 waits for a#1, c#1 for a slot
 	}
-	f.p.stop("a#1") // each one let go starts the next; by key: a started one doesn't take the other's finish
-	f.p.stop("b#1")
+	f.p.stop(ev("a", 1, "")) // each one let go starts the next; by key: a started one doesn't take the other's finish
+	f.p.stop(ev("b", 1, ""))
 	if got := []string{f.next(), f.next()}; !slices.Contains(got, "c#1") || !slices.Contains(got, "a#2") {
 		t.Fatal(got)
 	}
@@ -373,7 +374,7 @@ func TestPoolPanic(t *testing.T) {
 		t.Fatal("stays pending:", err)
 	}
 	f.p.mu.Lock()
-	b := f.p.running["b#1"]
+	b := f.p.running["b b#1"]
 	f.p.mu.Unlock()
 	if b == nil {
 		t.Fatal("b's job ended with a's")
@@ -394,10 +395,10 @@ func TestPoolStop(t *testing.T) {
 		f.next()
 	}
 	f.p.add(ev("c", 1, "")) // a push spares the answer; its review waits for it
-	f.p.stop("a#1")
-	f.waitFor(t, func() bool { return f.p.running["a#1"] == nil }) // a's job ends on its ctx
+	f.p.stop(ev("a", 1, ""))
+	f.waitFor(t, func() bool { return f.p.running["a a#1"] == nil }) // a's job ends on its ctx
 	f.p.mu.Lock()
-	b, c := f.p.running["b#1"], f.p.running["c#1"]
+	b, c := f.p.running["b b#1"], f.p.running["c c#1"]
 	f.p.mu.Unlock()
 	if b == nil || c == nil {
 		t.Fatal("stopped another job", b, c)
@@ -432,14 +433,43 @@ func TestReviewCleanupKeepsPending(t *testing.T) {
 	}
 }
 
+// A repo recreated under the old name runs beside the old one's job, a PR of the same number too: a close stops
+// only its repo's.
+func TestPoolRecreatedRepo(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	forges["github"] = &github.Hub{}
+	defer clear(forges)
+	f := newFakeJobs(2)
+	old, recreated := ev("a", 1, ""), ev("a", 1, "")
+	old.Forge, recreated.Forge = "github", "github"
+	old.Repository.ID, recreated.Repository.ID = 1, 2
+	f.p.add(old)
+	f.p.add(recreated)
+	f.next()
+	f.next()
+	f.p.stop(old)
+	f.waitFor(t, func() bool { return f.p.running[runKey(repoOf(old), old)] == nil })
+	f.p.mu.Lock()
+	r := f.p.running[runKey(repoOf(recreated), recreated)]
+	f.p.mu.Unlock()
+	if r == nil {
+		t.Fatal("stopped the recreated repo's job")
+	}
+	f.finish <- nil
+	f.idle(t)
+	if f.twice != "" {
+		t.Fatal(f.twice)
+	}
+}
+
 // A job is stoppable from the moment it is picked: a close before its goroutine ran stops it too, an answer as well.
 func TestPoolStopPicked(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	f := newFakeJobs(2)
 	f.p.add(ev("a", 1, ""))
 	f.p.add(ev("b", 1, "issue_comment"))
-	f.p.stop("a#1")
-	f.p.stop("b#1")
+	f.p.stop(ev("a", 1, ""))
+	f.p.stop(ev("b", 1, ""))
 	f.next()
 	f.next()
 	f.idle(t) // both end on their ctx, no finish sent

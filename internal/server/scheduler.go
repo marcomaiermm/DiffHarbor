@@ -11,7 +11,7 @@ import (
 type scheduler struct {
 	limit   int                       // jobs at once
 	room    int                       // jobs that may still wait: past it a webhook gets a 503 and is redelivered
-	waiting map[string][]*forge.Event // by repo: answers first, a human waits for them; else in order
+	waiting map[string][]*forge.Event // by repo: answers before reviews, a human waits for them; else in order
 	turns   []string                  // the repos with waiting jobs, the next turn first
 	busy    map[string]bool           // the repos with a running job
 }
@@ -37,10 +37,8 @@ func (s *scheduler) add(repo string, e *forge.Event) bool {
 		s.turns = append(s.turns, repo)
 	}
 	i := len(q)
-	if e.Kind != "pull_request" { // after the answers queued before it
-		if j := slices.IndexFunc(q, func(e *forge.Event) bool { return e.Kind == "pull_request" }); j >= 0 {
-			i = j
-		}
+	for e.Kind != "pull_request" && i > 0 && isReview(q[i-1]) { // after the answers and closes queued before it
+		i--
 	}
 	s.waiting[repo] = slices.Insert(q, i, e)
 	return true
