@@ -67,10 +67,7 @@ func Tree(ctx context.Context, sb *proc.Sandbox, cwd, title string, closed []Com
 // world-readable, also to another repo's job running at the same time.
 func Checkout(ctx context.Context, sb *proc.Sandbox, cloneURL, head, base, token string) (string, error) {
 	repo := sb.Repo()
-	remote, auth := cloneURL, []string{
-		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader",
-		"GIT_CONFIG_VALUE_0=Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token)),
-	}
+	remote, auth := cloneURL, gitAuth(token)
 	if _, err := proc.Run(sb.Command(ctx, sb.Dir, nil, "git", "init", "-q", repo)); err != nil { // as the repo's user, when we're root
 		return "", err
 	}
@@ -91,7 +88,7 @@ func Checkout(ctx context.Context, sb *proc.Sandbox, cloneURL, head, base, token
 		if _, err := proc.Run(sb.Command(ctx, repo, nil, "git", "config", "include.path", f)); err != nil {
 			return "", err
 		}
-		remote, auth = r, nil
+		remote = r
 	}
 	git := func(args ...string) (string, error) {
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
@@ -121,6 +118,39 @@ func Checkout(ctx context.Context, sb *proc.Sandbox, cloneURL, head, base, token
 		}
 	}
 	return git("diff", "-M", strings.TrimSpace(mb), head)
+}
+
+// gitAuth is the env that lets git read the repo with token; none through the vault: the checkout's config sends its
+// stand-in (Checkout).
+func gitAuth(token string) []string {
+	if vault.URL() != "" {
+		return nil
+	}
+	return []string{
+		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader",
+		"GIT_CONFIG_VALUE_0=Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token)),
+	}
+}
+
+// Since is the diff from an earlier head from to the head Checkout put in sb's Repo, with the same ctx and token: what
+// a push changed. "" when from can't be fetched, e.g. gone in a force push; an error when it was and git still failed.
+func Since(ctx context.Context, sb *proc.Sandbox, from, token string) (string, error) {
+	git := func(args ...string) (string, error) {
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		defer cancel()
+		out, err := proc.Run(sb.Command(ctx, sb.Dir, gitAuth(token), "git", append([]string{"-C", sb.Repo()}, args...)...))
+		return string(out), err
+	}
+	if _, err := git("cat-file", "-e", from+"^{commit}"); err != nil { // older than the fetched history
+		if _, err := git("fetch", "-q", "--filter=blob:none", "--depth=1", "origin", from); err != nil {
+			return "", nil
+		}
+	}
+	out, err := git("diff", "-M", from, "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("git diff since %s: %w", from, err)
+	}
+	return out, nil
 }
 
 // Commit is one commit of the PR: its subject and size.

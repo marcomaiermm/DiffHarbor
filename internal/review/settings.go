@@ -496,6 +496,14 @@ func (cfg Settings) Fold(c Comment) bool {
 	return c.Severity == "nit"
 }
 
+// Fresh drops the minor findings and nits of a push's review that lie off the lines the push touched (near: the added lines
+// and diff.RightLines' context of since): an old line seen again yields new edge cases on every push, never done.
+func Fresh(cs []Comment, near map[string]bool) []Comment {
+	return slices.DeleteFunc(cs, func(c Comment) bool {
+		return !Blocks(c.Severity) && !near[fmt.Sprintf("%s:%d", c.Path, c.Line)]
+	})
+}
+
 // RunsTests reports whether the tests of path's package run.
 func (cfg Settings) RunsTests(path string) bool {
 	_, t := cfg.At(path)
