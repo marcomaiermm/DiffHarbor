@@ -98,6 +98,7 @@
     "checks": { "type": "array", "items": { "$ref": "#/definitions/repoPath" } },
     "install_scripts": { "type": "boolean", "description": "Run lifecycle scripts (postinstall, native builds) in the checks' installs. Default false." },
     "base_branches": { "type": "array", "items": { "type": "string" }, "description": "Globs of base branches besides the default branch whose PRs get reviewed without asking." },
+    "drafts": { "enum": ["manual", "opt_in", "off"], "description": "Draft PRs: manual (default) reviewed on @bot review; opt_in once asked, every later push too; off never." },
     "tickets": { "type": "array", "items": { "type": "string" }, "description": "itsaplan or Linear projects (team keys) a PR may name; unset = any, [] = none." }
   }
 }

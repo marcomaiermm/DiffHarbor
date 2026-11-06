@@ -245,6 +245,18 @@ func TestSettings(t *testing.T) {
 		rel.Reviews("prod", "main") || rel.Reviews("release/1/x", "main") || (Settings{}).Reviews("prod", "main") || !(Settings{}).Reviews("prod", "") {
 		t.Errorf("base_branches: %v", err)
 	}
+	for _, c := range []struct {
+		drafts              string
+		push, asked, manual bool
+	}{{"", false, false, true}, {"manual", false, false, true}, {"opt_in", false, true, true}, {"off", false, false, false}} {
+		cfg, err := LoadSettings(`{"drafts":"` + c.drafts + `"}`)
+		if err != nil || cfg.ReviewsDraft(false, false) != c.push || cfg.ReviewsDraft(false, true) != c.asked || cfg.ReviewsDraft(true, false) != c.manual {
+			t.Errorf("drafts %q: %v", c.drafts, err)
+		}
+	}
+	if _, err := LoadSettings(`{"drafts":"auto"}`); err == nil {
+		t.Error("bad drafts accepted")
+	}
 	if _, err := LoadSettings(`{"base_branches":["["]}`); err == nil {
 		t.Error("bad base_branches glob accepted")
 	}
@@ -328,6 +340,9 @@ func TestAPIChanges(t *testing.T) {
 
 // Fence is one backtick longer than the longest run in s, at least four.
 func TestFence(t *testing.T) {
+	if got := Fence("a\n`````\n``````````b"); got != "```````````\na\n`````\n``````````b\n```````````" {
+		t.Fatalf("fence: %q", got)
+	}
 	long := strings.Repeat("`", 100000)
 	if Fence("x") != "````\nx\n````" || Fence("a ``` b") != "````\na ``` b\n````" || Fence(long) != long+"`\n"+long+"\n"+long+"`" {
 		t.Fatal(Fence("a ``` b"))

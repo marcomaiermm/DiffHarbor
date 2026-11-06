@@ -14,7 +14,7 @@ description: The steps of a DiffHarbor review and how to talk to the bot.
 - Up to 60k characters per pass: code first, then tests, data, stylesheets and docs. Larger PRs can be reviewed [in parts](../per-repo/#large-prs).
 - Left out: lockfiles, build output, vendored code, binaries and generated code (by name, Drizzle's migration snapshots or a "Code generated … DO NOT EDIT" header).
 
-**Drafts** aren't reviewed until they are marked ready.
+**Drafts** aren't reviewed until they are marked ready, unless someone asks with `@<bot> review`; [`drafts`](../per-repo/) can also review a draft's pushes once asked, or never.
 
 **Skipped PRs** get a green status. `@<bot> review` still reviews them.
 
