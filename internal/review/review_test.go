@@ -44,6 +44,9 @@ func TestTrustedContext(t *testing.T) {
 	if TrustedContext(" ", "") != "" || !strings.Contains(TrustedContext("use pnpm", "- x"), "## Learnings") {
 		t.Fatal("trustedContext")
 	}
+	if !strings.Contains(TrustedContext(strings.Repeat("x", 8000+4000+6000)+"nested", ""), "nested") {
+		t.Error("a full rules file and root conventions leave nested rules their 6000")
+	}
 }
 
 func TestGoModules(t *testing.T) {
@@ -300,6 +303,34 @@ func TestSettings(t *testing.T) {
 		!slices.Equal(cfg.SkillPaths(), []string{"tools/skills"}) || !slices.Equal(cfg.CheckPaths(), []string{"a.sh", "ci/b.sh"}) {
 		t.Errorf("set paths: %v %v %v %v", err, cfg.RulePaths(), cfg.SkillPaths(), cfg.CheckPaths())
 	}
+	files := map[string]string{"docs/md": "accept races", "AGENTS.md": "use pnpm"}
+	read := func(ns ...string) string {
+		for _, n := range ns {
+			if s, ok := files[n]; ok {
+				return s
+			}
+		}
+		return ""
+	}
+	if got := cfg.ReadRules(read); !strings.HasPrefix(got, "accept races") || !strings.HasSuffix(got, "use pnpm") {
+		t.Errorf("rules file and root conventions: %q", got)
+	}
+	files["docs/md"] = strings.Repeat("x", 9000)
+	if got := cfg.ReadRules(read); !strings.HasSuffix(got, "use pnpm") || len(got) > 8000+4000+100 {
+		t.Errorf("a long rules file keeps the conventions: %d chars", len(got))
+	}
+	files["AGENTS.md"] = files["docs/md"] + "use pnpm"
+	if got := cfg.ReadRules(read); !strings.HasSuffix(got, "x") || !strings.Contains(got, "## Conventions") {
+		t.Error("the same prefix, different files: both kept")
+	}
+	files["AGENTS.md"] = strings.Repeat("y", 13_000) + "use pnpm"
+	if delete(files, "docs/md"); !strings.HasSuffix(cfg.ReadRules(read), "use pnpm") {
+		t.Error("one file alone: not cut")
+	}
+	files["AGENTS.md"] = "use pnpm"
+	if delete(files, "docs/md"); cfg.ReadRules(read) != "use pnpm" {
+		t.Error("no rules file: the root's AGENTS.md alone")
+	}
 	if cfg, _ := LoadSettings(`{"checks":[]}`); len(cfg.CheckPaths()) != 0 {
 		t.Error("checks [] should turn the scripts off")
 	}
@@ -383,6 +414,10 @@ func TestProfile(t *testing.T) {
 	}
 	if !(Settings{}).Keep(Comment{Severity: "nit"}) || cfg.Keep(Comment{Path: "api/a.go", Severity: "nit"}) {
 		t.Error("nits kept unless min_severity drops them")
+	}
+	if !(Settings{}).FoldPush(Comment{Severity: "minor"}) || (Settings{}).FoldPush(Comment{Severity: "major"}) ||
+		cfg.FoldPush(Comment{Path: "web/a.ts", Severity: "minor"}) {
+		t.Error("a push folds minor ones unless assertive, never major ones")
 	}
 	cfg.Override = "chill"
 	if cfg.Fold(Comment{Path: "a.go", Severity: "minor"}) || !cfg.Fold(Comment{Path: "web/a.ts", Severity: "nit"}) {

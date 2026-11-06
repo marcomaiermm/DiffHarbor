@@ -268,7 +268,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 
 | File | |
 |---|---|
-| `.review/rules.md` | Rules in prose for the prompt. Without it, `AGENTS.md` or `CLAUDE.md`. |
+| `.review/rules.md` | Rules in prose for the prompt: what to report, which risks you accept. The root `AGENTS.md` (else `CLAUDE.md`) follows it; without a rules file it stands alone. |
 | `.review/skills/` | Review skills in the [Agent Skills format](https://agentskills.io/specification). On GitHub, skills in `<owner>/.github` under `.review/skills/` apply to all of the owner's repos. |
 | `.review/checks.sh` | Your own checks from the base branch, run in the PR checkout with the changed files after `--`. Their output (120 lines each) goes into the prompt. The exit code doesn't count. |
 | `review.json` | Settings, in the repo root. All keys are optional. |
@@ -338,7 +338,7 @@ Reviews can report defects (critical, major, minor) and, unless `min_severity` d
 | `chill` (default) | critical, major, minor | nits |
 | `assertive` | everything, nits too | |
 
-`min_severity` drops findings before that, `minor` the nits. A folded finding has no thread: a later review of its file may report it again, and an incremental review that finds only folded ones posts nothing.
+A push's review folds minor findings under `chill` too: most of a push fixes earlier findings, and the edge cases of each fix would open the next round of threads. `min_severity` drops findings before that, `minor` the nits. A folded finding has no thread: a later review of its file may report it again, and an incremental review that finds only folded ones posts nothing.
 
 The first that sets a profile wins:
 

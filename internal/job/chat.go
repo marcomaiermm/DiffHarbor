@@ -482,7 +482,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		fmt.Fprintf(&about, "## Diff (may be cut; read files for more)\n\n```diff\n%s\n```\n\n", text.Truncate(strings.Join(d, ""), 20_000))
 	}
 	cfg, _ := review.LoadSettings(p.File(pr.Base.SHA, "review.json")) // broken: defaults, the review says so
-	rules := p.File(pr.Base.SHA, cfg.RulePaths()...)
+	rules := cfg.ReadRules(func(n ...string) string { return p.File(pr.Base.SHA, n...) })
 	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(sb.Dir, "skills"))
 	system := chatSystem + review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings))
 	rm, _ := cfg.Models()
