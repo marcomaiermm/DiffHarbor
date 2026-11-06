@@ -283,7 +283,7 @@ func (p *pr) discussions(inline, rest []forge.Finding, raw, footer string) (_ in
 			posted = append(posted, c)
 		}
 	}
-	return len(posted) + len(rest), nil
+	return len(posted) + forge.Actionable(rest), nil
 }
 
 // publish publishes the findings as one review with the summary and the answers as drafts, one email: GitLab's
@@ -317,7 +317,7 @@ func (p *pr) publish(inline, rest []forge.Finding, threads []forge.Thread, raw, 
 	pubErr := p.bulkPublish()
 	posted, lost := p.published(drafted, keys, threads)
 	if pubErr == nil && err == nil && len(lost) == 0 {
-		return len(posted) + len(rest), nil
+		return len(posted) + forge.Actionable(rest), nil
 	}
 	// publishing failed, no summary draft, or GitLab dropped some: the summary says what was posted
 	var id int64
@@ -329,7 +329,7 @@ func (p *pr) publish(inline, rest []forge.Finding, threads []forge.Thread, raw, 
 	}
 	rest = append(rest, plain(lost)...)
 	_, err = p.Note(id, forge.Summary(posted, rest, footer))
-	return len(posted) + len(rest), err
+	return len(posted) + forge.Actionable(rest), err
 }
 
 // bulkPublish publishes the bot's drafts as one review, which marks the bot reviewed when it is a reviewer. Failing,

@@ -399,6 +399,14 @@ func TestBodyProfile(t *testing.T) {
 		"<!-- review: quiet | chill | assertive -->\n": "",
 		"code review: quiet please":                    "", // not a line of its own
 		"review: loud":                                 "",
+		"review: quiet-ish":                            "",
+		"1. [x] review: quiet\r\n2. [ ] review: chill": "quiet", // GitLab's numbered task list, CRLF
+		"review: **assertive**":                        "assertive",
+		"review: `quiet`.":                             "quiet",
+		"```markdown\n- [x] review: chill\n```\n":      "", // the README's example, pasted
+		"~~~\nreview: quiet\n~~~\nreview: chill":       "chill",
+		"```\nreview: quiet":                           "", // unclosed: code up to the end
+		"<!-- hint\nreview: quiet":                     "",
 	} {
 		if got := BodyProfile(body); got != want {
 			t.Errorf("%q: %q, want %q", body, got, want)
@@ -415,6 +423,7 @@ func TestCapped(t *testing.T) {
 	for range 12 {
 		cs = append(cs, Comment{Severity: "minor"})
 	}
+	cs = append(cs, Comment{Severity: "critical"}) // last, still kept: the most severe go first
 	got := capped(cs)
 	n := 0
 	for _, c := range got {
@@ -422,7 +431,7 @@ func TestCapped(t *testing.T) {
 			n++
 		}
 	}
-	if n != 5 || len(got)-n != 10 {
+	if n != 5 || len(got)-n != 10 || got[0].Severity != "critical" {
 		t.Fatalf("%d nits, %d findings", n, len(got)-n)
 	}
 }

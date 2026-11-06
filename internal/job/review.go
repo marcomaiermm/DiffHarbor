@@ -32,6 +32,13 @@ import (
 	"time"
 )
 
+// posts reports whether a review posts one: a full review always, so the bot shows up under Reviewers, an
+// incremental one only with a finding that isn't folded. Folded ones have no thread to hold them: alone they would
+// come back on every push.
+func posts(full bool, cs []review.Comment) bool {
+	return full || slices.ContainsFunc(cs, func(c review.Comment) bool { return !c.Fold })
+}
+
 // Review reviews the event's PR on f.
 //
 //nolint:gocognit,gocyclo // one job step by step, each step a few lines
@@ -238,7 +245,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		kind += " · ⚠️ review.json ignored: " + text.OneLine(cfgErr.Error(), 120)
 	}
 	n := 0
-	if only == nil || len(r.Comments) > 0 { // a full review always posts, so the bot shows up under Reviewers
+	if posts(only == nil, r.Comments) {
 		// Lines of the whole PR diff take inline comments, also in files this incremental review skipped: only
 		// a thread can be resolved once fixed.
 		if n, err = p.Post(sha, r, threads, raw,

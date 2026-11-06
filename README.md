@@ -338,7 +338,7 @@ Every review reports defects (critical, major, minor) and nits: naming, readabil
 | `chill` (default) | critical, major, minor | nits |
 | `assertive` | everything, nits too | |
 
-`min_severity` drops findings before that, `minor` the nits. A folded finding has no thread: the next full review may report it again.
+`min_severity` drops findings before that, `minor` the nits. A folded finding has no thread: a later review of its file may report it again, and an incremental review that finds only folded ones posts nothing.
 
 The first that sets a profile wins:
 

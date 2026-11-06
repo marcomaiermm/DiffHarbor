@@ -494,3 +494,15 @@ func TestInert(t *testing.T) {
 		t.Fatalf("%q", bodies)
 	}
 }
+
+// A folded finding on a diff line gets no draft of its own: the summary has it, folded, and it doesn't count.
+func TestPostFolded(t *testing.T) {
+	f := &fakeMR{t: t}
+	p := f.serve()
+	nit := review.Comment{Path: "a.go", Line: 13, Severity: "nit", Title: "name", Body: "b", Fold: true}
+	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postFix, nit}}, nil, postDiff, "f")
+	if err != nil || n != 1 || len(f.drafts) != 2 || !strings.Contains(f.summary(), "🧹 Nitpicks (1)") ||
+		!strings.Contains(f.summary(), "Actionable comments posted: 1") {
+		t.Fatalf("post: %d %v %v\n%s", n, err, f.drafts, f.summary())
+	}
+}

@@ -73,7 +73,7 @@ type PR interface {
 	// Publish sends what Resolve held back when no Post follows.
 	Publish()
 	// Post sends the findings of a review of sha: on lines of the PR's diff raw inline, the rest in one comment.
-	// Returns how many it posted.
+	// Returns how many it posted, the folded ones (Comment.Fold) not.
 	Post(sha string, r review.Result, threads []Thread, raw, footer string) (int, error)
 	// Discussion is the thread of the event's review comment.
 	Discussion() (Discussion, error)

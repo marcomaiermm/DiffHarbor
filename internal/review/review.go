@@ -630,8 +630,9 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string, again boo
 	return r, nil
 }
 
-// capped keeps the schema's limits, per pass: 10 findings and 5 nits, so nits never push out a defect.
+// capped keeps the schema's limits, per pass: the 10 most severe findings and 5 nits, so nits never push out a defect.
 func capped(cs []Comment) []Comment {
+	slices.SortStableFunc(cs, func(a, b Comment) int { return rank[b.Severity] - rank[a.Severity] })
 	n, nits := 0, 0
 	return slices.DeleteFunc(cs, func(c Comment) bool {
 		if c.Severity == "nit" {

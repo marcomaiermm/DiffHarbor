@@ -109,7 +109,7 @@ func Split(r review.Result, threads []Thread, lines map[string]string) (inline, 
 			seen[fmt.Sprintf("%s:%d", t.Path, t.Line)] = true
 		}
 	}
-	for _, rc := range r.Comments { // review.Analyze caps them: 10 per part
+	for _, rc := range r.Comments { // review.Analyze caps them: 10 and 5 nits per pass
 		c := Finding{Comment: rc}
 		at := fmt.Sprintf("%s:%d", c.Path, c.Line)
 		if seen[at] {
@@ -139,7 +139,7 @@ func section(title string, cs []Finding, open bool) string {
 	return out + "\n\n</details>"
 }
 
-// foldedTitle names the folded findings by what they are: nits under an assertive profile, minor ones under quiet.
+// foldedTitle names the folded findings by what they are: nits, under quiet minor ones too.
 func foldedTitle(cs []Finding) string {
 	nits := 0
 	for _, c := range cs {
@@ -154,6 +154,17 @@ func foldedTitle(cs []Finding) string {
 		return "Nitpicks"
 	}
 	return "Minor comments and nitpicks"
+}
+
+// Actionable counts the findings a review posts to act on: all but the folded ones (Comment.Fold).
+func Actionable(cs []Finding) int {
+	n := 0
+	for _, c := range cs {
+		if !c.Fold {
+			n++
+		}
+	}
+	return n
 }
 
 // allPrompts folds every finding's prompt into one block to paste into an agent.

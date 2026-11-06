@@ -803,6 +803,7 @@ func TestJudge(t *testing.T) {
 		Outline: diff.Outline{Weakened: []diff.Flag{{At: "a_test.go:4", What: "skip/only: `t.Skip()`"}}},
 		Findings: []review.Comment{
 			{Path: "a.go", Line: 9, Severity: "minor", Title: "naming"},
+			{Path: "a.go", Line: 5, Severity: "nit", Title: "name it n"},
 			{Path: "a.go", Line: 2, Severity: "critical", Title: "nil map", Body: "m is nil. It panics.\n\n_Verified:_ seen", Evidence: "seen"},
 			{Path: "a.go", Line: 2, Severity: "major", Title: "leak", Body: "The file stays open.\n\nClose it."},
 		}})
@@ -817,16 +818,17 @@ func TestJudge(t *testing.T) {
 		"Fix before merging: leak @ a.go:2 · step 1 · not verified",
 		"Fix before merging: skip/only: `t.Skip()` @ a_test.go:4 · not in the diff · In the diff",
 		"Minor: naming @ a.go:9 · step 1 · not verified",
+		"Nits: name it n @ a.go:5 · step 1 · not verified",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("groups:\n%s", strings.Join(got, "\n"))
 	}
 	if v.Verdict.OK || v.Verdict.Title != "Fix first: nil map" ||
-		v.Verdict.Body != "a.go:2: m is nil. After that, 2 more findings to fix, 1 minor finding and 1 decision." {
+		v.Verdict.Body != "a.go:2: m is nil. After that, 2 more findings to fix, 1 minor finding, 1 nit and 1 decision." {
 		t.Errorf("verdict: %+v", v.Verdict)
 	}
-	if v.Draft.Event != "Request changes" || v.Draft.Say != "1 blocker, 2 major and 1 minor, listed in the draft" ||
-		v.Draft.MD != "nil map (a.go:2). m is nil.\n\nFix before merging:\n- a.go:2  leak. The file stays open.\n- a_test.go:4  skip/only: `t.Skip()`\n\nQuestions:\n1. Retry?\n\nMinor:\n- a.go:9  naming" {
+	if v.Draft.Event != "Request changes" || v.Draft.Say != "1 blocker, 2 major, 1 minor and 1 nit, listed in the draft" ||
+		v.Draft.MD != "nil map (a.go:2). m is nil.\n\nFix before merging:\n- a.go:2  leak. The file stays open.\n- a_test.go:4  skip/only: `t.Skip()`\n\nQuestions:\n1. Retry?\n\nMinor:\n- a.go:9  naming\n\nNits:\n- a.go:5  name it n" {
 		t.Errorf("draft: %+v\n%s", v.Draft, v.Draft.MD)
 	}
 

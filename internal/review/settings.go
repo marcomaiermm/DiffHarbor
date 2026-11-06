@@ -139,9 +139,11 @@ var (
 	rank    = map[string]int{"nit": 1, "minor": 2, "major": 3, "critical": 4}
 	modelRe = regexp.MustCompile(`^\w[\w.-]*/[\w.:/@-]+$`)
 	themeRe = regexp.MustCompile(`^[a-z0-9-]{1,40}$`)
-	// a PR description's line "review: quiet", plain, a list item or a ticked box; an unticked box is no choice
-	bodyProfile = regexp.MustCompile(`(?im)^[ \t>]*(?:[-*+][ \t]+(?:\[[xX]\][ \t]+)?)?review:[ \t]*(quiet|chill|assertive)\b`)
-	htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
+	// a PR description's line "review: quiet", plain, a list item or a ticked box, "quiet" maybe bold or code; an
+	// unticked box is no choice
+	bodyProfile = regexp.MustCompile("(?im)^[ \\t>]*(?:(?:[-*+]|\\d+[.)])[ \\t]+(?:\\[[xX]\\][ \\t]+)?)?review:[ \\t]*[*_`]*(quiet|chill|assertive)[*_`]*(?:[ \\t.,;!)\\r]|$)")
+	// what a PR description shows no one or only as an example: HTML comments, code blocks; unclosed, up to the end
+	hidden = regexp.MustCompile("(?ms)<!--.*?(?:-->|\\z)|^[ \\t>]*```.*?(?:^[ \\t>]*```|\\z)|^[ \\t>]*~~~.*?(?:^[ \\t>]*~~~|\\z)")
 )
 
 // Profiles are the values of review.json's profile, least inline first.
@@ -150,7 +152,7 @@ var Profiles = []string{"quiet", "chill", "assertive"}
 // BodyProfile is the profile a PR description names on a line of its own, "review: quiet", by hand or as a ticked
 // box of its template; the first, "" for none. HTML comments don't count: a template's hint lists every profile.
 func BodyProfile(body string) string {
-	if m := bodyProfile.FindStringSubmatch(htmlComment.ReplaceAllString(body, "")); m != nil {
+	if m := bodyProfile.FindStringSubmatch(hidden.ReplaceAllString(body, "")); m != nil {
 		return strings.ToLower(m[1])
 	}
 	return ""

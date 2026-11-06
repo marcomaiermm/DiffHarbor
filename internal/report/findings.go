@@ -90,7 +90,7 @@ func judge(v *view, found []*finding) {
 		found = append(found, fd)
 		v.now.Findings, v.now.Weights[p+": "+w.What] = append(v.now.Findings, p+": "+w.What), fd.Severity // the next review sees it come and go
 	}
-	v.Groups = []fgroup{{Title: "Blocks the merge"}, {Title: "Fix before merging"}, {Title: "Minor"}}
+	v.Groups = []fgroup{{Title: "Blocks the merge"}, {Title: "Fix before merging"}, {Title: "Minor"}, {Title: "Nits"}}
 	for _, fd := range found {
 		if fd.Loc == "" {
 			fd.Loc = path.Base(fd.Path)
@@ -120,6 +120,8 @@ func judge(v *view, found []*finding) {
 			g = 0
 		case "major":
 			g = 1
+		case "nit":
+			g = 3
 		}
 		v.Groups[g].Items = append(v.Groups[g].Items, fd)
 	}
@@ -129,7 +131,7 @@ func judge(v *view, found []*finding) {
 
 // verdictOf is the verdict: the most severe blocking finding first, or what still needs the person.
 func verdictOf(v *view) verdict {
-	block, minor := blocking(v), len(v.Groups[2].Items)
+	block, small := blocking(v), smalls(v)
 	var need []string
 	if n := len(v.Decisions); n > 0 {
 		need = append(need, plural(n, "decision", "decisions"))
@@ -142,10 +144,7 @@ func verdictOf(v *view) verdict {
 		if n := len(block) - 1; n > 0 {
 			after = append(after, plural(n, "more finding", "more findings")+" to fix")
 		}
-		if minor > 0 {
-			after = append(after, plural(minor, "minor finding", "minor findings"))
-		}
-		after = append(after, need...)
+		after = append(append(after, small...), need...)
 		top := block[0]
 		body := top.Loc + ": " + cmp.Or(sentence(top.Lead), top.Title)
 		if len(after) > 0 {
@@ -173,8 +172,8 @@ func verdictOf(v *view) verdict {
 		}
 	}
 	vd := verdict{OK: true, Short: "No findings", Title: "Nothing blocks the merge", Body: "No finding on " + short(v.SHA) + "."}
-	if minor > 0 {
-		vd.Short, vd.Body = "No blockers", plural(minor, "minor finding", "minor findings")+", none that blocks."
+	if len(small) > 0 {
+		vd.Short, vd.Body = "No blockers", join(small)+", none that blocks."
 	}
 	if len(need) > 0 {
 		verb := "need"
@@ -185,6 +184,18 @@ func verdictOf(v *view) verdict {
 		vd.Body += " " + strings.ToUpper(s[:1]) + s[1:] + " still " + verb + " you before you approve."
 	}
 	return vd
+}
+
+// smalls counts the findings that block nothing, minor ones and nits, for a sentence.
+func smalls(v *view) []string {
+	var out []string
+	if n := len(v.Groups[2].Items); n > 0 {
+		out = append(out, plural(n, "minor finding", "minor findings"))
+	}
+	if n := len(v.Groups[3].Items); n > 0 {
+		out = append(out, plural(n, "nit", "nits"))
+	}
+	return out
 }
 
 // blocking is the findings of the first two groups, most severe first.
@@ -213,7 +224,7 @@ func draftOf(v *view) draft {
 				}
 			}
 		}
-	} else if len(v.Groups[2].Items) == 0 {
+	} else if len(v.Groups[2].Items)+len(v.Groups[3].Items) == 0 {
 		b.WriteString("No findings on " + short(v.SHA) + ".")
 	} else {
 		b.WriteString("Nothing blocks the merge on " + short(v.SHA) + ".")
@@ -224,15 +235,17 @@ func draftOf(v *view) draft {
 			fmt.Fprintf(&b, "\n%d. %s", i+1, q.Text)
 		}
 	}
-	if ms := v.Groups[2].Items; len(ms) > 0 {
-		b.WriteString("\n\nMinor:")
-		for _, fd := range ms {
-			fmt.Fprintf(&b, "\n- %s  %s", fd.Loc, fd.Title)
+	for _, g := range v.Groups[2:] {
+		if len(g.Items) > 0 {
+			b.WriteString("\n\n" + g.Title + ":")
+			for _, fd := range g.Items {
+				fmt.Fprintf(&b, "\n- %s  %s", fd.Loc, fd.Title)
+			}
 		}
 	}
 	d.MD = b.String()
 	var ns []string
-	for i, n := range []string{"blocker", "major", "minor"} {
+	for i, n := range []string{"blocker", "major", "minor", "nit"} {
 		if k := len(v.Groups[i].Items); k > 0 {
 			ns = append(ns, strconv.Itoa(k)+" "+n)
 		}
@@ -326,6 +339,6 @@ func (s step) Weight() *weighed {
 
 // heavier is whether severity a weighs more than b; "" weighs nothing.
 func heavier(a, b string) bool {
-	w := map[string]int{"minor": 1, "major": 2, "critical": 3}
+	w := map[string]int{"nit": 1, "minor": 2, "major": 3, "critical": 4}
 	return w[a] > w[b]
 }

@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const chatSystem = `You reviewed this pull request; a maintainer now asks or replies. Repo = cwd at the PR head: check the code with tools before answering.
@@ -218,23 +219,24 @@ func Seen(f forge.Forge, e *forge.Event) {
 	p.React()
 }
 
-// reviewCommand reads `review [all] [profile]` (or `full review …`), the words after review in any order; ok is
-// false for any other comment.
+// reviewCommand reads `review [all] [profile]` (or `full review …`), the words after review in any order, apart
+// by spaces, commas or a colon ("review: quiet", as in a description); ok is false for any other comment.
 func reviewCommand(cmd string) (large bool, profile string, ok bool) {
 	rest, found := strings.CutPrefix(cmd, "full review")
 	if !found {
 		rest, found = strings.CutPrefix(cmd, "review")
 	}
-	if !found || rest != "" && rest[0] != ' ' {
+	sep := func(r rune) bool { return unicode.IsSpace(r) || r == ',' || r == ':' }
+	if !found || rest != "" && !sep(rune(rest[0])) {
 		return false, "", false
 	}
-	for _, w := range strings.Fields(rest) {
+	for _, w := range strings.FieldsFunc(rest, sep) {
 		switch {
 		case w == "all":
 			large = true
-		case slices.Contains(review.Profiles, w):
+		case slices.Contains(review.Profiles, w) && profile == "":
 			profile = w
-		default:
+		default: // another word or a second profile: a question, not a command
 			return false, "", false
 		}
 	}

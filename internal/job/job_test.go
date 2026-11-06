@@ -29,11 +29,13 @@ type skipPR struct {
 	notes   []string
 	replies []string
 	status  string
+	// Configure's: the profile the review got
+	settings review.Settings
 }
 
-func (*skipPR) Refresh() error            { return nil }
-func (*skipPR) Configure(review.Settings) {}
-func (p *skipPR) Reply(b string) error    { p.replies = append(p.replies, b); return nil }
+func (*skipPR) Refresh() error                  { return nil }
+func (p *skipPR) Configure(cfg review.Settings) { p.settings = cfg }
+func (p *skipPR) Reply(b string) error          { p.replies = append(p.replies, b); return nil }
 
 func (p *skipPR) File(string, ...string) string {
 	if p.cfg != "" {
@@ -401,10 +403,60 @@ func TestReviewCommand(t *testing.T) {
 		"review": {ok: true}, "full review": {ok: true}, "review all": {true, "", true},
 		"review quiet": {false, "quiet", true}, "review all assertive": {true, "assertive", true}, "review chill all": {true, "chill", true},
 		"review loud": {}, "reviewer?": {}, "what is a review": {}, "reviews": {},
+		"review: quiet": {false, "quiet", true}, "review, all, chill": {true, "chill", true}, "review\tquiet": {false, "quiet", true},
+		"review quiet chill": {}, "review quiet quiet": {}, // a second profile: no command, a question
 	} {
 		large, profile, ok := reviewCommand(cmd)
 		if g := (got{large, profile, ok}); g != want {
 			t.Errorf("%q: %+v, want %+v", cmd, g, want)
 		}
+	}
+}
+
+// Only folded findings: an incremental review posts nothing, they'd come back on every push. A full one always posts.
+func TestPosts(t *testing.T) {
+	nits := []review.Comment{{Severity: "nit", Fold: true}}
+	if posts(false, nits) || posts(false, nil) || !posts(true, nil) || !posts(false, append(nits, review.Comment{Severity: "minor"})) {
+		t.Fatal("posts")
+	}
+}
+
+// The profile a review gets: the comment's over the description's over review.json's. A draft with drafts off
+// stops the review right after, before any checkout.
+func TestReviewProfile(t *testing.T) {
+	inline := func(cfg review.Settings) string { // what the profile puts inline
+		switch {
+		case !cfg.Fold(review.Comment{Severity: "nit"}):
+			return "assertive"
+		case cfg.Fold(review.Comment{Severity: "minor"}):
+			return "quiet"
+		}
+		return "chill"
+	}
+	for _, c := range []struct{ cfg, cmd, body, want string }{
+		{`{"drafts":"off"}`, "", "", "chill"},
+		{`{"drafts":"off","profile":"quiet"}`, "", "", "quiet"},
+		{`{"drafts":"off","profile":"quiet"}`, "", "- [x] review: assertive", "assertive"},
+		{`{"drafts":"off","profile":"quiet"}`, "chill", "review: assertive", "chill"},
+	} {
+		pr := &skipPR{cfg: c.cfg}
+		e := &forge.Event{Action: "manual", Profile: c.cmd}
+		e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Body, e.PullRequest.Head.SHA = "open", true, c.body, strings.Repeat("a", 40)
+		if err := Review(t.Context(), skipForge{pr: pr}, e); err != nil || inline(pr.settings) != c.want {
+			t.Errorf("%+v: %v %s", c, err, inline(pr.settings))
+		}
+	}
+}
+
+// `@bot review all quiet` reviews in parts with that profile.
+func TestChatReviewProfile(t *testing.T) {
+	pr := &skipPR{cfg: `{"drafts":"off"}`}
+	e := &forge.Event{Kind: "issue_comment", Action: "created"}
+	e.Comment.Body = "@bot review all quiet"
+	e.PullRequest.State, e.PullRequest.Draft, e.PullRequest.Head.SHA = "open", true, strings.Repeat("a", 40)
+	mention := regexp.MustCompile(`(?i)(^|[^\w.+-])@(bot)\.*([^\w.-]|$)`)
+	if err := Chat(t.Context(), skipForge{pr: pr}, mention, e); err != nil || e.Action != "large" || e.Profile != "quiet" ||
+		!pr.settings.Fold(review.Comment{Severity: "minor"}) {
+		t.Fatalf("%v %q %q", err, e.Action, e.Profile)
 	}
 }
