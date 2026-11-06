@@ -16,6 +16,7 @@ type fakeAgent struct {
 	mu      sync.Mutex // parts run at once
 	replies map[string][]string
 	calls   []string
+	tasks   map[string]string // the last task per pass name
 }
 
 func (f *fakeAgent) reply(name string) (string, error) {
@@ -27,10 +28,14 @@ func (f *fakeAgent) reply(name string) (string, error) {
 	return q[0], nil
 }
 
-func (f *fakeAgent) Run(_ context.Context, _, name, _, _, _, _ string) (string, error) {
+func (f *fakeAgent) Run(_ context.Context, _, name, _, task, _, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, name)
+	if f.tasks == nil {
+		f.tasks = map[string]string{}
+	}
+	f.tasks[name] = task
 	return f.reply(name)
 }
 
@@ -38,6 +43,10 @@ func (f *fakeAgent) Run(_ context.Context, _, name, _, _, _, _ string) (string, 
 func (f *fakeAgent) Continue(_ context.Context, _, name, _, task, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if strings.HasPrefix(task, repeatsTask[:30]) {
+		f.calls = append(f.calls, name+" repeats")
+		return f.reply(name + " repeats")
+	}
 	if task != againTask {
 		f.calls = append(f.calls, name+" repair")
 		return f.reply(name)
@@ -123,6 +132,43 @@ func TestAnalyze(t *testing.T) {
 	slices.Sort(calls)
 	if len(r.Comments) != 1 || strings.Join(calls, ",") != "review,review repair,review.2,review.2 again,verify" {
 		t.Fatalf("first pass failed: %+v %v", r.Comments, calls)
+	}
+
+	// Open earlier findings reach the verifier, numbered past the rest, so it can drop a repeat in other words; a
+	// claimed fixed one stays in its own list.
+	f := &fakeAgent{replies: map[string][]string{"review": {`{"summary":"","comments":[{"path":"a.md","line":2,"severity":"minor","title":"t","body":"b"}],"fixed":[1]}`}}}
+	prior := []Comment{{Path: "a.md", Line: 1, Body: "open race"}, {Path: "a.md", Line: 1, Body: "gone"}} // threads carry no title
+	if _, _, err := Analyze(context.Background(), Input{Agent: f, Dir: t.TempDir(), Parts: []string{md}, Prior: prior}); err != nil {
+		t.Fatal(err)
+	}
+	if v := f.tasks["verify"]; !strings.Contains(v, "## Earlier findings, still open (posted already: no verdicts for these)\n\n### 3 · a.md:1\n\nopen race") ||
+		strings.Count(v, "gone") != 1 {
+		t.Fatalf("verify task: %q", v)
+	}
+
+	// A claimed fix the verifier rejects leaves its thread open: a kept finding repeating it is dropped, asked in the
+	// verify session. A confirmed fix asks nothing; a failed answer keeps the finding.
+	fixedRun := func(replies map[string][]string) (Result, []string) {
+		t.Helper()
+		replies["review"] = []string{`{"summary":"","comments":[{"path":"a.md","line":2,"severity":"minor","title":"t","body":"b"}],"fixed":[0]}`}
+		f := &fakeAgent{replies: replies}
+		r, _, err := Analyze(context.Background(), Input{Agent: f, Dir: t.TempDir(), Parts: []string{md}, Prior: []Comment{{Path: "a.md", Line: 1, Body: "race"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r, f.calls
+	}
+	r, calls = fixedRun(map[string][]string{"verify": {`{"verdicts":[{"i":0,"keep":true}],"fixed":[]}`}, "verify repeats": {`{"repeats":[0]}`}})
+	if len(r.Comments) != 0 || len(r.Dropped) != 1 || len(r.Fixed) != 0 || strings.Join(calls, ",") != "review,review again,verify,verify repeats" {
+		t.Fatalf("repeats a rejected fix: %+v %+v %v", r.Comments, r.Dropped, calls)
+	}
+	r, calls = fixedRun(map[string][]string{"verify": {`{"verdicts":[{"i":0,"keep":true}],"fixed":[0]}`}})
+	if len(r.Comments) != 1 || !slices.Equal(r.Fixed, []int{0}) || strings.Join(calls, ",") != "review,review again,verify" {
+		t.Fatalf("confirmed fix: %+v %v %v", r.Comments, r.Fixed, calls)
+	}
+	r, calls = fixedRun(map[string][]string{"verify": {`{"verdicts":[{"i":0,"keep":true}],"fixed":[]}`}, "verify repeats": {"no json"}})
+	if len(r.Comments) != 1 || strings.Join(calls, ",") != "review,review again,verify,verify repeats" {
+		t.Fatalf("repeats failed: %+v %v", r.Comments, calls)
 	}
 
 	// In parts: a review pass, a second look and a verify pass each, findings merged most severe first, a failed part
