@@ -36,7 +36,7 @@ func TestPlace(t *testing.T) {
 		t.Fatalf("split: %d inline, %d rest", len(inline), len(rest))
 	}
 	want := "````diff\n-nope\n-\n+y\n+\n````"
-	if !strings.Contains(Format(inline[0], "suggestion"), want) || !strings.Contains(Format(rest[0], ""), want) || strings.Contains(Format(rest[1], ""), "diff") ||
+	if !strings.Contains(Format(inline[0], "suggestion"), want) || !strings.Contains(Format(rest[0], ""), want) || !strings.HasSuffix(Format(rest[1], ""), "**Suggested fix:**\n\n````\nx\n````") ||
 		!strings.Contains(Format(rest[2], ""), "````diff\n-x\n+\n````") || !strings.HasSuffix(Format(inline[1], "suggestion"), "```suggestion\n\n```") {
 		t.Fatalf("split: %q %q %q %q %q", Format(inline[0], "suggestion"), Format(rest[0], ""), Format(rest[1], ""), Format(rest[2], ""), Format(inline[1], "suggestion"))
 	}
