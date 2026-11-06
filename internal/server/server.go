@@ -104,9 +104,9 @@ type pool struct {
 	run     func(context.Context, *forge.Event) error // runJob, a fake in tests
 }
 
-// newPool runs up to limit jobs at once and queues up to 100 more.
+// newPool runs up to limit jobs at once, at least one, and queues up to 100 more.
 func newPool(limit int, run func(context.Context, *forge.Event) error) *pool {
-	return &pool{s: newScheduler(limit, 100), running: map[string]*task{}, run: run}
+	return &pool{s: newScheduler(max(limit, 1), 100), running: map[string]*task{}, run: run}
 }
 
 // add queues e's job; false when the queue is full.
@@ -114,6 +114,14 @@ func (p *pool) add(e *forge.Event) bool {
 	repo := repoOf(e)
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// Under mu: a newer push's handler that queued first is not replaced by an older one's (scheduler.add). This one
+	// would skip (review).
+	latest.Lock()
+	sha, known := latest.m[e.Key()]
+	latest.Unlock()
+	if isReview(e) && known && sha != e.PullRequest.Head.SHA {
+		return true
+	}
 	ok := p.s.add(repo, e)
 	p.start()
 	return ok

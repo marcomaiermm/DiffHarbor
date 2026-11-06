@@ -336,9 +336,8 @@ func TestPoolParallel(t *testing.T) {
 	if got := []string{f.next(), f.next(), f.quiet()}; !slices.Contains(got, "a#1") || !slices.Contains(got, "b#1") || got[2] != "" {
 		t.Fatal(got) // a#2 waits for a#1, c#1 for a slot
 	}
-	for range 2 { // each one let go starts the next
-		f.finish <- nil
-	}
+	f.p.stop("a#1", false) // each one let go starts the next; by key: a started one doesn't take the other's finish
+	f.p.stop("b#1", false)
 	if got := []string{f.next(), f.next()}; !slices.Contains(got, "c#1") || !slices.Contains(got, "a#2") {
 		t.Fatal(got)
 	}
@@ -443,4 +442,43 @@ func TestPoolStopPicked(t *testing.T) {
 	f.next()
 	f.next()
 	f.idle(t) // both end on their ctx, no finish sent
+}
+
+// Two pushes' handlers queue in the other order than they set latest: the newer review stays, the older is dropped.
+func TestPoolOlderPush(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	f := newFakeJobs(1)
+	f.p.add(ev("a", 2, "")) // keeps a busy
+	f.next()
+	older, newer := ev("a", 1, ""), ev("a", 1, "")
+	older.PullRequest.Head.SHA, newer.PullRequest.Head.SHA = "old", "new"
+	latest.Lock()
+	latest.m["a#1"] = "new"
+	latest.Unlock()
+	t.Cleanup(func() { latest.Lock(); delete(latest.m, "a#1"); latest.Unlock() })
+	if !f.p.add(newer) || !f.p.add(older) {
+		t.Fatal("full")
+	}
+	f.p.mu.Lock()
+	q := f.p.s.waiting["a"]
+	f.p.mu.Unlock()
+	if len(q) != 1 || q[0] != newer {
+		t.Fatal(q)
+	}
+	f.finish <- nil
+	f.next()
+	f.finish <- nil
+	f.idle(t)
+}
+
+// An unset limit is one job at a time, not none.
+func TestPoolNoLimit(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	f := newFakeJobs(0)
+	f.p.add(ev("a", 1, ""))
+	if f.next() != "a#1" {
+		t.Fatal("never started")
+	}
+	f.finish <- nil
+	f.idle(t)
 }

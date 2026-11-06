@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -184,8 +185,8 @@ func Workspace(repo string) (*Sandbox, error) {
 	return s, nil
 }
 
-// Close ends the job: its user's processes die and its files in the shared temp dirs go, so neither reaches a job of
-// another repo, and Dir is removed. When that fails no other job starts until a retry gets through (Workspace).
+// Close ends the job: its user's processes die and its files in the shared temp dirs and Dir go, so none reaches a
+// job of another repo. When that fails no other job starts until a retry gets through (Workspace).
 func (s *Sandbox) Close() {
 	if err := clean(s.uid); err != nil {
 		log.Print(err)
@@ -468,9 +469,10 @@ var procDir = "/proc"
 // tmpDirs are the temp dirs all users share: TMPDIR is the job's own, but code may write to any of them.
 var tmpDirs = []string{"/tmp", "/var/tmp", "/dev/shm"}
 
-// clearUsers kills the processes of the users whose uid is of and removes their files in the temp dirs all share.
+// clearUsers kills the processes of the users whose uid is of and removes their files in the temp dirs all share and
+// their work dirs: one Close couldn't remove goes before the user's next job.
 func clearUsers(of func(uid int) bool) error {
-	return errors.Join(killLeftovers(of), cleanTmp(of, tmpDirs...))
+	return errors.Join(killLeftovers(of), cleanTmp(of, append(slices.Clone(tmpDirs), workDir())...))
 }
 
 // cleanTmp removes what the users whose uid is of left in dirs, also inside a dir root or the image made
