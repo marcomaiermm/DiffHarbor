@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.8.0...v0.8.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **review:** pushes fold minor findings, severity by recovery ([#85](https://github.com/marcomaiermm/DiffHarbor/issues/85)) ([3a22256](https://github.com/marcomaiermm/DiffHarbor/commit/3a222569b30185f1b5a276cd8994259d7a2c1050))
+
 ## [0.8.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.7.1...v0.8.0) (2026-11-06)
 
 
