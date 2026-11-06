@@ -169,16 +169,13 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if err != nil {
 		return err
 	}
-	// Earlier findings on the PR's files, also the ones this push left alone: findings go on the whole PR diff. The
-	// model must not repeat them and may report open ones fixed. Closed ones were fixed or declined; without them a
-	// declined finding comes back on the next push.
+	// Every earlier finding of the PR, also on files this push left alone or renamed: findings go on the whole PR
+	// diff. The model must not repeat them and may report open ones fixed. Closed ones were fixed or declined;
+	// without them a declined finding comes back on the next push.
 	files := diff.Paths(d)
 	var open []forge.Thread
 	var prior, closed []review.Comment
 	for _, t := range threads {
-		if !slices.Contains(prFiles, t.Path) {
-			continue
-		}
 		// with the replies: a point declined there would come back as a new finding
 		c := review.Comment{Path: t.Path, Line: cmp.Or(t.Line, t.Original), Body: text.Truncate(strings.ReplaceAll(forge.Redact(t.Body), forge.Mark, ""), 600) + t.Replies}
 		if t.Resolved {
@@ -221,7 +218,11 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		p.Resolve(open[i], sha)
 	}
 	if only != nil { // a push: minor findings only on what it changed, else every push finds new edge cases
-		if since := review.Since(ctx, filepath.Join(dir, "repo"), s.State.SHA, read); since != "" {
+		since := review.Since(ctx, filepath.Join(dir, "repo"), s.State.SHA, read)
+		if ctx.Err() != nil { // cancelled, not a force push: post nothing unfiltered
+			return ctx.Err()
+		}
+		if since != "" {
 			n := len(r.Comments)
 			if r.Comments = review.Fresh(r.Comments, diff.RightLines(since, true)); n > len(r.Comments) {
 				log.Println(key, n-len(r.Comments), "minor findings and nits off the push dropped")

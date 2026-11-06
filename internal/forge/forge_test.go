@@ -46,13 +46,15 @@ func TestPlace(t *testing.T) {
 	}
 }
 
-// A finding a few lines off an open or closed thread is its repeat; past 5 lines or in another file it is new.
+// An inline finding a few lines off an open or closed thread is its repeat; past 5 lines, in another file, outside
+// the diff or folded it is new, on the thread's own line never.
 func TestSplitNearThread(t *testing.T) {
 	lines := map[string]string{"a.ts:120": "x", "a.ts:122": "x", "b.ts:116": "x"}
-	r := review.Result{Comments: []review.Comment{{Path: "a.ts", Line: 115}, {Path: "a.ts", Line: 122}, {Path: "b.ts", Line: 116}, {Path: "a.ts", Line: 120}}}
-	inline, outside, _ := Split(r, []Thread{{Path: "a.ts", Line: 118, Resolved: true}, {Path: "a.ts", Line: 127}}, lines)
-	if len(inline) != 1 || inline[0].Path != "b.ts" || len(outside) != 0 {
-		t.Fatalf("inline %+v outside %+v", inline, outside)
+	r := review.Result{Comments: []review.Comment{{Path: "a.ts", Line: 115}, {Path: "a.ts", Line: 122}, {Path: "b.ts", Line: 116}, {Path: "a.ts", Line: 120},
+		{Path: "a.ts", Line: 119}, {Path: "a.ts", Line: 120, Fold: true}, {Path: "a.ts", Line: 118, Fold: true}}}
+	inline, outside, folded := Split(r, []Thread{{Path: "a.ts", Line: 118, Resolved: true}, {Path: "a.ts", Line: 127}}, lines)
+	if len(inline) != 1 || inline[0].Path != "b.ts" || len(outside) != 2 || outside[0].Line != 115 || len(folded) != 1 || folded[0].Line != 120 {
+		t.Fatalf("inline %+v outside %+v folded %+v", inline, outside, folded)
 	}
 }
 
