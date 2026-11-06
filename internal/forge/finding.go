@@ -31,6 +31,10 @@ func Format(c Finding, suggestion string) string {
 			f += "`"
 		}
 		s += "\n\n" + f + suggestion + "\n" + c.Fix + "\n" + f
+	} else if e, f := strings.TrimSuffix(c.Existing, "\n"), strings.TrimSuffix(c.Fix, "\n"); e != "" && f != "" && e != f {
+		// no place for a suggestion: what it replaces too. Trimmed here only: a placed fix keeps its last blank line.
+		d := prefixed("-", e) + "\n" + prefixed("+", f)
+		s += "\n\n**Suggested fix:**\n\n````diff\n" + strings.TrimPrefix(review.Fence(d), "````\n")
 	} else if c.Fix != "" {
 		s += "\n\n**Suggested fix:**\n\n" + review.Fence(c.Fix)
 	}
@@ -38,6 +42,11 @@ func Format(c Finding, suggestion string) string {
 		s += "\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n" + review.Fence(c.Prompt) + "\n\n</details>"
 	}
 	return s
+}
+
+// prefixed puts p before each of s's lines.
+func prefixed(p, s string) string {
+	return p + strings.ReplaceAll(s, "\n", "\n"+p)
 }
 
 // Parse reads severity, title and the verifier's evidence back from a finding Format posted. A body Format

@@ -321,3 +321,9 @@ func TestAPIChanges(t *testing.T) {
 		t.Fatalf("apiChanges: %v %v %q", removed, added, cl)
 	}
 }
+
+func TestFence(t *testing.T) {
+	if got := Fence("a\n`````\n``````````b"); got != "````\na\n```\n```b\n````" {
+		t.Fatalf("fence: %q", got)
+	}
+}
