@@ -300,6 +300,18 @@ func TestPublishAnswers(t *testing.T) {
 	}
 }
 
+// A review with nothing on diff lines, clean or all outside the diff: its summary is the review, the bot reviewed.
+func TestPostSummaryOnly(t *testing.T) {
+	for _, cs := range [][]review.Comment{nil, {{Path: "b.go", Line: 1, Severity: "major", Body: "elsewhere"}}} {
+		f := &fakeMR{t: t}
+		p := f.serve()
+		n, err := p.Post("abcdef1", review.Result{Comments: cs}, nil, postDiff, "f")
+		if err != nil || n != len(cs) || len(f.drafts) != 1 || f.published != 1 || f.states[0] != "reviewed" || f.notes != nil {
+			t.Fatalf("post: %d %v %v %v", n, err, f.drafts, f.notes)
+		}
+	}
+}
+
 // gitlab_findings discussions: the note comes first. A suggestion GitLab refuses goes without it, a line it refuses
 // into the note.
 func TestPostDiscussions(t *testing.T) {

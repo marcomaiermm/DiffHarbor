@@ -238,11 +238,7 @@ func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, foot
 		log.Println(p.e.Key(), "diff of", sha[:7], "not ready, findings go in the note")
 		rest, inline = append(rest, inline...), nil
 	}
-	switch {
-	case len(inline) == 0 && len(p.answers) == 0:
-		_, err := p.Note(0, forge.Summary(nil, rest, footer))
-		return len(rest), err
-	case !p.batch():
+	if !p.batch() {
 		return p.discussions(inline, rest, raw, footer)
 	}
 	return p.publish(inline, rest, threads, raw, footer)
