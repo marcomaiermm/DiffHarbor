@@ -254,6 +254,7 @@ var (
 	// nothing after but a full stop; an unticked box is no choice
 	bodyProfileRe = regexp.MustCompile("(?im)^[ \\t>]*(?:(?:[-*+]|\\d+[.)])[ \\t]+(?:\\[[xX]\\][ \\t]+)?)?review:[ \\t]*[*_`]*(quiet|chill|assertive)[*_`]*\\.?[ \\t]*\\r?$")
 	listRe        = regexp.MustCompile(`^[ \t>]*(?:[-*+]|\d+[.)])[ \t]`)
+	quoteRe       = regexp.MustCompile(`^ {0,3}(?:> ?)+`) // a blockquote's markers, each with its one space
 	fenceRe       = regexp.MustCompile("^[ \\t>]*(?:(?:[-*+]|\\d+[.)])[ \\t]+)?(```+|~~~+)")
 )
 
@@ -285,8 +286,9 @@ func visible(body string) string {
 			l, comment = after, ok
 		}
 		line := strings.TrimRight(v.String(), "\r\n")
-		w := 0 // the line's indent, a tab 4 columns
-		for _, r := range line {
+		q := len(quoteRe.FindString(line))
+		w := 0 // the line's indent inside its blockquotes, a tab 4 columns
+		for _, r := range line[q:] {
 			if r == '\t' {
 				w += 3
 			} else if r != ' ' {
@@ -294,14 +296,14 @@ func visible(body string) string {
 			}
 			w++
 		}
-		if strings.TrimSpace(line) == "" {
+		if strings.TrimSpace(line[q:]) == "" {
 			blank = true
 			continue
 		}
 		if code = (code || blank) && w >= col+4; !code {
 			switch item := listRe.FindStringIndex(line); {
 			case item != nil:
-				col = item[1]
+				col = item[1] - q
 			case w < col: // past the list
 				col = 0
 			}

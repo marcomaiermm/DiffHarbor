@@ -494,6 +494,8 @@ func TestBodyProfile(t *testing.T) {
 		"- [ ] a\n    - [x] review: quiet":             "quiet", // a nested list item
 		"- item\n\n      - [x] review: quiet":          "",      // code in a list item
 		"- item\n\n  - [x] review: quiet":              "quiet",
+		">     review: quiet":                          "", // code in a blockquote
+		">\n> review: quiet":                           "quiet",
 		"- ```\n  review: quiet\n  ```\nreview: chill": "chill", // a fence in a list item
 		"```\n<!--\n```\nreview: quiet":                "quiet", // a comment marker in code is code
 		"text\n    review: quiet":                      "quiet", // indented, but no blank line before: the paragraph goes on
