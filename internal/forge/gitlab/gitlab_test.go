@@ -202,3 +202,41 @@ func TestOthers(t *testing.T) {
 		t.Fatal(err, ps, calls)
 	}
 }
+
+// No line of a body runs as a quick action, whatever markdown the model wraps it in. A fix with one goes as plain
+// code, a suggestion is committed as written.
+func TestInert(t *testing.T) {
+	for _, in := range []string{
+		"/merge", "see ```x := 1```\n```x := 1```\n/merge", "``` a`b\n/merge", "text\n    ```\n/merge", "```\n    ```\n```\n/merge",
+		"```\n``` ```\n```\n/merge", "```\r\n/a\r\n```\r\n/merge\r\n", "\r/merge", "- a\n  ```\n/merge", "<br>\n```\n\n/merge",
+	} {
+		for _, l := range strings.Split(inert(in), "\n") {
+			if command(l) {
+				t.Errorf("%q: %q runs", in, l)
+			}
+		}
+	}
+	if got := inert("// go\n/* c */\nsee /close"); got != "// go\n/* c */\nsee /close" {
+		t.Fatalf("%q", got)
+	}
+	var bodies []string
+	serve(t, func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		json.NewDecoder(r.Body).Decode(&b)
+		bodies = append(bodies, b["body"].(string))
+	})
+	e := &forge.Event{Forge: "gitlab"}
+	e.Repository.ID, e.PullRequest.Number = 5, 3
+	f, _ := (&Hub{}).Open(e)
+	p := f.(*pr)
+	for _, fix := range []string{"// keep\nx := 1", "x := 1\n/approve"} {
+		c := forge.Finding{Comment: review.Comment{Path: "a.go", Line: 2, Body: "```x```\n/merge", Fix: fix}, Start: 1, End: 2}
+		if err := p.discuss(c, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !strings.Contains(bodies[0], "```suggestion:-1+0\n// keep\nx := 1\n```") || strings.Contains(bodies[1], "suggestion") ||
+		!strings.Contains(bodies[1], "\\/approve") || !strings.Contains(bodies[0], "\\/merge") {
+		t.Fatalf("%q", bodies)
+	}
+}
