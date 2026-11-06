@@ -459,3 +459,23 @@ func olds(raw string) map[string]old {
 	}
 	return m
 }
+
+// inert escapes each line that would run as a quick action (/merge, /approve) with the bot's rights: a finding's
+// text comes from the PR's untrusted code. Every such line, fenced or not: guessing what GitLab's markdown parser
+// calls a code block is how one slips through. discuss keeps them out of a suggestion, which must stay as written.
+func inert(body string) string {
+	lines := strings.Split(body, "\n")
+	for i, l := range lines {
+		if command(l) {
+			lines[i] = `\` + l
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// command is a line GitLab could read as a quick action: "/" and a name at its start, once it drops "\r".
+// "//" and "/*" start no command, they are code comments.
+func command(l string) bool {
+	l = strings.ReplaceAll(l, "\r", "")
+	return strings.HasPrefix(l, "/") && !strings.HasPrefix(l, "//") && !strings.HasPrefix(l, "/*")
+}

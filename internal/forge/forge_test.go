@@ -24,10 +24,10 @@ func TestPlace(t *testing.T) {
 func TestFormat(t *testing.T) {
 	c := Finding{Comment: review.Comment{Severity: "major", Title: "t", Body: "b", Prompt: "In a.go around line 3, use ````x````"}}
 	got := Format(c, "suggestion")
-	if !strings.HasPrefix(got, "_🟠 Major_ · **t**\n\nb") || !strings.Contains(got, "Prompt for AI Agents") || strings.Count(got, "````") != 2 {
+	if !strings.HasPrefix(got, "_🟠 Major_ · **t**\n\nb") || !strings.Contains(got, "`````\nIn a.go around line 3, use ````x````\n`````") {
 		t.Fatalf("format: %q", got)
 	}
-	if allPrompts([]Finding{{Comment: review.Comment{Body: "x"}}}) != "" || !strings.Contains(allPrompts([]Finding{c, c}), "use ```x```\nIn a.go") {
+	if allPrompts([]Finding{{Comment: review.Comment{Body: "x"}}}) != "" || !strings.Contains(allPrompts([]Finding{c, c}), "use ````x````\nIn a.go") {
 		t.Fatalf("allPrompts: %q", allPrompts([]Finding{c, c}))
 	}
 	c.Body += "\n\n" + review.Verified + "the map is nil on line 3\n"

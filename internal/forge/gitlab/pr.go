@@ -112,7 +112,7 @@ func (p *pr) Notes() ([]forge.Note, error) {
 }
 
 func (p *pr) Note(id int64, body string) (int64, error) {
-	b := map[string]string{"body": body}
+	b := map[string]string{"body": inert(body)}
 	if id != 0 {
 		return id, call("PUT", fmt.Sprintf("%s/notes/%d", p.mr, id), b, nil)
 	}
@@ -207,7 +207,11 @@ func rejected(err error) bool {
 }
 
 // discuss starts the discussion of one finding: on the suggestion's last line, which it replaces up from there.
+// A fix with a line inert would escape goes as plain code: a suggestion is committed as written.
 func (p *pr) discuss(c forge.Finding, lines map[string]old) error {
+	if slices.ContainsFunc(strings.Split(c.Fix, "\n"), command) {
+		c.Start = 0
+	}
 	line, tag := c.Line, "suggestion"
 	if c.Start > 0 {
 		line, tag = c.End, fmt.Sprintf("suggestion:-%d+0", c.End-c.Start)
@@ -220,7 +224,7 @@ func (p *pr) discuss(c forge.Finding, lines map[string]old) error {
 	if o.line > 0 {
 		pos["old_line"] = o.line
 	}
-	return call("POST", p.mr+"/discussions", map[string]any{"body": forge.Format(c, tag) + "\n\n" + forge.Mark, "position": pos}, nil)
+	return call("POST", p.mr+"/discussions", map[string]any{"body": inert(forge.Format(c, tag) + "\n\n" + forge.Mark), "position": pos}, nil)
 }
 
 func (p *pr) Discussion() (forge.Discussion, error) {
@@ -243,7 +247,7 @@ func (p *pr) Discussion() (forge.Discussion, error) {
 }
 
 func (p *pr) Reply(body string) error {
-	b := map[string]string{"body": body}
+	b := map[string]string{"body": inert(body)}
 	if p.e.Kind == "issue_comment" || p.e.Comment.Discussion == "" {
 		return call("POST", p.mr+"/notes", b, nil)
 	}

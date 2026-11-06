@@ -880,5 +880,11 @@ func TrustedContext(rules, learnings string) string {
 	return s.String()
 }
 
-// Fence wraps s in a code block that its own backticks can't close.
-func Fence(s string) string { return "````\n" + strings.ReplaceAll(s, "````", "```") + "\n````" }
+// Fence wraps s in a code block that its own backticks can't close: the fence is longer than any run in s.
+func Fence(s string) string {
+	f := "````"
+	for strings.Contains(s, f) {
+		f += "`"
+	}
+	return f + "\n" + s + "\n" + f
+}
