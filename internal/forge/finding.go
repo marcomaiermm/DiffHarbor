@@ -31,9 +31,8 @@ func Format(c Finding, suggestion string) string {
 			f += "`"
 		}
 		s += "\n\n" + f + suggestion + "\n" + c.Fix + "\n" + f
-	} else if e, f := strings.TrimSuffix(c.Existing, "\n"), strings.TrimSuffix(c.Fix, "\n"); e != "" && f != "" && e != f {
-		// no place for a suggestion: what it replaces too. Trimmed here only: a placed fix keeps its last blank line.
-		d := prefixed("-", e) + "\n" + prefixed("+", f)
+	} else if c.Fix != "" && c.Existing != "" && c.Existing != c.Fix { // no place for a suggestion: what it replaces too
+		d := prefixed("-", c.Existing) + "\n" + prefixed("+", c.Fix)
 		s += "\n\n**Suggested fix:**\n\n" + strings.Replace(review.Fence(d), "\n", "diff\n", 1)
 	} else if c.Fix != "" {
 		s += "\n\n**Suggested fix:**\n\n" + review.Fence(c.Fix)
@@ -115,6 +114,7 @@ func Split(r review.Result, threads []Thread, lines map[string]string) (inline, 
 			Place(&c, lines)
 			inline = append(inline, c)
 		} else {
+			c.Existing, c.Fix = strings.TrimSuffix(c.Existing, "\n"), strings.TrimSuffix(c.Fix, "\n") // as Place does
 			rest = append(rest, c)
 		}
 	}
