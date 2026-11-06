@@ -211,6 +211,9 @@ func (p *pr) dropDrafts() bool {
 		log.Println(p.e.Key(), "drafts:", err)
 		return false
 	}
+	if len(ds) >= 30*100 { // all's cap: one unseen could be a person's
+		return false
+	}
 	ok := true
 	for _, d := range ds {
 		if !strings.HasSuffix(strings.TrimSpace(d.Note), forge.Mark) { // a person's quoting a note of ours stays

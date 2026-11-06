@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -72,6 +73,7 @@ func TestOlds(t *testing.T) {
 type fakeMR struct {
 	t           *testing.T
 	stale       string         // a draft there before, its note
+	many        bool           // 3000 drafts of ours there before: all can show
 	drop        func(int) bool // the drafts GitLab doesn't place, by index
 	reject      bool           // a finding's draft refused (4xx)
 	fail        bool           // a finding's draft fails (5xx)
@@ -113,7 +115,9 @@ func (f *fakeMR) serve() *pr {
 		mr := "/projects/5/merge_requests/3"
 		switch r.Method + " " + r.URL.Path {
 		case "GET " + mr + "/draft_notes":
-			if f.stale != "" {
+			if f.many {
+				out(slices.Repeat([]map[string]any{{"id": 5, "note": forge.Mark}}, 3000))
+			} else if f.stale != "" {
 				out([]map[string]any{{"id": 4, "note": f.stale}})
 			} else {
 				out([]any{})
@@ -271,14 +275,15 @@ func TestPublishFails(t *testing.T) {
 }
 
 // A person's draft (a personal token), one quoting ours too, stays and would be published: discussions instead,
-// answers too.
+// answers too. So do as many drafts as all reads: one past them could be a person's.
 func TestPostPersonsDraft(t *testing.T) {
-	f := &fakeMR{t: t, stale: "> " + forge.Mark + "\n\nmine"}
-	p := f.serve()
-	p.Resolve(forge.Thread{ID: "d7"}, "abcdef1")
-	p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx}}, nil, postDiff, "f")
-	if f.deleted || f.drafts != nil || f.published != 0 || len(f.discussions) != 1 || len(f.answered) != 1 {
-		t.Fatalf("drafts %v, published %d, discussions %v", f.drafts, f.published, f.discussions)
+	for _, f := range []*fakeMR{{t: t, stale: "> " + forge.Mark + "\n\nmine"}, {t: t, many: true}} {
+		p := f.serve()
+		p.Resolve(forge.Thread{ID: "d7"}, "abcdef1")
+		p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx}}, nil, postDiff, "f")
+		if f.deleted || f.drafts != nil || f.published != 0 || len(f.discussions) != 1 || len(f.answered) != 1 {
+			t.Fatalf("drafts %v, published %d, discussions %v", f.drafts, f.published, f.discussions)
+		}
 	}
 }
 
