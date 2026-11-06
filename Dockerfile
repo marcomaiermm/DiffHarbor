@@ -1,5 +1,6 @@
 FROM golang:1.27-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS build
-# Pinned so a release tag rebuilds the same checks. actionlint and osv-scanner too: built here, on current Go and deps, not Alpine's stale ones.
+# Pinned so a release tag rebuilds the same checks.
+# actionlint and osv-scanner too: built here on current Go, not Alpine's stale builds.
 RUN CGO_ENABLED=0 go install honnef.co/go/tools/cmd/staticcheck@v0.8.2 && CGO_ENABLED=0 go install github.com/zricethezav/gitleaks/v8@v8.30.1 \
     && CGO_ENABLED=0 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 && CGO_ENABLED=0 go install golang.org/x/tools/cmd/deadcode@v0.52.0 \
     && CGO_ENABLED=0 go install golang.org/x/vuln/cmd/govulncheck@v1.9.0 && CGO_ENABLED=0 go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 \
