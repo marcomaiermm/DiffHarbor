@@ -258,6 +258,7 @@ type reactPR struct {
 
 func (*reactPR) Discussion() (forge.Discussion, error) { return forge.Discussion{Ours: true}, nil }
 func (p *reactPR) React()                              { close(p.reacted); <-p.release }
+func (*reactPR) CanWrite(string) (bool, error)         { return false, nil }
 
 type reactForge struct {
 	skipForge
@@ -317,17 +318,19 @@ func TestNewer(t *testing.T) {
 		d     forge.Discussion
 		id    int64
 		login string
+		maint bool
 		want  bool
 	}{
-		{forge.Discussion{Ours: true, Notes: ours}, 2, "ann", true},  // asked again past bob's comment: that one answers both
-		{forge.Discussion{Ours: true, Notes: ours}, 4, "ann", false}, // later only a question for bob and thanks: chat answers neither, so this one
-		{forge.Discussion{Ours: true, Notes: ours}, 3, "bob", false},
-		{forge.Discussion{Ours: true, Notes: ours}, 9, "ann", false},
-		{forge.Discussion{Notes: humans}, 2, "ann", false},             // no @bot after: a human thread goes on between humans
-		{forge.Discussion{Ours: true, Notes: capped}, 2, "ann", false}, // we said our piece: "and now?" goes unanswered
-		{forge.Discussion{Ours: true, Notes: edited}, 2, "ann", false}, // "thanks" edited into a question: its edit was never queued
+		{forge.Discussion{Ours: true, Notes: ours}, 2, "ann", false, true},  // asked again past bob's comment: that one answers both
+		{forge.Discussion{Ours: true, Notes: ours}, 4, "ann", false, false}, // later only a question for bob and thanks: chat answers neither, so this one
+		{forge.Discussion{Ours: true, Notes: ours}, 3, "bob", false, false},
+		{forge.Discussion{Ours: true, Notes: ours}, 9, "ann", false, false},
+		{forge.Discussion{Notes: humans}, 2, "ann", false, false},             // no @bot after: a human thread goes on between humans
+		{forge.Discussion{Ours: true, Notes: capped}, 2, "ann", false, false}, // we said our piece: "and now?" goes unanswered
+		{forge.Discussion{Ours: true, Notes: capped}, 2, "ann", true, true},   // unless a maintainer asks: the decision is theirs
+		{forge.Discussion{Ours: true, Notes: edited}, 2, "ann", false, false}, // "thanks" edited into a question: its edit was never queued
 	} {
-		if got := newer(bot, c.d, c.id, c.login); got != c.want {
+		if got := newer(bot, c.d, c.id, c.login, c.maint); got != c.want {
 			t.Errorf("%d %s: got %v", c.id, c.login, got)
 		}
 	}

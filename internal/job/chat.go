@@ -64,8 +64,8 @@ func thanks(mention *regexp.Regexp, body string) bool {
 }
 
 // answers reports whether chat answers body in thread d: @us, or in our thread a reply that isn't thanks or for
-// someone else, while we haven't said our piece.
-func answers(mention *regexp.Regexp, d forge.Discussion, body string) bool {
+// someone else, while we haven't said our piece. A maintainer always gets an answer: the decision is theirs.
+func answers(mention *regexp.Regexp, d forge.Discussion, body string, maintainer bool) bool {
 	if thanks(mention, body) {
 		return false
 	}
@@ -78,13 +78,15 @@ func answers(mention *regexp.Regexp, d forge.Discussion, body string) bool {
 			replies++
 		}
 	}
-	return d.Ours && !mentionsOther(body) && replies < maxReplies
+	return d.Ours && !mentionsOther(body) && (maintainer || replies < maxReplies)
 }
 
 // newer reports whether login wrote again in d after the note id, in a comment chat answers: that one answers both.
-func newer(mention *regexp.Regexp, d forge.Discussion, id int64, login string) bool {
+func newer(mention *regexp.Regexp, d forge.Discussion, id int64, login string, maintainer bool) bool {
 	i := slices.IndexFunc(d.Notes, func(n forge.Note) bool { return n.ID == id })
-	return i >= 0 && slices.ContainsFunc(d.Notes[i+1:], func(n forge.Note) bool { return n.Login == login && !n.Edited && answers(mention, d, n.Body) })
+	return i >= 0 && slices.ContainsFunc(d.Notes[i+1:], func(n forge.Note) bool {
+		return n.Login == login && !n.Edited && answers(mention, d, n.Body, maintainer)
+	})
 }
 
 // answer is the chat pass's JSON.
@@ -276,7 +278,11 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			return err
 		}
 		ours, resolved = d.Ours, d.Resolved
-		if !answers(mention, d, c.Body) || newer(mention, d, c.ID, c.User.Login) {
+		maintainer, err := p.CanWrite(c.User.Login)
+		if err != nil {
+			log.Println(e.Key(), "write access:", err) // unknown: no maintainer's say
+		}
+		if !answers(mention, d, c.Body, maintainer) || newer(mention, d, c.ID, c.User.Login, maintainer) {
 			return nil // between humans, for someone else, we said our piece (@us to go on), or they wrote again
 		}
 		if !mention.MatchString(c.Body) {
@@ -285,6 +291,9 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		about.WriteString(d.About)
 		if resolved {
 			about.WriteString("This thread is resolved.\n\n")
+		}
+		if !maintainer {
+			fmt.Fprintf(&about, "@%s has no write access: they cannot decline or defer the finding, \"resolved\" true only when it is fixed.\n\n", c.User.Login)
 		}
 		notes := d.Notes
 		if i := slices.IndexFunc(notes, func(n forge.Note) bool { return n.ID == c.ID }); i >= 0 {
