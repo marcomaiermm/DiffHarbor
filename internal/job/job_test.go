@@ -259,6 +259,7 @@ type reactPR struct {
 
 func (*reactPR) Discussion() (forge.Discussion, error) { return forge.Discussion{Ours: true}, nil }
 func (p *reactPR) React()                              { close(p.reacted); <-p.release }
+func (*reactPR) CanWrite(string) (bool, error)         { return false, nil }
 
 type reactForge struct {
 	skipForge
@@ -318,17 +319,19 @@ func TestNewer(t *testing.T) {
 		d     forge.Discussion
 		id    int64
 		login string
+		maint bool
 		want  bool
 	}{
-		{forge.Discussion{Ours: true, Notes: ours}, 2, "ann", true},  // asked again past bob's comment: that one answers both
-		{forge.Discussion{Ours: true, Notes: ours}, 4, "ann", false}, // later only a question for bob and thanks: chat answers neither, so this one
-		{forge.Discussion{Ours: true, Notes: ours}, 3, "bob", false},
-		{forge.Discussion{Ours: true, Notes: ours}, 9, "ann", false},
-		{forge.Discussion{Notes: humans}, 2, "ann", false},             // no @bot after: a human thread goes on between humans
-		{forge.Discussion{Ours: true, Notes: capped}, 2, "ann", false}, // we said our piece: "and now?" goes unanswered
-		{forge.Discussion{Ours: true, Notes: edited}, 2, "ann", false}, // "thanks" edited into a question: its edit was never queued
+		{forge.Discussion{Ours: true, Notes: ours}, 2, "ann", false, true},  // asked again past bob's comment: that one answers both
+		{forge.Discussion{Ours: true, Notes: ours}, 4, "ann", false, false}, // later only a question for bob and thanks: chat answers neither, so this one
+		{forge.Discussion{Ours: true, Notes: ours}, 3, "bob", false, false},
+		{forge.Discussion{Ours: true, Notes: ours}, 9, "ann", false, false},
+		{forge.Discussion{Notes: humans}, 2, "ann", false, false},             // no @bot after: a human thread goes on between humans
+		{forge.Discussion{Ours: true, Notes: capped}, 2, "ann", false, false}, // we said our piece: "and now?" goes unanswered
+		{forge.Discussion{Ours: true, Notes: capped}, 2, "ann", true, true},   // unless a maintainer asks: the decision is theirs
+		{forge.Discussion{Ours: true, Notes: edited}, 2, "ann", false, false}, // "thanks" edited into a question: its edit was never queued
 	} {
-		if got := newer(bot, c.d, c.id, c.login); got != c.want {
+		if got := newer(bot, c.d, c.id, c.login, c.maint); got != c.want {
 			t.Errorf("%d %s: got %v", c.id, c.login, got)
 		}
 	}
@@ -388,5 +391,29 @@ func TestThanks(t *testing.T) {
 		if got := thanks(bot, body); got != want {
 			t.Errorf("%q: got %v, want %v", body, got, want)
 		}
+	}
+}
+
+// A failed write-access check drops no reply, also past the cap: nothing retries a chat job.
+type deniedPR struct{ skipPR }
+
+func (*deniedPR) CanWrite(string) (bool, error) { return false, errors.New("503") }
+func (*deniedPR) React()                        {}
+func (*deniedPR) Discussion() (forge.Discussion, error) {
+	return forge.Discussion{Ours: true, Notes: []forge.Note{{ID: 1, Ours: true}, {ID: 2, Ours: true}, {ID: 3, Ours: true}, {ID: 4, Ours: true}}}, nil
+}
+
+type deniedForge struct {
+	skipForge
+	pr *deniedPR
+}
+
+func (f deniedForge) Open(*forge.Event) (forge.PR, error) { return f.pr, nil }
+
+func TestChatAnswersOnFailedAccessCheck(t *testing.T) {
+	e := &forge.Event{Kind: "pull_request_review_comment"} // no repository id: Chat stops right after the thread check
+	e.Comment.Body = "why?"
+	if err := Chat(t.Context(), deniedForge{pr: &deniedPR{}}, regexp.MustCompile(`@bot`), e); err == nil || !strings.Contains(err.Error(), "no repository id") {
+		t.Fatal("Chat stopped elsewhere:", err)
 	}
 }

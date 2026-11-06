@@ -236,6 +236,9 @@ func (p *pr) CanWrite(login string) (bool, error) {
 		Permission string `json:"permission"`
 	}
 	err := Call("GET", fmt.Sprintf("%s/collaborators/%s/permission", p.api, url.PathEscape(login)), p.token, nil, &r)
+	if ge := (*ghError)(nil); errors.As(err, &ge) && ge.status == 404 {
+		return false, nil // no collaborator
+	}
 	return r.Permission == "admin" || r.Permission == "write", err
 }
 
