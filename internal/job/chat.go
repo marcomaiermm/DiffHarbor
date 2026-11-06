@@ -507,7 +507,16 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		return fmt.Errorf("chat returned no JSON, ends with %q", text.Tail(out))
 	}
 	body := strings.TrimSpace(*a.Reply)
-	if l := text.OneLine(a.Learning, 300); l != "" {
+	l := text.OneLine(a.Learning, 300)
+	if l != "" && e.Kind == "issue_comment" { // a review thread asked already
+		ok, err := p.CanWrite(c.User.Login)
+		maintainer = err == nil && ok
+	}
+	if l != "" && !maintainer { // a learning steers later reviews, it can quiet a finding: only who can push sets one
+		log.Println(e.Key(), "learning without write access dropped:", c.User.Login)
+		l = ""
+	}
+	if l != "" {
 		where := ""
 		if c.Path != "" {
 			where = ", `" + c.Path + "`"
