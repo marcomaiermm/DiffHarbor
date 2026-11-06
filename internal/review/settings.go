@@ -432,6 +432,17 @@ func (cfg Settings) RulePaths() []string {
 	return []string{".review/rules.md", "AGENTS.md", "CLAUDE.md"}
 }
 
+// ReadRules reads the rules with read (the first of names that exists, "" if none): the rules file, then the root's
+// AGENTS.md or CLAUDE.md too. A rules file says what to report, the root's conventions still hold.
+func (cfg Settings) ReadRules(read func(names ...string) string) string {
+	ps := cfg.RulePaths()
+	rules, conv := read(ps[0]), read(ps[1:]...)
+	if rules == "" || conv == "" || rules == conv {
+		return cmp.Or(rules, conv)
+	}
+	return rules + "\n\n## Conventions (the repo root's AGENTS.md or CLAUDE.md)\n\n" + conv
+}
+
 // SkillPaths returns the candidates for the skills dir, the first that exists holds.
 func (cfg Settings) SkillPaths() []string {
 	if cfg.Skills != "" {
@@ -494,6 +505,12 @@ func (cfg Settings) Fold(c Comment) bool {
 		return !Blocks(c.Severity)
 	}
 	return c.Severity == "nit"
+}
+
+// FoldPush is Fold for a push's review: a minor one folds too unless the file's profile is assertive. A push
+// mostly fixes earlier findings, and each fix's own edge cases opened new threads, round after round.
+func (cfg Settings) FoldPush(c Comment) bool {
+	return cfg.Fold(c) || !Blocks(c.Severity) && cmp.Or(cfg.Override, cfg.at(c.Path).Profile) != "assertive"
 }
 
 // Fresh drops the minor findings and nits of a push's review that lie off the lines the push touched (near: the added lines

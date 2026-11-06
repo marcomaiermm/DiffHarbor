@@ -300,6 +300,21 @@ func TestSettings(t *testing.T) {
 		!slices.Equal(cfg.SkillPaths(), []string{"tools/skills"}) || !slices.Equal(cfg.CheckPaths(), []string{"a.sh", "ci/b.sh"}) {
 		t.Errorf("set paths: %v %v %v %v", err, cfg.RulePaths(), cfg.SkillPaths(), cfg.CheckPaths())
 	}
+	files := map[string]string{"docs/md": "accept races", "AGENTS.md": "use pnpm"}
+	read := func(ns ...string) string {
+		for _, n := range ns {
+			if s, ok := files[n]; ok {
+				return s
+			}
+		}
+		return ""
+	}
+	if got := cfg.ReadRules(read); !strings.HasPrefix(got, "accept races") || !strings.HasSuffix(got, "use pnpm") {
+		t.Errorf("rules file and root conventions: %q", got)
+	}
+	if delete(files, "docs/md"); cfg.ReadRules(read) != "use pnpm" {
+		t.Error("no rules file: the root's AGENTS.md alone")
+	}
 	if cfg, _ := LoadSettings(`{"checks":[]}`); len(cfg.CheckPaths()) != 0 {
 		t.Error("checks [] should turn the scripts off")
 	}
@@ -383,6 +398,10 @@ func TestProfile(t *testing.T) {
 	}
 	if !(Settings{}).Keep(Comment{Severity: "nit"}) || cfg.Keep(Comment{Path: "api/a.go", Severity: "nit"}) {
 		t.Error("nits kept unless min_severity drops them")
+	}
+	if !(Settings{}).FoldPush(Comment{Severity: "minor"}) || (Settings{}).FoldPush(Comment{Severity: "major"}) ||
+		cfg.FoldPush(Comment{Path: "web/a.ts", Severity: "minor"}) {
+		t.Error("a push folds minor ones unless assertive, never major ones")
 	}
 	cfg.Override = "chill"
 	if cfg.Fold(Comment{Path: "a.go", Severity: "minor"}) || !cfg.Fold(Comment{Path: "web/a.ts", Severity: "nit"}) {

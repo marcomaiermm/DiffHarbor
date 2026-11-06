@@ -206,7 +206,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			scripts = append(scripts, checks.Script{Name: path, File: f})
 		}
 	}
-	rules := text.Truncate(p.File(pr.Base.SHA, cfg.RulePaths()...), 8000) + p.NestedRules(pr.Base.SHA, files)
+	rules := text.Truncate(cfg.ReadRules(func(n ...string) string { return p.File(pr.Base.SHA, n...) }), 8000) + p.NestedRules(pr.Base.SHA, files)
 	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(sb.Dir, "skills"))
 
 	started := time.Now()
@@ -237,6 +237,9 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			if r.Comments = review.Fresh(r.Comments, diff.RightLines(since, true)); n > len(r.Comments) {
 				log.Println(key, n-len(r.Comments), "minor findings and nits off the push dropped")
 			}
+		}
+		for i := range r.Comments {
+			r.Comments[i].Fold = cfg.FoldPush(r.Comments[i])
 		}
 	}
 	for _, i := range r.Fixed {

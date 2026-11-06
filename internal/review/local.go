@@ -31,13 +31,14 @@ func Tree(ctx context.Context, sb *proc.Sandbox, cwd, title string, closed []Com
 	if err != nil {
 		return Result{}, "", fmt.Errorf("review.json: %w", err)
 	}
-	rules := ""
-	for _, n := range cfg.RulePaths() {
-		if b, err := os.ReadFile(filepath.Join(cwd, n)); err == nil { //nolint:gosec // your own tree
-			rules = string(b)
-			break
+	rules := cfg.ReadRules(func(names ...string) string {
+		for _, n := range names {
+			if b, err := os.ReadFile(filepath.Join(cwd, n)); err == nil { //nolint:gosec // your own tree
+				return string(b)
+			}
 		}
-	}
+		return ""
+	})
 	for _, d := range cfg.SkillPaths() {
 		if rd := filepath.Join(cwd, d); proc.Exists(rd) { // -L: symlinked dev skills become real copies, as from the API
 			if err := os.MkdirAll(filepath.Join(sb.Dir, "skills"), 0o755); err != nil {
