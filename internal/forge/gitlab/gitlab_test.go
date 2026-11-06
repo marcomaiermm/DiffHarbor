@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -77,6 +78,8 @@ type fakeMR struct {
 	reject      bool           // a finding's draft refused (4xx)
 	fail        bool           // a finding's draft fails (5xx)
 	failSummary bool           // the summary's draft fails
+	failEdit    bool           // editing a draft fails
+	lostEdit    bool           // editing a draft goes through, its answer fails (a timeout)
 	failThreads bool           // the discussions don't read after publishing
 	failAnswer  bool           // an answer's draft fails
 	failPublish bool           // bulk_publish fails
@@ -112,6 +115,16 @@ func (f *fakeMR) serve() *pr {
 		bot := map[string]string{"username": "review-bot"}
 		out := func(v any) { json.NewEncoder(w).Encode(v) }
 		mr := "/projects/5/merge_requests/3"
+		if id, ok := strings.CutPrefix(r.URL.Path, mr+"/draft_notes/"); ok && r.Method == "PUT" { // a draft's id: its index + 1
+			if !f.failEdit {
+				n, _ := strconv.Atoi(id)
+				f.drafts[n-1]["note"] = b["note"]
+			}
+			if f.failEdit || f.lostEdit {
+				w.WriteHeader(500)
+			}
+			return
+		}
 		switch r.Method + " " + r.URL.Path {
 		case "GET " + mr + "/draft_notes":
 			if f.paged {
@@ -133,6 +146,7 @@ func (f *fakeMR) serve() *pr {
 				w.WriteHeader(500)
 			default:
 				f.drafts = append(f.drafts, b)
+				out(map[string]any{"id": len(f.drafts)})
 			}
 		case "POST " + mr + "/draft_notes/bulk_publish":
 			if f.failPublish {
@@ -198,19 +212,20 @@ var (
 	postCtx = review.Comment{Path: "a.go", Line: 13, Body: "context line"}
 )
 
-// One review: the stale draft dropped; the answer, the findings and the summary drafted, published once. GitLab
-// doesn't place the first finding: an older thread with its body on its line doesn't count, the summary gets it
-// as plain code.
+// One review: the stale draft dropped; the answer, the summary and the findings drafted, the summary before the
+// findings so it heads them, published once. GitLab doesn't place the first finding: an older thread with its body
+// on its line doesn't count, the summary gets it as plain code.
 func TestPost(t *testing.T) {
-	f := &fakeMR{t: t, stale: "old " + forge.Mark, drop: func(i int) bool { return i == 1 }}
+	f := &fakeMR{t: t, stale: "old " + forge.Mark, drop: func(i int) bool { return i == 2 }}
 	p := f.serve()
 	p.Resolve(forge.Thread{ID: "d7"}, "abcdef1")
 	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postFix, postCtx}}, []forge.Thread{{ID: "d0"}}, postDiff, "f")
 	pos := func(i int) map[string]any { return f.drafts[i]["position"].(map[string]any) }
 	if err != nil || n != 2 || !f.deleted || len(f.drafts) != 4 || f.published != 1 || f.states[0] != "reviewed" || f.notes != nil ||
 		f.drafts[0]["in_reply_to_discussion_id"] != "d7" || f.drafts[0]["resolve_discussion"] != true ||
-		!strings.Contains(f.drafts[1]["note"].(string), "```suggestion:-1+0\n") || pos(1)["new_line"] != 12.0 ||
-		pos(2)["old_line"] != 3.0 || pos(2)["head_sha"] != "abcdef1" || !strings.Contains(f.summary(), "Actionable comments posted: 2") ||
+		f.drafts[1]["note"] != f.summary() || !strings.Contains(f.drafts[2]["note"].(string), "```suggestion:-1+0\n") ||
+		pos(2)["new_line"] != 12.0 || pos(3)["old_line"] != 3.0 || pos(3)["head_sha"] != "abcdef1" ||
+		!strings.Contains(f.summary(), "Actionable comments posted: 2") ||
 		!strings.Contains(f.edited, "Comments not posted inline (1)") || strings.Contains(f.edited, "Outside diff") || !strings.Contains(f.edited, "fix body") ||
 		!strings.Contains(f.edited, "Suggested fix") || strings.Contains(f.edited, "context line") {
 		t.Fatalf("post: %d %v %v %v\n%s", n, err, f.drafts, f.notes, f.edited)
@@ -236,6 +251,28 @@ func TestPostRefused(t *testing.T) {
 	if err != nil || n != 2 || f.published != 1 || f.notes != nil || f.edited != "" ||
 		!strings.Contains(f.summary(), "Comments not posted inline (2)") || strings.Contains(f.summary(), "Outside diff") || !strings.Contains(f.summary(), "context line") {
 		t.Fatalf("post: %d %v %v\n%s", n, err, f.notes, f.summary())
+	}
+}
+
+// Refused findings and the summary's draft not updated: it goes out as drafted, then the note gets them.
+func TestPostSummaryNotUpdated(t *testing.T) {
+	f := &fakeMR{t: t, reject: true, failEdit: true}
+	p := f.serve()
+	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx, postFix}}, nil, postDiff, "f")
+	if err != nil || n != 2 || f.published != 1 || f.notes != nil || strings.Contains(f.summary(), "not posted inline") ||
+		!strings.Contains(f.edited, "Comments not posted inline (2)") {
+		t.Fatalf("post: %d %v %v\n%s", n, err, f.notes, f.edited)
+	}
+}
+
+// The summary's draft updated though GitLab's answer failed, and a finding dropped: the published summary, as
+// updated, is edited, not a second one posted.
+func TestPostSummaryUpdateLost(t *testing.T) {
+	f := &fakeMR{t: t, fail: true, lostEdit: true}
+	p := f.serve()
+	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx, postFix}}, nil, postDiff, "f")
+	if err != nil || n != 2 || f.published != 1 || f.notes != nil || !strings.Contains(f.edited, "Comments not posted inline (2)") {
+		t.Fatalf("post: %d %v %v\n%s", n, err, f.notes, f.edited)
 	}
 }
 
