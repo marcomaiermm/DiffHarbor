@@ -65,10 +65,15 @@ type PR interface {
 	Note(id int64, body string) (int64, error)
 	// Threads are our inline findings on the PR.
 	Threads() ([]Thread, error)
-	// Resolve answers a thread whose finding sha fixed, then resolves it.
+	// Configure takes the repo's review.json, before Resolve and Post.
+	Configure(cfg review.Settings)
+	// Resolve answers a thread whose finding sha fixed, then resolves it. On GitLab the answer may wait for Post or
+	// Publish, to go out with the review.
 	Resolve(t Thread, sha string)
+	// Publish sends what Resolve held back when no Post follows.
+	Publish()
 	// Post sends the findings of a review of sha: on lines of the PR's diff raw inline, the rest in one comment.
-	// Returns how many it posted.
+	// Returns how many it posted, the folded ones (Comment.Fold) not.
 	Post(sha string, r review.Result, threads []Thread, raw, footer string) (int, error)
 	// Discussion is the thread of the event's review comment.
 	Discussion() (Discussion, error)
@@ -94,6 +99,8 @@ type Note struct {
 	Login string
 	Body  string
 	Ours  bool
+	// Edited after it was posted: chat skips edits, so what it says now was never queued.
+	Edited bool
 }
 
 // Thread is one of our inline review threads.
@@ -119,9 +126,10 @@ func Answers(ns []Note) string {
 
 // Discussion is a review thread with what it is about.
 type Discussion struct {
-	Ours  bool   // we started it: chat may resolve it
-	About string // markdown: the file and its hunk
-	Notes []Note
+	Ours     bool   // we started it: chat may resolve it
+	Resolved bool   // someone resolved it already
+	About    string // markdown: the file and its hunk
+	Notes    []Note
 }
 
 // RuleDirs are the dirs above files, below the root, whose AGENTS.md applies to them.
@@ -156,4 +164,13 @@ func Redact(s string) string { return reportSecret.ReplaceAllString(s, "/…") }
 func Clean(s string) string {
 	s = Redact(s)
 	return text.Truncate(strings.TrimSpace(stateTag.ReplaceAllString(strings.NewReplacer(Mark, "", stickyMark, "").Replace(s), "")), 3000)
+}
+
+// MentionOf matches @handle for any of handles as a whole login (not @handle-other).
+func MentionOf(handles ...string) *regexp.Regexp {
+	for i, h := range handles {
+		handles[i] = regexp.QuoteMeta(h)
+	}
+	// dots end a sentence, not a GitLab username: @bot. yes, @bot.ann no
+	return regexp.MustCompile(`(?i)(^|[^\w.+-])@(` + strings.Join(handles, "|") + `)\.*([^\w.-]|$)`)
 }

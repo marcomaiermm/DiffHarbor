@@ -1,9 +1,10 @@
 # cp compose.example.yml compose.yml, put the values in .env next to it, docker compose up -d.
-# Only POST /webhook/github and /webhook/gitlab need to be reachable from the forge; with REPORT_URL, /r/ too, best behind your SSO.
+# Only POST /webhook/github and /webhook/gitlab need to be reachable from the forge. With REPORT_URL, /r/ too, best behind your SSO,
+# and /reviewing.svg, /reviewing-light.svg and /reviewing-dark.svg, public: the PR comment shows them while a review runs.
 services:
   diffharbor:
     # Or build: . to build it yourself.
-    image: ghcr.io/marcomaiermm/diffharbor:0.4.1 # x-release-please-version
+    image: ghcr.io/marcomaiermm/diffharbor:0.7.1 # x-release-please-version
     init: true
     # Idle is the Go server (~10 MB); the cap is for installs and type checks of big repos during checks.
     mem_limit: 3g
@@ -25,6 +26,7 @@ services:
       GITLAB_TOKEN: ${GITLAB_TOKEN:-}
       GITLAB_READ_TOKEN: ${GITLAB_READ_TOKEN:-}
       GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
+      GITLAB_FINDINGS: ${GITLAB_FINDINGS:-} # review (one email) or discussions (one each)
       # Models as provider/id[:level]; empty = a repo's review.json, else picked by the keys present.
       REVIEW_MODEL: ${REVIEW_MODEL:-}
       VERIFY_MODEL: ${VERIFY_MODEL:-}

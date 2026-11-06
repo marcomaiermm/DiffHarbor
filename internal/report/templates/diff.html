@@ -38,8 +38,8 @@
   {{with .Blob}}<p class="fnote-at"><a href="{{.}}" class="chip loc" target="_blank" rel="noopener">{{icon "code" ""}}{{$.Loc}} at the head ↗</a></p>{{end}}
 </div>{{end}}
 
-{{/* A finding's weight as its chip: Blocker, Major, Minor. */}}
-{{define "sev"}}<span class="sev" data-sev="{{.}}">{{if eq . "critical"}}Blocker{{else if eq . "major"}}Major{{else}}Minor{{end}}</span>{{end}}
+{{/* A finding's weight as its chip: Blocker, Major, Minor, Nit. */}}
+{{define "sev"}}<span class="sev" data-sev="{{.}}">{{if eq . "critical"}}Blocker{{else if eq . "major"}}Major{{else if eq . "nit"}}Nit{{else}}Minor{{end}}</span>{{end}}
 
 {{define "graph"}}<div class="graph" data-graph="{{json .}}"><div class="cy"></div>
   <div class="graph-tools btn-group" role="group" aria-label="Graph">

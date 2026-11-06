@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"diffharbor/internal/agent"
+	"diffharbor/internal/assets"
 	"diffharbor/internal/forge"
 	"diffharbor/internal/forge/github"
 	"diffharbor/internal/forge/gitlab"
@@ -31,6 +32,7 @@ import (
 )
 
 var (
+	// Review decides on drafts (review.json's drafts). Turned to draft brings no new code: a running review finishes.
 	actions = map[string]bool{"opened": true, "synchronize": true, "reopened": true, "ready_for_review": true}
 	trusted = map[string]bool{"OWNER": true, "MEMBER": true, "COLLABORATOR": true}
 	// The code hosts the server takes webhooks from, at /webhook/<name>, and @bot in their comments.
@@ -66,7 +68,7 @@ func review(ctx context.Context, f forge.Forge, e *forge.Event) error {
 		}
 		latest.Unlock()
 	}()
-	return job.Review(ctx, f, e)
+	return job.Review(ctx, f, e, "")
 }
 
 // work runs the queue's jobs one at a time: a review, an answer in a thread, or deleting a closed PR's reports.
@@ -111,9 +113,9 @@ func work(queue chan *forge.Event) {
 	}
 }
 
-// closing is a PR closed or turned to draft: its reports go.
+// closing is a PR closed: its reports go.
 func closing(e *forge.Event) bool {
-	return e.Kind == "pull_request" && (e.Action == "closed" || e.Action == "converted_to_draft")
+	return e.Kind == "pull_request" && e.Action == "closed"
 }
 
 // drop deletes a closed PR's reports while its deletingFile is there: none means it was reopened or done since.
@@ -173,7 +175,11 @@ func Serve(cfg Config) {
 		log.Fatal("no forge: set GITHUB_APP_PRIVATE_KEY_B64 or GITLAB_TOKEN")
 	}
 	for name, f := range forges {
-		mentions[name] = mentionOf(f.Bot())
+		handles := []string{f.Bot()}
+		if name == "gitlab" && gitlab.Name != "" {
+			handles = append(handles, gitlab.Name)
+		}
+		mentions[name] = forge.MentionOf(handles...)
 		log.Printf("%s as @%s on POST /webhook/%s", name, f.Bot(), name)
 	}
 	if err := proc.Clean(); err != nil { // a crash's work dirs, the cache all repos shared before
@@ -220,7 +226,7 @@ func Serve(cfg Config) {
 				return
 			}
 			stop(e.Key(), false)
-		case e.Kind == "pull_request" && actions[e.Action] && !e.PullRequest.Draft:
+		case e.Kind == "pull_request" && actions[e.Action]:
 			latest.Lock()
 			latest.m[e.Key()] = e.PullRequest.Head.SHA
 			if e.Action == "reopened" || e.Action == "ready_for_review" { // not a late push: its close still deletes
@@ -246,7 +252,8 @@ func Serve(cfg Config) {
 		select {
 		case queue <- e:
 			w.WriteHeader(http.StatusAccepted)
-			if e.Kind != "pull_request" {
+			// a reply without @bot may be in a thread between humans: Chat reacts once it knows the thread is ours
+			if e.Kind != "pull_request" && (e.Kind != "pull_request_review_comment" || mention.MatchString(c.Body)) {
 				go job.Seen(f, e)
 			}
 		default:
@@ -256,6 +263,10 @@ func Serve(cfg Config) {
 	})
 	if job.ReportURL != "" {
 		http.HandleFunc("GET /r/{path...}", serveReport)
+		names, _ := fs.Glob(assets.Reviewing, "*.svg")
+		for _, name := range names {
+			http.HandleFunc("GET /"+name, serveLighthouse)
+		}
 	}
 	resume(queue)
 	go func() {
@@ -273,6 +284,21 @@ func Serve(cfg Config) {
 	// A client that sends its body slowly or idles holds a connection only so long. No WriteTimeout: a report is big.
 	srv := &http.Server{Addr: ":3000", ReadHeaderTimeout: 10 * time.Second, ReadTimeout: time.Minute, IdleTimeout: 2 * time.Minute}
 	log.Fatal(srv.ListenAndServe())
+}
+
+// serveLighthouse serves the walkthrough's reviewing banner: GitHub's image proxy fetches it, on GitLab the browser.
+func serveLighthouse(w http.ResponseWriter, r *http.Request) {
+	b, err := assets.Reviewing.ReadFile(path.Base(r.URL.Path)) // only the routes registered for its files get here
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "image/svg+xml")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'") // opened on its own: no scripts
+	h.Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(b)
 }
 
 // serveReport serves a PR's report to who has its link: a report holds the PR's code, and the app has no login, the
@@ -447,15 +473,11 @@ func retryDrops(queue chan *forge.Event) {
 			_ = os.Remove(f)
 			continue
 		}
+		e.Action = "closed" // a delete whatever saved it: a converted_to_draft from before drafts kept the reports
 		select {
 		case queue <- e:
 		default: // stays for the next round
 			return
 		}
 	}
-}
-
-// mentionOf matches @slug as a whole login (not @slug-other).
-func mentionOf(slug string) *regexp.Regexp {
-	return regexp.MustCompile(`(?i)(^|\s)@` + regexp.QuoteMeta(slug) + `([^\w-]|$)`)
 }

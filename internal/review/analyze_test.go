@@ -107,6 +107,22 @@ func TestAnalyze(t *testing.T) {
 		t.Fatalf("below min_severity skips verify: %+v %v", r.Comments, calls)
 	}
 
+	// The profile folds by the file the verifier settled on; min_severity drops a nit before verify.
+	quiet, _ := LoadSettings(`{"profile":"quiet"}`)
+	nit := `{"summary":"s","comments":[{"path":"a.md","line":1,"severity":"minor","title":"m","body":"b"},{"path":"a.md","line":2,"severity":"nit","title":"n","body":"b"}]}`
+	r, _, _ = run(map[string][]string{"review": {nit}, "verify": {`{"verdicts":[{"i":0,"keep":true},{"i":1,"keep":true}]}`}}, quiet)
+	if len(r.Comments) != 2 || !r.Comments[0].Fold || !r.Comments[1].Fold {
+		t.Fatalf("quiet folds: %+v", r.Comments)
+	}
+	r, _, _ = run(map[string][]string{"review": {nit}, "verify": {`{"verdicts":[{"i":0,"keep":true},{"i":1,"keep":true}]}`}}, Settings{})
+	if len(r.Comments) != 2 || r.Comments[0].Fold || !r.Comments[1].Fold {
+		t.Fatalf("chill folds nits: %+v", r.Comments)
+	}
+	r, _, calls = run(map[string][]string{"review": {strings.Replace(nit, `"minor"`, `"nit"`, 1)}}, Settings{pkgSettings: pkgSettings{MinSeverity: "minor"}})
+	if len(r.Comments) != 0 || strings.Join(calls, ",") != "review,review again" {
+		t.Fatalf("min_severity minor drops nits: %+v %v", r.Comments, calls)
+	}
+
 	// The second look's findings are verified with the first's, one per line, most severe first.
 	r, _, calls = run(map[string][]string{
 		"review":       {finding},
@@ -166,9 +182,11 @@ func TestAnalyze(t *testing.T) {
 	if len(r.Comments) != 1 || !slices.Equal(r.Fixed, []int{0}) || strings.Join(calls, ",") != "review,review again,verify" {
 		t.Fatalf("confirmed fix: %+v %v %v", r.Comments, r.Fixed, calls)
 	}
-	r, calls = fixedRun(map[string][]string{"verify": {`{"verdicts":[{"i":0,"keep":true}],"fixed":[]}`}, "verify repeats": {"no json"}})
-	if len(r.Comments) != 1 || strings.Join(calls, ",") != "review,review again,verify,verify repeats" {
-		t.Fatalf("repeats failed: %+v %v", r.Comments, calls)
+	for _, bad := range []string{"no json", `{"repeats":[null]}`, `{"repeats":[0,99]}`, `{"repeats":[-1]}`} {
+		r, calls = fixedRun(map[string][]string{"verify": {`{"verdicts":[{"i":0,"keep":true}],"fixed":[]}`}, "verify repeats": {bad}})
+		if len(r.Comments) != 1 || len(r.Dropped) != 0 || strings.Join(calls, ",") != "review,review again,verify,verify repeats" {
+			t.Fatalf("repeats %s: %+v %v", bad, r.Comments, calls)
+		}
 	}
 
 	// In parts: a review pass, a second look and a verify pass each, findings merged most severe first, a failed part

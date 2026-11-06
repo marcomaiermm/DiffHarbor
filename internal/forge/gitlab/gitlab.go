@@ -28,7 +28,9 @@ var (
 	// APIURL is GITLAB_URL's REST API.
 	APIURL = "https://gitlab.com/api/v4"
 	// Bot is the token's user: @Bot in an MR comment talks to the bot.
-	Bot              string
+	Bot string
+	// Name is its display name: people type @Name when they skip the autocomplete.
+	Name             string
 	token, readToken string
 	client           = &http.Client{Timeout: time.Minute}
 	errNotFound      = errors.New("not found")
@@ -39,8 +41,9 @@ var (
 // Hub takes GitLab's webhooks.
 type Hub struct{ secret string }
 
-// Config is the bot user: GITLAB_URL, GITLAB_TOKEN, GITLAB_READ_TOKEN and GITLAB_WEBHOOK_SECRET.
-type Config struct{ URL, Token, ReadToken, Secret string }
+// Config is the bot user: GITLAB_URL, GITLAB_TOKEN, GITLAB_READ_TOKEN and GITLAB_WEBHOOK_SECRET, and
+// GITLAB_FINDINGS: review (default) or discussions.
+type Config struct{ URL, Token, ReadToken, Secret, Findings string }
 
 // Setup checks cfg and learns the bot's username. ok is false when no GITLAB_TOKEN is set.
 func Setup(cfg Config) (h *Hub, ok bool, err error) {
@@ -52,14 +55,18 @@ func Setup(cfg Config) (h *Hub, ok bool, err error) {
 	if h.secret == "" {
 		return nil, true, errors.New("GITLAB_WEBHOOK_SECRET is empty")
 	}
+	if Findings = cmp.Or(cfg.Findings, "review"); Findings != "review" && Findings != "discussions" {
+		return nil, true, fmt.Errorf("GITLAB_FINDINGS %q: want review or discussions", Findings)
+	}
 	readToken = cfg.ReadToken // unset: git fetches with token, which stays in the vault like this one
 	var u struct {
 		Username string `json:"username"`
+		Name     string `json:"name"`
 	}
 	if err := call("GET", "/user", nil, &u); err != nil || u.Username == "" {
 		return nil, true, fmt.Errorf("gitlab GET /user: %w", err)
 	}
-	Bot = u.Username
+	Bot, Name = u.Username, u.Name
 	return h, true, nil
 }
 
@@ -393,6 +400,8 @@ type note struct {
 	Body     string `json:"body"`
 	System   bool   `json:"system"`
 	Resolved bool   `json:"resolved"`
+	Created  string `json:"created_at"`
+	Updated  string `json:"updated_at"` // resolving the thread moves it too: then chat may answer twice, not never
 	Author   struct {
 		Username string `json:"username"`
 	} `json:"author"`
@@ -403,7 +412,7 @@ type note struct {
 }
 
 func (n note) forge() forge.Note {
-	return forge.Note{ID: n.ID, Login: n.Author.Username, Body: n.Body, Ours: n.Author.Username == Bot}
+	return forge.Note{ID: n.ID, Login: n.Author.Username, Body: n.Body, Ours: n.Author.Username == Bot, Edited: n.Updated != n.Created}
 }
 
 func discussion(project string, iid int, id string) ([]note, error) {
@@ -453,4 +462,24 @@ func olds(raw string) map[string]old {
 		}
 	}
 	return m
+}
+
+// inert escapes each line that would run as a quick action (/merge, /approve) with the bot's rights: a finding's
+// text comes from the PR's untrusted code. Every such line, fenced or not: guessing what GitLab's markdown parser
+// calls a code block is how one slips through. discuss keeps them out of a suggestion, which must stay as written.
+func inert(body string) string {
+	lines := strings.Split(body, "\n")
+	for i, l := range lines {
+		if command(l) {
+			lines[i] = `\` + l
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// command is a line GitLab could read as a quick action: "/" and a name at its start, once it drops "\r".
+// "//" and "/*" start no command, they are code comments.
+func command(l string) bool {
+	l = strings.ReplaceAll(l, "\r", "")
+	return strings.HasPrefix(l, "/") && !strings.HasPrefix(l, "//") && !strings.HasPrefix(l, "/*")
 }

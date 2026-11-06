@@ -32,10 +32,18 @@ import (
 	"time"
 )
 
-// Review reviews the event's PR on f.
+// posts reports whether a review posts one: a full review always, so the bot shows up under Reviewers, an
+// incremental one only with a finding that isn't folded. Folded ones have no thread to hold them: alone they would
+// come back on every push.
+func posts(full bool, r review.Result, threads []forge.Thread) bool {
+	_, rest, _ := forge.Split(r, threads, nil) // without diff lines: every unfolded one not on a thread's line
+	return full || len(rest) > 0
+}
+
+// Review reviews the event's PR on f; profile is `@bot review <profile>`'s, over the description's and review.json's.
 //
 //nolint:gocognit,gocyclo // one job step by step, each step a few lines
-func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
+func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) (err error) {
 	key := e.Key()
 	p, err := f.Open(e)
 	if err != nil {
@@ -45,19 +53,34 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	if err := p.Refresh(); err != nil {
 		return err
 	}
-	if e.PullRequest.State != "open" || e.PullRequest.Draft {
+	if e.PullRequest.State != "open" {
 		return nil
 	}
 	pr, sha := e.PullRequest, e.PullRequest.Head.SHA
+	manual := e.Action == "manual" || e.Action == "large"
+	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
+	profile = cmp.Or(profile, bodyProfile(pr.Body))
+	cfg.Override = profile
+	p.Configure(cfg)
+	// A draft's push reads the walkthrough only under opt_in, for whether someone asked.
+	if pr.Draft && !cfg.ReviewsDraft(manual, cfg.Drafts == "opt_in") {
+		if manual { // drafts: off, asked anyway: say why nothing comes
+			return p.Reply("⏭️ Drafts get no review in this repo (`drafts` in review.json). Mark the PR ready for review for one.\n\n" + forge.Mark)
+		}
+		return nil // ready_for_review brings the review
+	}
 	s, err := forge.LoadSticky(p)
 	if err != nil {
 		return err
 	}
-	manual := e.Action == "manual" || e.Action == "large"
 	if s.State.SHA == sha && !manual {
 		return nil // reviewed already, e.g. a redelivered event; `@app review` forces one
 	}
-	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
+	if pr.Draft && !cfg.ReviewsDraft(manual, s.State.Drafts) {
+		return nil // opt_in, nobody asked yet
+	}
+	// Only under opt_in: a later switch to it doesn't start reviewing drafts asked about before.
+	s.State.Drafts = s.State.Drafts || pr.Draft && manual && cfg.Drafts == "opt_in" // kept by the walkthrough's first write below
 	// Like a bot author: green, and `@app review` still reviews. A broken review.json reviews, its note says why.
 	if !manual && cfgErr == nil && !cfg.Reviews(pr.Base.Ref, e.Repository.DefaultBranch) {
 		s.Write(fmt.Sprintf("⏭️ **Review skipped:** base branch `%s` is not the default branch or in `base_branches`. Comment `@%s review` for one.", pr.Base.Ref, f.Bot()), "")
@@ -71,8 +94,12 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		p.Status(sha, "success", "Skipped: bot author")
 		return nil
 	}
-	// The lighthouse lives on the docs site: a forge fetches it, and a self-hosted server may not be reachable.
-	s.Write(fmt.Sprintf(`<img src="https://marcomaiermm.github.io/DiffHarbor/reviewing.svg" width="440" alt="A lighthouse sweeping its beam"><br>⏳ **Reviewing** `+"`%s` …", sha[:7]), "")
+	// The lighthouse comes from this server when it has a public URL, else from the docs site: the forge fetches it.
+	// GitHub picks a <source> by its theme setting; elsewhere the <img> follows the OS's color scheme.
+	img := cmp.Or(ReportURL, "https://marcomaiermm.github.io/DiffHarbor") + "/reviewing"
+	s.Write(fmt.Sprintf(`<picture><source media="(prefers-color-scheme: dark)" srcset="%[1]s-dark.svg">`+
+		`<source media="(prefers-color-scheme: light)" srcset="%[1]s-light.svg">`+
+		`<img src="%[1]s.svg" width="440" alt="A lighthouse sweeping its beam"></picture><br>⏳ **Reviewing** `+"`%[2]s` …", img, sha[:7]), "")
 	desc, state := "Review completed", "success"
 	p.Status(sha, "pending", "Review in progress")
 	defer func() {
@@ -197,7 +224,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		if since := review.Since(ctx, filepath.Join(dir, "repo"), s.State.SHA, read); since != "" {
 			n := len(r.Comments)
 			if r.Comments = review.Fresh(r.Comments, diff.RightLines(since, true)); n > len(r.Comments) {
-				log.Println(key, n-len(r.Comments), "minor findings off the push dropped")
+				log.Println(key, n-len(r.Comments), "minor findings and nits off the push dropped")
 			}
 		}
 	}
@@ -222,17 +249,22 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	if tid != "" {
 		kind += " · ticket " + tid
 	}
+	if profile != "" {
+		kind += " · profile " + profile
+	}
 	if cfgErr != nil {
 		kind += " · ⚠️ review.json ignored: " + text.OneLine(cfgErr.Error(), 120)
 	}
 	n := 0
-	if only == nil || len(r.Comments) > 0 { // a full review always posts, so the bot shows up under Reviewers
+	if posts(only == nil, r, threads) {
 		// Lines of the whole PR diff take inline comments, also in files this incremental review skipped: only
 		// a thread can be resolved once fixed.
 		if n, err = p.Post(sha, r, threads, raw,
 			fmt.Sprintf("%s · %s · %s · %ds", stats, kind, sha[:7], int(time.Since(started).Round(time.Second).Seconds()))); err != nil {
 			return err
 		}
+	} else {
+		p.Publish() // the answers to fixed threads
 	}
 	desc = text.Count(n, "finding")
 	if len(r.Fixed) > 0 {

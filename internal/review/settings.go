@@ -53,10 +53,17 @@ type Settings struct {
 	InstallScripts bool `json:"install_scripts"`
 	// Base branches besides the default branch whose PRs get reviewed without asking, as globs ("release/*").
 	BaseBranches []string `json:"base_branches"`
+	// Draft PRs: "manual" (default) reviewed when asked; "opt_in" once asked, every push too, like any PR;
+	// "off" never.
+	Drafts string `json:"drafts"`
+	// How GitLab gets the findings: "review" as one review, one email; "discussions" an email each. Unset: the
+	// server's GITLAB_FINDINGS.
+	GitLabFindings string `json:"gitlab_findings"`
 	// What reviews and chats of this repo follow of the learnings.
 	Learnings Learnings `json:"learnings"`
 
 	ignoreRe, keepRe *regexp.Regexp // ignore's globs, its "!" ones
+	Override         string         `json:"-"` // this review's profile (the PR's), over the top's and the packages'
 	CITests          string         // checks.CITests: the CI file running the tests; unless "tests" says otherwise, the review doesn't
 	pkgs             []pkgRule      // longest pattern first
 }
@@ -118,6 +125,9 @@ type Pass struct {
 type pkgSettings struct {
 	MinSeverity string `json:"min_severity"` // minor|major|critical: post nothing below it
 	Tests       *bool  `json:"tests"`        // false: don't run the tests of changed packages; unset = inherit, at the top run unless CI does
+	// What goes inline and what folds into the review's summary: "quiet" folds minor ones and nits, "chill" (default)
+	// nits, "assertive" none. min_severity drops what is below it first, "minor" the nits.
+	Profile string `json:"profile"`
 }
 
 type pkgRule struct {
@@ -126,10 +136,24 @@ type pkgRule struct {
 }
 
 var (
-	rank    = map[string]int{"minor": 1, "major": 2, "critical": 3}
 	modelRe = regexp.MustCompile(`^\w[\w.-]*/[\w.:/@-]+$`)
 	themeRe = regexp.MustCompile(`^[a-z0-9-]{1,40}$`)
 )
+
+// Profiles are the values of review.json's profile, least inline first.
+var Profiles = []string{"quiet", "chill", "assertive"}
+
+// Severities are a finding's, lightest first: the order is their rank.
+var Severities = []string{"nit", "minor", "major", "critical"}
+
+// Rank is sev's weight by Severities, 0 for none or one it doesn't know.
+func Rank(sev string) int { return slices.Index(Severities, sev) + 1 }
+
+// Blocks reports whether a finding of sev blocks the merge: a critical or major one.
+func Blocks(sev string) bool { return Rank(sev) >= Rank("major") }
+
+// bySeverity orders findings most severe first.
+func bySeverity(a, b Comment) int { return Rank(b.Severity) - Rank(a.Severity) }
 
 // Models returns the review and verify model: the server's env, else review.json, else agent.Matrix. An empty
 // verify model means the review model verifies.
@@ -197,6 +221,11 @@ func (cfg Settings) Reviews(base, defaultBranch string) bool {
 		ok, _ := path.Match(g, base)
 		return ok
 	})
+}
+
+// ReviewsDraft reports whether a draft PR gets reviewed: asked for now (manual), or on a push once asked before.
+func (cfg Settings) ReviewsDraft(manual, asked bool) bool {
+	return cfg.Drafts != "off" && (manual || asked && cfg.Drafts == "opt_in")
 }
 
 // Asks reports whether a review cut short offers the box for all parts.
@@ -339,6 +368,12 @@ func LoadSettings(s string) (Settings, error) {
 			return Settings{}, fmt.Errorf("base_branches %q: %w", g, err)
 		}
 	}
+	if !slices.Contains([]string{"", "manual", "opt_in", "off"}, cfg.Drafts) {
+		return Settings{}, fmt.Errorf("drafts %q: want manual, opt_in or off", cfg.Drafts)
+	}
+	if f := cfg.GitLabFindings; f != "" && f != "review" && f != "discussions" {
+		return Settings{}, fmt.Errorf("gitlab_findings %q: want review or discussions", f)
+	}
 	if cfg.MaxParts < 0 || cfg.MaxParts > 8 {
 		return Settings{}, fmt.Errorf("max_parts %d: want 1 to 8", cfg.MaxParts)
 	}
@@ -353,8 +388,8 @@ func LoadSettings(s string) (Settings, error) {
 			return Settings{}, fmt.Errorf("suggest_split: count %q: want %s", c, strings.Join(diff.Classes, ", "))
 		}
 	}
-	if cfg.MinSeverity != "" && rank[cfg.MinSeverity] == 0 {
-		return Settings{}, fmt.Errorf("min_severity %q: want minor, major or critical", cfg.MinSeverity)
+	if err := cfg.pkgSettings.check(); err != nil {
+		return Settings{}, err
 	}
 	var err error
 	if cfg.ignoreRe, cfg.keepRe, err = globsRe(cfg.Ignore); err != nil {
@@ -366,8 +401,8 @@ func LoadSettings(s string) (Settings, error) {
 	}
 	for _, p := range slices.SortedFunc(maps.Keys(cfg.Packages), func(a, b string) int { return cmp.Compare(len(b), len(a)) }) {
 		ps := cfg.Packages[p]
-		if ps.MinSeverity != "" && rank[ps.MinSeverity] == 0 {
-			return Settings{}, fmt.Errorf("packages %q: min_severity %q: want minor, major or critical", p, ps.MinSeverity)
+		if err := ps.check(); err != nil {
+			return Settings{}, fmt.Errorf("packages %q: %w", p, err)
 		}
 		re, err := globRe(strings.TrimSuffix(p, "/"))
 		if err != nil {
@@ -376,6 +411,17 @@ func LoadSettings(s string) (Settings, error) {
 		cfg.pkgs = append(cfg.pkgs, pkgRule{re, ps})
 	}
 	return cfg, nil
+}
+
+// check validates the keys a package may override.
+func (s pkgSettings) check() error {
+	if s.MinSeverity != "" && Rank(s.MinSeverity) < Rank("minor") {
+		return fmt.Errorf("min_severity %q: want minor, major or critical", s.MinSeverity)
+	}
+	if s.Profile != "" && !slices.Contains(Profiles, s.Profile) {
+		return fmt.Errorf("profile %q: want one of %s", s.Profile, strings.Join(Profiles, ", "))
+	}
+	return nil
 }
 
 // RulePaths returns the candidates for the rules file, the first that exists holds.
@@ -415,7 +461,7 @@ func (cfg Settings) at(path string) pkgSettings {
 	s := cfg.pkgSettings
 	for _, r := range cfg.pkgs {
 		if r.re.MatchString(path) {
-			s.MinSeverity, s.Tests = cmp.Or(r.s.MinSeverity, s.MinSeverity), cmp.Or(r.s.Tests, s.Tests)
+			s.MinSeverity, s.Tests, s.Profile = cmp.Or(r.s.MinSeverity, s.MinSeverity), cmp.Or(r.s.Tests, s.Tests), cmp.Or(r.s.Profile, s.Profile)
 			break
 		}
 	}
@@ -435,14 +481,26 @@ func (cfg Settings) Ignored(path string) bool {
 // Keep reports whether c reaches the min_severity for its file.
 func (cfg Settings) Keep(c Comment) bool {
 	m, _ := cfg.At(c.Path)
-	return m == "" || rank[c.Severity] >= rank[m]
+	return m == "" || Rank(c.Severity) >= Rank(m)
 }
 
-// Fresh drops the minor findings of a push's review that lie off the lines the push touched (near: the added lines
+// Fold reports whether c goes folded into the review's summary instead of inline, by its file's profile: a nit
+// unless assertive, a minor one under quiet.
+func (cfg Settings) Fold(c Comment) bool {
+	switch cmp.Or(cfg.Override, cfg.at(c.Path).Profile) {
+	case "assertive":
+		return false
+	case "quiet":
+		return !Blocks(c.Severity)
+	}
+	return c.Severity == "nit"
+}
+
+// Fresh drops the minor findings and nits of a push's review that lie off the lines the push touched (near: the added lines
 // and diff.RightLines' context of since): an old line seen again yields new edge cases on every push, never done.
 func Fresh(cs []Comment, near map[string]bool) []Comment {
 	return slices.DeleteFunc(cs, func(c Comment) bool {
-		return rank[c.Severity] < rank["major"] && !near[fmt.Sprintf("%s:%d", c.Path, c.Line)]
+		return !Blocks(c.Severity) && !near[fmt.Sprintf("%s:%d", c.Path, c.Line)]
 	})
 }
 

@@ -24,8 +24,25 @@ func TestPlace(t *testing.T) {
 		!strings.Contains(Format(blank, "suggestion"), "```suggestion\ny\n\n```") {
 		t.Fatalf("blank: %+v %q", blank, Format(blank, "suggestion"))
 	}
-	if got := Format(Finding{Comment: review.Comment{Existing: "x\n", Fix: "x"}}, ""); strings.Contains(got, "diff") {
-		t.Fatalf("no-op diff: %q", got)
+	if got := Format(Finding{Comment: review.Comment{Existing: "a ````", Fix: "b"}}, ""); !strings.HasSuffix(got, "`````diff\n-a ````\n+b\n`````") {
+		t.Fatalf("diff fence: %q", got)
+	}
+	// Trimmed once, placed or not, inline or outside the diff: a fix's last blank line stays.
+	// A fix that is a blank line stays one, placed or not.
+	cs := []review.Comment{{Path: "a.go", Line: 11, Existing: "nope\n\n", Fix: "y\n\n"}, {Path: "a.go", Line: 40, Existing: "nope\n\n", Fix: "y\n\n"}, {Path: "a.go", Line: 41, Existing: "x\n", Fix: "x"},
+		{Path: "a.go", Line: 42, Existing: "x", Fix: "\n"}, {Path: "a.go", Line: 11, Existing: "\tif x {\n", Fix: "\n"}}
+	inline, rest, _ := Split(review.Result{Comments: cs}, nil, lines)
+	if len(inline) != 2 || len(rest) != 3 || !inline[0].OnDiff || rest[0].OnDiff { // OnDiff: what a forge refuses heads apart
+		t.Fatalf("split: %d inline, %d rest", len(inline), len(rest))
+	}
+	want := "````diff\n-nope\n-\n+y\n+\n````"
+	if !strings.Contains(Format(inline[0], "suggestion"), want) || !strings.Contains(Format(rest[0], ""), want) || !strings.HasSuffix(Format(rest[1], ""), "**Suggested fix:**\n\n````\nx\n````") ||
+		!strings.Contains(Format(rest[2], ""), "````diff\n-x\n+\n````") || !strings.HasSuffix(Format(inline[1], "suggestion"), "```suggestion\n\n```") {
+		t.Fatalf("split: %q %q %q %q %q", Format(inline[0], "suggestion"), Format(rest[0], ""), Format(rest[1], ""), Format(rest[2], ""), Format(inline[1], "suggestion"))
+	}
+	// A placed finding moved into the summary (GitLab's diff not ready yet) shows what it replaces.
+	if got := Summary(nil, inline[1:], nil, ""); !strings.Contains(got, "````diff\n-\tif x {\n+\n````") {
+		t.Fatalf("moved: %q", got)
 	}
 }
 
@@ -33,19 +50,19 @@ func TestPlace(t *testing.T) {
 func TestSplitNearThread(t *testing.T) {
 	lines := map[string]string{"a.ts:120": "x", "a.ts:122": "x", "b.ts:116": "x"}
 	r := review.Result{Comments: []review.Comment{{Path: "a.ts", Line: 115}, {Path: "a.ts", Line: 122}, {Path: "b.ts", Line: 116}, {Path: "a.ts", Line: 120}}}
-	inline, rest := Split(r, []Thread{{Path: "a.ts", Line: 118, Resolved: true}, {Path: "a.ts", Line: 127}}, lines)
-	if len(inline) != 1 || inline[0].Path != "b.ts" || len(rest) != 0 {
-		t.Fatalf("inline %+v rest %+v", inline, rest)
+	inline, outside, _ := Split(r, []Thread{{Path: "a.ts", Line: 118, Resolved: true}, {Path: "a.ts", Line: 127}}, lines)
+	if len(inline) != 1 || inline[0].Path != "b.ts" || len(outside) != 0 {
+		t.Fatalf("inline %+v outside %+v", inline, outside)
 	}
 }
 
 func TestFormat(t *testing.T) {
 	c := Finding{Comment: review.Comment{Severity: "major", Title: "t", Body: "b", Prompt: "In a.go around line 3, use ````x````"}}
 	got := Format(c, "suggestion")
-	if !strings.HasPrefix(got, "_🟠 Major_ · **t**\n\nb") || !strings.Contains(got, "Prompt for AI Agents") || strings.Count(got, "````") != 2 {
+	if !strings.HasPrefix(got, "_🟠 Major_ · **t**\n\nb") || !strings.Contains(got, "`````\nIn a.go around line 3, use ````x````\n`````") {
 		t.Fatalf("format: %q", got)
 	}
-	if allPrompts([]Finding{{Comment: review.Comment{Body: "x"}}}) != "" || !strings.Contains(allPrompts([]Finding{c, c}), "use ```x```\nIn a.go") {
+	if allPrompts([]Finding{{Comment: review.Comment{Body: "x"}}}) != "" || !strings.Contains(allPrompts([]Finding{c, c}), "use ````x````\nIn a.go") {
 		t.Fatalf("allPrompts: %q", allPrompts([]Finding{c, c}))
 	}
 	c.Body += "\n\n" + review.Verified + "the map is nil on line 3\n"
@@ -160,5 +177,50 @@ func TestRepoID(t *testing.T) {
 	b, _ := RepoID(instance("git.example.com"), e)
 	if a != "gitlab:gitlab.com:5" || a == b {
 		t.Fatal(a, b)
+	}
+}
+
+func TestMention(t *testing.T) {
+	m := MentionOf("diffharbor")
+	for s, want := range map[string]bool{
+		"@diffharbor review": true, "hey @DiffHarbor, why?": true, "@diffharbor": true,
+		"@diffharbor-bot hi": false, "mail@diffharbor": false,
+	} {
+		if m.MatchString(s) != want {
+			t.Errorf("%q", s)
+		}
+	}
+	if got := strings.TrimSpace(m.ReplaceAllString("@diffharbor review", "")); got != "review" {
+		t.Fatalf("%q", got)
+	}
+	m = MentionOf("project_1_bot_ab", "mr-agent")
+	for s, want := range map[string]bool{"@mr-agent why?": true, "@project_1_bot_ab why?": true, "(@mr-agent) why?": true, "@mr-agent-x": false, "@mr-agent.alice what?": false, "ask @mr-agent.": true, "@mr-agent... hm": true, "@mr why": false} {
+		if m.MatchString(s) != want {
+			t.Errorf("%q", s)
+		}
+	}
+}
+
+// Folded findings go into the summary, folded and apart from those outside the diff, and don't count as actionable.
+func TestSummaryFolded(t *testing.T) {
+	lines := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n x\n+y\n")
+	r := review.Result{Comments: []review.Comment{
+		{Path: "a.go", Line: 2, Severity: "major", Title: "inline", Body: "b"},
+		{Path: "a.go", Line: 2, Severity: "nit", Title: "name", Body: "b", Fold: true, Prompt: "rename"},
+		{Path: "b.go", Line: 9, Severity: "minor", Title: "far", Body: "b"},
+	}}
+	inline, outside, folded := Split(r, nil, lines)
+	s := Summary(inline, outside, folded, "f")
+	if len(inline) != 1 || len(outside) != 1 || len(folded) != 1 || !strings.Contains(s, "Actionable comments posted: 2") ||
+		!strings.Contains(s, "Outside diff range comments (1)") || !strings.Contains(s, "<details>\n<summary><b>🧹 Nitpicks (1)</b></summary>") ||
+		!strings.Contains(s, "_🔵 Nit_ · **name**") || !strings.Contains(s, "rename") {
+		t.Fatalf("%d inline, %d outside, %d folded:\n%s", len(inline), len(outside), len(folded), s)
+	}
+	if p := Parse(Format(Finding{Comment: r.Comments[1]}, "")); p.Severity != "nit" || p.Title != "name" {
+		t.Fatalf("parse nit: %+v", p)
+	}
+	minor := []Finding{{Comment: review.Comment{Severity: "minor", Fold: true}}}
+	if s := Summary(nil, nil, minor, "f"); !strings.Contains(s, "No actionable comments") || !strings.Contains(s, "🧹 Minor comments (1)") {
+		t.Fatal(s)
 	}
 }

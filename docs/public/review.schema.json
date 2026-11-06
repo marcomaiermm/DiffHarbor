@@ -5,7 +5,11 @@
   "description": "Per-repo settings for DiffHarbor, in the repo root. All keys are optional; unknown keys are ignored.",
   "type": "object",
   "definitions": {
-    "severity": { "enum": ["minor", "major", "critical"] },
+    "severity": { "enum": ["minor", "major", "critical"], "description": "Findings below are dropped before verification; minor drops the nits." },
+    "profile": {
+      "enum": ["quiet", "chill", "assertive"],
+      "description": "What goes inline, the rest folds into the review's summary. quiet: critical and major; chill (default): minor too; assertive: nits too. A PR's \"review: <profile>\" line or `@bot review <profile>` overrides it."
+    },
     "model": {
       "type": "string",
       "pattern": "^\\w[\\w.-]*/[\\w.:/@-]+$",
@@ -20,6 +24,7 @@
       "type": "object",
       "properties": {
         "min_severity": { "$ref": "#/definitions/severity" },
+        "profile": { "$ref": "#/definitions/profile" },
         "tests": { "type": "boolean" }
       }
     }
@@ -31,6 +36,7 @@
       "description": "Globs (*, **, ?, [abc], {a,b}); a path without one takes its folder, \"!glob\" takes paths back in."
     },
     "min_severity": { "$ref": "#/definitions/severity" },
+    "profile": { "$ref": "#/definitions/profile" },
     "tests": { "type": "boolean", "description": "Run the tests of changed packages. Unset: only when no CI workflow does." },
     "packages": {
       "type": "object",
@@ -98,6 +104,8 @@
     "checks": { "type": "array", "items": { "$ref": "#/definitions/repoPath" } },
     "install_scripts": { "type": "boolean", "description": "Run lifecycle scripts (postinstall, native builds) in the checks' installs. Default false." },
     "base_branches": { "type": "array", "items": { "type": "string" }, "description": "Globs of base branches besides the default branch whose PRs get reviewed without asking." },
+    "drafts": { "enum": ["manual", "opt_in", "off"], "description": "Draft PRs: manual (default) reviewed on @bot review; opt_in once asked, every later push too; off never." },
+    "gitlab_findings": { "enum": ["review", "discussions"], "description": "GitLab: review posts the findings, answers and summary as one review, one email; discussions each on its own, an email each. Default: the server's GITLAB_FINDINGS." },
     "tickets": { "type": "array", "items": { "type": "string" }, "description": "itsaplan or Linear projects (team keys) a PR may name; unset = any, [] = none." }
   }
 }

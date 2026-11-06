@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.7.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.7.0...v0.7.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* checked commit under chat replies, bad repeats indices keep all findings ([#67](https://github.com/marcomaiermm/DiffHarbor/issues/67)) ([6a6c953](https://github.com/marcomaiermm/DiffHarbor/commit/6a6c953647dce726634cbd75d320fcce8c476c62))
+* **review:** verifier drops repeats of open threads ([#65](https://github.com/marcomaiermm/DiffHarbor/issues/65)) ([19f2497](https://github.com/marcomaiermm/DiffHarbor/commit/19f2497b8ce9a2f319f252e88497941012cb7ba8))
+
+## [0.7.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.6.1...v0.7.0) (2026-11-05)
+
+
+### Features
+
+* dependency bumps get full tsc and an npm diff of the bumped packages ([#61](https://github.com/marcomaiermm/DiffHarbor/issues/61)) ([7886ffd](https://github.com/marcomaiermm/DiffHarbor/commit/7886ffdf8b7661830d8d6dd750b2bc0f7e9cbf98))
+
+
+### Bug Fixes
+
+* **chat:** follow-ups to [#63](https://github.com/marcomaiermm/DiffHarbor/issues/63) review ([#64](https://github.com/marcomaiermm/DiffHarbor/issues/64)) ([b86f77b](https://github.com/marcomaiermm/DiffHarbor/commit/b86f77b944d47d44d437776d0fa26df43515927b))
+* **chat:** no reply to questions for others, accept deferrals, severity by worst case ([#63](https://github.com/marcomaiermm/DiffHarbor/issues/63)) ([da3f5bd](https://github.com/marcomaiermm/DiffHarbor/commit/da3f5bdcdad072eedcb58dc287910834088717ec))
+
+## [0.6.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.6.0...v0.6.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **chat:** no 👀 on replies in threads between humans ([#59](https://github.com/marcomaiermm/DiffHarbor/issues/59)) ([61721ed](https://github.com/marcomaiermm/DiffHarbor/commit/61721edf2b028ba3acce634aa962f767f614b4cf))
+
+## [0.6.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.5.0...v0.6.0) (2026-11-05)
+
+
+### Features
+
+* **review:** animated lighthouse while reviewing, banners as a note ([#57](https://github.com/marcomaiermm/DiffHarbor/issues/57)) ([a8264b0](https://github.com/marcomaiermm/DiffHarbor/commit/a8264b0ea69fe4307485fe528abd07113d30556a))
+* **review:** lighthouse in the design system's colors, served by the server with REPORT_URL ([#58](https://github.com/marcomaiermm/DiffHarbor/issues/58)) ([0132f7e](https://github.com/marcomaiermm/DiffHarbor/commit/0132f7e9490f56d699e68220e904f2959bcb0949))
+* **review:** suggest_split counts code only, count and skip configure it ([#55](https://github.com/marcomaiermm/DiffHarbor/issues/55)) ([e0188a0](https://github.com/marcomaiermm/DiffHarbor/commit/e0188a0dae31af675b1c49ba6ac52b9446505cb8))
+
+## [0.5.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.4.1...v0.5.0) (2026-11-05)
+
+
+### Features
+
+* **chat:** learnings settings in review.json, learnings and forget commands ([#53](https://github.com/marcomaiermm/DiffHarbor/issues/53)) ([f3c3031](https://github.com/marcomaiermm/DiffHarbor/commit/f3c3031260c9d96c185cb4ab5fe03f6328058d19))
+* **review:** ask about unstated assumptions, check contracts and migrations, suggest a split ([#50](https://github.com/marcomaiermm/DiffHarbor/issues/50)) ([1134adc](https://github.com/marcomaiermm/DiffHarbor/commit/1134adc0bc726e74e1c5374f8882a8d6fc1f8f5f))
+* **review:** run the proof test on the base versions of the PR's code ([#54](https://github.com/marcomaiermm/DiffHarbor/issues/54)) ([c5446df](https://github.com/marcomaiermm/DiffHarbor/commit/c5446df245d4e2d5d486a94e9c1e46a96ce682df))
+
 ## [0.4.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.4.0...v0.4.1) (2026-11-05)
 
 

@@ -19,21 +19,6 @@ import (
 	"testing"
 )
 
-func TestMention(t *testing.T) {
-	m := mentionOf("diffharbor")
-	for s, want := range map[string]bool{
-		"@diffharbor review": true, "hey @DiffHarbor, why?": true, "@diffharbor": true,
-		"@diffharbor-bot hi": false, "mail@diffharbor": false,
-	} {
-		if m.MatchString(s) != want {
-			t.Errorf("%q", s)
-		}
-	}
-	if got := strings.TrimSpace(m.ReplaceAllString("@diffharbor review", "")); got != "review" {
-		t.Fatalf("%q", got)
-	}
-}
-
 func TestStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	running.key, running.review, running.cancel = "o/r#1", false, cancel
@@ -78,6 +63,21 @@ func TestPendingResume(t *testing.T) {
 	done(key)
 	if _, err := os.Stat(pendingFile(key)); !os.IsNotExist(err) {
 		t.Fatal("kept after its review:", err)
+	}
+}
+
+// A deletingFile a converted_to_draft saved before drafts kept the reports is still a delete, not a review that never
+// drains it.
+func TestRetryDropsOldDraft(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "converted_to_draft"}
+	e.Repository.FullName, e.PullRequest.Number = "o/r", 7
+	latest.Lock()
+	save(deletingFile(e.Key()), e)
+	latest.Unlock()
+	q := make(chan *forge.Event, 1)
+	if retryDrops(q); len(q) != 1 || !closing(<-q) {
+		t.Fatal("not queued as a delete")
 	}
 }
 
@@ -211,6 +211,18 @@ func TestReportRoute(t *testing.T) {
 		dir, sha, ok := reportRoute(p)
 		if got := dir + " " + sha; !ok && want != "!" || ok && got != want {
 			t.Error(p, got, ok)
+		}
+	}
+}
+
+// Each lighthouse file is an SVG with a CSP: GitHub picks -light or -dark by its theme, the rest gets the plain one.
+func TestServeLighthouse(t *testing.T) {
+	for _, name := range []string{"reviewing.svg", "reviewing-light.svg", "reviewing-dark.svg"} {
+		w := httptest.NewRecorder()
+		serveLighthouse(w, httptest.NewRequest(http.MethodGet, "/"+name, nil))
+		if w.Code != 200 || w.Header().Get("Content-Type") != "image/svg+xml" || w.Header().Get("Content-Security-Policy") == "" ||
+			!strings.HasPrefix(w.Body.String(), "<svg") {
+			t.Fatal(name, w.Code, w.Header())
 		}
 	}
 }

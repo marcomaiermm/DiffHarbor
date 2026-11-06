@@ -803,6 +803,7 @@ func TestJudge(t *testing.T) {
 		Outline: diff.Outline{Weakened: []diff.Flag{{At: "a_test.go:4", What: "skip/only: `t.Skip()`"}}},
 		Findings: []review.Comment{
 			{Path: "a.go", Line: 9, Severity: "minor", Title: "naming"},
+			{Path: "a.go", Line: 5, Severity: "nit", Title: "name it n"},
 			{Path: "a.go", Line: 2, Severity: "critical", Title: "nil map", Body: "m is nil. It panics.\n\n_Verified:_ seen", Evidence: "seen"},
 			{Path: "a.go", Line: 2, Severity: "major", Title: "leak", Body: "The file stays open.\n\nClose it."},
 		}})
@@ -817,16 +818,17 @@ func TestJudge(t *testing.T) {
 		"Fix before merging: leak @ a.go:2 · step 1 · not verified",
 		"Fix before merging: skip/only: `t.Skip()` @ a_test.go:4 · not in the diff · In the diff",
 		"Minor: naming @ a.go:9 · step 1 · not verified",
+		"Nits: name it n @ a.go:5 · step 1 · not verified",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("groups:\n%s", strings.Join(got, "\n"))
 	}
 	if v.Verdict.OK || v.Verdict.Title != "Fix first: nil map" ||
-		v.Verdict.Body != "a.go:2: m is nil. After that, 2 more findings to fix, 1 minor finding and 1 decision." {
+		v.Verdict.Body != "a.go:2: m is nil. After that, 2 more findings to fix, 1 minor finding, 1 nit and 1 decision." {
 		t.Errorf("verdict: %+v", v.Verdict)
 	}
-	if v.Draft.Event != "Request changes" || v.Draft.Say != "1 blocker, 2 major and 1 minor, listed in the draft" ||
-		v.Draft.MD != "nil map (a.go:2). m is nil.\n\nFix before merging:\n- a.go:2  leak. The file stays open.\n- a_test.go:4  skip/only: `t.Skip()`\n\nQuestions:\n1. Retry?\n\nMinor:\n- a.go:9  naming" {
+	if v.Draft.Event != "Request changes" || v.Draft.Say != "1 blocker, 2 major, 1 minor and 1 nit, listed in the draft" ||
+		v.Draft.MD != "nil map (a.go:2). m is nil.\n\nFix before merging:\n- a.go:2  leak. The file stays open.\n- a_test.go:4  skip/only: `t.Skip()`\n\nQuestions:\n1. Retry?\n\nMinor:\n- a.go:9  naming\n\nNits:\n- a.go:5  name it n" {
 		t.Errorf("draft: %+v\n%s", v.Draft, v.Draft.MD)
 	}
 
@@ -1138,5 +1140,19 @@ func TestFailedNotClean(t *testing.T) {
 	}
 	if page = string(b); !strings.Contains(page, "1 file not fully reviewed") || !strings.Contains(page, "in the files reviewed") || strings.Contains(page, "Nothing blocks the merge") {
 		t.Error("omitted: a clean verdict")
+	}
+}
+
+// A nit or a minor finding on a declaration marks no way: only what blocks the merge is "on the way".
+func TestWaysNit(t *testing.T) {
+	for _, sev := range []string{"nit", "minor"} {
+		store := &file{Path: "store.go", Changes: []change{{Name: "Save", State: "new", Sev: sev}}}
+		v := view{Steps: []step{{Files: []*file{store}}}, files: map[string]*file{"store.go": store}}
+		syms := map[string][]Symbol{"Save": {{Path: "store.go", Exact: true, Ways: []Way{
+			{Method: "GET", Route: "/x", Path: "server.go", Line: 3, Chain: []Hop{{Name: "Save", Path: "store.go", Line: 5, In: "server.go", At: 3}}},
+		}}}}
+		if ws := ways(&v, syms); len(ws) != 1 || ws[0].Sev != "" || strings.Contains(ws[0].Says(), "on the way") {
+			t.Errorf("%s: %+v", sev, ws)
+		}
 	}
 }

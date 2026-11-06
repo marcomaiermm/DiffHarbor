@@ -158,6 +158,37 @@ func TestSuggestion(t *testing.T) {
 	}
 }
 
+// GitHub rejects a line: the finding on it goes into the body under its own heading, apart from the one outside
+// the diff.
+func TestRejectedLine(t *testing.T) {
+	src := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,2 @@\n ctx\n+new\n"
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b struct {
+			Body     string
+			Comments []any
+		}
+		json.NewDecoder(r.Body).Decode(&b)
+		if len(b.Comments) > 0 {
+			w.WriteHeader(422)
+		}
+		body = b.Body
+		fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+	APIURL = srv.URL
+	e := &forge.Event{}
+	e.PullRequest.Number = 1
+	p := &pr{e: e, api: "/repos/o/r", token: "t"}
+	on, out := review.Comment{Path: "a.go", Line: 2, Body: "on the diff"}, review.Comment{Path: "b.go", Line: 1, Body: "elsewhere"}
+	n, err := p.Post("abc", review.Result{Comments: []review.Comment{on, out}}, nil, src, "f")
+	_, after, _ := strings.Cut(body, "Comments not posted inline (1)")
+	if err != nil || n != 2 || !strings.Contains(body, "Actionable comments posted: 2") || !strings.Contains(body, "Outside diff range comments (1)") ||
+		!strings.Contains(after, "on the diff") || strings.Contains(after, "elsewhere") {
+		t.Fatalf("post: %d %v\n%s", n, err, body)
+	}
+}
+
 func TestVerify(t *testing.T) {
 	body := []byte(`{"a":1}`)
 	m := hmac.New(sha256.New, []byte("s"))
@@ -203,5 +234,30 @@ func TestThreadsOurs(t *testing.T) {
 	ts, err := Threads("o/r", 1, "t")
 	if err != nil || len(ts) != 1 || ts[0].ID != "ours" || ts[0].Replies != "\n\n**@kev**: won't split" { // the first comment once
 		t.Fatalf("threads %+v %v", ts, err)
+	}
+}
+
+// A folded finding on a diff line goes into the review's body, not inline, and doesn't count as posted.
+func TestPostFolded(t *testing.T) {
+	src := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,3 @@\n x\n+y\n+z\n"
+	var sent struct {
+		Body     string
+		Comments []map[string]any
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&sent)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+	APIURL = srv.URL
+	e := &forge.Event{}
+	e.PullRequest.Number = 1
+	p := &pr{e: e, api: "/repos/o/r", token: "t"}
+	n, err := p.Post("abc", review.Result{Comments: []review.Comment{
+		{Path: "a.go", Line: 2, Severity: "major", Title: "bug", Body: "b"},
+		{Path: "a.go", Line: 3, Severity: "nit", Title: "name", Body: "b", Fold: true},
+	}}, nil, src, "f")
+	if err != nil || n != 1 || len(sent.Comments) != 1 || sent.Comments[0]["line"] != 2.0 || !strings.Contains(sent.Body, "🧹 Nitpicks (1)") {
+		t.Fatalf("post: %d %v %+v", n, err, sent)
 	}
 }

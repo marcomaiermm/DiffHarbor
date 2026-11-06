@@ -18,14 +18,14 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-A small Go server takes the webhook, runs your checks on the changed lines, lets an agent ([Pi](https://github.com/earendil-works/pi)) review the diff with read, grep and bash in a checkout, has a second model verify every finding against the code, and posts what survives as inline comments with committable suggestions.
+A small Go server takes the webhook and runs your checks on the changed lines. An agent ([Pi](https://github.com/earendil-works/pi)) reviews the diff in a checkout with read, grep and bash. A second model verifies every finding against the code. What survives is posted as inline comments with committable suggestions.
 
 <CardGrid>
 	<Card title="Verified findings">A second, cheaper model checks each finding in the code and drops what it can't back up.</Card>
 	<Card title="Your own checks as context">gitleaks, tsc, biome, eslint, oxlint, gofmt, vet, staticcheck, golangci-lint, deadcode, fallow, squawk, shellcheck, luacheck, actionlint, zizmor, osv-scanner and the tests of changed packages, on the changed lines.</Card>
 	<Card title="Incremental">A push reviews only files whose changed lines changed. A rebase or a merge of main reviews nothing.</Card>
-	<Card title="Committable fixes">A local fix becomes a suggestion block; fixed findings get their threads resolved.</Card>
-	<Card title="Chat and learnings">Reply to a finding or mention the bot; corrections become rules for the next reviews.</Card>
+	<Card title="Committable fixes">A local fix becomes a suggestion block. Fixed findings get their threads resolved.</Card>
+	<Card title="Chat and learnings">Reply to a finding or mention the bot. Corrections become rules for the next reviews.</Card>
 	<Card title="Any model Pi supports">OpenAI, Anthropic, DeepSeek, AWS Bedrock, Azure OpenAI or a gateway in front of them, with automatic fallback.</Card>
 	<Card title="PR reports">An optional HTML page per PR with a reading order, diffs with findings, call graphs and merge risks.</Card>
 	<Card title="Small and self-hosted">One container, Go standard library only. Your code stays on your server and with your model provider.</Card>

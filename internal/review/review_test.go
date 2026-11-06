@@ -104,6 +104,10 @@ func TestVerdicts(t *testing.T) {
 	if kept, _, _, ok := verdicts([]Comment{{Existing: "a", Fix: "b"}}, nil, `{"verdicts":[{"i":0,"keep":true,"fix":false}]}`, nil); !ok || kept[0].Fix != "" {
 		t.Fatalf("fix=false kept the fix: %+v", kept)
 	}
+	two := []Comment{{Severity: "major"}, {Severity: "minor"}}
+	if kept, _, _, _ := verdicts(two, nil, `{"verdicts":[{"i":0,"keep":true,"severity":"minor"},{"i":1,"keep":true,"severity":"critical"}]}`, nil); kept[0].Severity != "minor" || kept[1].Severity != "minor" {
+		t.Fatalf("severity: %+v", kept)
+	}
 }
 
 // A decision is an object with its place; a plain string, as states before it hold, is its text.
@@ -154,13 +158,13 @@ func TestSettings(t *testing.T) {
 	}
 	// a push: a minor finding stays on what it touched, a major one anywhere
 	near := diff.RightLines("diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -10,2 +10,3 @@\n ctx\n+new\n ctx\n", true)
-	if got := Fresh([]Comment{{Path: "a.ts", Line: 11, Severity: "minor"}, {Path: "a.ts", Line: 260, Severity: "minor"}, {Path: "a.ts", Line: 265, Severity: "major"}, {Path: "b.ts", Line: 11, Severity: "minor"}}, near); len(got) != 2 || got[0].Line != 11 || got[1].Line != 265 {
+	if got := Fresh([]Comment{{Path: "a.ts", Line: 11, Severity: "minor"}, {Path: "a.ts", Line: 260, Severity: "minor"}, {Path: "a.ts", Line: 265, Severity: "major"}, {Path: "b.ts", Line: 11, Severity: "nit"}}, near); len(got) != 2 || got[0].Line != 11 || got[1].Line != 265 {
 		t.Errorf("fresh: %+v", got)
 	}
 	if _, err := LoadSettings(`{"min_severity":"high"}`); err == nil {
 		t.Error("min_severity high accepted")
 	}
-	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"suggest_split":{"files":-1}}`, `{"suggest_split":{"count":["tests"]}}`, `{"suggest_split":{"skip":["a/{b"]}}`, `{"learnings":{"max":-1}}`, `{"learnings":{"max":101}}`, `{"learnings":{"max_age_days":-1}}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
+	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"gitlab_findings":"each"}`, `{"suggest_split":{"files":-1}}`, `{"suggest_split":{"count":["tests"]}}`, `{"suggest_split":{"skip":["a/{b"]}}`, `{"learnings":{"max":-1}}`, `{"learnings":{"max":101}}`, `{"learnings":{"max_age_days":-1}}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
 		if _, err := LoadSettings(bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
@@ -247,6 +251,18 @@ func TestSettings(t *testing.T) {
 		rel.Reviews("prod", "main") || rel.Reviews("release/1/x", "main") || (Settings{}).Reviews("prod", "main") || !(Settings{}).Reviews("prod", "") {
 		t.Errorf("base_branches: %v", err)
 	}
+	for _, c := range []struct {
+		drafts              string
+		push, asked, manual bool
+	}{{"", false, false, true}, {"manual", false, false, true}, {"opt_in", false, true, true}, {"off", false, false, false}} {
+		cfg, err := LoadSettings(`{"drafts":"` + c.drafts + `"}`)
+		if err != nil || cfg.ReviewsDraft(false, false) != c.push || cfg.ReviewsDraft(false, true) != c.asked || cfg.ReviewsDraft(true, false) != c.manual {
+			t.Errorf("drafts %q: %v", c.drafts, err)
+		}
+	}
+	if _, err := LoadSettings(`{"drafts":"auto"}`); err == nil {
+		t.Error("bad drafts accepted")
+	}
 	if _, err := LoadSettings(`{"base_branches":["["]}`); err == nil {
 		t.Error("bad base_branches glob accepted")
 	}
@@ -328,8 +344,82 @@ func TestAPIChanges(t *testing.T) {
 	}
 }
 
+// Fence is one backtick longer than the longest run in s, at least four.
 func TestFence(t *testing.T) {
-	if got := Fence("a\n`````\n``````````b"); got != "````\na\n```\n```b\n````" {
-		t.Fatalf("fence: %q", got)
+	long := strings.Repeat("`", 100000)
+	for in, want := range map[string]string{
+		"x":                     "````\nx\n````",
+		"a ``` b":               "````\na ``` b\n````",
+		"a\n`````\n``````````b": "```````````\na\n`````\n``````````b\n```````````",
+		long:                    long + "`\n" + long + "\n" + long + "`",
+	} {
+		if got := Fence(in); got != want {
+			t.Errorf("Fence(%.20q) = %.40q (%d bytes), want %d bytes", in, got, len(got), len(want))
+		}
+	}
+}
+
+// A profile moves findings between inline and the summary, by file; a PR's override wins over every file's.
+func TestProfile(t *testing.T) {
+	cfg, err := LoadSettings(`{"profile":"quiet","packages":{"web":{"profile":"assertive"},"api":{"min_severity":"minor"}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path, sev string
+		fold      bool
+	}{
+		{"a.go", "major", false}, {"a.go", "minor", true}, {"a.go", "nit", true},
+		{"web/a.ts", "minor", false}, {"web/a.ts", "nit", false},
+		{"api/a.go", "minor", true}, // the package sets no profile: the top's
+	} {
+		if got := cfg.Fold(Comment{Path: tc.path, Severity: tc.sev}); got != tc.fold {
+			t.Errorf("%s %s: fold %v", tc.path, tc.sev, got)
+		}
+	}
+	if (Settings{}).Fold(Comment{Severity: "minor"}) || !(Settings{}).Fold(Comment{Severity: "nit"}) {
+		t.Error("chill by default: minor inline, nits folded")
+	}
+	if !(Settings{}).Keep(Comment{Severity: "nit"}) || cfg.Keep(Comment{Path: "api/a.go", Severity: "nit"}) {
+		t.Error("nits kept unless min_severity drops them")
+	}
+	cfg.Override = "chill"
+	if cfg.Fold(Comment{Path: "a.go", Severity: "minor"}) || !cfg.Fold(Comment{Path: "web/a.ts", Severity: "nit"}) {
+		t.Error("override")
+	}
+	for _, bad := range []string{`{"profile":"strict"}`, `{"packages":{"x":{"profile":"loud"}}}`, `{"min_severity":"nit"}`} {
+		if _, err := LoadSettings(bad); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+}
+
+// Nits have their own cap: they never push out a defect.
+func TestCapped(t *testing.T) {
+	var cs []Comment
+	for range 8 {
+		cs = append(cs, Comment{Severity: "nit"})
+	}
+	for range 12 {
+		cs = append(cs, Comment{Severity: "minor"})
+	}
+	cs = append(cs, Comment{Severity: "critical"}) // last, still kept: the most severe go first
+	got := capped(cs)
+	n := 0
+	for _, c := range got {
+		if c.Severity == "nit" {
+			n++
+		}
+	}
+	if n != 5 || len(got)-n != 10 || got[0].Severity != "critical" {
+		t.Fatalf("%d nits, %d findings", n, len(got)-n)
+	}
+	// After verify: another pass keeps its own 10, the nits the verifier lowered count against their pass's 5.
+	cs = nil
+	for i := range 10 {
+		cs = append(cs, Comment{Severity: "major", pass: 1}, Comment{Severity: "nit", pass: i % 2})
+	}
+	if got := capped(append(got, cs...)); len(got) != 10+5+10+5 {
+		t.Fatalf("%d after verify", len(got))
 	}
 }
