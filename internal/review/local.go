@@ -64,16 +64,13 @@ func Tree(ctx context.Context, cwd, dir, title string, closed []Comment, large b
 // like the PR's code: it fetches through the vault, whose remote works until ctx is done (blob:none fetches the
 // blobs later commands need) and never holds token. Else token goes in the env (argv is world-readable).
 func Checkout(ctx context.Context, repo, cloneURL, head, base, token string) (string, error) {
-	remote, auth := cloneURL, []string{
-		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader",
-		"GIT_CONFIG_VALUE_0=Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token)),
-	}
+	remote, auth := cloneURL, gitAuth(token)
 	if vault.URL() != "" {
 		r, err := vault.Git(ctx, cloneURL, token)
 		if err != nil {
 			return "", err
 		}
-		remote, auth = r, nil
+		remote = r
 	}
 	git := func(args ...string) (string, error) {
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
@@ -106,6 +103,38 @@ func Checkout(ctx context.Context, repo, cloneURL, head, base, token string) (st
 		}
 	}
 	return git("diff", "-M", strings.TrimSpace(mb), head)
+}
+
+// gitAuth is the env that lets git read the repo with token; none through the vault, whose remote needs none.
+func gitAuth(token string) []string {
+	if vault.URL() != "" {
+		return nil
+	}
+	return []string{
+		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader",
+		"GIT_CONFIG_VALUE_0=Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token)),
+	}
+}
+
+// Since is the diff from an earlier head from to the head Checkout put in repo, with the same ctx and token: what
+// a push changed. "" when from can't be fetched, e.g. gone in a force push; an error when it was and git still failed.
+func Since(ctx context.Context, repo, from, token string) (string, error) {
+	git := func(args ...string) (string, error) {
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		defer cancel()
+		out, err := proc.Run(proc.Command(ctx, filepath.Dir(repo), gitAuth(token), "git", append([]string{"-C", repo}, args...)...))
+		return string(out), err
+	}
+	if _, err := git("cat-file", "-e", from+"^{commit}"); err != nil { // older than the fetched history
+		if _, err := git("fetch", "-q", "--filter=blob:none", "--depth=1", "origin", from); err != nil {
+			return "", nil
+		}
+	}
+	out, err := git("diff", "-M", from, "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("git diff since %s: %w", from, err)
+	}
+	return out, nil
 }
 
 // Commit is one commit of the PR: its subject and size.

@@ -33,11 +33,11 @@ import (
 )
 
 // posts reports whether a review posts one: a full review always, so the bot shows up under Reviewers, an
-// incremental one only with a finding that isn't folded. Folded ones have no thread to hold them: alone they would
-// come back on every push.
-func posts(full bool, r review.Result, threads []forge.Thread) bool {
-	_, rest, _ := forge.Split(r, threads, nil) // without diff lines: every unfolded one not on a thread's line
-	return full || len(rest) > 0
+// incremental one only with a finding that isn't folded and that Split on the diff's lines keeps. Folded ones have no
+// thread to hold them: alone they would come back on every push.
+func posts(full bool, r review.Result, threads []forge.Thread, lines map[string]string) bool {
+	inline, outside, _ := forge.Split(r, threads, lines)
+	return full || len(inline)+len(outside) > 0
 }
 
 // Review reviews the event's PR on f; profile is `@bot review <profile>`'s, over the description's and review.json's.
@@ -169,18 +169,17 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if err != nil {
 		return err
 	}
-	// Earlier findings on the files under review: the model must not repeat them and may report open ones fixed.
-	// Closed ones were fixed or declined; without them a declined finding comes back on the next push.
+	// Every earlier finding of the PR, also on files this push left alone or renamed: findings go on the whole PR
+	// diff. The model must not repeat them and may report open ones fixed. Closed ones were fixed or declined;
+	// without them a declined finding comes back on the next push.
 	files := diff.Paths(d)
 	var open []forge.Thread
 	var prior, closed []review.Comment
-	for _, t := range threads {
-		if !slices.Contains(files, t.Path) {
-			continue
-		}
-		c := review.Comment{Path: t.Path, Line: cmp.Or(t.Line, t.Original), Body: text.Truncate(strings.ReplaceAll(forge.Redact(t.Body), forge.Mark, ""), 600)}
-		if t.Resolved { // with the replies: a point declined there would come back as a new finding
-			c.Body += t.Replies
+	// the newest 100: about 150 KB at most, as each is cut to its first comment and three short replies
+	for _, t := range threads[max(0, len(threads)-100):] {
+		// with the replies: a point declined there would come back as a new finding
+		c := review.Comment{Path: t.Path, Line: cmp.Or(t.Line, t.Original), Body: text.Truncate(strings.ReplaceAll(forge.Redact(t.Body), forge.Mark, ""), 600) + t.Replies}
+		if t.Resolved {
 			closed = append(closed, c)
 		} else {
 			open = append(open, t)
@@ -216,6 +215,18 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if err != nil {
 		return err
 	}
+	if only != nil { // a push: minor findings only on what it changed, else every push finds new edge cases
+		since, err := review.Since(ctx, filepath.Join(dir, "repo"), s.State.SHA, read)
+		if err = cmp.Or(ctx.Err(), err); err != nil { // cancelled or git failed, not a force push: post and resolve nothing
+			return err
+		}
+		if since != "" {
+			n := len(r.Comments)
+			if r.Comments = review.Fresh(r.Comments, diff.RightLines(since, true)); n > len(r.Comments) {
+				log.Println(key, n-len(r.Comments), "minor findings and nits off the push dropped")
+			}
+		}
+	}
 	for _, i := range r.Fixed {
 		p.Resolve(open[i], sha)
 	}
@@ -247,7 +258,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		kind += " · ⚠️ review.json ignored: " + text.OneLine(cfgErr.Error(), 120)
 	}
 	n := 0
-	if posts(only == nil, r, threads) {
+	if posts(only == nil, r, threads, diff.NewLines(raw)) {
 		// Lines of the whole PR diff take inline comments, also in files this incremental review skipped: only
 		// a thread can be resolved once fixed.
 		if n, err = p.Post(sha, r, threads, raw,
