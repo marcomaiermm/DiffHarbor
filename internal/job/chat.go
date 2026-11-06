@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const chatSystem = `You reviewed this pull request; a maintainer now asks or replies. Repo = cwd at the PR head: check the code with tools before answering.
@@ -224,6 +225,108 @@ func Seen(f forge.Forge, e *forge.Event) {
 	p.React()
 }
 
+// reviewCommand reads `review [all] [profile]` (or `full review …`), the words after review in any order, apart
+// by spaces, commas or a colon ("review: quiet", as in a description); ok is false for any other comment.
+func reviewCommand(cmd string) (large bool, profile string, ok bool) {
+	rest, found := strings.CutPrefix(cmd, "full review")
+	if !found {
+		rest, found = strings.CutPrefix(cmd, "review")
+	}
+	sep := func(r rune) bool { return unicode.IsSpace(r) || r == ',' || r == ':' }
+	if !found || rest != "" && !sep(rune(rest[0])) {
+		return false, "", false
+	}
+	for _, w := range strings.FieldsFunc(rest, sep) {
+		switch {
+		case w == "all":
+			large = true
+		case slices.Contains(review.Profiles, w) && profile == "":
+			profile = w
+		default: // another word or a second profile: a question, not a command
+			return false, "", false
+		}
+	}
+	return large, profile, true
+}
+
+var (
+	// a PR description's line "review: quiet", plain, a list item or a ticked box, "quiet" maybe bold or code, and
+	// nothing after but a full stop; an unticked box is no choice
+	bodyProfileRe = regexp.MustCompile("(?im)^[ \\t>]*(?:(?:[-*+]|\\d+[.)])[ \\t]+(?:\\[[xX]\\][ \\t]+)?)?review:[ \\t]*[*_`]*(quiet|chill|assertive)[*_`]*\\.?[ \\t]*\\r?$")
+	listRe        = regexp.MustCompile(`^[ \t>]*(?:[-*+]|\d+[.)])[ \t]`)
+	quoteRe       = regexp.MustCompile(`^ {0,3}(?:> ?)+`) // a blockquote's markers, each with its one space
+	fenceRe       = regexp.MustCompile("^[ \\t>]*(?:(?:[-*+]|\\d+[.)])[ \\t]+)?(```+|~~~+)")
+)
+
+// visible is what a PR description shows as text: no HTML comments, no code blocks (a template's hint, an example).
+// A fence, also in a list item, closes at one of the same character at least as long; a line indented 4 columns past
+// the list item's text (outside a list: the margin) after a blank line is code. Unclosed, up to the end.
+// ponytail: a line scan, not a Markdown parser; lazy continuations and nested quotes are guesses.
+func visible(body string) string {
+	var out strings.Builder
+	fence := "" // the open fence's backticks or tildes
+	comment, code, blank := false, false, true
+	col := 0 // where the last list item's text starts, 0 outside a list
+	for l := range strings.Lines(body) {
+		if fence != "" { // code: no comment starts in it
+			if m := fenceRe.FindStringSubmatch(l); m != nil && m[1][0] == fence[0] && len(m[1]) >= len(fence) && strings.TrimSpace(l[len(m[0]):]) == "" {
+				fence = ""
+			}
+			continue
+		}
+		var v strings.Builder // l without HTML comments, which may span lines
+		for l != "" {
+			if comment {
+				_, after, ok := strings.Cut(l, "-->")
+				l, comment = after, !ok
+				continue
+			}
+			before, after, ok := strings.Cut(l, "<!--")
+			v.WriteString(before)
+			l, comment = after, ok
+		}
+		line := strings.TrimRight(v.String(), "\r\n")
+		q := len(quoteRe.FindString(line))
+		w := 0 // the line's indent inside its blockquotes, a tab 4 columns
+		for _, r := range line[q:] {
+			if r == '\t' {
+				w += 3
+			} else if r != ' ' {
+				break
+			}
+			w++
+		}
+		if strings.TrimSpace(line[q:]) == "" {
+			blank = true
+			continue
+		}
+		if code = (code || blank) && w >= col+4; !code {
+			switch item := listRe.FindStringIndex(line); {
+			case item != nil:
+				col = item[1] - q
+			case w < col: // past the list
+				col = 0
+			}
+			if m := fenceRe.FindStringSubmatch(line); m != nil {
+				fence = m[1]
+			} else {
+				out.WriteString(line + "\n")
+			}
+		}
+		blank = false
+	}
+	return out.String()
+}
+
+// bodyProfile is the profile a PR description names on a line of its own, "review: quiet", by hand or as a ticked
+// box of its template; the first, "" for none. HTML comments and code blocks don't count: a template's hint, an example.
+func bodyProfile(body string) string {
+	if m := bodyProfileRe.FindStringSubmatch(visible(body)); m != nil {
+		return strings.ToLower(m[1])
+	}
+	return ""
+}
+
 // Chat answers the event's comment on f, or reviews the PR when it asks for one; mention matches @bot.
 //
 //nolint:gocognit // one job step by step, each step a few lines
@@ -261,12 +364,12 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		}
 		// "review again and check …" asks for a review too: answered as a question it posts no findings
 		first, _, _ := strings.Cut(bare, " ")
-		if large := ticked || bare == "review all"; large || first == "review" || bare == "full review" {
+		if large, profile, ok := reviewCommand(bare); ok || ticked || first == "review" {
 			e.Action = "manual" // anything but synchronize: full review
-			if large {
+			if large || ticked {
 				e.Action = "large"
 			}
-			return Review(ctx, f, e)
+			return Review(ctx, f, e, profile)
 		}
 		if bare == "learnings" || strings.HasPrefix(cmd, "forget ") {
 			return p.Reply(learningsCommand(cmd, f.Bot(), e) + "\n\n" + forge.Mark)

@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var badge = map[string]string{"critical": "🔴 Critical", "major": "🟠 Major", "minor": "🟡 Minor"}
+var badge = map[string]string{"critical": "🔴 Critical", "major": "🟠 Major", "minor": "🟡 Minor", "nit": "🔵 Nit"}
 
 // Finding is a Comment as posted: Start..End are the new-file lines its fix replaces as a suggestion, 0 = none.
 // OnDiff: it is on a diff line, so one in the summary is there because the forge didn't take it inline.
@@ -102,30 +102,65 @@ func Place(c *Finding, lines map[string]string) {
 	}
 }
 
-// Split sorts a review's findings: the ones on diff lines (lines) to post inline, placed, and the rest. Lines
-// that already have one of threads get nothing new.
-func Split(r review.Result, threads []Thread, lines map[string]string) (inline, rest []Finding) {
+// Split sorts a review's findings: the ones on diff lines (lines) to post inline, placed, the ones outside the
+// diff, and the folded ones (Comment.Fold), anywhere. Lines that already have one of threads get nothing new.
+func Split(r review.Result, threads []Thread, lines map[string]string) (inline, outside, folded []Finding) {
 	seen := map[string]bool{}
 	for _, t := range threads {
 		if t.Line > 0 {
 			seen[fmt.Sprintf("%s:%d", t.Path, t.Line)] = true
 		}
 	}
-	for _, rc := range r.Comments { // review.Analyze caps them: 10 per part
+	for _, rc := range r.Comments { // review.Analyze caps them: 10 and 5 nits per pass
 		c := Finding{Comment: rc}
 		at := fmt.Sprintf("%s:%d", c.Path, c.Line)
 		if seen[at] {
 			continue
 		}
-		if _, ok := lines[at]; ok {
+		_, ok := lines[at]
+		switch {
+		case c.Fold:
+			folded = append(folded, c)
+		case ok:
 			c.OnDiff = true
 			Place(&c, lines)
 			inline = append(inline, c)
-		} else {
-			rest = append(rest, c)
+		default:
+			outside = append(outside, c)
 		}
 	}
-	return inline, rest
+	return inline, outside, folded
+}
+
+// section lists findings in full under a heading, each in its own block; open shows them unfolded.
+func section(title string, cs []Finding, open bool) string {
+	attr := ""
+	if open {
+		attr = " open"
+	}
+	out := fmt.Sprintf("<details%s>\n<summary><b>%s</b></summary>", attr, title)
+	for _, c := range cs {
+		out += fmt.Sprintf("\n\n<details%s>\n<summary>%s · <code>%s:%d</code></summary>\n\n%s\n\n</details>",
+			attr, html.EscapeString(cmp.Or(c.Title, c.Severity)), html.EscapeString(c.Path), c.Line, Format(c, ""))
+	}
+	return out + "\n\n</details>"
+}
+
+// foldedTitle names the folded findings by what they are: nits, under quiet minor ones too.
+func foldedTitle(cs []Finding) string {
+	nits := 0
+	for _, c := range cs {
+		if c.Severity == "nit" {
+			nits++
+		}
+	}
+	switch nits {
+	case 0:
+		return "Minor comments"
+	case len(cs):
+		return "Nitpicks"
+	}
+	return "Minor comments and nitpicks"
 }
 
 // allPrompts folds every finding's prompt into one block to paste into an agent.
@@ -147,9 +182,10 @@ func allPrompts(cs []Finding) string {
 		review.Fence("Verify each finding against the current code and only fix it if needed.\n\n"+strings.Join(ps, sep)) + "\n\n</details>"
 }
 
-// Summary is the review's top comment: how many findings, the ones not posted inline in full, all prompts. Those
-// outside the diff and those the forge didn't take inline (refused, dropped, not tried) go under their own heading.
-func Summary(inline, rest []Finding, footer string) string {
+// Summary is the review's top comment: how many findings, the ones not posted inline in full, the folded ones
+// folded, all prompts. Those outside the diff and those the forge didn't take inline (refused, dropped, not tried)
+// go under their own heading.
+func Summary(inline, rest, folded []Finding, footer string) string {
 	parts := []string{fmt.Sprintf("**Actionable comments posted: %d**", len(inline)+len(rest))}
 	if len(inline)+len(rest) == 0 {
 		parts[0] = "**No actionable comments were generated in this review.**"
@@ -163,24 +199,19 @@ func Summary(inline, rest []Finding, footer string) string {
 		}
 	}
 	if len(outside) > 0 { // inline comments only go on diff lines
-		parts = append(parts, folded("> [!CAUTION]\n> Some comments are outside the diff and can't be posted inline.", "⚠️ Outside diff range comments", outside))
+		parts = append(parts, "> [!CAUTION]\n> Some comments are outside the diff and can't be posted inline.\n\n"+
+			section(fmt.Sprintf("⚠️ Outside diff range comments (%d)", len(outside)), outside, true))
 	}
 	if len(refused) > 0 {
-		parts = append(parts, folded("> [!WARNING]\n> Some comments are on the diff but couldn't be posted inline.", "💬 Comments not posted inline", refused))
+		parts = append(parts, "> [!WARNING]\n> Some comments are on the diff but couldn't be posted inline.\n\n"+
+			section(fmt.Sprintf("💬 Comments not posted inline (%d)", len(refused)), refused, true))
 	}
-	if p := allPrompts(append(slices.Clone(inline), rest...)); p != "" {
+	if len(folded) > 0 {
+		parts = append(parts, section(fmt.Sprintf("🧹 %s (%d)", foldedTitle(folded), len(folded)), folded, false))
+	}
+	if p := allPrompts(slices.Concat(inline, rest, folded)); p != "" {
 		parts = append(parts, p)
 	}
 	parts = append(parts, "<details>\n<summary>ℹ️ Review info</summary>\n\n<sub>"+footer+"</sub>\n\n</details>\n\n"+Mark)
 	return strings.Join(parts, "\n\n")
-}
-
-// folded is findings in full under a caution and a heading with their count.
-func folded(caution, heading string, cs []Finding) string {
-	out := fmt.Sprintf("%s\n\n<details open>\n<summary><b>%s (%d)</b></summary>", caution, heading, len(cs))
-	for _, c := range cs {
-		out += fmt.Sprintf("\n\n<details open>\n<summary>%s · <code>%s:%d</code></summary>\n\n%s\n\n</details>",
-			html.EscapeString(cmp.Or(c.Title, c.Severity)), html.EscapeString(c.Path), c.Line, Format(c, ""))
-	}
-	return out + "\n\n</details>"
 }

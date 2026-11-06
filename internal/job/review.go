@@ -32,10 +32,18 @@ import (
 	"time"
 )
 
-// Review reviews the event's PR on f.
+// posts reports whether a review posts one: a full review always, so the bot shows up under Reviewers, an
+// incremental one only with a finding that isn't folded. Folded ones have no thread to hold them: alone they would
+// come back on every push.
+func posts(full bool, r review.Result, threads []forge.Thread) bool {
+	_, rest, _ := forge.Split(r, threads, nil) // without diff lines: every unfolded one not on a thread's line
+	return full || len(rest) > 0
+}
+
+// Review reviews the event's PR on f; profile is `@bot review <profile>`'s, over the description's and review.json's.
 //
 //nolint:gocognit,gocyclo // one job step by step, each step a few lines
-func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
+func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) (err error) {
 	key := e.Key()
 	p, err := f.Open(e)
 	if err != nil {
@@ -51,6 +59,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	pr, sha := e.PullRequest, e.PullRequest.Head.SHA
 	manual := e.Action == "manual" || e.Action == "large"
 	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
+	profile = cmp.Or(profile, bodyProfile(pr.Body))
+	cfg.Override = profile
 	p.Configure(cfg)
 	// A draft's push reads the walkthrough only under opt_in, for whether someone asked.
 	if pr.Draft && !cfg.ReviewsDraft(manual, cfg.Drafts == "opt_in") {
@@ -230,11 +240,14 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	if tid != "" {
 		kind += " · ticket " + tid
 	}
+	if profile != "" {
+		kind += " · profile " + profile
+	}
 	if cfgErr != nil {
 		kind += " · ⚠️ review.json ignored: " + text.OneLine(cfgErr.Error(), 120)
 	}
 	n := 0
-	if only == nil || len(r.Comments) > 0 { // a full review always posts, so the bot shows up under Reviewers
+	if posts(only == nil, r, threads) {
 		// Lines of the whole PR diff take inline comments, also in files this incremental review skipped: only
 		// a thread can be resolved once fixed.
 		if n, err = p.Post(sha, r, threads, raw,
