@@ -530,7 +530,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		if err := addLearning(key, fmt.Sprintf("- %s (@%s%s)", l, c.User.Login, where), time.Now()); err != nil {
 			return err
 		}
-		body = strings.TrimSpace(body + "\n\n📝 _Learning saved" + scope + ":_ " + l + "\n\n_Wrong or too broad? `@" + f.Bot() + " forget <part of it>` drops it._")
+		body = strings.TrimSpace(body + "\n\n📝 _Learning saved" + scope + ":_ " + l + "\n\n_Wrong or too broad? `@" + f.Bot() + " forget <part of it>` in a PR comment drops it._")
 	}
 	resolve := a.Resolved && ours && !resolved && maintainer // a contributor's fix: the next review resolves it
 	if body == "" {
