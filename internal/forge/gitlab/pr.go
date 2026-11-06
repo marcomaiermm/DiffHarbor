@@ -7,6 +7,7 @@ import (
 	"diffharbor/internal/proc"
 	"diffharbor/internal/report"
 	"diffharbor/internal/review"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -203,15 +204,19 @@ func (p *pr) batch() bool {
 
 // dropDrafts deletes the bot's drafts; false if it can't, or a person's are there, publishing would send them.
 func (p *pr) dropDrafts() bool {
-	ds, err := all[struct {
+	var ds []struct {
 		ID   int64  `json:"id"`
 		Note string `json:"note"`
-	}](p.mr + "/draft_notes?per_page=100")
+	}
+	b, next, err := do("GET", p.mr+"/draft_notes?per_page=100", nil)
+	if err == nil {
+		err = json.Unmarshal(b, &ds)
+	}
 	if err != nil {
 		log.Println(p.e.Key(), "drafts:", err)
 		return false
 	}
-	if len(ds) >= 30*100 { // all's cap: one unseen could be a person's
+	if next != "" { // GitLab lists drafts on one page; past a page, one unseen could be a person's
 		return false
 	}
 	ok := true
