@@ -264,7 +264,10 @@ func TestResumeKeepsNewer(t *testing.T) {
 	latest.Unlock()
 	t.Cleanup(func() { latest.Lock(); delete(latest.m, prKey(e)); latest.Unlock() })
 	q := make(chan *forge.Event, 2)
-	resume(queue(q))
+	resume(func(e *forge.Event) bool { // the id's review is done at once: the name's file is no less stale
+		os.Remove(pendingFile(prKey(e)))
+		return queue(q)(e)
+	})
 	if len(q) != 1 || (<-q).PullRequest.Head.SHA != "new" || proc.Exists(pendingFile(e.Key())) {
 		t.Fatal("the name's file won")
 	}
@@ -456,6 +459,16 @@ func (f *fakeJobs) within(d time.Duration) string {
 	}
 }
 
+// end ends a running job, failing when none takes it within seconds: a job that never started doesn't hang the test.
+func (f *fakeJobs) end(t *testing.T) {
+	t.Helper()
+	select {
+	case f.finish <- nil:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no job running to end")
+	}
+}
+
 // waitFor waits until ok, under the pool's lock, for seconds at most.
 func (f *fakeJobs) waitFor(t *testing.T, ok func() bool) {
 	t.Helper()
@@ -490,8 +503,8 @@ func TestPoolParallel(t *testing.T) {
 	if got := []string{f.next(), f.next()}; !slices.Contains(got, "c#1") || !slices.Contains(got, "a#2") {
 		t.Fatal(got)
 	}
-	f.finish <- nil
-	f.finish <- nil
+	f.end(t)
+	f.end(t)
 	f.idle(t)
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -527,8 +540,8 @@ func TestPoolPanic(t *testing.T) {
 	if b == nil {
 		t.Fatal("b's job ended with a's")
 	}
-	f.finish <- nil
-	f.finish <- nil
+	f.end(t)
+	f.end(t)
 	f.idle(t)
 }
 
@@ -552,7 +565,7 @@ func TestPoolStop(t *testing.T) {
 		t.Fatal("stopped another job", b, c)
 	}
 	for range 3 { // b, c's answer, then c's review
-		f.finish <- nil
+		f.end(t)
 	}
 	f.idle(t)
 }
@@ -606,7 +619,7 @@ func TestPoolRecreatedRepo(t *testing.T) {
 	if r == nil {
 		t.Fatal("stopped the recreated repo's job")
 	}
-	f.finish <- nil
+	f.end(t)
 	f.idle(t)
 	if f.twice != "" {
 		t.Fatal(f.twice)
@@ -647,9 +660,9 @@ func TestPoolOlderPush(t *testing.T) {
 	if len(q) != 1 || q[0] != newer {
 		t.Fatal(q)
 	}
-	f.finish <- nil
+	f.end(t)
 	f.next()
-	f.finish <- nil
+	f.end(t)
 	f.idle(t)
 }
 
@@ -661,7 +674,7 @@ func TestPoolNoLimit(t *testing.T) {
 	if f.next() != "a#1" {
 		t.Fatal("never started")
 	}
-	f.finish <- nil
+	f.end(t)
 	f.idle(t)
 }
 
@@ -695,7 +708,30 @@ func TestPoolPushStops(t *testing.T) {
 	if f.next() != "a#1" { // x's review ended on its ctx, y's started
 		t.Fatal("not stopped")
 	}
-	f.finish <- nil
+	f.end(t)
+	f.idle(t)
+}
+
+// A close's handler that stops late, after a reopen started the PR's review, leaves that review running.
+func TestPoolStopAfterReopen(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	f := newFakeJobs(1)
+	e := ev("a", 1, "")
+	e.Action = "closed"
+	closed(e)
+	reopen := ev("a", 1, "")
+	reopen.Action, reopen.PullRequest.Head.SHA = "reopened", "abc"
+	pushed(reopen)
+	t.Cleanup(func() { latest.Lock(); delete(latest.m, "a#1"); latest.Unlock() })
+	f.p.add(reopen)
+	f.next()
+	f.p.stop(e)
+	f.end(t) // still running: it takes the finish
+	f.idle(t)
+	closed(e) // closed again: stopped
+	f.p.add(ev("a", 1, ""))
+	f.next()
+	f.p.stop(e)
 	f.idle(t)
 }
 

@@ -475,6 +475,9 @@ func adopt(old, dir string) error {
 	if err == nil { // before old's pages go: its links never 404
 		err = s.Put(old+"/moved", []byte(dir))
 	}
+	if err != nil { // old's pages stay: the next report copies them again
+		return err
+	}
 	for _, v := range olds {
 		err = errors.Join(err, deletePage(s, old, v.SHA))
 	}

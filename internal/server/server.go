@@ -198,6 +198,13 @@ func drop(e *forge.Event) error {
 func (p *pool) stop(e *forge.Event) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	latest.Lock()
+	_, open := latest.m[prKey(e)]
+	reopened := open && !proc.Exists(deletingFile(prKey(e))) // since the close: pushed removed its file
+	latest.Unlock()
+	if reopened {
+		return
+	}
 	if t := p.running[prKey(e)]; t != nil {
 		log.Println(e.Key(), "stopping the running job")
 		t.cancel()
@@ -517,6 +524,7 @@ func done(key string) {
 // resume queues the reviews a restart cut off.
 func resume(add func(*forge.Event) bool) {
 	fs, _ := filepath.Glob(filepath.Join(proc.DataDir, "pending", "*.json"))
+	var es []*forge.Event // queued once all are read: a review done meanwhile would let its PR's older file pass
 	for _, f := range fs {
 		e := &forge.Event{Kind: "pull_request"}
 		b, err := os.ReadFile(f) //nolint:gosec // the server's pending dir
@@ -539,9 +547,12 @@ func resume(add func(*forge.Event) bool) {
 				continue
 			}
 		}
+		es = append(es, e)
+	}
+	for _, e := range es {
 		log.Println(e.Key(), "resuming the review a restart cut off")
 		latest.Lock()
-		latest.m[key] = e.PullRequest.Head.SHA
+		latest.m[prKey(e)] = e.PullRequest.Head.SHA
 		latest.Unlock()
 		if !add(e) { // stays on disk for the next start
 			log.Println(e.Key(), "queue full")

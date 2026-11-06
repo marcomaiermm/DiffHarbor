@@ -357,6 +357,34 @@ func TestAdoptRetries(t *testing.T) {
 	}
 }
 
+// A move whose list or moved file can't be written deletes none of old's pages: its links still serve, the walkthrough
+// keeps its link, and the next report moves them all.
+func TestAdoptPublishFails(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	e := &forge.Event{}
+	e.Repository.ID, e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = 5, "o/r", 7, "https://github.com/o/r/pull/7"
+	sha := func(i int) string { return fmt.Sprintf("%040x", i) }
+	key := reportSecret("")
+	old, dir := "github.com/o/r/7/"+key, reportPath(e)+"/"+key
+	Reports().Put(old+"/"+sha(1)+".html.gz", []byte("one"))
+	Reports().Put(old+"/versions.json", fmt.Appendf(nil, `[{"sha":"%s","at":"2026-01-01T00:00:00Z"}]`, sha(1)))
+	link := ReportURL + "/r/" + old
+	for _, block := range []string{dir + "/versions.json", old + "/moved"} { // a folder in the way
+		Reports().Put(block+"/x", nil)
+		if u := writeReport(e, key, link, report.Data{SHA: sha(2)}); u != link {
+			t.Fatal(block, u)
+		}
+		if b, err := Reports().Get(old + "/" + sha(1) + ".html.gz"); string(b) != "one" {
+			t.Fatal(block, "deleted old's page:", err)
+		}
+		Reports().DeleteAll(block)
+	}
+	writeReport(e, key, link, report.Data{SHA: sha(2)})
+	if vs, err := Versions(dir); err != nil || len(vs) != 2 || vs[1].SHA != sha(1) || Moved(old) != dir {
+		t.Fatalf("%+v %v", vs, err)
+	}
+}
+
 // A PR keeps the secret its walkthrough holds; a new one is random, and one edited out of shape is replaced.
 func TestReportSecret(t *testing.T) {
 	a, b := reportSecret(""), reportSecret("")
