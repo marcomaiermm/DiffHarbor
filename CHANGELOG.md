@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.7.0...v0.7.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* checked commit under chat replies, bad repeats indices keep all findings ([#67](https://github.com/marcomaiermm/DiffHarbor/issues/67)) ([6a6c953](https://github.com/marcomaiermm/DiffHarbor/commit/6a6c953647dce726634cbd75d320fcce8c476c62))
+* **review:** verifier drops repeats of open threads ([#65](https://github.com/marcomaiermm/DiffHarbor/issues/65)) ([19f2497](https://github.com/marcomaiermm/DiffHarbor/commit/19f2497b8ce9a2f319f252e88497941012cb7ba8))
+
 ## [0.7.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.6.1...v0.7.0) (2026-11-05)
 
 
