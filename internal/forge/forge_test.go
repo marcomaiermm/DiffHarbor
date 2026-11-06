@@ -40,6 +40,10 @@ func TestPlace(t *testing.T) {
 		!strings.Contains(Format(rest[2], ""), "````diff\n-x\n+\n````") || !strings.HasSuffix(Format(inline[1], "suggestion"), "```suggestion\n\n```") {
 		t.Fatalf("split: %q %q %q %q %q", Format(inline[0], "suggestion"), Format(rest[0], ""), Format(rest[1], ""), Format(rest[2], ""), Format(inline[1], "suggestion"))
 	}
+	// A placed finding moved into the summary (GitLab's diff not ready yet) shows what it replaces.
+	if got := Summary(nil, inline[1:], ""); !strings.Contains(got, "````diff\n-\tif x {\n+\n````") {
+		t.Fatalf("moved: %q", got)
+	}
 }
 
 func TestFormat(t *testing.T) {

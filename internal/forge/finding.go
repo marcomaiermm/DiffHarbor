@@ -18,7 +18,8 @@ type Finding struct {
 }
 
 // Format renders one finding: severity, title, explanation, a folded prompt for an AI agent. suggestion opens
-// the forge's suggestion block for Start..End: "suggestion" on GitHub, "suggestion:-1+0" on GitLab.
+// the forge's suggestion block for Start..End: "suggestion" on GitHub, "suggestion:-1+0" on GitLab; "" where none
+// can go (the summary), placed or not.
 func Format(c Finding, suggestion string) string {
 	s := "_" + cmp.Or(badge[c.Severity], c.Severity) + "_"
 	if c.Title != "" {
@@ -27,7 +28,7 @@ func Format(c Finding, suggestion string) string {
 	s += "\n\n" + c.Body
 	// f is "" when the fix is a blank line: c.Fix says whether there is one.
 	e, f := trim(c.Existing), trim(c.Fix)
-	if c.Fix != "" && c.Start > 0 { // the forge shows a button that commits the fix
+	if c.Fix != "" && c.Start > 0 && suggestion != "" { // the forge shows a button that commits the fix
 		fence := "```"
 		for strings.Contains(f, fence) {
 			fence += "`"
