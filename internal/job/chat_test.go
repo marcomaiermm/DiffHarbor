@@ -4,6 +4,7 @@ import (
 	"context"
 	"diffharbor/internal/forge"
 	"diffharbor/internal/proc"
+	"diffharbor/internal/report"
 	"diffharbor/internal/review"
 	"errors"
 	"os/exec"
@@ -37,6 +38,7 @@ func (*chatPR) Discussion() (forge.Discussion, error) {
 }
 func (p *chatPR) CanWrite(string) (bool, error) { return p.write, p.writeErr }
 func (*chatPR) React()                          {}
+func (*chatPR) Links() report.Forge             { return report.Forge{Ref: "#"} }
 func (*chatPR) ReadToken() (string, error)      { return "t", nil }
 func (*chatPR) Skills(string, []string, string) {}
 func (p *chatPR) File(string, ...string) string { return "" }
@@ -126,7 +128,7 @@ echo 1 > a.txt; git add .; git commit -q -m base; git checkout -q -b pr; echo 2 
 		chatAgent = &chatFake{reply: `{"reply":"Ok.","learning":"Old tabs may hit a removed route until a reload","shared":false,"resolved":false}`}
 		e := &forge.Event{Kind: "pull_request_review_comment", Forge: "github"}
 		e.Repository.ID, e.Repository.CloneURL, e.Repository.FullName = 1, "file://"+origin, "o/r"
-		e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = head, "main"
+		e.PullRequest.Number, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = 12, head, "main"
 		e.Comment.ID, e.Comment.Body, e.Comment.User.Login = 2, "wrong", "ann"
 		if err := Chat(context.Background(), chatForge{pr: &pr}, regexp.MustCompile(`@bot`), e); err != nil {
 			t.Fatal(err)
@@ -134,6 +136,9 @@ echo 1 > a.txt; git add .; git commit -q -m base; git checkout -q -b pr; echo 2 
 		saved := strings.Contains(strings.Join(pr.log, ""), "Learning saved")
 		if want := pr.write && pr.writeErr == nil; saved != want || (len(learningsOf("o/r")) > 0) != want {
 			t.Fatalf("write %v err %v: saved %v, %q", pr.write, pr.writeErr, saved, learningsOf("o/r"))
+		}
+		if saved && !strings.Contains(learningsOf("o/r")[0], "(@ann, #12, ") { // the PR it came from, as the forge links it
+			t.Fatalf("no PR in %q", learningsOf("o/r"))
 		}
 		_, _ = forgetLearnings("o/r", "old tabs")
 	}

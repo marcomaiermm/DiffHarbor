@@ -86,7 +86,7 @@ docker compose up -d
 | `@<bot> learnings` | Lists the saved learnings of the repo and its owner. |
 | `@<bot> forget <text>` | Drops the learnings containing the text. Only owners and members drop the owner's. |
 
-When a maintainer corrects the bot or states a convention, the bot saves a dated rule in `/data/learnings/`. It keeps the newest 100 per repo and per owner. A review follows the newest 30 of each. [`learnings`](#per-repo-settings) in `review.json` changes that.
+When a maintainer corrects the bot or states a convention, the bot saves the rule with its reason, the PR and the date in `/data/learnings/`, unless one already says it or it only holds for now. It keeps the newest 100 per repo and per owner. A review follows the newest 30 of each, a newer one over an older one it contradicts. [`learnings`](#per-repo-settings) in `review.json` changes that.
 
 ## Configuration
 
