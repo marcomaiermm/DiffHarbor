@@ -413,13 +413,15 @@ func Versions(path string) ([]report.Version, error) {
 }
 
 // namedDir is where the PR's reports from before the repo's ID are: the folder link names, the walkthrough's under a
-// name the repo had then, or under its name now. "" for an event without the ID: its reports are there already. A
-// link edited to another PR's folder moves nothing without that PR's secret, which is its reports' key anyway.
+// name the repo had then, or under its name now. The link is read past its /r/{host}/, not REPORT_URL: that may have
+// changed since. "" for an event without the ID: its reports are there already. A link edited to another PR's folder
+// moves nothing without that PR's secret, which is its reports' key anyway.
 func namedDir(e *forge.Event, secret, link string) string {
 	if e.Repository.ID == 0 {
 		return ""
 	}
-	p, ok := strings.CutPrefix(link, ReportURL+"/r/")
+	_, p, ok := strings.Cut(link, "/r/"+host(e)+"/")
+	p = host(e) + "/" + p
 	if !ok || !fs.ValidPath(p) || strings.Contains(p, "/id:") || !strings.HasSuffix(p, fmt.Sprintf("/%d/%s", e.PullRequest.Number, secret)) {
 		return namePath(e) + "/" + secret
 	}
@@ -428,6 +430,7 @@ func namedDir(e *forge.Event, secret, link string) string {
 
 // adopt moves the reports in old, from before the repo's ID, into dir, newest first with dir's, and leaves a moved
 // file: /r/ redirects old's links there (Moved). A close finds them under the ID, whatever the repo was called then.
+// old's versions.json goes last: until it did, the next report retries what is left.
 func adopt(old, dir string) error {
 	if old == "" {
 		return nil
@@ -445,6 +448,8 @@ func adopt(old, dir string) error {
 		if slices.ContainsFunc(vs, func(n report.Version) bool { return n.SHA == v.SHA }) {
 			continue
 		}
+		// page: none when moved before a retry and dropped since past maxVersions
+		page := false
 		for _, name := range []string{v.SHA + ".html.gz", v.SHA + ".html"} { // .html: from before .html.gz
 			b, err := s.Get(old + "/" + name)
 			if errors.Is(err, fs.ErrNotExist) {
@@ -456,28 +461,38 @@ func adopt(old, dir string) error {
 			if err != nil {
 				return err
 			}
+			page = true
 		}
-		vs = append(vs, v)
+		if page {
+			vs = append(vs, v)
+		}
 	}
 	slices.SortStableFunc(vs, func(a, b report.Version) int { return b.At.Compare(a.At) }) // writeReport keeps maxVersions
 	b, err := json.Marshal(vs)
 	if err == nil {
 		err = s.Put(dir+"/versions.json", b)
 	}
-	if err == nil { // before old's list goes: its links never 404
+	if err == nil { // before old's pages go: its links never 404
 		err = s.Put(old+"/moved", []byte(dir))
 	}
-	if err == nil {
-		err = s.Delete(old + "/versions.json")
+	for _, v := range olds {
+		err = errors.Join(err, deletePage(s, old, v.SHA))
 	}
 	if err != nil {
 		return err
 	}
-	for _, v := range olds {
-		_ = s.Delete(old + "/" + v.SHA + ".html.gz")
-		_ = s.Delete(old + "/" + v.SHA + ".html")
+	return s.Delete(old + "/versions.json")
+}
+
+// deletePage deletes the version sha's page in dir, an .html.gz or one from before.
+func deletePage(s store.Store, dir, sha string) error {
+	var err error
+	for _, name := range []string{sha + ".html.gz", sha + ".html"} {
+		if e := s.Delete(dir + "/" + name); !errors.Is(e, fs.ErrNotExist) {
+			err = errors.Join(err, e)
+		}
 	}
-	return nil
+	return err
 }
 
 // Moved is the folder the reports in dir moved to (adopt), "" when they didn't.
@@ -492,15 +507,16 @@ func Moved(dir string) string {
 // writeReport renders the PR's report into its secret's folder as the version of its head, against the newest of
 // another head, and returns its URL; "" when that fails, the review stands without it. d.Routine is this review's: an
 // incremental one has none, and the last full one's line numbers may be stale.
-// link is the walkthrough's last one: reports it names from before the repo's ID move here first (adopt).
+// link is the walkthrough's last one: reports it names from before the repo's ID move here first (adopt). Until they
+// did, it stays the link.
 // ponytail: two reviews of a PR finishing at once can drop one's entry from versions.json; a lock per PR if it shows.
 func writeReport(e *forge.Event, secret, link string, d report.Data) string {
 	dir, s := reportPath(e)+"/"+secret, Reports()
-	err := adopt(namedDir(e, secret, link), dir)
-	var vs []report.Version
-	if err == nil {
-		vs, err = Versions(dir)
+	if err := adopt(namedDir(e, secret, link), dir); err != nil { // the next report retries; till then link serves
+		log.Println(e.Key(), "report:", Hide(err, secret))
+		return link
 	}
+	vs, err := Versions(dir)
 	if err != nil {
 		log.Println(e.Key(), "report:", Hide(err, secret))
 		return ""
@@ -532,7 +548,7 @@ func writeReport(e *forge.Event, secret, link string, d report.Data) string {
 		return ""
 	}
 	for _, v := range vs[len(keep):] {
-		_ = s.Delete(dir + "/" + v.SHA + ".html.gz")
+		_ = deletePage(s, dir, v.SHA)
 	}
 	return ReportURL + "/r/" + dir
 }

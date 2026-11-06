@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -236,10 +237,36 @@ func TestResumeRenameFails(t *testing.T) {
 	latest.Lock()
 	save(pendingFile(e.Key()), e)
 	latest.Unlock()
-	os.MkdirAll(pendingFile(prKey(e))+"/x", 0o700) // a directory in the way
+	if os.Geteuid() == 0 {
+		t.Skip("root renames in a read-only folder")
+	}
+	dir := filepath.Dir(pendingFile(e.Key()))
+	os.Chmod(dir, 0o500)
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
 	q := make(chan *forge.Event, 1)
 	if resume(queue(q)); len(q) != 0 || !proc.Exists(pendingFile(e.Key())) {
 		t.Fatal("queued without its file")
+	}
+}
+
+// A pending file by the repo's name beside one by its id is older: only this version writes the id's. resume queues the
+// id's and drops the name's, not the other way round.
+func TestResumeKeepsNewer(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	forges["github"] = &github.Hub{}
+	defer clear(forges)
+	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "synchronize"}
+	e.Repository.ID, e.Repository.FullName, e.PullRequest.Number, e.PullRequest.Head.SHA = 2, "o/r", 7, "old"
+	latest.Lock()
+	save(pendingFile(e.Key()), e)
+	e.PullRequest.Head.SHA = "new"
+	save(pendingFile(prKey(e)), e)
+	latest.Unlock()
+	t.Cleanup(func() { latest.Lock(); delete(latest.m, prKey(e)); latest.Unlock() })
+	q := make(chan *forge.Event, 2)
+	resume(queue(q))
+	if len(q) != 1 || (<-q).PullRequest.Head.SHA != "new" || proc.Exists(pendingFile(e.Key())) {
+		t.Fatal("the name's file won")
 	}
 }
 

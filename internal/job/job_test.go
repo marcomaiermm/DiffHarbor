@@ -323,6 +323,40 @@ func TestAdoptNamedReports(t *testing.T) {
 	}
 }
 
+// A move cut short, old's list still there, finishes on the next report without listing a version twice or one without
+// its page; a walkthrough link from another REPORT_URL still finds old; an .html page from before goes past maxVersions.
+func TestAdoptRetries(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	e := &forge.Event{}
+	e.Repository.ID, e.Repository.FullName, e.PullRequest.Number, e.PullRequest.HTMLURL = 5, "o/new", 7, "https://github.com/o/new/pull/7"
+	sha := func(i int) string { return fmt.Sprintf("%040x", i) }
+	key := reportSecret("")
+	old, dir := "github.com/o/old/7/"+key, reportPath(e)+"/"+key
+	list := fmt.Appendf(nil, `[{"sha":"%s","at":"2026-01-02T00:00:00Z"},{"sha":"%s","at":"2026-01-01T00:00:00Z"},`+
+		`{"sha":"%s","at":"2025-12-01T00:00:00Z"}]`, sha(2), sha(1), sha(0)) // sha(0): its page gone
+	Reports().Put(old+"/"+sha(1)+".html.gz", []byte("one"))
+	Reports().Put(old+"/"+sha(2)+".html", []byte("two"))
+	Reports().Put(old+"/versions.json", list)
+	link := "https://before.example/r/" + old
+	writeReport(e, key, link, report.Data{SHA: sha(3)})
+	Reports().Put(old+"/versions.json", list) // cut short: one page and the list left
+	Reports().Put(old+"/"+sha(1)+".html.gz", []byte("one"))
+	writeReport(e, key, link, report.Data{SHA: sha(4)})
+	vs, err := Versions(dir)
+	if err != nil || len(vs) != 4 || vs[2].SHA != sha(2) || vs[3].SHA != sha(1) {
+		t.Fatalf("%+v %v", vs, err)
+	}
+	if v, _ := Versions(old); len(v) != 0 || Moved(old) != dir {
+		t.Fatal("not finished:", v)
+	}
+	for i := range maxVersions {
+		writeReport(e, key, "", report.Data{SHA: sha(10 + i)})
+	}
+	if _, err := Reports().Get(dir + "/" + sha(2) + ".html"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("kept an .html page past maxVersions:", err)
+	}
+}
+
 // A PR keeps the secret its walkthrough holds; a new one is random, and one edited out of shape is replaced.
 func TestReportSecret(t *testing.T) {
 	a, b := reportSecret(""), reportSecret("")

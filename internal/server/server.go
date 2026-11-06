@@ -388,6 +388,10 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if to := job.Moved(dir); to != "" { // a link from before the repo id: its reports moved, or are moving
+		http.Redirect(w, r, strings.TrimSuffix(job.ReportURL+"/r/"+to+"/"+sha, "/"), http.StatusMovedPermanently)
+		return
+	}
 	pr := path.Dir(dir) // for the log: not the secret
 	vs, err := job.Versions(dir)
 	if err != nil {
@@ -396,8 +400,6 @@ func serveReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
-	case len(vs) == 0 && job.Moved(dir) != "": // a link from before the repo id: its reports moved
-		http.Redirect(w, r, strings.TrimSuffix(job.ReportURL+"/r/"+job.Moved(dir)+"/"+sha, "/"), http.StatusMovedPermanently)
 	case len(vs) == 0:
 		http.NotFound(w, r)
 	case sha == "versions": // for the page's version picker
@@ -527,6 +529,10 @@ func resume(add func(*forge.Event) bool) {
 			continue
 		}
 		key := prKey(e)
+		if f != pendingFile(key) && proc.Exists(pendingFile(key)) { // only this version writes the id's: it is newer
+			_ = os.Remove(f)
+			continue
+		}
 		if f != pendingFile(key) { // named before eventFile escaped keys, or by the repo's name
 			if err := os.Rename(f, pendingFile(key)); err != nil { // queued, done would leave f: run again on each start
 				log.Println(e.Key(), "pending:", err)
