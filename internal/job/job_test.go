@@ -31,8 +31,9 @@ type skipPR struct {
 	status  string
 }
 
-func (*skipPR) Refresh() error         { return nil }
-func (p *skipPR) Reply(b string) error { p.replies = append(p.replies, b); return nil }
+func (*skipPR) Refresh() error            { return nil }
+func (*skipPR) Configure(review.Settings) {}
+func (p *skipPR) Reply(b string) error    { p.replies = append(p.replies, b); return nil }
 
 func (p *skipPR) File(string, ...string) string {
 	if p.cfg != "" {

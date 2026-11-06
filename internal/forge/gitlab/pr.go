@@ -7,6 +7,7 @@ import (
 	"diffharbor/internal/proc"
 	"diffharbor/internal/report"
 	"diffharbor/internal/review"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -25,12 +26,16 @@ type pr struct {
 	refs [3]string
 	// patches are the diffs Others read, by MR, for Patches
 	patches map[int]map[string]string
+	// findings is how this review posts (Findings, Configure), checked once batch looked at the drafts
+	findings string
+	checked  bool
+	answers  []answer // the answers Resolve drafted, published with the review
 }
 
 // Open needs no token per repo: GitLab's is one bot user's.
 func (*Hub) Open(e *forge.Event) (forge.PR, error) {
 	api := fmt.Sprintf("/projects/%d", e.Repository.ID)
-	return &pr{e: e, api: api, mr: fmt.Sprintf("%s/merge_requests/%d", api, e.PullRequest.Number)}, nil
+	return &pr{e: e, api: api, mr: fmt.Sprintf("%s/merge_requests/%d", api, e.PullRequest.Number), findings: Findings}, nil
 }
 
 // Refresh also learns whether the author is a bot (Renovate, a project token) and the diff's base for positions.
@@ -146,25 +151,109 @@ func (p *pr) resolve(id string) error {
 	return call("PUT", fmt.Sprintf("%s/discussions/%s?resolved=true", p.mr, url.PathEscape(id)), nil, nil)
 }
 
+// answer is a thread's answer waiting in a draft.
+type answer struct{ id, body string }
+
+// Resolve answers the thread and resolves it. In a review the answer is a draft that resolves it once published.
 func (p *pr) Resolve(t forge.Thread, sha string) {
-	err := call("POST", fmt.Sprintf("%s/discussions/%s/notes", p.mr, url.PathEscape(t.ID)),
-		map[string]string{"body": fmt.Sprintf("✅ Addressed in `%s`\n\n%s", sha[:7], forge.Mark)}, nil)
+	body := fmt.Sprintf("✅ Addressed in `%s`\n\n%s", sha[:7], forge.Mark)
+	if p.batch() {
+		err := call("POST", p.mr+"/draft_notes", map[string]any{"note": body, "in_reply_to_discussion_id": t.ID, "resolve_discussion": true}, nil)
+		if err == nil {
+			p.answers = append(p.answers, answer{t.ID, body})
+			return
+		}
+		// answered on its own: a timeout that drafted it anyway answers twice rather than not at all
+		log.Println(p.e.Key(), "draft answer:", err)
+	}
+	p.answer(answer{t.ID, body})
+}
+
+// answer answers the thread on its own and resolves it.
+func (p *pr) answer(a answer) {
+	err := call("POST", fmt.Sprintf("%s/discussions/%s/notes", p.mr, url.PathEscape(a.id)), map[string]string{"body": a.body}, nil)
 	if err == nil {
-		err = p.resolve(t.ID)
+		err = p.resolve(a.id)
 	}
 	if err != nil {
 		log.Println("resolve:", err)
 	}
 }
 
-// Post sends the summary note, then a discussion per finding on a diff line: the summary heads them, as a GitHub
-// review does. A position GitLab refuses (outdated diff, a line it doesn't show) moves the finding into the note.
-func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, footer string) (_ int, err error) {
+// Findings is GITLAB_FINDINGS, how a review posts unless review.json's gitlab_findings says: "review" as one
+// review, one email, a suggestion's range GitLab refuses goes into the summary as code; "discussions" each finding
+// and each answer on its own, an email each, a refused range retried without it.
+var Findings = "review"
+
+// Configure takes review.json's gitlab_findings over the server's.
+func (p *pr) Configure(cfg review.Settings) { p.findings = cmp.Or(cfg.GitLabFindings, Findings) }
+
+// batch reports whether this review posts as one review. First it drops the bot's drafts left over (a run that
+// died, ones GitLab kept for not placing them), which publishing would send along; a person's drafts (a personal
+// token), one it can't drop or no draft API make the review post discussions.
+func (p *pr) batch() bool {
+	if p.findings == "review" && !p.checked {
+		p.checked = true
+		if !p.dropDrafts() {
+			log.Println(p.e.Key(), "drafts in the way: findings as discussions")
+			p.findings = "discussions"
+		}
+	}
+	return p.findings == "review"
+}
+
+// dropDrafts deletes the bot's drafts; false if it can't, or a person's are there, publishing would send them.
+func (p *pr) dropDrafts() bool {
+	var ds []struct {
+		ID   int64  `json:"id"`
+		Note string `json:"note"`
+	}
+	b, next, err := do("GET", p.mr+"/draft_notes?per_page=100", nil)
+	if err == nil {
+		err = json.Unmarshal(b, &ds)
+	}
+	if err != nil {
+		log.Println(p.e.Key(), "drafts:", err)
+		return false
+	}
+	if next != "" { // GitLab lists drafts on one page; past a page, one unseen could be a person's
+		return false
+	}
+	ok := true
+	for _, d := range ds {
+		if !strings.HasSuffix(strings.TrimSpace(d.Note), forge.Mark) { // a person's quoting a note of ours stays
+			ok = false
+		} else if err := call("DELETE", fmt.Sprintf("%s/draft_notes/%d", p.mr, d.ID), nil, nil); err != nil {
+			log.Println(p.e.Key(), "drafts:", err)
+			ok = false
+		}
+	}
+	return ok
+}
+
+// Publish sends the answers Resolve drafted when no Post follows.
+func (p *pr) Publish() {
+	if len(p.answers) > 0 {
+		p.bulkPublish()
+	}
+}
+
+// Post sends the summary and the findings on diff lines, with the answers Resolve drafted. A position GitLab
+// refuses (outdated diff, a line it doesn't show) moves the finding into the summary.
+func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, footer string) (int, error) {
 	inline, rest := forge.Split(r, threads, diff.NewLines(raw))
 	if p.refs[2] != sha { // GitLab hasn't built the diff of this push yet: no positions on it
 		log.Println(p.e.Key(), "diff of", sha[:7], "not ready, findings go in the note")
 		rest, inline = append(rest, inline...), nil
 	}
+	if !p.batch() {
+		return p.discussions(inline, rest, raw, footer)
+	}
+	return p.publish(inline, rest, threads, raw, footer)
+}
+
+// discussions sends the summary, then a discussion per finding: the summary heads them, as a GitHub review does.
+func (p *pr) discussions(inline, rest []forge.Finding, raw, footer string) (_ int, err error) {
 	id, err := p.Note(0, forge.Summary(inline, rest, footer))
 	if err != nil {
 		return 0, err
@@ -186,13 +275,9 @@ func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, foot
 		}
 		switch {
 		case rejected(err):
-			c.Start = 0
 			rest = append(rest, c)
 		case err != nil: // the rest isn't tried: the note keeps them
-			for _, c := range inline[i:] {
-				c.Start = 0
-				rest = append(rest, c)
-			}
+			rest = append(rest, plain(inline[i:])...)
 			return len(posted), err
 		default:
 			posted = append(posted, c)
@@ -201,14 +286,153 @@ func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, foot
 	return len(posted) + len(rest), nil
 }
 
+// publish publishes the findings as one review with the summary and the answers as drafts, one email: GitLab's
+// own summary (bulk_publish's note) is a note of its own, an email more. GitLab checks a draft's position only on
+// publishing and drops one it can't place: a finding with no discussion afterwards goes into the summary.
+func (p *pr) publish(inline, rest []forge.Finding, threads []forge.Thread, raw, footer string) (int, error) {
+	lines := olds(raw)
+	var drafted []forge.Finding
+	var keys []string
+	for i, c := range inline {
+		line, body, pos := p.place(c, lines)
+		err := call("POST", p.mr+"/draft_notes", map[string]any{"note": body, "position": pos}, nil)
+		if rejected(err) {
+			c.Start = 0
+			rest = append(rest, c)
+			continue
+		}
+		drafted, keys = append(drafted, c), append(keys, key(c.Path, line, body))
+		if err != nil { // drafted or not (a timeout): its discussion tells. The rest isn't tried: the summary keeps them
+			log.Println(p.e.Key(), "draft:", err)
+			rest = append(rest, plain(inline[i+1:])...)
+			break
+		}
+	}
+	summary := forge.Summary(drafted, rest, footer)
+	err := call("POST", p.mr+"/draft_notes", map[string]string{"note": inert(summary)}, nil)
+	if err != nil {
+		log.Println(p.e.Key(), "draft summary:", err) // a note of its own then
+	}
+	before, beforeErr := p.newest()
+	pubErr := p.bulkPublish()
+	posted, lost := p.published(drafted, keys, threads)
+	if pubErr == nil && err == nil && len(lost) == 0 {
+		return len(posted) + len(rest), nil
+	}
+	// publishing failed, no summary draft, or GitLab dropped some: the summary says what was posted
+	var id int64
+	if err = beforeErr; err == nil {
+		id, err = p.ours(inert(summary), before)
+	}
+	if err != nil {
+		log.Println(p.e.Key(), "notes:", err) // a second summary rather than an older one edited
+	}
+	rest = append(rest, plain(lost)...)
+	_, err = p.Note(id, forge.Summary(posted, rest, footer))
+	return len(posted) + len(rest), err
+}
+
+// bulkPublish publishes the bot's drafts as one review, which marks the bot reviewed when it is a reviewer. Failing,
+// it answers the threads on their own: a timeout that published them anyway answers twice rather than not at all.
+func (p *pr) bulkPublish() error {
+	answers := p.answers
+	p.answers = nil
+	err := call("POST", p.mr+"/draft_notes/bulk_publish", map[string]string{"reviewer_state": "reviewed"}, nil)
+	if err != nil {
+		log.Println(p.e.Key(), "publish:", err)
+		for _, a := range answers {
+			p.answer(a)
+		}
+	}
+	return err
+}
+
+// published splits the drafted findings by whether GitLab made a discussion of them: a thread of ours, not one of
+// before, on their line with their body. Unread threads count all as lost: the summary repeats them.
+func (p *pr) published(drafted []forge.Finding, keys []string, old []forge.Thread) (posted, lost []forge.Finding) {
+	if len(drafted) == 0 {
+		return nil, nil
+	}
+	ts, err := p.Threads()
+	if err != nil {
+		log.Println(p.e.Key(), "threads:", err)
+		return nil, drafted
+	}
+	known := map[string]bool{}
+	for _, t := range old {
+		known[t.ID] = true
+	}
+	got := map[string]int{}
+	for _, t := range ts {
+		if !known[t.ID] {
+			got[key(t.Path, t.Line, t.Body)]++
+		}
+	}
+	for i, c := range drafted {
+		if got[keys[i]] > 0 {
+			got[keys[i]]--
+			posted = append(posted, c)
+		} else {
+			lost = append(lost, c)
+		}
+	}
+	return posted, lost
+}
+
+// key is a discussion's place and body, to tell a published draft by.
+func key(path string, line int, body string) string {
+	return fmt.Sprintf("%s:%d:%s", path, line, strings.TrimSpace(body))
+}
+
+// plain is the findings without their suggestion's range: the note shows the fix as code.
+func plain(fs []forge.Finding) []forge.Finding {
+	out := slices.Clone(fs)
+	for i := range out {
+		out[i].Start = 0
+	}
+	return out
+}
+
+// newest is the id of the MR's newest note, 0 if there is none.
+func (p *pr) newest() (int64, error) {
+	var ns []note
+	if err := call("GET", p.mr+"/notes?sort=desc&order_by=created_at&per_page=1", nil, &ns); err != nil || len(ns) == 0 {
+		return 0, err
+	}
+	return ns[0].ID, nil
+}
+
+// ours is the id of our note with this body after note after, 0 if there is none.
+func (p *pr) ours(body string, after int64) (int64, error) {
+	for page := 1; page <= 10; page++ { // a review's notes: up to 80 findings and their answers
+		var ns []note
+		if err := call("GET", fmt.Sprintf("%s/notes?sort=desc&order_by=created_at&per_page=100&page=%d", p.mr, page), nil, &ns); err != nil {
+			return 0, err
+		}
+		for _, n := range ns {
+			if n.ID <= after {
+				return 0, nil
+			}
+			if n.forge().Ours && strings.TrimSpace(n.Body) == strings.TrimSpace(body) {
+				return n.ID, nil
+			}
+		}
+		if len(ns) < 100 {
+			break
+		}
+	}
+	return 0, nil
+}
+
 func rejected(err error) bool {
 	var ae *apiError
 	return errors.As(err, &ae) && ae.status >= 400 && ae.status < 500
 }
 
-// discuss starts the discussion of one finding: on the suggestion's last line, which it replaces up from there.
-// A fix with a line inert would escape goes as plain code: a suggestion is committed as written.
-func (p *pr) discuss(c forge.Finding, lines map[string]old) error {
+// place is the discussion of one finding: its line, body and position, on the suggestion's last line, which it
+// replaces up from there.
+func (p *pr) place(c forge.Finding, lines map[string]old) (int, string, map[string]any) {
+	// A fix with a line inert would escape goes as plain code: a suggestion is committed as written.
 	if slices.ContainsFunc(strings.Split(c.Fix, "\n"), command) {
 		c.Start = 0
 	}
@@ -224,7 +448,13 @@ func (p *pr) discuss(c forge.Finding, lines map[string]old) error {
 	if o.line > 0 {
 		pos["old_line"] = o.line
 	}
-	return call("POST", p.mr+"/discussions", map[string]any{"body": inert(forge.Format(c, tag) + "\n\n" + forge.Mark), "position": pos}, nil)
+	return line, inert(forge.Format(c, tag) + "\n\n" + forge.Mark), pos
+}
+
+// discuss starts the discussion of one finding.
+func (p *pr) discuss(c forge.Finding, lines map[string]old) error {
+	_, body, pos := p.place(c, lines)
+	return call("POST", p.mr+"/discussions", map[string]any{"body": body, "position": pos}, nil)
 }
 
 func (p *pr) Discussion() (forge.Discussion, error) {

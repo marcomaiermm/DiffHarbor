@@ -26,6 +26,7 @@ services:
       GITLAB_TOKEN: ${GITLAB_TOKEN:-}
       GITLAB_READ_TOKEN: ${GITLAB_READ_TOKEN:-}
       GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
+      GITLAB_FINDINGS: ${GITLAB_FINDINGS:-} # review (one email) or discussions (one each)
       # Models as provider/id[:level]; empty = a repo's review.json, else picked by the keys present.
       REVIEW_MODEL: ${REVIEW_MODEL:-}
       VERIFY_MODEL: ${VERIFY_MODEL:-}

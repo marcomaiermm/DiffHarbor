@@ -91,7 +91,7 @@ func configure() server.Config {
 		},
 		GitLab: gitlab.Config{
 			URL: os.Getenv("GITLAB_URL"), Token: os.Getenv("GITLAB_TOKEN"), ReadToken: os.Getenv("GITLAB_READ_TOKEN"),
-			Secret: os.Getenv("GITLAB_WEBHOOK_SECRET"),
+			Secret: os.Getenv("GITLAB_WEBHOOK_SECRET"), Findings: os.Getenv("GITLAB_FINDINGS"),
 		},
 	}
 }

@@ -51,6 +51,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	pr, sha := e.PullRequest, e.PullRequest.Head.SHA
 	manual := e.Action == "manual" || e.Action == "large"
 	cfg, cfgErr := review.LoadSettings(p.File(pr.Base.SHA, "review.json"))
+	p.Configure(cfg)
 	// A draft's push reads the walkthrough only under opt_in, for whether someone asked.
 	if pr.Draft && !cfg.ReviewsDraft(manual, cfg.Drafts == "opt_in") {
 		if manual { // drafts: off, asked anyway: say why nothing comes
@@ -239,6 +240,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 			fmt.Sprintf("%s · %s · %s · %ds", stats, kind, sha[:7], int(time.Since(started).Round(time.Second).Seconds()))); err != nil {
 			return err
 		}
+	} else {
+		p.Publish() // the answers to fixed threads
 	}
 	desc = text.Count(n, "finding")
 	if len(r.Fixed) > 0 {

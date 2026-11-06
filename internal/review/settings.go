@@ -56,6 +56,9 @@ type Settings struct {
 	// Draft PRs: "manual" (default) reviewed when asked; "opt_in" once asked, every push too, like any PR;
 	// "off" never.
 	Drafts string `json:"drafts"`
+	// How GitLab gets the findings: "review" as one review, one email; "discussions" an email each. Unset: the
+	// server's GITLAB_FINDINGS.
+	GitLabFindings string `json:"gitlab_findings"`
 	// What reviews and chats of this repo follow of the learnings.
 	Learnings Learnings `json:"learnings"`
 
@@ -349,6 +352,9 @@ func LoadSettings(s string) (Settings, error) {
 	}
 	if !slices.Contains([]string{"", "manual", "opt_in", "off"}, cfg.Drafts) {
 		return Settings{}, fmt.Errorf("drafts %q: want manual, opt_in or off", cfg.Drafts)
+	}
+	if f := cfg.GitLabFindings; f != "" && f != "review" && f != "discussions" {
+		return Settings{}, fmt.Errorf("gitlab_findings %q: want review or discussions", f)
 	}
 	if cfg.MaxParts < 0 || cfg.MaxParts > 8 {
 		return Settings{}, fmt.Errorf("max_parts %d: want 1 to 8", cfg.MaxParts)

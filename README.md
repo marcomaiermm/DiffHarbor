@@ -128,10 +128,11 @@ Add a webhook on the project or group: `https://<host>/webhook/gitlab`, with the
 | `GITLAB_TOKEN` | A bot user's token (or a project/group access token) with scope `api` and at least the Developer role. Its username is the bot: `@<username> review`. |
 | `GITLAB_READ_TOKEN` | Optional. A token with only `read_repository` for git's fetches. Without it they use the `api` token. Both stay in the server: git fetches through its proxy. |
 | `GITLAB_WEBHOOK_SECRET` | The webhook's secret token. |
+| `GITLAB_FINDINGS` | `review` (default): the findings, the answers to fixed threads and the summary are one review, one email; a suggestion GitLab can't place goes into the summary as code. `discussions`: each on its own, an email each; a refused suggestion is retried as plain code on its line. Drafts a person has on the token's user when a review starts make it fall back to `discussions`; ones drafted during it go out with it, so give the bot an account of its own. A repo's `review.json` can say otherwise (`gitlab_findings`). |
 
 Differences to GitHub:
 
-- Findings are diff discussions and fixes are `suggestion:-N+0` blocks.
+- Findings are diff discussions, published as one review (`GITLAB_FINDINGS`), and fixes are `suggestion:-N+0` blocks.
 - A finding GitLab refuses to place goes into the summary note.
 - Large MRs in parts start with `@<bot> review all`. There is no checkbox.
 - No redelivery. GitLab retries a failed webhook only briefly.
@@ -290,6 +291,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
   "base_branches": ["develop", "release/*"],
   "drafts": "manual",
   "learnings": {"max": 30, "max_age_days": 180},
+  "gitlab_findings": "review",
   "checks": [".review/checks.sh"],
   "packages": {
     "apps/web": {"min_severity": "major"},
@@ -313,6 +315,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `base_branches` | Globs of base branches whose PRs get reviewed, besides the default branch. A PR into any other (`main` → `prod`) is skipped with a green status. `@<bot> review` still reviews it. |
 | `drafts` | `manual` (default): a draft PR gets a review on `@<bot> review`, then once marked ready. `opt_in`: once someone asked with `@<bot> review`, every later push of the draft gets one too, like any PR. `off`: never; `@<bot> review` says so. |
 | `learnings` | `max`: how many of the newest learnings of the repo and of the owner a review and the chat follow, each. `0` is none, at most 100, default 30. `max_age_days`: older ones are left out. Default: any age. A learning saved before dates were kept never ages. Both only hide, nothing is deleted. |
+| `gitlab_findings` | `review`: the findings, the answers to fixed threads and the summary are one review, one email; a suggestion GitLab can't place goes into the summary as code. `discussions`: each on its own, an email each; a refused suggestion is retried as plain code on its line. Default: the server's `GITLAB_FINDINGS`. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part. The longest glob wins. |
