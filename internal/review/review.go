@@ -927,7 +927,7 @@ func TrustedContext(rules, learnings string) string {
 		fmt.Fprintf(&s, "\n\n## Project rules (from the base branch, written by the maintainers)\n\n%s", text.Truncate(rules, 18_500)) // rules file 8000, root conventions 4000, nested 6000, headings
 	}
 	if learnings = strings.TrimSpace(learnings); learnings != "" {
-		fmt.Fprintf(&s, "\n\n## Learnings from earlier reviews (maintainer replies to your comments; follow them)\n\n%s", learnings)
+		fmt.Fprintf(&s, "\n\n## Learnings from earlier reviews (maintainer replies to your comments, newest last; follow them, a newer one over an older one it contradicts)\n\n%s", learnings)
 	}
 	return s.String()
 }
