@@ -76,7 +76,7 @@ services:
   # Docker for testcontainers (Postgres etc.) in the checks. The PR's code controls this daemon, so it holds no
   # secrets. sysbox-runc (https://github.com/nestybox/sysbox, on the host) isolates it without --privileged.
   dind:
-    image: docker:29-dind
+    image: docker:29-dind@sha256:08a98015fce594af7c382883bea080ea206de74402a95da9dc52b6428c8cd121
     runtime: sysbox-runc
     command: [--tls=false]
     environment:
