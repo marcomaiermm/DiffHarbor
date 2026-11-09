@@ -22,7 +22,7 @@ ARG VERSION=dev
 RUN tailwindcss -i internal/report/styles.css -o /tmp/styles.css --minify && { cmp -s /tmp/styles.css internal/report/styles.gen.css || { echo "styles.gen.css is stale: go generate ./internal/report"; exit 1; }; } \
     && go vet ./... && go test ./... && govulncheck ./... && CGO_ENABLED=0 go build -trimpath -ldflags="-s -X main.version=$VERSION" -o /home/node/diffharbor ./cmd/diffharbor
 
-FROM node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94
+FROM node:26-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216
 # fallow's musl binary needs a CPU with AVX2.
 RUN apk add --no-cache curl git ripgrep fd bash ast-grep shellcheck luacheck zizmor && npm install -g --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.5.0 \
     squawk-cli@2.70.0 oxlint@1.90.0 oxlint-tsgolint@7.0.2005 fallow@3.38.1 corepack@0.36.0 && npm cache clean --force && corepack enable && mkdir -p /cache /data && chmod 755 /cache && chmod 700 /data
