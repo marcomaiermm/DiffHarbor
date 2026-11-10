@@ -500,7 +500,7 @@ func TestDocsBlock(t *testing.T) {
 
 func TestAuthorsOf(t *testing.T) { // git ends each record with "\x00\n"
 	log := "Ann\nfix\n\nCo-Authored-By: Claude Opus 4 <noreply@anthropic.com>\n\x00\nBob\nx\n\nGenerated with [Claude Code]\n\x00\n" +
-		"codex[bot]\nfeat\n\x00\nCy\nuses codex in a title\n\x00\n\nuse codex cli\n\x00\nDi\nwip\n\nCo-authored-by: Gemini <g@google.com>\n\x00\nEd\nCo-authored-by: Copilot <c@github.com>\n\x00\n"
+		"codex[bot]\nfeat\n\x00\nCy\nuses codex in a title\n\x00\n\nuse codex cli\n\x00\nDi\nwip\n\nCo-authored-by: Gemini <g@google.com>\n\x00\nFo\nCo-authored-by: Claudette <c@x.io>\n\x00\nCodexia\nhi\n\x00\nEd\nCo-authored-by: Copilot <c@github.com>\n\x00\n"
 	if got := authorsOf(log); !slices.Equal(got, []string{"anthropic", "anthropic", "openai", "google"}) {
 		t.Errorf("authors %v", got)
 	}

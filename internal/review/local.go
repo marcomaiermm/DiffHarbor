@@ -198,7 +198,7 @@ var aiAuthors = []struct {
 	re       *regexp.Regexp
 }{
 	{"anthropic", regexp.MustCompile(`(?im)^co-authored-by:\s*claude\b|generated with \[claude code\]`)},
-	{"openai", regexp.MustCompile(`(?im)^co-authored-by:\s*codex|\A[^\n]*codex`)},
+	{"openai", regexp.MustCompile(`(?im)^co-authored-by:\s*codex|\A[^\n]*codex[^\n]*\[bot\]`)},
 	{"google", regexp.MustCompile(`(?im)^co-authored-by:\s*gemini|\A[^\n]*gemini-code-assist`)},
 }
 

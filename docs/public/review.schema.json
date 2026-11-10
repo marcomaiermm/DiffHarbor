@@ -45,6 +45,7 @@
     },
     "review_model": { "$ref": "#/definitions/model" },
     "verify_model": { "$ref": "#/definitions/model" },
+    "model_inversion": { "type": "boolean", "description": "false: no switch to another provider's model when the review model's provider's AI wrote most commits. A pinned review_model never switches. Default true." },
     "large_pr": { "enum": ["ask", "all", "off"] },
     "max_parts": { "type": "integer", "minimum": 1, "maximum": 8, "description": "Default 4." },
     "passes": {
