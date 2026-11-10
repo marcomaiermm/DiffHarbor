@@ -61,7 +61,6 @@ const (
 	maxEntities = 40
 	secChars    = 2000 // a section's text
 	budget      = 8000 // all sections' text: the ticket's
-	perAdapter  = 200  // sections kept of one adapter's answer, before the filter
 	timeout     = 10 * time.Second
 )
 
@@ -144,8 +143,16 @@ func Lookup(ctx context.Context, env Env, picks []string) []review.Doc {
 			log.Println(env.Key, "knowledge:", names[i]+":", r.err)
 		}
 		returned += len(r.secs)
-		for _, s := range r.secs[:min(len(r.secs), perAdapter)] {
-			s.ID, s.Title, s.URL, s.Updated = env.Redact(s.ID), env.Redact(s.Title), env.Redact(s.URL), env.Redact(s.Updated)
+		for _, s := range r.secs {
+			if s.ID == "" { // no identity: it would dedupe with every other one
+				continue
+			}
+			if t, err := time.Parse(time.RFC3339, s.Updated); err == nil {
+				s.Updated = t.Format(time.RFC3339)
+			} else {
+				s.Updated = "" // not a time: it goes into the prompt outside the fence
+			}
+			s.ID, s.Title, s.URL = env.Redact(s.ID), env.Redact(s.Title), env.Redact(s.URL)
 			s.Text = text.Truncate(env.Redact(s.Text), secChars)
 			cs = append(cs, cand{adapter: names[i], Section: s, refs: refs[names[i]], urls: urls})
 		}
@@ -196,10 +203,10 @@ func b2i(b bool) int {
 	return 0
 }
 
-// explicit reports whether s is what a ref names: its ID, a section of the doc it names, or its URL.
+// explicit reports whether s is what a ref names: its ID or URL, or a section of the doc that ID or URL is.
 func explicit(s Section, refs []string) bool {
 	return slices.ContainsFunc(refs, func(r string) bool {
-		return r != "" && (s.ID == r || strings.HasPrefix(s.ID, r+"#") || s.URL == r)
+		return r != "" && (s.ID == r || strings.HasPrefix(s.ID, r+"#") || s.URL == r || strings.HasPrefix(s.URL, r+"#"))
 	})
 }
 
@@ -253,7 +260,9 @@ var (
 func Entities(d string) []Entity {
 	set := map[Entity]bool{}
 	for _, p := range diff.Paths(d) {
-		set[Entity{p, "path", 0}] = true
+		if !generic.MatchString(p) { // a root README.md: every repo's docs name it
+			set[Entity{p, "path", 0}] = true
+		}
 	}
 	for _, n := range report.Declared(d) {
 		if len(n) >= 4 && compound.MatchString(n) {
@@ -299,10 +308,12 @@ type File struct{ ID, Title, URL, Updated, Text string }
 var (
 	heading = regexp.MustCompile(`^#{1,3}\s+(.+?)[\s#]*$`)
 	nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
+	fenceRe = regexp.MustCompile("^\\s*(`{3,}|~{3,})")
 )
 
-// Split cuts f at its headings (# to ###, none inside a code fence) into sections with the ID "<f.ID>#<slug>"; the
-// text before the first heading is "<f.ID>#". A heading with nothing under it is no section.
+// Split cuts f at its headings (# to ###, none inside a code fence) into sections with the ID "<f.ID>#<slug>" and
+// the URL "<f.URL>#<slug>" (GitHub's and GitLab's anchor for a heading of letters, digits and spaces); the text
+// before the first heading is "<f.ID>#" with f.URL. A heading with nothing under it is no section.
 func Split(f File) []Section {
 	var out []Section
 	slugs := map[string]bool{}
@@ -310,24 +321,30 @@ func Split(f File) []Section {
 	var body []string
 	flush := func() {
 		if t := strings.TrimSpace(strings.Join(body, "\n")); t != "" {
-			title := f.Title
+			title, u := f.Title, f.URL
 			if head != "" {
 				title += " › " + head
 				t = "# " + head + "\n\n" + t
+				u += "#" + slug
 			}
-			out = append(out, Section{ID: f.ID + "#" + slug, Title: title, URL: f.URL, Updated: f.Updated, Text: text.Truncate(t, secChars)})
+			out = append(out, Section{ID: f.ID + "#" + slug, Title: title, URL: u, Updated: f.Updated, Text: text.Truncate(t, secChars)})
 		}
 		body = nil
 	}
-	fence := false
+	fence := "" // the open code fence's run of ` or ~
 	for l := range strings.SplitSeq(f.Text, "\n") {
-		if t := strings.TrimSpace(l); strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
-			fence = !fence
+		if m := fenceRe.FindStringSubmatch(l); m != nil {
+			switch {
+			case fence == "":
+				fence = m[1]
+			case m[1][0] == fence[0] && len(m[1]) >= len(fence) && strings.TrimSpace(l[len(m[0]):]) == "": // closes it
+				fence = ""
+			}
 		}
-		if m := heading.FindStringSubmatch(l); m != nil && !fence {
+		if m := heading.FindStringSubmatch(l); m != nil && fence == "" {
 			flush()
 			head, slug = m[1], strings.Trim(nonSlug.ReplaceAllString(strings.ToLower(m[1]), "-"), "-")
-			for base, i := cmp.Or(slug, "s"), 2; slug == "" || slugs[slug]; i++ { // unique: a repeated heading, or no ASCII in it
+			for base, i := cmp.Or(slug, "s"), 1; slug == "" || slugs[slug]; i++ { // unique as the forges number them: a repeated heading, or no ASCII in it
 				slug = fmt.Sprintf("%s-%d", base, i)
 			}
 			slugs[slug] = true

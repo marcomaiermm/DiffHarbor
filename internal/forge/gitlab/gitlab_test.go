@@ -536,3 +536,31 @@ func TestVisibility(t *testing.T) {
 		}
 	}
 }
+
+// Refresh reads the project as it is now: a webhook that said private doesn't keep it so.
+func TestRefreshVisibility(t *testing.T) {
+	for vis, want := range map[string]bool{`{"visibility":"private"}`: true, `{"visibility":"public"}`: false, `{"visibility":"internal"}`: false, ``: false} {
+		serve(t, func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/projects/5/merge_requests/3":
+				fmt.Fprint(w, `{"iid":3,"state":"opened","author":{"id":7}}`)
+			case "/users/7":
+				fmt.Fprint(w, `{"bot":false}`)
+			case "/projects/5":
+				if vis == "" { // unavailable: not private
+					http.Error(w, "boom", 500)
+					return
+				}
+				fmt.Fprint(w, vis)
+			default:
+				http.NotFound(w, r)
+			}
+		})
+		e := &forge.Event{Forge: "gitlab"}
+		e.Repository.ID, e.PullRequest.Number, e.Repository.Visibility = 5, 3, "private" // as the webhook said
+		p, _ := (&Hub{}).Open(e)
+		if err := p.Refresh(); err != nil || e.Private() != want {
+			t.Errorf("%q: private %v, %v", vis, e.Private(), err)
+		}
+	}
+}

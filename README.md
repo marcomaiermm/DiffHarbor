@@ -230,7 +230,7 @@ team-a @team-a https://art.corp/artifactory/api/npm/team-a/ <token>
 
 ### Reference docs
 
-Before the review, the server fetches the doc sections that mention what the PR changes and gives them to the model as reference material. A change that makes a section wrong gets a minor finding with the section's link. Sources: the repo's `*.md` (`docs`), the GitLab wiki (`wiki`), Linear documents (`linear`), or your own HTTP service. Only for private repos and PRs from the repo itself.
+Before the review, the server fetches the doc sections that mention what the PR changes and gives them to the model as reference material. A change that makes a section wrong gets a minor finding with the section's link. Sources: the repo's `*.md` (`docs`), the GitLab wiki (`wiki`), Linear documents (`linear`), or your own HTTP service. Only for PRs from the repo itself, and for private repos unless `knowledge_public` opts a public one in.
 
 `KNOWLEDGE_ADAPTERS` lists, per owner, the remote adapters (`<owner> <name> <url> <token>`) and who may use `linear` (`<owner> linear`). Setup, the `review.json` key, the adapter contract and the guards: [Reference docs](https://marcomaiermm.github.io/DiffHarbor/configuration/#reference-docs).
 

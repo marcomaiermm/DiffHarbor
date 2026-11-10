@@ -59,6 +59,12 @@ func (p *pr) Refresh() error {
 	if u.Bot {
 		p.e.PullRequest.User.Type = "Bot"
 	}
+	// the project as it is now, not as the event was queued (forge.Event.Private); unknown isn't private
+	var proj struct{ Visibility string }
+	if err := call("GET", p.api, nil, &proj); err != nil {
+		log.Println("visibility:", err)
+	}
+	p.e.PullRequest.Base.Repo.Visibility = cmp.Or(proj.Visibility, "unknown")
 	return nil
 }
 
