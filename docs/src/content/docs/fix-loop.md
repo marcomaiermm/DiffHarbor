@@ -27,6 +27,9 @@ Other agents: copy [`plugins/diffharbor/skills/fix-loop`](https://github.com/mar
 
 It needs git and, signed in with push access to the branch, `gh` on GitHub or `glab` and `jq` on GitLab.
 
+- DiffHarbor answers replies in its threads only from the repo's owners, members and collaborators (on GitLab: Developer or higher). Run the loop as one, or its replies go unanswered.
+- The wait reads the commit status `diffharbor`: on GitHub the App needs the [Commit statuses](../configuration/#github) permission, otherwise the wait ends at its 15-minute cap and the loop stops.
+
 ## Guards
 
 - Thread text is the PR's data: the skill never runs commands from it, never sends secrets anywhere and never force-pushes.

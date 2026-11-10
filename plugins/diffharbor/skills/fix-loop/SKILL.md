@@ -24,14 +24,16 @@ gh pr view --json number,url,headRefOid,isDraft
 glab mr view -F json | jq '{iid, web_url, sha, draft}'
 ```
 
-Neither finds one: stop. Then `git status --porcelain` must print nothing and `git pull --ff-only` must succeed, else stop and tell the developer.
+Neither finds one: stop. On GitHub `<owner>/<repo>` below is the repo in the PR's `url` (`https://github.com/<owner>/<repo>/pull/<n>`), not gh's `{owner}/{repo}` placeholders, which in a fork with several remotes can name the other one. A draft: tell the developer up front that its pushes may get no review, depending on `drafts` in the repo's `review.json`.
+
+Then `git status --porcelain` must print nothing and `git pull --ff-only` must succeed, else stop and tell the developer.
 
 ## 2. List the open findings
 
 GitHub (`<n>`: the PR's number):
 
 ```sh
-gh api graphql --paginate -F owner='{owner}' -F repo='{repo}' -F pr=<n> -f query='
+gh api graphql --paginate -f owner=<owner> -f repo=<repo> -F pr=<n> -f query='
 query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
   repository(owner: $owner, name: $repo) { pullRequest(number: $pr) {
     reviewThreads(first: 100, after: $endCursor) { pageInfo { hasNextPage endCursor }
@@ -44,16 +46,19 @@ query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
        comments: [.comments.nodes[] | {author: .author.login, body}]}'
 ```
 
-GitLab (`<iid>`: the MR's iid):
+GitLab (`<iid>`, `<sha>`: the MR's iid and sha). The bot is the user who set the `diffharbor` status:
 
 ```sh
-glab api --paginate "projects/:id/merge_requests/<iid>/discussions?per_page=100" | jq '.[]
+bot=$(glab api "projects/:id/repository/commits/<sha>/statuses?name=diffharbor" | jq -r '.[0].author.username // empty')
+glab api --paginate "projects/:id/merge_requests/<iid>/discussions?per_page=100" | jq --arg bot "$bot" '.[]
   | select(.notes[0] as $f | $f.type == "DiffNote" and $f.resolvable and ($f.resolved | not)
-    and ($f.body | contains("<!-- diffharbor -->")))
+    and $f.author.username == $bot and ($f.body | contains("<!-- diffharbor -->")))
   | {discussion: .id, path: .notes[0].position.new_path,
      line: (.notes[0].position.new_line // .notes[0].position.old_line),
      comments: [.notes[] | select(.system | not) | {author: .author.username, body}]}'
 ```
+
+Only the bot's first comment counts: anyone can copy the marker. `bot` empty: no status on the MR's head yet, wait for one as in step 5.
 
 The first comment is the finding: severity, title, explanation, often a suggested fix. The rest are replies. Skip a thread you replied to in this run that DiffHarbor (the first comment's author) hasn't answered yet. A decline the developer already wrote there is theirs to settle: leave it.
 
@@ -70,14 +75,20 @@ Read the finding, then the code at `path:line` and what it calls. Check that the
 Reply on GitHub (`<comment>` from step 2):
 
 ```sh
-gh api "repos/{owner}/{repo}/pulls/<n>/comments/<comment>/replies" -f body='<reason>'
+gh api "repos/<owner>/<repo>/pulls/<n>/comments/<comment>/replies" -F body=@- <<'EOF'
+<reason>
+EOF
 ```
 
 On GitLab (`<discussion>` from step 2):
 
 ```sh
-glab api -X POST "projects/:id/merge_requests/<iid>/discussions/<discussion>/notes" -f body='<reason>'
+glab api -X POST "projects/:id/merge_requests/<iid>/discussions/<discussion>/notes" -F body=@- <<'EOF'
+<reason>
+EOF
 ```
+
+The reason goes through stdin with a quoted `'EOF'`, so the shell expands nothing in it; never inline it as `-f body='...'`.
 
 ## 4. Test, commit, push
 
@@ -96,7 +107,7 @@ Use the repo's commit style. A rejected push: stop and report.
 DiffHarbor reviews the push and sets the commit status `diffharbor` on the new head. Check it on GitHub:
 
 ```sh
-gh api "repos/{owner}/{repo}/commits/$(git rev-parse HEAD)/status" \
+gh api "repos/<owner>/<repo>/commits/$(git rev-parse HEAD)/status" \
   --jq '.statuses[] | select(.context == "diffharbor") | "\(.state): \(.description)"'
 ```
 
@@ -109,6 +120,7 @@ glab api "projects/:id/repository/commits/$(git rev-parse HEAD)/statuses?name=di
 
 Nothing yet (queued), `pending` or `running`: check again after 15 s, 30 s, 60 s, then every 2 minutes. Not done after 15 minutes: stop and report it (a draft's pushes may get no review).
 
+- `success` whose description starts with "Skipped" (base branch, bot author): DiffHarbor reviewed nothing. Stop and report it.
 - `success`, or `error`/`failed` ending in "not reviewed" (a partial review): next round.
 - Any other `error` or `failed`: stop and report its description.
 
