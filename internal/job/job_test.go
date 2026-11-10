@@ -702,8 +702,8 @@ func (p *reopenPR) Reopen(t forge.Thread, _ string, _ forge.Finding) error {
 	return nil
 }
 
-// A fixed finding back reopens its thread, once; a folded one, one on another file and one the forge refuses post, the
-// last without its thread to keep it off the line.
+// A fixed finding back reopens its thread, once; a folded one, one on another file and one the forge refuses post,
+// without their thread to keep them off the line. A folded one at its thread's line is posted, folded.
 func TestReopen(t *testing.T) {
 	at := func(i int) *int { return &i }
 	gone := []forge.Thread{{ID: "a", Path: "a.go"}, {ID: "b", Path: "b.go"}}
@@ -715,17 +715,23 @@ func TestReopen(t *testing.T) {
 		{Path: "b.go", Title: "new"},
 	}
 	p := &reopenPR{}
-	post, n, _ := reopen(p, gone, "abcdef1", cs)
+	post, n, free := reopen(p, gone, "abcdef1", cs)
 	titles := func(cs []review.Comment) (ts []string) {
 		for _, c := range cs {
 			ts = append(ts, c.Title)
 		}
 		return ts
 	}
-	if n != 1 || !slices.Equal(p.reopened, []string{"a"}) || !slices.Equal(titles(post), []string{"twice", "folded", "moved", "new"}) {
-		t.Fatalf("reopened %v %d, post %v", p.reopened, n, titles(post))
+	if n != 1 || !slices.Equal(p.reopened, []string{"a"}) || !slices.Equal(titles(post), []string{"twice", "folded", "moved", "new"}) ||
+		fmt.Sprint(free) != "map[b:true]" {
+		t.Fatalf("reopened %v %d, post %v, free %v", p.reopened, n, titles(post), free)
 	}
-	if post, n, refused := reopen(&reopenPR{refuse: true}, gone, "abcdef1", cs); n != 0 || len(post) != len(cs) || fmt.Sprint(refused) != "map[a:true]" {
-		t.Fatalf("refused %v: %d, post %v", refused, n, titles(post))
+	gone[1].Line = 7
+	seen := slices.DeleteFunc(slices.Clone(gone), func(t forge.Thread) bool { return free[t.ID] })
+	if _, _, folded := forge.Split(review.Result{Comments: []review.Comment{{Path: "b.go", Line: 7, Title: "folded", Again: at(1), Fold: true}}}, seen, nil); len(folded) != 1 {
+		t.Fatalf("folded at its thread's line: %v", folded)
+	}
+	if post, n, free := reopen(&reopenPR{refuse: true}, gone, "abcdef1", cs); n != 0 || len(post) != len(cs) || fmt.Sprint(free) != "map[a:true b:true]" {
+		t.Fatalf("refused %v: %d, post %v", free, n, titles(post))
 	}
 }

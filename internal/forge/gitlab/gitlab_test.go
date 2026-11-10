@@ -47,10 +47,12 @@ func TestParse(t *testing.T) {
 	if e, _ := h.Parse(hd, []byte(strings.Replace(push, `"oldrev":"a"`, `"title":"x"`, 1))); e != nil {
 		t.Fatal("a title edit is no push")
 	}
-	retarget := strings.NewReplacer(`"oldrev":"a"`, `"title":"x"`,
-		`"object_attributes"`, `"changes":{"target_branch":{"previous":"f0","current":"main"}},"object_attributes"`).Replace(push)
-	if e, err := h.Parse(hd, []byte(retarget)); err != nil || e.Action != "edited" || e.Changes.Base.Ref.From != "f0" {
-		t.Fatalf("retarget: %+v %v", e, err)
+	// with a push too: a full review against the new base, not an incremental one
+	moved := strings.Replace(push, `"object_attributes"`, `"changes":{"target_branch":{"previous":"f0","current":"main"}},"object_attributes"`, 1)
+	for _, retarget := range []string{strings.Replace(moved, `"oldrev":"a"`, `"title":"x"`, 1), moved} {
+		if e, err := h.Parse(hd, []byte(retarget)); err != nil || e.Action != "edited" || e.Changes.Base.Ref.From != "f0" {
+			t.Fatalf("retarget: %+v %v", e, err)
+		}
 	}
 	reply := `{"object_kind":"note","user":{"id":7,"username":"dev"},"project":{"id":5,"path_with_namespace":"g/s/p"},"merge_request":{"iid":3},
 "object_attributes":{"id":2,"note":"why?","noteable_type":"MergeRequest","type":"DiffNote","discussion_id":"d1","position":{"new_path":"a.go"}}}`

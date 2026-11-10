@@ -261,10 +261,10 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	}
 	post := r
 	var reopened int
-	var refused map[string]bool
-	post.Comments, reopened, refused = reopen(p, gone, sha, r.Comments)
-	// one the forge refused posts anew: its resolved thread mustn't keep it off the line
-	seen := slices.DeleteFunc(slices.Clone(threads), func(t forge.Thread) bool { return refused[t.ID] })
+	var free map[string]bool
+	post.Comments, reopened, free = reopen(p, gone, sha, r.Comments)
+	// one back but not reopened posts anew: its resolved thread mustn't keep it off the line
+	seen := slices.DeleteFunc(slices.Clone(threads), func(t forge.Thread) bool { return free[t.ID] })
 
 	kind := "full"
 	if only != nil {
@@ -660,25 +660,30 @@ func openFindings(threads, open []forge.Thread, r review.Result) []review.Commen
 }
 
 // reopen reopens the thread of each fixed finding (gone) that one of cs brings back, and returns the others to post,
-// how many it reopened and the threads the forge refused to (by ID). Posted anew at its line, Split would drop it
-// there. A folded one stays folded; one on another file than its thread, or refused, posts anew.
-func reopen(p forge.PR, gone []forge.Thread, sha string, cs []review.Comment) (post []review.Comment, n int, refused map[string]bool) {
+// how many it reopened and the threads of those it brings back but left resolved (by ID): posted anew at its line,
+// Split would drop one there. A folded one stays folded; one on another file than its thread, or refused, posts anew.
+func reopen(p forge.PR, gone []forge.Thread, sha string, cs []review.Comment) (post []review.Comment, n int, free map[string]bool) {
 	done := map[int]bool{}
-	refused = map[string]bool{}
+	free = map[string]bool{}
 	for _, c := range cs {
-		if c.Again != nil && !c.Fold && !done[*c.Again] && gone[*c.Again].Path == c.Path {
+		if c.Again != nil {
 			t := gone[*c.Again]
-			err := p.Reopen(t, sha, forge.Finding{Comment: c})
-			if err == nil {
-				done[*c.Again] = true
-				continue
+			if !c.Fold && !done[*c.Again] && t.Path == c.Path {
+				err := p.Reopen(t, sha, forge.Finding{Comment: c})
+				if err == nil {
+					done[*c.Again] = true
+					continue
+				}
+				log.Println("reopen:", err)
 			}
-			log.Println("reopen:", err)
-			refused[t.ID] = true
+			free[t.ID] = true
 		}
 		post = append(post, c)
 	}
-	return post, len(done), refused
+	for i := range done { // a repeat of one reopened: its thread holds it off
+		delete(free, gone[i].ID)
+	}
+	return post, len(done), free
 }
 
 // reviewedPatches is the patch IDs to remember: now's for the files reviewed, the last reviewed one for a file left out

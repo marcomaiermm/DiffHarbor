@@ -335,14 +335,14 @@ func (h *Hub) Parse(hd http.Header, body []byte) (*forge.Event, error) {
 			e.Action = "reopened"
 		case a.Action == "close" || a.Action == "merge":
 			e.Action = "closed"
+		case a.Action == "update" && w.Changes.Target != nil: // retargeted, maybe pushed too: as GitHub's edited base, a full review
+			e.Action, e.Changes.Base.Ref.From = "edited", w.Changes.Target.Previous
 		case a.Action == "update" && a.OldRev != "": // a push
 			e.Action = "synchronize"
 		case a.Action == "update" && d != nil && d.Previous && !d.Current:
 			e.Action = "ready_for_review"
 		case a.Action == "update" && d != nil && !d.Previous && d.Current:
 			e.Action = "converted_to_draft"
-		case a.Action == "update" && w.Changes.Target != nil: // retargeted: as GitHub's edited base
-			e.Action, e.Changes.Base.Ref.From = "edited", w.Changes.Target.Previous
 		default: // title, labels, approvals: nothing to review
 			return nil, nil
 		}
