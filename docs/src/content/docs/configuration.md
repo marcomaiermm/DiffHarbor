@@ -71,7 +71,7 @@ Differences to GitHub:
 
 - Bedrock in the EU: `amazon-bedrock/eu.anthropic.…`.
 - Each pass gets only its own provider's key.
-- Model inversion, off by default (`MODEL_INVERSION` or `"model_inversion": true` turn it on): when the AI of the review model's provider wrote most of a PR's commits (Claude Code, Codex or Gemini trailers, bot authors), `MODEL_INVERSION`'s model, else the next provider with a key, reviews and verifies, `REVIEW_MODEL` included. The walkthrough footer says so. A `review_model` in `review.json` keeps the model.
+- Model inversion, off by default (`MODEL_INVERSION` or `"model_inversion": true` turn it on): when the AI of the review model's provider wrote at least as many of a PR's commits as any other AI (Claude Code, Codex or Gemini trailers, bot authors; commits without one don't count), `MODEL_INVERSION`'s model, else the next provider with a key, reviews and verifies, `REVIEW_MODEL` included. The walkthrough footer says so. A `review_model` in `review.json` keeps the model.
 
 :::note
 Use API keys. Pi can also log in with a ChatGPT subscription: `openai/…` without `OPENAI_API_KEY`, then `docker compose exec -it diffharbor diffharbor login`. Whether your plan's terms allow that for a review bot is yours to check. You use it at your own risk.

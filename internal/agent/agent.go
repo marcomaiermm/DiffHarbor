@@ -298,8 +298,8 @@ func maker(provider string) string {
 }
 
 // Invert is the review and verify model of MODEL_INVERSION, else of the first provider in Matrix, with credentials
-// and another maker than review's, when review's maker wrote most of the commits: authors has the maker of each
-// commit an AI wrote. by names that maker. "" = review stays.
+// and another maker than review's, when no maker wrote more of the commits than review's: authors has the maker of
+// each commit an AI wrote, the others don't count. by names that maker. "" = review stays.
 func Invert(review string, authors []string) (rm, vm, by string) {
 	n := map[string]int{}
 	for _, a := range authors {

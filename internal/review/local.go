@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -197,17 +198,19 @@ var aiAuthors = []struct {
 	provider string
 	re       *regexp.Regexp
 }{
-	{"anthropic", regexp.MustCompile(`(?im)^co-authored-by:\s*claude\b|generated with \[claude code\]`)},
-	{"openai", regexp.MustCompile(`(?im)^co-authored-by:\s*codex|\A[^\n]*codex[^\n]*\[bot\]`)},
-	{"google", regexp.MustCompile(`(?im)^co-authored-by:\s*gemini|\A[^\n]*gemini-code-assist`)},
+	{"anthropic", regexp.MustCompile(`(?im)^co-authored-by:\s*claude\b|generated with \[?claude code\b`)},
+	{"openai", regexp.MustCompile(`(?im)^co-authored-by:\s*codex\b|\A[^\n]*codex[^\n]*\[bot\]`)},
+	{"google", regexp.MustCompile(`(?im)^co-authored-by:\s*gemini\b|\A[^\n]*gemini-code-assist`)},
 }
 
-// Authors is the provider of the AI behind each of the PR's commits an AI wrote, from a Checkout. nil when git fails.
+// Authors is the provider of the AI behind each of the PR's commits an AI wrote, from a Checkout: a commit of two AIs
+// names both. nil when git fails, which the log says: no model inversion then.
 func Authors(ctx context.Context, sb *proc.Sandbox) []string {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "log", "--no-merges", "--format=%an%n%B%x00", "refs/base..HEAD"))
 	if err != nil {
+		log.Println("authors:", err)
 		return nil
 	}
 	return authorsOf(string(out))
@@ -218,7 +221,6 @@ func authorsOf(log string) (ps []string) {
 		for _, a := range aiAuthors {
 			if a.re.MatchString(strings.TrimPrefix(c, "\n")) {
 				ps = append(ps, a.provider)
-				break
 			}
 		}
 	}

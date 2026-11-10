@@ -45,7 +45,7 @@
     },
     "review_model": { "$ref": "#/definitions/model" },
     "verify_model": { "$ref": "#/definitions/model" },
-    "model_inversion": { "type": "boolean", "description": "true: switch to another provider's model when the review model's provider's AI wrote most commits. A pinned review_model never switches. Default: the server's MODEL_INVERSION, off." },
+    "model_inversion": { "type": "boolean", "description": "true: switch to another provider's model when the review model's provider's AI wrote at least as many commits as any other AI; commits no AI wrote don't count. A pinned review_model never switches. Default: the server's MODEL_INVERSION, off." },
     "large_pr": { "enum": ["ask", "all", "off"] },
     "max_parts": { "type": "integer", "minimum": 1, "maximum": 8, "description": "Default 4." },
     "passes": {

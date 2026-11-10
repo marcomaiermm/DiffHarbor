@@ -187,7 +187,7 @@ func Blocks(sev string) bool { return Rank(sev) >= Rank("major") }
 func bySeverity(a, b Comment) int { return Rank(b.Severity) - Rank(a.Severity) }
 
 // Models returns the review and verify model: the server's env, else review.json, else agent.Matrix, inverted to
-// another lab's when the review model's lab wrote most of the PR's commits. An empty verify model means the review model verifies.
+// another lab's when no lab wrote more of the PR's AI-written commits than the review model's. An empty verify model means the review model verifies.
 func (cfg Settings) Models() (review, verify string) {
 	review = cmp.Or(agent.Model, cfg.ReviewModel, agent.Default())
 	if r, v, _ := cfg.inverted(review); r != "" {
