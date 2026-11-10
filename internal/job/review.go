@@ -257,6 +257,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			r.Comments[i].Fold = cfg.FoldPush(r.Comments[i])
 		}
 	}
+	review.CapInline(r.Comments)
 	for _, i := range r.Fixed {
 		p.Resolve(open[i], sha)
 	}

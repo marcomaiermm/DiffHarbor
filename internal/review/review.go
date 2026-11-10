@@ -402,6 +402,32 @@ func fold(cs []Comment, cfg Settings) {
 	}
 }
 
+// maxInline is how many findings a run posts inline, the ones that block never folded past it: each thread costs a maintainer
+// attention, and a run with many minor findings would otherwise flood the PR.
+const maxInline = 5
+
+// CapInline folds the least severe inline findings past maxInline into the review's summary, nothing dropped. Critical
+// and major ones never fold here, even past maxInline, and take slots first. Run it last, on the whole run's comments, after every other
+// Fold decision (a push's FoldPush replaces the one fold made).
+// ponytail: a finding outside the diff still takes a slot though Split puts it in the summary; count only diff lines if that starves real threads.
+func CapInline(cs []Comment) {
+	var open []int
+	free := maxInline
+	for i, c := range cs {
+		switch {
+		case c.Fold:
+		case Blocks(c.Severity):
+			free--
+		default:
+			open = append(open, i)
+		}
+	}
+	slices.SortStableFunc(open, func(a, b int) int { return bySeverity(cs[a], cs[b]) })
+	for _, i := range open[min(max(free, 0), len(open)):] {
+		cs[i].Fold = true
+	}
+}
+
 // held runs f in one of sem's slots, given back on a panic too: the other parts' passes wait for it.
 func held(sem chan struct{}, f func()) {
 	sem <- struct{}{}
