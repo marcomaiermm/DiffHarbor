@@ -224,7 +224,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		if picks := cfg.KnowledgeFor(prFiles); len(picks) > 0 && (e.Private() || cfg.KnowledgePublic) {
 			docs = knowledge.Lookup(ctx, knowledge.Env{
 				Key: key, Owner: e.Owner(), Repo: e.Repository.FullName, Diff: raw, Texts: []string{pr.Body, commits, tk},
-				Sb: sb, Blob: p.Links().Blob, Wiki: p.Wiki, Redact: forge.Redact,
+				Sb: sb, Blob: p.Links().Blob, GitLab: e.Forge == "gitlab", Wiki: p.Wiki, Redact: forge.Redact,
 			}, picks)
 		}
 	}
