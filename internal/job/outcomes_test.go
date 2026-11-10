@@ -5,7 +5,6 @@ import (
 	"diffharbor/internal/forge"
 	"diffharbor/internal/proc"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -192,18 +191,27 @@ func TestOutcomesFail(t *testing.T) {
 	}
 }
 
-// One close saves at most maxLearnedPerClose learnings, and counts every decline.
+// One close saves at most maxLearnedPerClose new learnings, and counts every decline. One the repo has, or a
+// second of the same, takes no place.
 func TestOutcomesLearnCap(t *testing.T) {
 	proc.DataDir = t.TempDir()
-	pr := &votePR{asked: map[string]int{}}
-	pr.cfg = `{}`
-	for i := range maxLearnedPerClose + 2 {
-		pr.ts = append(pr.ts, forge.Thread{Body: "_🟠 Major_ · **Races**\n\nbody", Path: fmt.Sprint(i, ".go"), Down: []string{"ann"}})
+	decline := func(n int, paths ...string) error {
+		pr := &votePR{asked: map[string]int{}}
+		pr.cfg = `{}`
+		for _, p := range paths {
+			pr.ts = append(pr.ts, forge.Thread{Body: "_🟠 Major_ · **Races**\n\nbody", Path: p, Down: []string{"ann"}})
+		}
+		e := &forge.Event{Forge: "github"}
+		e.Repository.FullName, e.PullRequest.Number = "o/r", n
+		return Outcomes(voteForge{pr: pr}, e)
 	}
-	e := &forge.Event{Forge: "github"}
-	e.Repository.FullName, e.PullRequest.Number = "o/r", 7
-	if err := Outcomes(voteForge{pr: pr}, e); err != nil || len(learningsOf("o/r")) != maxLearnedPerClose || tallyOf(t, "o/r").Total[dismissed] != maxLearnedPerClose+2 {
-		t.Fatalf("%v %q %+v", err, learningsOf("o/r"), tallyOf(t, "o/r"))
+	if err := decline(6, "0.go"); err != nil {
+		t.Fatal(err)
+	}
+	err := decline(7, "0.go", "1.go", "1.go", "2.go", "3.go", "4.go")
+	ls := learningsOf("o/r")
+	if err != nil || len(ls) != 1+maxLearnedPerClose || !strings.Contains(ls[3], "(3.go") || tallyOf(t, "o/r").Total[dismissed] != 7 {
+		t.Fatalf("%v %q %+v", err, ls, tallyOf(t, "o/r"))
 	}
 }
 
@@ -211,7 +219,7 @@ func TestOutcomesLearnCap(t *testing.T) {
 func TestLearnOnce(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	for _, l := range []string{"- X (a, b)", "- X (a)", "- X (a)"} {
-		if err := learnOnce("o/r", l); err != nil {
+		if _, err := learnOnce("o/r", l); err != nil {
 			t.Fatal(err)
 		}
 	}

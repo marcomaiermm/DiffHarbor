@@ -135,6 +135,12 @@ func call(method, url string, body, out any) error {
 
 // all GETs every page of a list (url with a query), at most 30 pages.
 func all[T any](url string) ([]T, error) {
+	out, _, err := paged[T](url)
+	return out, err
+}
+
+// paged is all that also says whether it stopped with a next page left.
+func paged[T any](url string) ([]T, bool, error) {
 	var out []T
 	for page := "1"; page != ""; {
 		b, next, err := do("GET", url+"&page="+page, nil)
@@ -143,14 +149,14 @@ func all[T any](url string) ([]T, error) {
 			err = json.Unmarshal(b, &p)
 		}
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if out = append(out, p...); page == "30" {
-			break
+			return out, next != "", nil
 		}
 		page = next
 	}
-	return out, nil
+	return out, false, nil
 }
 
 // raw GETs a file of the project at ref.

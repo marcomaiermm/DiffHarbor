@@ -74,8 +74,8 @@ func loadTally(f string) (t tally, err error) {
 	return t, nil
 }
 
-// maxLearnedPerClose bounds the learnings one close saves: a PR of many 👎 mustn't push the curated ones out of
-// the newest a review follows.
+// maxLearnedPerClose bounds the new learnings one close saves (ones the repo has don't count): a PR of many 👎
+// mustn't push the curated ones out of the newest a review follows.
 const maxLearnedPerClose = 3
 
 // tallyMu guards the read-modify-write of record, like learningsMu.
@@ -190,9 +190,18 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 	}
 	// The learnings before the count: learnOnce saves each once, and a PR counted is skipped on its next close.
 	if cfgErr == nil && cfg.Learnings.Learns() {
-		for _, l := range lost[:min(len(lost), maxLearnedPerClose)] {
-			if err := learnOnce(key, l); err != nil {
+		// ponytail: a retry after a failed save may add up to the cap again; tag entries with the PR if that matters.
+		saved := 0
+		for _, l := range lost {
+			if saved == maxLearnedPerClose {
+				break
+			}
+			ok, err := learnOnce(key, l)
+			if err != nil {
 				return err
+			}
+			if ok {
+				saved++
 			}
 		}
 	}
@@ -200,17 +209,18 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 	return err
 }
 
-// learnOnce saves entry as a learning unless the repo has it, whatever its date (addLearning's ", 2006-01-02)").
-func learnOnce(key, entry string) error {
+// learnOnce saves entry as a learning unless the repo has it, whatever its date (addLearning's ", 2006-01-02)"),
+// and says whether it did.
+func learnOnce(key, entry string) (bool, error) {
 	p := strings.TrimSuffix(entry, ")") + ", "
 	if slices.ContainsFunc(learningsOf(key), func(l string) bool {
 		d, ok := strings.CutPrefix(l, p)
 		_, err := time.Parse(time.DateOnly+")", d)
 		return ok && err == nil
 	}) {
-		return nil
+		return false, nil
 	}
-	return addLearning(key, entry, time.Now())
+	return true, addLearning(key, entry, time.Now())
 }
 
 // Stats prints the tally of repo, or of every repo with one, as plain text.

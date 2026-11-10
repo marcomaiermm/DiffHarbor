@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -287,12 +288,16 @@ func TestThreadsAddressed(t *testing.T) {
 }
 
 // Voted asks for the reactions on the first comment, Threads doesn't. Past the first 100 of a kind it reads them
-// all from REST, and fails when those are fewer than the count.
+// all from REST, and fails when those are fewer than the count or cut off at 30 pages, however many.
 func TestVoted(t *testing.T) {
 	var q []string
-	up := 2
+	up, more := 2, false // more: reactions added since the query, a next page past the 30th
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/repos/o/r/pulls/comments/1/reactions" && r.URL.Query().Get("content") == "+1" {
+			if more {
+				n, _ := strconv.Atoi(r.URL.Query().Get("page"))
+				w.Header().Set("Link", fmt.Sprintf(`<http://%s%s?content=%%2B1&per_page=100&page=%d>; rel="next"`, r.Host, r.URL.Path, n+1))
+			}
 			fmt.Fprint(w, `[{"user":{"login":"bo"}},{"user":{"login":"ed"}}]`)
 			return
 		}
@@ -316,6 +321,10 @@ func TestVoted(t *testing.T) {
 	up = 3
 	if _, err := Voted("o/r", 1, "t"); err == nil {
 		t.Fatal("a truncated list counts")
+	}
+	up, more = 2, true
+	if _, err := Voted("o/r", 1, "t"); err == nil {
+		t.Fatal("a cut-off list counts")
 	}
 }
 
