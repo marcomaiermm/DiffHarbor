@@ -1,0 +1,11 @@
+{
+  "name": "diffharbor",
+  "description": "Work off DiffHarbor's open review findings in your checkout until the PR is clean.",
+  "author": {
+    "name": "Marco Maier",
+    "url": "https://github.com/marcomaiermm"
+  },
+  "homepage": "https://marcomaiermm.github.io/DiffHarbor/fix-loop/",
+  "repository": "https://github.com/marcomaiermm/DiffHarbor",
+  "license": "FSL-1.1-ALv2"
+}

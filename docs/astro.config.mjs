@@ -12,7 +12,7 @@ export default defineConfig({
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/marcomaiermm/DiffHarbor' }],
 			editLink: { baseUrl: 'https://github.com/marcomaiermm/DiffHarbor/edit/main/docs/' },
 			sidebar: [
-				{ label: 'Start', items: ['quick-start', 'how-it-works'] },
+				{ label: 'Start', items: ['quick-start', 'how-it-works', 'fix-loop'] },
 				{ label: 'Setup', items: ['configuration', 'per-repo', 'security'] },
 				{ label: 'More', items: ['development'] },
 			],

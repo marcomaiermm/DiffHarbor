@@ -35,4 +35,6 @@ description: The steps of a DiffHarbor review and how to talk to the bot.
 | `@<bot> learnings` | Lists the saved learnings of the repo and its owner. |
 | `@<bot> forget <text>` | Drops the learnings containing the text. Only owners and members drop the owner's. |
 
+To work off the findings in your checkout, an agent skill fixes or answers them, pushes and waits for the next review until the PR is clean: [Fix loop](../fix-loop/).
+
 When a maintainer corrects the bot or states a convention, the bot saves the rule with its reason, the PR and the date in `/data/learnings/`, unless one already says it or it only holds for now. It keeps the newest 100 per repo and per owner. A review follows the newest 30 of each, a newer one over an older one it contradicts. [`learnings`](../per-repo/#reviewjson-reference) in `review.json` changes that.

@@ -1,0 +1,14 @@
+{
+  "name": "diffharbor",
+  "description": "Agent skills for DiffHarbor, the self-hosted AI code review bot.",
+  "owner": {
+    "name": "Marco Maier",
+    "url": "https://github.com/marcomaiermm"
+  },
+  "plugins": [
+    {
+      "name": "diffharbor",
+      "source": "./plugins/diffharbor"
+    }
+  ]
+}
