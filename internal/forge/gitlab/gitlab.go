@@ -411,13 +411,14 @@ func (h *Hub) Parse(hd http.Header, body []byte) (*forge.Event, error) {
 }
 
 type note struct {
-	ID       int64  `json:"id"`
-	Body     string `json:"body"`
-	System   bool   `json:"system"`
-	Resolved bool   `json:"resolved"`
-	Created  string `json:"created_at"`
-	Updated  string `json:"updated_at"` // resolving the thread moves it too: then chat may answer twice, not never
-	Author   struct {
+	ID         int64  `json:"id"`
+	Body       string `json:"body"`
+	System     bool   `json:"system"`
+	Resolved   bool   `json:"resolved"`
+	Resolvable bool   `json:"resolvable"` // false for a note of its own: only a thread can be resolved
+	Created    string `json:"created_at"`
+	Updated    string `json:"updated_at"` // resolving the thread moves it too: then chat may answer twice, not never
+	Author     struct {
 		Username string `json:"username"`
 	} `json:"author"`
 	Position *struct {
