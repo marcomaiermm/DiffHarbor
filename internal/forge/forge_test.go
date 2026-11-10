@@ -251,6 +251,7 @@ func TestRisked(t *testing.T) {
 		{"nothing", nil, 0, "🟢 0/5"},
 		{"nits and folded", []review.Comment{c("nit", false), c("minor", true), c("major", true)}, 0, "🟢 1/5 (3 nits)"},
 		{"unknown severity is a minor", []review.Comment{c("", false)}, 0, "🟡 2/5 (1 minor)"},
+		{"unknown severity is a minor too", []review.Comment{c("high", false)}, 0, "🟡 2/5 (1 minor)"},
 		{"one major", []review.Comment{c("major", false), c("nit", false)}, 0, "🟡 3/5 (1 major, 1 nit)"},
 		{"two majors", []review.Comment{c("major", false), c("major", false)}, 0, "🔴 4/5 (2 majors)"},
 		{"failing tests", []review.Comment{c("minor", false)}, 2, "🔴 4/5 (2 failing tests, 1 minor)"},

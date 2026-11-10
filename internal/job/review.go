@@ -360,8 +360,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		banner = "No actionable comments were generated in the latest review."
 	}
 	s.Write(banner, footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc)))
-	if d := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); len(d) <= 140 { // GitHub's limit
-		desc = d
+	if w := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); len(w) <= 140 { // GitHub's limit
+		desc = w
 	}
 	return nil
 }
@@ -679,7 +679,7 @@ func openFindings(threads, open []forge.Thread, r review.Result) []review.Commen
 
 // stillOpen is what is open after the post: the threads left open, the findings reopen brought back (r's not in
 // post) and, if the review posted, the ones Post sends, as Split keeps them.
-func stillOpen(threads, open []forge.Thread, r review.Result, post review.Result, seen []forge.Thread, lines map[string]string, posted bool) []review.Comment {
+func stillOpen(threads, open []forge.Thread, r, post review.Result, seen []forge.Thread, lines map[string]string, posted bool) []review.Comment {
 	cs := openFindings(threads, open, review.Result{Fixed: r.Fixed})
 	for _, c := range r.Comments {
 		if !slices.Contains(post.Comments, c) {

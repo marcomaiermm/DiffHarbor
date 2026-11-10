@@ -752,15 +752,17 @@ func TestStillOpen(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		cs   []review.Comment
+		fix  []int
 		want string
 	}{
-		{"repeat of an open thread", []review.Comment{again}, "🟡 3/5 (1 major)"},
-		{"repeat on a resolved thread", []review.Comment{{Path: "b.go", Line: 5, Severity: "critical"}}, "🟡 3/5 (1 major)"},
-		{"new one posted", []review.Comment{{Path: "c.go", Line: 1, Severity: "major"}}, "🔴 4/5 (2 majors)"},
+		{"repeat of an open thread", []review.Comment{again}, nil, "🟡 3/5 (1 major)"},
+		{"repeat on a resolved thread", []review.Comment{{Path: "b.go", Line: 5, Severity: "critical"}}, nil, "🟡 3/5 (1 major)"},
+		{"new one posted", []review.Comment{{Path: "c.go", Line: 1, Severity: "major"}}, nil, "🔴 4/5 (2 majors)"},
+		{"open one fixed", nil, []int{0}, "🟢 0/5"},
 	} {
-		r := review.Result{Comments: tc.cs}
+		r := review.Result{Comments: tc.cs, Fixed: tc.fix}
 		threads := []forge.Thread{major, resolved}
-		cs := stillOpen(threads, nil, r, r, threads, lines, true)
+		cs := stillOpen(threads, []forge.Thread{major}, r, r, threads, lines, true)
 		if got := forge.Risked(cs, 0).String(); got != tc.want {
 			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
 		}

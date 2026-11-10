@@ -1,7 +1,6 @@
 package forge
 
 import (
-	"cmp"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
@@ -113,11 +112,14 @@ type Risk struct {
 func Risked(cs []review.Comment, failing int) Risk {
 	var n [4]int // nit, minor, major, critical
 	for _, c := range cs {
-		sev := review.Rank(cmp.Or(c.Severity, "minor"))
+		sev := review.Rank(c.Severity)
+		if sev == 0 {
+			sev = review.Rank("minor")
+		}
 		if c.Fold {
 			sev = 1
 		}
-		n[max(sev, 1)-1]++
+		n[sev-1]++
 	}
 	var why []string
 	if failing > 0 {
