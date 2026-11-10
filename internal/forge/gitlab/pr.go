@@ -184,12 +184,15 @@ func (p *pr) Voted() ([]forge.Thread, error) {
 		if t.Addressed {
 			continue
 		}
-		as, err := all[struct {
+		as, cut, err := paged[struct {
 			Name string `json:"name"`
 			User struct {
 				Username string `json:"username"`
 			} `json:"user"`
 		}](fmt.Sprintf("%s/notes/%d/award_emoji?per_page=100", p.mr, t.Comment))
+		if err == nil && cut { // a partial list mustn't count
+			err = fmt.Errorf("note %d: award emoji cut off at %d", t.Comment, len(as))
+		}
 		if err != nil {
 			return nil, err
 		}

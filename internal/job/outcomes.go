@@ -74,6 +74,10 @@ func loadTally(f string) (t tally, err error) {
 	return t, nil
 }
 
+// maxLearnedPerClose bounds the learnings one close saves, its first distinct declines: a PR of many 👎 mustn't
+// push the curated ones out of the newest a review follows.
+const maxLearnedPerClose = 3
+
 // tallyMu guards the read-modify-write of record, like learningsMu.
 var tallyMu sync.Mutex
 
@@ -176,17 +180,21 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 		o := classify(t, can)
 		sevs, outs = append(sevs, sev), append(outs, o)
 		// Only a writer's 👎 is a learning: a resolve may as well mean fixed.
-		if o == dismissed {
-			lost = append(lost, fmt.Sprintf("- Maintainers declined a %s finding: %s (%s)", sev,
-				text.OneLine(cmp.Or(c.Title, c.Body), 100), text.OneLine(t.Path, 100)))
+		if o != dismissed {
+			continue
+		}
+		if l := fmt.Sprintf("- Maintainers declined a %s finding: %s (%s)", sev,
+			text.OneLine(cmp.Or(c.Title, c.Body), 100), text.OneLine(t.Path, 100)); !slices.Contains(lost, l) {
+			lost = append(lost, l)
 		}
 	}
 	if canErr != nil {
 		return fmt.Errorf("can write: %w", canErr) // a non-writer's vote would count
 	}
 	// The learnings before the count: learnOnce saves each once, and a PR counted is skipped on its next close.
+	// The same first few whatever the repo has: a retry picks them again and adds none past the cap.
 	if cfgErr == nil && cfg.Learnings.Learns() {
-		for _, l := range lost {
+		for _, l := range lost[:min(len(lost), maxLearnedPerClose)] {
 			if err := learnOnce(key, l); err != nil {
 				return err
 			}

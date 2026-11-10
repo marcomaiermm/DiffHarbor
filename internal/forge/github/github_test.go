@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -287,11 +288,16 @@ func TestThreadsAddressed(t *testing.T) {
 }
 
 // Voted asks for the reactions on the first comment, Threads doesn't. Past the first 100 of a kind it reads them
-// all from REST.
+// all from REST, and fails when those are fewer than the count or cut off at 30 pages, however many.
 func TestVoted(t *testing.T) {
 	var q []string
+	up, more := 2, false // more: reactions added since the query, a next page past the 30th
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/repos/o/r/pulls/comments/1/reactions" && r.URL.Query().Get("content") == "+1" {
+			if more {
+				n, _ := strconv.Atoi(r.URL.Query().Get("page"))
+				w.Header().Set("Link", fmt.Sprintf(`<http://%s%s?content=%%2B1&per_page=100&page=%d>; rel="next"`, r.Host, r.URL.Path, n+1))
+			}
 			fmt.Fprint(w, `[{"user":{"login":"bo"}},{"user":{"login":"ed"}}]`)
 			return
 		}
@@ -299,7 +305,7 @@ func TestVoted(t *testing.T) {
 		q = append(q, string(b))
 		fmt.Fprint(w, `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[`+
 			`{"id":"a","isResolved":true,"comments":{"nodes":[{"databaseId":1,"body":"x `+forge.Mark+
-			`","author":{"__typename":"Bot","login":"app"},"up":{"totalCount":2,"nodes":[{"user":{"login":"bo"}}]},"down":{"totalCount":2,"nodes":[{"user":{"login":"cy"}},{"user":{"login":"di"}}]}}]}},`+
+			`","author":{"__typename":"Bot","login":"app"},"up":{"totalCount":`+fmt.Sprint(up)+`,"nodes":[{"user":{"login":"bo"}}]},"down":{"totalCount":2,"nodes":[{"user":{"login":"cy"}},{"user":{"login":"di"}}]}}]}},`+
 			`{"id":"b","isResolved":true,"comments":{"nodes":[{"databaseId":2,"body":"x `+forge.Mark+
 			`","author":{"__typename":"Bot","login":"app"}}]}}]}}}}}`)
 	}))
@@ -311,6 +317,14 @@ func TestVoted(t *testing.T) {
 	}
 	if _, err := Threads("o/r", 1, "t"); err != nil || !strings.Contains(q[0], "reactions") || strings.Contains(q[1], "reactions") {
 		t.Fatalf("%v %q", err, q)
+	}
+	up = 3
+	if _, err := Voted("o/r", 1, "t"); err == nil || !strings.Contains(err.Error(), "2 of 3") {
+		t.Fatalf("a truncated list counts: %v", err)
+	}
+	up, more = 2, true // 60 read of 2
+	if _, err := Voted("o/r", 1, "t"); err == nil || !strings.Contains(err.Error(), "cut off at 60") {
+		t.Fatalf("a cut-off list counts: %v", err)
 	}
 }
 

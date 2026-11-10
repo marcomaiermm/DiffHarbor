@@ -191,6 +191,39 @@ func TestOutcomesFail(t *testing.T) {
 	}
 }
 
+// One close saves its first maxLearnedPerClose distinct declines, and counts every one. A second of the same
+// takes no place, one the repo has does. A retry after a failed count saves the same ones, so no more.
+func TestOutcomesLearnCap(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	decline := func(n int, paths ...string) error {
+		pr := &votePR{asked: map[string]int{}}
+		pr.cfg = `{}`
+		for _, p := range paths {
+			pr.ts = append(pr.ts, forge.Thread{Body: "_🟠 Major_ · **Races**\n\nbody", Path: p, Down: []string{"ann"}})
+		}
+		e := &forge.Event{Forge: "github"}
+		e.Repository.FullName, e.PullRequest.Number = "o/r", n
+		return Outcomes(voteForge{pr: pr}, e)
+	}
+	if err := decline(6, "0.go"); err != nil {
+		t.Fatal(err)
+	}
+	f := tallyFile("o/r")
+	if err := os.MkdirAll(f+".tmp", 0o700); err != nil { // the tally's write fails
+		t.Fatal(err)
+	}
+	paths := []string{"0.go", "1.go", "1.go", "2.go", "3.go", "4.go", "5.go", "6.go"}
+	if err := decline(7, paths...); err == nil || len(learningsOf("o/r")) != maxLearnedPerClose {
+		t.Fatalf("%v %q", err, learningsOf("o/r"))
+	}
+	_ = os.Remove(f + ".tmp")
+	err := decline(7, paths...)
+	ls := learningsOf("o/r")
+	if err != nil || len(ls) != maxLearnedPerClose || !strings.Contains(ls[2], "(2.go") || tallyOf(t, "o/r").Total[dismissed] != 1+len(paths) {
+		t.Fatalf("%v %q %+v", err, ls, tallyOf(t, "o/r"))
+	}
+}
+
 // learnOnce knows an entry whatever its date, and only that entry: not one whose path starts like it.
 func TestLearnOnce(t *testing.T) {
 	proc.DataDir = t.TempDir()

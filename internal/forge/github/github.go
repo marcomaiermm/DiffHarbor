@@ -106,6 +106,12 @@ func Call(method, url, token string, body, out any) error {
 
 // All GETs every page of a list (url with per_page=100), at most 30 pages.
 func All[T any](url, token string) ([]T, error) {
+	all, _, err := paged[T](url, token)
+	return all, err
+}
+
+// paged is All that also says whether it stopped with a next page left.
+func paged[T any](url, token string) ([]T, bool, error) {
 	var all []T
 	for range 30 {
 		b, next, err := ghDoNext("GET", url, token, "application/vnd.github+json", nil)
@@ -114,14 +120,14 @@ func All[T any](url, token string) ([]T, error) {
 			err = json.Unmarshal(b, &page)
 		}
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if all = append(all, page...); next == "" {
-			break
+			return all, false, nil
 		}
 		url = next
 	}
-	return all, nil
+	return all, true, nil
 }
 
 // Raw GETs url with the Accept header accept and returns the body.
@@ -465,11 +471,18 @@ type react struct {
 // logins are the logins of r, all of them: past the query's first 100 from the REST API, content its +1 or -1.
 func (r react) logins(repo string, id int64, content, token string) (ls []string, err error) {
 	if len(r.Nodes) < r.TotalCount {
-		r.Nodes, err = All[struct {
+		var cut bool
+		r.Nodes, cut, err = paged[struct {
 			User struct {
 				Login string `json:"login"`
 			} `json:"user"`
 		}](fmt.Sprintf("/repos/%s/pulls/comments/%d/reactions?content=%s&per_page=100", repo, id, url.QueryEscape(content)), token)
+		switch { // a partial list mustn't count
+		case err == nil && cut:
+			err = fmt.Errorf("comment %d: %s reactions cut off at %d", id, content, len(r.Nodes))
+		case err == nil && len(r.Nodes) < r.TotalCount:
+			err = fmt.Errorf("comment %d: %d of %d %s reactions read", id, len(r.Nodes), r.TotalCount, content)
+		}
 	}
 	for _, n := range r.Nodes {
 		ls = append(ls, n.User.Login)
