@@ -533,15 +533,15 @@ func TestThreadsReplies(t *testing.T) {
 	}
 }
 
-// Voted reads the award emoji of each finding but an addressed one, and Threads names who resolved: not the bot.
+// Voted reads the award emoji of each finding but an addressed one.
 func TestVoted(t *testing.T) {
 	Bot = "review-bot"
 	var asked []string
 	serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/discussions") {
 			ok, _ := json.Marshal(forge.AddressedIn("abcdef1"))
-			fmt.Fprint(w, `[{"id":"d1","notes":[{"id":1,"body":"f `+forge.Mark+`","resolved":true,"resolved_by":{"username":"ann"},"author":{"username":"review-bot"},"position":{"new_path":"a.ts","new_line":3}}]},`+
-				`{"id":"d2","notes":[{"id":2,"body":"f `+forge.Mark+`","resolved":true,"resolved_by":{"username":"review-bot"},"author":{"username":"review-bot"},"position":{"new_path":"b.ts","new_line":3}},`+
+			fmt.Fprint(w, `[{"id":"d1","notes":[{"id":1,"body":"f `+forge.Mark+`","resolved":true,"author":{"username":"review-bot"},"position":{"new_path":"a.ts","new_line":3}}]},`+
+				`{"id":"d2","notes":[{"id":2,"body":"f `+forge.Mark+`","resolved":true,"author":{"username":"review-bot"},"position":{"new_path":"b.ts","new_line":3}},`+
 				`{"id":4,"body":`+string(ok)+`,"author":{"username":"review-bot"}}]}]`)
 			return
 		}
@@ -553,7 +553,7 @@ func TestVoted(t *testing.T) {
 	p, _ := (&Hub{}).Open(e)
 	ts, err := p.Voted()
 	if err != nil || len(ts) != 2 || !slices.Equal(ts[0].Up, []string{"bo"}) || !slices.Equal(ts[0].Down, []string{"cy"}) ||
-		ts[0].Resolver != "ann" || ts[1].Resolver != "" || !ts[1].Addressed || len(asked) != 1 || !strings.HasSuffix(asked[0], "/notes/1/award_emoji") {
+		!ts[1].Addressed || len(asked) != 1 || !strings.HasSuffix(asked[0], "/notes/1/award_emoji") {
 		t.Fatalf("%+v %q %v", ts, asked, err)
 	}
 }

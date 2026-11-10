@@ -39,7 +39,8 @@ func TestClassify(t *testing.T) {
 		{forge.Thread{Up: []string{"ann"}, Resolved: true}, accepted},
 		{forge.Thread{Up: []string{"mallory"}}, ignored}, // anyone can react on a public repo
 		{forge.Thread{Down: []string{"mallory"}}, ignored},
-		{forge.Thread{Resolved: true}, dismissed},
+		{forge.Thread{Resolved: true}, resolved},
+		{forge.Thread{Resolved: true, Down: []string{"mallory"}}, resolved},
 		{forge.Thread{}, ignored},
 	} {
 		if got := classify(c.t, can); got != c.want {
@@ -57,11 +58,10 @@ func TestOutcomes(t *testing.T) {
 	pr := &votePR{asked: map[string]int{}, ts: []forge.Thread{
 		{Body: body("major", "Leaks"), Path: "a.go", Addressed: true},
 		{Body: body("major", "Races"), Path: "b.go", Down: []string{"ann", "mallory"}},
-		{Body: body("minor", "Naming"), Path: "c.go", Up: []string{"ann"}, Resolved: true, Resolver: "ann"}, // accepted, then resolved: no learning
+		{Body: body("minor", "Naming"), Path: "c.go", Up: []string{"ann"}, Resolved: true}, // accepted, then resolved
 		{Body: body("minor", "Typo"), Path: "d.go"},
-		{Body: body("minor", "Spam"), Path: "f.go", Resolved: true, Resolver: "mallory"}, // the PR's author may resolve
-		{Body: body("minor", "Stale"), Path: "g.go", Resolved: true, Resolver: "ann"},
-		{Body: body("minor", "Fixed"), Path: "h.go", Resolved: true}, // by the chat pass
+		{Body: body("minor", "Spam"), Path: "f.go", Resolved: true, Down: []string{"mallory"}}, // not a writer's 👎
+		{Body: body("minor", "Stale"), Path: "g.go", Resolved: true},                           // fixed or declined: no learning
 	}}
 	e := &forge.Event{Forge: "github"}
 	e.Repository.FullName = "o/r"
@@ -73,13 +73,12 @@ func TestOutcomes(t *testing.T) {
 		}
 	}
 	tl := readTally("o/r")
-	if len(tl.PRs) != 1 || tl.Total[addressed] != 1 || tl.Total[dismissed] != 4 || tl.Total[accepted] != 1 || tl.Total[ignored] != 1 ||
+	if len(tl.PRs) != 1 || tl.Total[addressed] != 1 || tl.Total[dismissed] != 1 || tl.Total[resolved] != 2 || tl.Total[accepted] != 1 || tl.Total[ignored] != 1 ||
 		tl.Severity["major"][dismissed] != 1 || tl.Profile["quiet"][accepted] != 1 {
 		t.Fatalf("%+v", tl)
 	}
 	ls := learningsOf("o/r")
-	if len(ls) != 2 || !strings.HasPrefix(ls[0], "- Maintainers declined a major finding: Races (b.go, ") ||
-		!strings.HasPrefix(ls[1], "- Maintainers declined a minor finding: Stale (g.go, ") {
+	if len(ls) != 1 || !strings.HasPrefix(ls[0], "- Maintainers declined a major finding: Races (b.go, ") {
 		t.Fatalf("%q", ls)
 	}
 	if pr.asked["ann"] != 1 || pr.asked["mallory"] != 1 || pr.asked[""] != 0 {
@@ -95,12 +94,12 @@ func TestOutcomes(t *testing.T) {
 	dismiss(8, "Panics", "e.go")
 	pr.cfg = `{}`
 	dismiss(9, "Races", "b.go") // declined again: one line still
-	if ls := learningsOf("o/r"); len(ls) != 2 || readTally("o/r").Total[dismissed] != 6 {
+	if ls := learningsOf("o/r"); len(ls) != 1 || readTally("o/r").Total[dismissed] != 3 {
 		t.Fatalf("%q %+v", ls, readTally("o/r"))
 	}
 	var b bytes.Buffer
 	if err := Stats(&b, "o/r"); err != nil || !strings.Contains(b.String(), "all") || !strings.Contains(b.String(), "severity major") ||
-		!strings.Contains(b.String(), "profile quiet") || !strings.Contains(b.String(), "67%") {
+		!strings.Contains(b.String(), "profile quiet") || !strings.Contains(b.String(), "resolved") || !strings.Contains(b.String(), "75%") {
 		t.Fatalf("%v\n%s", err, b.String())
 	}
 }

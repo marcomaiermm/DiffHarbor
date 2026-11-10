@@ -24,11 +24,12 @@ import (
 const (
 	addressed = "addressed" // our "✅ Addressed in" reply
 	accepted  = "accepted"  // 👍 by someone who can push
-	dismissed = "dismissed" // resolved by hand, or 👎 by someone who can push
+	dismissed = "dismissed" // 👎 by someone who can push
+	resolved  = "resolved"  // resolved by hand, no such vote: fixed or declined, we can't tell
 	ignored   = "ignored"   // still open
 )
 
-var outcomeNames = []string{addressed, accepted, dismissed, ignored}
+var outcomeNames = []string{addressed, accepted, dismissed, resolved, ignored}
 
 // counts is outcome -> findings.
 type counts map[string]int
@@ -66,7 +67,7 @@ func classify(t forge.Thread, can func(login string) bool) string {
 	case slices.ContainsFunc(t.Up, can):
 		return accepted
 	case t.Resolved:
-		return dismissed
+		return resolved
 	}
 	return ignored
 }
@@ -150,8 +151,8 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 		sev := cmp.Or(c.Severity, "other")
 		o := classify(t, can)
 		sevs, outs = append(sevs, sev), append(outs, o)
-		// A learning needs a writer's word: a 👎, or a resolve by one (the chat pass and the PR author don't count).
-		if o == dismissed && (slices.ContainsFunc(t.Down, can) || can(t.Resolver)) {
+		// Only a writer's 👎 is a learning: a resolve may as well mean fixed.
+		if o == dismissed {
 			lost = append(lost, fmt.Sprintf("- Maintainers declined a %s finding: %s (%s)", sev,
 				text.OneLine(cmp.Or(c.Title, c.Body), 100), text.OneLine(t.Path, 100)))
 		}
@@ -196,7 +197,7 @@ func Stats(w io.Writer, repo string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, t := range ts {
 		fmt.Fprintf(tw, "%s\t%d PR(s)\n\n", t.Repo, len(t.PRs))
-		fmt.Fprintln(tw, "\tfindings\taddressed\taccepted\tdismissed\tignored")
+		fmt.Fprintln(tw, "\tfindings\taddressed\taccepted\tdismissed\tresolved\tignored")
 		row(tw, "all", t.Total)
 		for _, g := range []struct {
 			name string
