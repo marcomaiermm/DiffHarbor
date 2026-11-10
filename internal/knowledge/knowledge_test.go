@@ -60,6 +60,23 @@ func TestSplit(t *testing.T) {
 	if want := []string{"docs/r.md# u", "docs/r.md#refunds u#refunds", "docs/r.md#window-1 u#window-1"}; !slices.Equal(ids, want) {
 		t.Fatalf("got %v, want %v", ids, want)
 	}
+
+	// anchors as the forges make them: _ and Unicode stay, other punctuation goes, GitLab squeezes -
+	md = "# API_v2\n\na\n\n# Foo & Bar\n\nb\n\n# Ünicode Größe\n\nc\n\n# API_v2\n\nd\n"
+	for gitlab, want := range map[bool][]string{
+		false: {"u#api_v2", "u#foo--bar", "u#ünicode-größe", "u#api_v2-1"},
+		true:  {"u#api_v2", "u#foo-bar", "u#ünicode-größe", "u#api_v2-1"},
+	} {
+		ss := Split(File{ID: "r.md", URL: "u", Text: md, GitLab: gitlab})
+		var urls []string
+		for _, s := range ss {
+			urls = append(urls, s.URL)
+		}
+		named := slices.DeleteFunc(ss, func(s Section) bool { return !explicit(s, []string{want[1]}) }) // a link to a section: that one
+		if !slices.Equal(urls, want) || len(named) != 1 || named[0].URL != want[1] {
+			t.Errorf("gitlab %v: got %v, %v named; want %v", gitlab, urls, len(named), want)
+		}
+	}
 }
 
 func TestPick(t *testing.T) {
@@ -217,26 +234,28 @@ func TestDocs(t *testing.T) {
 }
 
 func TestLinear(t *testing.T) {
-	searches := 0
+	searches, reads := 0, 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var q struct {
 			Query     string
 			Variables map[string]string
 		}
 		_ = json.NewDecoder(r.Body).Decode(&q)
-		doc := func(id, text string) string {
-			return fmt.Sprintf(`{"id":%q,"title":"T %s","url":"https://linear.app/acme/document/t-%s","content":%q,"updatedAt":""}`, id, id, id, text)
+		doc := func(id, slug, text string) string {
+			return fmt.Sprintf(`{"id":%q,"slugId":%q,"title":"T %s","url":"https://linear.app/acme/document/t-%s","content":%q,"updatedAt":""}`, id, slug, id, slug, text)
 		}
+		policy := doc("uuid-9", "3f2a1b9c8d7e", "# Policy\n\nREFUND_WINDOW_DAYS\n\n# Window\n\nthe window\n\n# Other\n\nnothing")
 		switch {
 		case strings.Contains(q.Query, "document(id"):
+			reads++
 			if id := q.Variables["id"]; id != "3f2a1b9c8d7e" && id != "uuid-9" { // the link's slug id, not the link
 				fmt.Fprint(w, `{"data":{"document":null}}`)
 				return
 			}
-			fmt.Fprintf(w, `{"data":{"document":%s}}`, doc("uuid-9", "# Policy\n\nREFUND_WINDOW_DAYS"))
+			fmt.Fprintf(w, `{"data":{"document":%s}}`, policy)
 		case searches == 0:
 			searches++
-			fmt.Fprintf(w, `{"data":{"searchDocuments":{"nodes":[%s,%s]}}}`, doc("uuid-9", "# Policy\n\nREFUND_WINDOW_DAYS"), doc("uuid-2", "# Window\n\nREFUND_WINDOW_DAYS is 14"))
+			fmt.Fprintf(w, `{"data":{"searchDocuments":{"nodes":[%s,%s]}}}`, policy, doc("uuid-2", "000000000002", "# Window\n\nREFUND_WINDOW_DAYS is 14"))
 		default:
 			http.Error(w, "down", 500)
 		}
@@ -247,17 +266,29 @@ func TestLinear(t *testing.T) {
 	t.Cleanup(func() { linearURL, ticket.LinearKey = oldURL, oldKey })
 	t.Setenv("KNOWLEDGE_ADAPTERS", "acme linear")
 
-	link := "https://linear.app/acme/document/refund-policy-3f2a1b9c8d7e"
-	docs := Lookup(context.Background(), Env{Key: "t", Owner: "acme", Repo: "acme/api", Diff: testDiff, Texts: []string{"See " + link + "."},
-		Redact: func(s string) string { return s }}, []string{"linear:uuid-9"})
-	var got []string
-	for _, d := range docs {
-		got = append(got, d.Title)
-	}
-	// the linked document first (by id it sorts last) and once, though review.json's ref and the search found it too;
-	// the first search's other one stays though the next search failed
-	if want := []string{"T uuid-9 › Policy", "T uuid-2 › Window"}; !slices.Equal(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+	link := "https://linear.app/acme/document/refund-policy-3f2a1b9c8d7e#window" // a link to one section
+	for _, tc := range []struct {
+		name  string
+		picks []string
+		want  []string
+	}{
+		// the linked section first, the others only by their names; the search's other document stays though the
+		// next search failed
+		{"a section's link", []string{"linear"}, []string{"T uuid-9 › Window", "T uuid-9 › Policy", "T uuid-2 › Window"}},
+		// review.json names the whole document by id and slug id: all its sections are explicit, and it's read once
+		{"the document's id and slug id too", []string{"linear:uuid-9", "linear:3f2a1b9c8d7e"},
+			[]string{"T uuid-9 › Policy", "T uuid-9 › Other", "T uuid-9 › Window", "T uuid-2 › Window"}},
+	} {
+		searches, reads = 0, 0
+		docs := Lookup(context.Background(), Env{Key: "t", Owner: "acme", Repo: "acme/api", Diff: testDiff, Texts: []string{"See " + link + "."},
+			Redact: func(s string) string { return s }}, tc.picks)
+		var got []string
+		for _, d := range docs {
+			got = append(got, d.Title)
+		}
+		if !slices.Equal(got, tc.want) || reads != 1 {
+			t.Errorf("%s: got %v, %d reads; want %v, 1 read", tc.name, got, reads, tc.want)
+		}
 	}
 }
 

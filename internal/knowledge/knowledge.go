@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -71,6 +72,7 @@ type Env struct {
 	Texts            []string               // PR body, commits, ticket: where refs come from
 	Sb               *proc.Sandbox          // docs reads its pinned checkout
 	Blob             string                 // the forge's URL of a repo file: Blob + path
+	GitLab           bool                   // the forge is GitLab: its heading anchors
 	Wiki             func() ([]File, error) // the repo's wiki; nil without
 	Redact           func(string) string    // forge.Redact: on all that goes into the prompt
 }
@@ -303,17 +305,38 @@ func URLs(texts ...string) []string {
 }
 
 // File is a markdown page of a source: a file of the repo, a wiki page, a document.
-type File struct{ ID, Title, URL, Updated, Text string }
+type File struct {
+	ID, Title, URL, Updated, Text string
+	GitLab                        bool // its heading anchors are GitLab's, else GitHub's
+}
 
 var (
 	heading = regexp.MustCompile(`^#{1,3}\s+(.+?)[\s#]*$`)
-	nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 	fenceRe = regexp.MustCompile("^\\s*(`{3,}|~{3,})")
+	dashes  = regexp.MustCompile(`-{2,}`)
 )
 
-// Split cuts f at its headings (# to ###, none inside a code fence) into sections with the ID "<f.ID>#<slug>" and
-// the URL "<f.URL>#<slug>" (GitHub's and GitLab's anchor for a heading of letters, digits and spaces); the text
-// before the first heading is "<f.ID>#" with f.URL. A heading with nothing under it is no section.
+// anchor is a heading's anchor as the forge makes it: lower case, no punctuation but - and _, a space a -; GitLab
+// then squeezes runs of -. Of the heading's markdown, not its rendered text: a link in a heading keeps its URL in it.
+func anchor(h string, gitlab bool) string {
+	a := strings.Map(func(r rune) rune {
+		switch {
+		case r == ' ':
+			return '-'
+		case r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r):
+			return unicode.ToLower(r)
+		}
+		return -1
+	}, h)
+	if gitlab {
+		a = dashes.ReplaceAllString(a, "-")
+	}
+	return a
+}
+
+// Split cuts f at its headings (# to ###, none inside a code fence) into sections with the ID "<f.ID>#<anchor>" and
+// the URL "<f.URL>#<anchor>"; the text before the first heading is "<f.ID>#" with f.URL. A heading with nothing
+// under it is no section.
 func Split(f File) []Section {
 	var out []Section
 	slugs := map[string]bool{}
@@ -343,8 +366,8 @@ func Split(f File) []Section {
 		}
 		if m := heading.FindStringSubmatch(l); m != nil && fence == "" {
 			flush()
-			head, slug = m[1], strings.Trim(nonSlug.ReplaceAllString(strings.ToLower(m[1]), "-"), "-")
-			for base, i := cmp.Or(slug, "s"), 1; slug == "" || slugs[slug]; i++ { // unique as the forges number them: a repeated heading, or no ASCII in it
+			head, slug = m[1], anchor(m[1], f.GitLab)
+			for base, i := cmp.Or(slug, "s"), 1; slug == "" || slugs[slug]; i++ { // unique as the forges number them: a repeated heading, or one of symbols only
 				slug = fmt.Sprintf("%s-%d", base, i)
 			}
 			slugs[slug] = true
