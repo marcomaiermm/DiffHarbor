@@ -494,7 +494,7 @@ func TestCapInline(t *testing.T) {
 		cs = append(cs, Comment{Severity: "minor"})
 	}
 	CapInline(cs)
-	if in, f := count(cs); in != 5 || f != 3 {
+	if in, f := count(cs); in != 5 || f != 3 || cs[4].Fold || !cs[5].Fold {
 		t.Fatalf("8 minor: %d inline, %d folded", in, f)
 	}
 
@@ -511,8 +511,8 @@ func TestCapInline(t *testing.T) {
 	}
 
 	cs = nil
-	for range 4 { // already folded by the profile, or a push: no slot
-		cs = append(cs, Comment{Severity: "nit", Fold: true})
+	for range 4 { // already folded by the profile, or a push: no slot, though first and as severe
+		cs = append(cs, Comment{Severity: "minor", Fold: true})
 	}
 	for range 5 {
 		cs = append(cs, Comment{Severity: "minor"})
@@ -523,19 +523,22 @@ func TestCapInline(t *testing.T) {
 	}
 
 	// a push: the same limit, after FoldPush
-	cfg, err := LoadSettings(`{"profile":"assertive"}`)
+	cfg, err := LoadSettings(`{"packages":{"web":{"profile":"assertive"}}}`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cs = nil
-	for range 8 {
+	for range 4 { // FoldPush folds these under chill
 		cs = append(cs, Comment{Path: "a.go", Severity: "minor"})
+	}
+	for range 8 {
+		cs = append(cs, Comment{Path: "web/a.ts", Severity: "minor"})
 	}
 	for i := range cs {
 		cs[i].Fold = cfg.FoldPush(cs[i])
 	}
 	CapInline(cs)
-	if in, f := count(cs); in != 5 || f != 3 {
+	if in, f := count(cs); in != 5 || f != 7 || cs[4].Fold || cs[8].Fold || !cs[9].Fold {
 		t.Fatalf("push: %d inline, %d folded", in, f)
 	}
 }

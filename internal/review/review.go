@@ -402,14 +402,15 @@ func fold(cs []Comment, cfg Settings) {
 	}
 }
 
-// maxInline is how many findings a run posts inline, the ones that block never folded past it: each thread costs a maintainer
-// attention, and a run with many minor findings would otherwise flood the PR.
+// maxInline is how many findings a run posts inline, blocking ones on top: each thread costs a maintainer attention, and a
+// run with many minor findings would flood the PR. A run posts fewer in practice, so 5 only bites on a flood.
 const maxInline = 5
 
 // CapInline folds the least severe inline findings past maxInline into the review's summary, nothing dropped. Critical
-// and major ones never fold here, even past maxInline, and take slots first. Run it last, on the whole run's comments, after every other
-// Fold decision (a push's FoldPush replaces the one fold made).
-// ponytail: a finding outside the diff still takes a slot though Split puts it in the summary; count only diff lines if that starves real threads.
+// and major ones never fold here, even past maxInline, and take slots first. Run it last, on the whole run's comments,
+// after every other Fold decision (a push's FoldPush replaces the one fold made).
+// ponytail: a finding outside the diff, or within 5 lines of an existing thread, still takes a slot though Split puts it
+// in the summary or drops it; count what Split keeps inline if that starves real threads.
 func CapInline(cs []Comment) {
 	var open []int
 	free := maxInline
