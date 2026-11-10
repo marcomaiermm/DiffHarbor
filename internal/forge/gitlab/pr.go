@@ -190,6 +190,9 @@ func (p *pr) Voted() ([]forge.Thread, error) {
 				Username string `json:"username"`
 			} `json:"user"`
 		}](fmt.Sprintf("%s/notes/%d/award_emoji?per_page=100", p.mr, t.Comment))
+		if err == nil && len(as) >= 30*100 { // all's last page: there may be more
+			err = fmt.Errorf("note %d: over %d award emoji", t.Comment, len(as))
+		}
 		if err != nil {
 			return nil, err
 		}

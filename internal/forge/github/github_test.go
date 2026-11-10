@@ -287,9 +287,10 @@ func TestThreadsAddressed(t *testing.T) {
 }
 
 // Voted asks for the reactions on the first comment, Threads doesn't. Past the first 100 of a kind it reads them
-// all from REST.
+// all from REST, and fails when those are fewer than the count.
 func TestVoted(t *testing.T) {
 	var q []string
+	up := 2
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/repos/o/r/pulls/comments/1/reactions" && r.URL.Query().Get("content") == "+1" {
 			fmt.Fprint(w, `[{"user":{"login":"bo"}},{"user":{"login":"ed"}}]`)
@@ -299,7 +300,7 @@ func TestVoted(t *testing.T) {
 		q = append(q, string(b))
 		fmt.Fprint(w, `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[`+
 			`{"id":"a","isResolved":true,"comments":{"nodes":[{"databaseId":1,"body":"x `+forge.Mark+
-			`","author":{"__typename":"Bot","login":"app"},"up":{"totalCount":2,"nodes":[{"user":{"login":"bo"}}]},"down":{"totalCount":2,"nodes":[{"user":{"login":"cy"}},{"user":{"login":"di"}}]}}]}},`+
+			`","author":{"__typename":"Bot","login":"app"},"up":{"totalCount":`+fmt.Sprint(up)+`,"nodes":[{"user":{"login":"bo"}}]},"down":{"totalCount":2,"nodes":[{"user":{"login":"cy"}},{"user":{"login":"di"}}]}}]}},`+
 			`{"id":"b","isResolved":true,"comments":{"nodes":[{"databaseId":2,"body":"x `+forge.Mark+
 			`","author":{"__typename":"Bot","login":"app"}}]}}]}}}}}`)
 	}))
@@ -311,6 +312,10 @@ func TestVoted(t *testing.T) {
 	}
 	if _, err := Threads("o/r", 1, "t"); err != nil || !strings.Contains(q[0], "reactions") || strings.Contains(q[1], "reactions") {
 		t.Fatalf("%v %q", err, q)
+	}
+	up = 3
+	if _, err := Voted("o/r", 1, "t"); err == nil {
+		t.Fatal("a truncated list counts")
 	}
 }
 

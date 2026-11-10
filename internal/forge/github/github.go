@@ -470,6 +470,9 @@ func (r react) logins(repo string, id int64, content, token string) (ls []string
 				Login string `json:"login"`
 			} `json:"user"`
 		}](fmt.Sprintf("/repos/%s/pulls/comments/%d/reactions?content=%s&per_page=100", repo, id, url.QueryEscape(content)), token)
+		if err == nil && len(r.Nodes) < r.TotalCount { // All stops at 30 pages: a partial list mustn't count
+			err = fmt.Errorf("comment %d: %d of %d %s reactions", id, len(r.Nodes), r.TotalCount, content)
+		}
 	}
 	for _, n := range r.Nodes {
 		ls = append(ls, n.User.Login)
