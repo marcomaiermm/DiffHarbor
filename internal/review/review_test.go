@@ -497,3 +497,52 @@ func TestDocsBlock(t *testing.T) {
 		t.Errorf("cited: %q", c)
 	}
 }
+
+func TestAuthorsOf(t *testing.T) {
+	log := "Ann\nfix\n\nCo-Authored-By: Claude Opus 4 <noreply@anthropic.com>\n\x00Bob\nx\n\nGenerated with [Claude Code]\n\x00" +
+		"codex[bot]\nfeat\n\x00Cy\nuses codex in a title\n\x00Di\nwip\n\nCo-authored-by: Gemini <g@google.com>\n\x00Ed\nCo-authored-by: Copilot <c@github.com>\n\x00"
+	if got := authorsOf(log); !slices.Equal(got, []string{"anthropic", "anthropic", "openai", "google"}) {
+		t.Errorf("authors %v", got)
+	}
+}
+
+func TestInversion(t *testing.T) {
+	defer func(d, m string) { proc.DataDir, agent.Model = d, m }(proc.DataDir, agent.Model)
+	proc.DataDir, agent.Model = t.TempDir(), ""
+	for _, k := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "AWS_REGION", "AZURE_OPENAI_API_KEY"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("ANTHROPIC_API_KEY", "k")
+	t.Setenv("OPENAI_API_KEY", "k")
+	claude := []string{"anthropic"}
+	for _, c := range []struct {
+		name, json string
+		authors    []string
+		agent      string // REVIEW_MODEL
+		review     string
+		why        string
+	}{
+		{"no AI commits", `{}`, nil, "", "openai/gpt-6.1-terra:high", ""},
+		{"default writes it", `{}`, []string{"openai"}, "", "anthropic/claude-sonnet-5-5:high", "commits by openai"},
+		{"other one wrote it", `{}`, claude, "", "openai/gpt-6.1-terra:high", ""},
+		{"most commits count", `{}`, []string{"openai", "anthropic", "anthropic"}, "", "openai/gpt-6.1-terra:high", ""},
+		{"tie, the other wrote commits too", `{}`, []string{"openai", "anthropic"}, "", "openai/gpt-6.1-terra:high", ""},
+		{"env model inverts", `{}`, claude, "anthropic/x", "openai/gpt-6.1-terra:high", "commits by anthropic"},
+		{"review.json pins", `{"review_model":"openai/y"}`, []string{"openai"}, "", "openai/y", ""},
+		{"off", `{"model_inversion":false}`, []string{"openai"}, "", "openai/gpt-6.1-terra:high", ""},
+	} {
+		agent.Model = c.agent
+		cfg, err := LoadSettings(c.json)
+		cfg.Authors = c.authors
+		r, v := cfg.Models()
+		if err != nil || r != c.review || cfg.Inversion() != c.why || (c.why != "" && v == "") {
+			t.Errorf("%s: %v %q %q %q", c.name, err, r, v, cfg.Inversion())
+		}
+	}
+	t.Setenv("OPENAI_API_KEY", "")
+	cfg := Settings{Authors: claude}
+	agent.Model = "anthropic/x"
+	if r, _ := cfg.Models(); r != "anthropic/x" {
+		t.Errorf("no other provider with a key: %q", r)
+	}
+}

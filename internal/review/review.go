@@ -378,6 +378,9 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 		wg.Wait()
 	}
 	r, tag, err := merge(ps, m, vm, ci)
+	if why := in.Settings.Inversion(); why != "" {
+		tag += " · " + why // the reviewer isn't the default's: say why
+	}
 	r.Tests = tests
 	r.Comments = append(r.Comments, proofOnBase(ctx, in.Sandbox, repo, r.Story.Proof, tests.Ran, in.Settings)...)
 	fold(r.Comments, in.Settings)

@@ -27,6 +27,9 @@ type Settings struct {
 	// the server's env: a model whose provider has no key there fails the review.
 	ReviewModel string `json:"review_model"`
 	VerifyModel string `json:"verify_model"`
+	// false: reviews don't switch to another provider's model when the review model's provider wrote the commits.
+	// A pinned review_model never switches.
+	ModelInversion *bool `json:"model_inversion"`
 	// A diff past diff.Max reviews in parts of up to diff.Max, one review and verify pass each, at most MaxParts.
 	// "all" (default): always in parts; "ask": code first up to diff.Max, the walkthrough offers a box to tick for
 	// all parts; "off": never.
@@ -70,6 +73,7 @@ type Settings struct {
 
 	ignoreRe, keepRe *regexp.Regexp // ignore's globs, its "!" ones
 	Override         string         `json:"-"` // this review's profile (the PR's), over the top's and the packages'
+	Authors          []string       `json:"-"` // Authors(): the provider of each commit an AI wrote
 	CITests          string         // checks.CITests: the CI file running the tests; unless "tests" says otherwise, the review doesn't
 	pkgs             []pkgRule      // longest pattern first
 	know             []knowRule     // Knowledge's globs, in order
@@ -182,11 +186,33 @@ func Blocks(sev string) bool { return Rank(sev) >= Rank("major") }
 // bySeverity orders findings most severe first.
 func bySeverity(a, b Comment) int { return Rank(b.Severity) - Rank(a.Severity) }
 
-// Models returns the review and verify model: the server's env, else review.json, else agent.Matrix. An empty
-// verify model means the review model verifies.
+// Models returns the review and verify model: the server's env, else review.json, else agent.Matrix, inverted to
+// another provider's when that one's model wrote the PR. An empty verify model means the review model verifies.
 func (cfg Settings) Models() (review, verify string) {
 	review = cmp.Or(agent.Model, cfg.ReviewModel, agent.Default())
-	return review, cmp.Or(agent.VerifyModel, cfg.VerifyModel, agent.VerifyFor(review))
+	verify = agent.VerifyFor(review)
+	if r, v := cfg.inverted(review); r != "" {
+		review, verify = r, v
+	}
+	return review, cmp.Or(agent.VerifyModel, cfg.VerifyModel, verify)
+}
+
+// inverted is agent.Invert unless review.json pins the review model or turns model_inversion off.
+func (cfg Settings) inverted(review string) (string, string) {
+	if cfg.ReviewModel != "" || cfg.ModelInversion != nil && !*cfg.ModelInversion {
+		return "", ""
+	}
+	return agent.Invert(review, cfg.Authors)
+}
+
+// Inversion says why Models picked another provider's model ("" = it didn't).
+func (cfg Settings) Inversion() string {
+	review := cmp.Or(agent.Model, cfg.ReviewModel, agent.Default())
+	if r, _ := cfg.inverted(review); r != "" {
+		p, _, _ := strings.Cut(review, "/")
+		return "commits by " + p
+	}
+	return ""
 }
 
 // Finders returns the passes a PR with lines changed lines gets, with their models.

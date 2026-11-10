@@ -21,6 +21,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
   "tests": true,
   "review_model": "openai/gpt-6.1-sol",
   "verify_model": "anthropic/claude-haiku-5-5:low",
+  "model_inversion": true,
   "large_pr": "all",
   "max_parts": 4,
   "passes": [{}, {"max_lines": 1500}],
@@ -48,6 +49,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `min_severity` | `minor`, `major` or `critical`: findings below are dropped before verification, nowhere posted. `minor` drops the nits. |
 | `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. |
 | `review_model`, `verify_model` | Apply where the server sets none. The provider's key must be on the server. |
+| `model_inversion` | `false` turns off the switch to another provider's model when most commits say that provider's AI wrote them (Claude Code, Codex, Gemini trailers). A pinned `review_model` never switches. Default on. The other provider's key must be on the server. |
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `passes` | Finders per part, at most 3. See [Passes](#passes). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |

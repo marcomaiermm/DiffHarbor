@@ -287,6 +287,30 @@ func Default() string {
 	return Matrix[0].Review
 }
 
+// Invert is the review and verify model of another provider than review's, when review's provider wrote most of the
+// commits: authors has the provider of each commit an AI wrote. The first other provider in Matrix with credentials
+// and no commit of its own; "" = review stays.
+func Invert(review string, authors []string) (rm, vm string) {
+	n := func(p string) (c int) {
+		for _, a := range authors {
+			if a == p {
+				c++
+			}
+		}
+		return c
+	}
+	own := providerOf(review)
+	if n(own) == 0 || slices.ContainsFunc(authors, func(a string) bool { return n(a) > n(own) }) {
+		return "", ""
+	}
+	for _, r := range Matrix {
+		if n(r.Name) == 0 && Available(r.Name) {
+			return r.Review, r.Verify
+		}
+	}
+	return "", ""
+}
+
 // VerifyFor is the verify model to pair with review: the cheap one of its provider, "" = review verifies.
 func VerifyFor(review string) string { return providerFor(providerOf(review)).Verify }
 
