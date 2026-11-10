@@ -519,7 +519,7 @@ func TestPostFolded(t *testing.T) {
 }
 
 // A summary an older version left as an open thread is resolved, and is no finding's thread. One resolved already,
-// a person's thread (a personal token) and a note of our own stay as they are.
+// one someone answered, a person's thread (a personal token) and a note of our own stay as they are.
 func TestThreadsOldSummary(t *testing.T) {
 	var resolved []string
 	serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -530,6 +530,8 @@ func TestThreadsOldSummary(t *testing.T) {
 		bot := `"author":{"username":"review-bot"}`
 		fmt.Fprint(w, `[{"id":"s1","notes":[{"id":1,"body":"summary\n\n`+forge.Mark+`","resolvable":true,`+bot+`}]},`+
 			`{"id":"s2","notes":[{"id":2,"body":"summary\n\n`+forge.Mark+`","resolvable":true,"resolved":true,`+bot+`}]},`+
+			`{"id":"s3","notes":[{"id":5,"body":"summary\n\n`+forge.Mark+`","resolvable":true,`+bot+`},{"id":6,"body":"moved","system":true},`+
+			`{"id":7,"body":"why?","author":{"username":"kev"}}]},`+
 			`{"id":"p1","notes":[{"id":3,"body":"mine","resolvable":true,`+bot+`}]},`+
 			`{"id":"n1","notes":[{"id":4,"body":"summary\n\n`+forge.Mark+`",`+bot+`}]}]`)
 	})

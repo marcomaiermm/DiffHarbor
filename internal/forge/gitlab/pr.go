@@ -168,8 +168,10 @@ func (p *pr) Threads() ([]forge.Thread, error) {
 		n := d.Notes[0]
 		if n.Position == nil {
 			// a summary from when it was part of the review: a thread no fix resolves, one left open per review.
-			// The mark at its end: not a person's thread on a personal token.
-			if n.Resolvable && !n.Resolved && strings.HasSuffix(strings.TrimSpace(n.Body), forge.Mark) {
+			// The mark at its end: not a person's thread on a personal token. One answered is a conversation: theirs
+			// to resolve.
+			answered := slices.ContainsFunc(d.Notes[1:], func(r note) bool { return !r.System })
+			if n.Resolvable && !n.Resolved && !answered && strings.HasSuffix(strings.TrimSpace(n.Body), forge.Mark) {
 				if err := p.resolve(d.ID); err != nil {
 					log.Println(p.e.Key(), "old summary:", err)
 				}
