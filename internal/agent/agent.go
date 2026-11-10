@@ -94,6 +94,9 @@ var (
 	FallbackModel string
 	// FallbackVerifyModel is FALLBACK_VERIFY_MODEL, the fallback for the verify pass.
 	FallbackVerifyModel string
+	// Inversion is MODEL_INVERSION: "off" turns model inversion off for every repo, a model (provider/id[:level])
+	// is the one Invert switches to. Unset = the first other maker in Matrix.
+	Inversion string
 	secretVar           = regexp.MustCompile(`KEY|SECRET|TOKEN`)
 	unavailable         = regexp.MustCompile(`(?i)usage limit|quota|rate.?limit|too many requests|\b(429|5\d\d)\b|overloaded|unavailable|capacity|ChatGPT login`)
 	// FallbackUntil is unix ms: until then passes go straight to the fallback.
@@ -293,17 +296,20 @@ func maker(provider string) string {
 	return cmp.Or(map[string]string{"amazon-bedrock": "anthropic", "azure": "openai", "google-vertex": "google"}[provider], provider)
 }
 
-// Invert is the review and verify model of the first provider in Matrix with credentials and another maker than
-// review's, when review's maker wrote most of the commits: authors has the maker of each commit an AI wrote. by
-// names that maker. "" = review stays.
+// Invert is the review and verify model of MODEL_INVERSION, else of the first provider in Matrix, with credentials
+// and another maker than review's, when review's maker wrote most of the commits: authors has the maker of each
+// commit an AI wrote. by names that maker. "" = review stays, as with MODEL_INVERSION=off.
 func Invert(review string, authors []string) (rm, vm, by string) {
 	n := map[string]int{}
 	for _, a := range authors {
 		n[a]++
 	}
 	own := maker(providerOf(review))
-	if n[own] == 0 || n[own] < slices.Max(slices.Collect(maps.Values(n))) {
+	if Inversion == "off" || n[own] == 0 || n[own] < slices.Max(slices.Collect(maps.Values(n))) {
 		return "", "", ""
+	}
+	if p := providerOf(Inversion); Inversion != "" && maker(p) != own && Available(p) {
+		return Inversion, VerifyFor(Inversion), own
 	}
 	for _, r := range Matrix {
 		if maker(r.Name) != own && Available(r.Name) {

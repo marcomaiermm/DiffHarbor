@@ -544,6 +544,21 @@ func TestInversion(t *testing.T) {
 			t.Errorf("%s: %v %q %q %q", c.name, err, r, v, cfg.Inversion())
 		}
 	}
+	defer func(i string) { agent.Inversion = i }(agent.Inversion)
+	agent.Model, agent.VerifyModel = "", ""
+	gpts := Settings{Authors: []string{"openai"}}
+	for _, c := range []struct{ env, review, verify string }{
+		{"off", gpt, gptV},
+		{"anthropic/y", "anthropic/y", clV},
+		{"openai/y", cl, clV},   // the same maker: Matrix's
+		{"deepseek/y", cl, clV}, // no key
+	} {
+		agent.Inversion = c.env
+		if r, v := gpts.Models(); r != c.review || v != c.verify {
+			t.Errorf("MODEL_INVERSION=%s: %q %q", c.env, r, v)
+		}
+	}
+	agent.Inversion = ""
 	// Bedrock hosts Claude, Azure GPT: not another maker
 	t.Setenv("AWS_REGION", "r")
 	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "k")
