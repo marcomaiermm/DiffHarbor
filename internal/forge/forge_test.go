@@ -239,3 +239,34 @@ func TestPrivate(t *testing.T) {
 		}
 	}
 }
+
+func TestRisked(t *testing.T) {
+	c := func(sev string, fold bool) review.Comment { return review.Comment{Severity: sev, Fold: fold} }
+	for _, tc := range []struct {
+		name    string
+		cs      []review.Comment
+		failing int
+		want    string
+	}{
+		{"nothing", nil, 0, "🟢 0/5"},
+		{"nits and folded", []review.Comment{c("nit", false), c("minor", true), c("major", true)}, 0, "🟢 1/5 (3 nits)"},
+		{"unknown severity is a minor", []review.Comment{c("", false)}, 0, "🟡 2/5 (1 minor)"},
+		{"one major", []review.Comment{c("major", false), c("nit", false)}, 0, "🟡 3/5 (1 major, 1 nit)"},
+		{"two majors", []review.Comment{c("major", false), c("major", false)}, 0, "🔴 4/5 (2 majors)"},
+		{"failing tests", []review.Comment{c("minor", false)}, 2, "🔴 4/5 (2 failing tests, 1 minor)"},
+		{"failing alone", nil, 1, "🔴 4/5 (1 failing test)"},
+		{"critical", []review.Comment{c("critical", false), c("major", false)}, 0, "🔴 5/5 (1 critical, 1 major)"},
+	} {
+		if got := Risked(tc.cs, tc.failing).String(); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	st := State{SHA: "a", Risk: &Risk{Score: 3, Why: "1 major"}}
+	body := st.render("", "", "", nil)
+	if !strings.Contains(body, "**Merge risk:** 🟡 3/5 (1 major)") || parseState(body).Risk.Score != 3 {
+		t.Fatalf("render: %s", body)
+	}
+	if old := (State{SHA: "a"}).render("", "", "", nil); strings.Contains(old, "Merge risk") || parseState(old).Risk != nil {
+		t.Fatal("old sticky shows a risk")
+	}
+}

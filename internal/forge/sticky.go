@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"cmp"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
@@ -21,6 +22,7 @@ type State struct {
 	Files   map[string]string `json:"files"`
 	Diagram string            `json:"diagram"`
 	Effort  int               `json:"effort"`
+	Risk    *Risk             `json:"risk,omitempty"`   // nil in a sticky from before it existed
 	Patches map[string]string `json:"patches"`          // diff.PatchIDs at SHA: what a push has to change to get reviewed
 	Large   bool              `json:"large,omitempty"`  // someone asked for all parts: later pushes get them too
 	Drafts  bool              `json:"drafts,omitempty"` // someone asked for a review of the draft: drafts opt_in reviews its pushes
@@ -98,6 +100,58 @@ func parseState(body string) State {
 }
 
 var effort = []string{"", "1 (Trivial)", "2 (Simple)", "3 (Moderate)", "4 (Complex)", "5 (Very complex)"}
+
+// Risk is the merge risk after a review: 0 (nothing open) to 5 (a critical finding open), and what it counts.
+type Risk struct {
+	Score int    `json:"score"`
+	Why   string `json:"why"`
+}
+
+// Risked scores what is still open: cs, the open findings (a folded one counts as a nit, one with no severity as
+// a minor), and failing, the tests and packages that fail. 5 a critical one; 4 two majors or anything failing;
+// 3 one major; 2 a minor; 1 a nit; 0 nothing.
+func Risked(cs []review.Comment, failing int) Risk {
+	var n [4]int // nit, minor, major, critical
+	for _, c := range cs {
+		sev := review.Rank(cmp.Or(c.Severity, "minor"))
+		if c.Fold {
+			sev = 1
+		}
+		n[max(sev, 1)-1]++
+	}
+	var why []string
+	for i, w := range []string{"nit", "minor", "major", "critical"} {
+		if n[i] > 0 {
+			why = append([]string{text.Count(n[i], w)}, why...)
+		}
+	}
+	if failing > 0 {
+		why = append([]string{text.Count(failing, "failing test")}, why...)
+	}
+	r := Risk{Why: strings.Join(why, ", ")}
+	switch {
+	case n[3] > 0:
+		r.Score = 5
+	case failing > 0 || n[2] > 1:
+		r.Score = 4
+	case n[2] == 1:
+		r.Score = 3
+	case n[1] > 0:
+		r.Score = 2
+	case n[0] > 0:
+		r.Score = 1
+	}
+	return r
+}
+
+// String is the score with its band's colour, 🟢 0-1, 🟡 2-3, 🔴 4-5, and why.
+func (r Risk) String() string {
+	s := fmt.Sprintf("%s %d/5", []string{"🟢", "🟡", "🔴"}[r.Score/2], r.Score)
+	if r.Why != "" {
+		s += " (" + r.Why + ")"
+	}
+	return s
+}
 
 // shown is the list items a walkthrough section shows; the report has all.
 const shown = 15
@@ -188,6 +242,9 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 		}
 		if st.Effort > 0 && st.Effort < len(effort) {
 			b.WriteString("**Estimated review effort:** 🎯 " + effort[st.Effort] + "\n\n")
+		}
+		if st.Risk != nil {
+			b.WriteString("**Merge risk:** " + st.Risk.String() + "\n\n")
 		}
 		b.WriteString("</details>\n\n")
 	}

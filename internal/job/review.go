@@ -322,6 +322,11 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	}
 	log.Printf("%s %s %s %s: %s", key, sha[:7], kind, stats, desc)
 	s.State = s.State.Update(r, sha, prFiles, only == nil)
+	risk := forge.Risked(openFindings(threads, open, r), failing(r.Tests))
+	s.State.Risk = &risk
+	if d := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); len(d) <= 140 { // GitHub's limit
+		desc = d
+	}
 	// a file with a piece left out isn't reviewed: the next push reviews it again
 	s.State.Patches = reviewedPatches(s.State.Patches, patches, slices.DeleteFunc(diff.Paths(d), func(f string) bool {
 		return slices.Contains(r.Failed, f) || slices.Contains(omitted, f)
@@ -357,6 +362,17 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	}
 	s.Write(banner, footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc)))
 	return nil
+}
+
+// failing counts the tests that fail, a subtest with its test once, and the packages that don't build.
+func failing(t checks.Tests) int {
+	n := len(t.Broken)
+	for name, out := range t.Ran {
+		if out == "fail" && !strings.Contains(name, "/") {
+			n++
+		}
+	}
+	return n
 }
 
 // ReportURL is where the server serves reports (REPORT_URL); "" = no reports.

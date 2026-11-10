@@ -1,6 +1,7 @@
 package job
 
 import (
+	"diffharbor/internal/checks"
 	"diffharbor/internal/forge"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/report"
@@ -733,5 +734,12 @@ func TestReopen(t *testing.T) {
 	}
 	if post, n, free := reopen(&reopenPR{refuse: true}, gone, "abcdef1", cs); n != 0 || len(post) != len(cs) || fmt.Sprint(free) != "map[a:true b:true]" {
 		t.Fatalf("refused %v: %d, post %v", free, n, titles(post))
+	}
+}
+
+func TestFailing(t *testing.T) {
+	ran := map[string]string{"TestA": "fail", "TestA/x": "fail", "TestB": "pass", "TestC": "fail"}
+	if n := failing(checks.Tests{Ran: ran, Broken: []string{"pkg"}}); n != 3 {
+		t.Fatal("failing:", n)
 	}
 }
