@@ -570,7 +570,7 @@ reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isRes
 				return nil, err
 			}
 			ts = append(ts, forge.Thread{
-				ID: t.ID, Comment: c.DatabaseID, Resolved: t.IsResolved, Path: c.Path, Line: c.Line, Original: c.OriginalLine, Body: c.Body, Replies: forge.Answers(rs),
+				ID: t.ID, Comment: c.DatabaseID, Resolved: t.IsResolved, Path: c.Path, Line: c.Line, Original: c.OriginalLine, Body: c.Body, Replies: forge.Answers(rs), Notes: rs,
 				Addressed: forge.Addressed(rs), Up: up, Down: down,
 			})
 		}

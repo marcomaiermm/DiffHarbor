@@ -122,6 +122,7 @@ type Thread struct {
 	Original int
 	Body     string
 	Replies  string // Answers(): the last replies, where a maintainer declines what the finding or our answer said
+	Notes    []Note // every reply after the first comment: the outcome count reads who decided what
 	// Addressed(): resolved by our "✅ Addressed in", nobody replied since. A commit fixed it: one bringing it back
 	// reopens it.
 	Addressed bool

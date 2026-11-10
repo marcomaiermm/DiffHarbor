@@ -7,6 +7,7 @@ import (
 	"diffharbor/internal/report"
 	"diffharbor/internal/review"
 	"errors"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -123,9 +124,22 @@ echo 1 > a.txt; git add .; git commit -q -m base; git checkout -q -b pr; echo 2 
 		})
 	}
 
-	// a learning steers later reviews: only who can push saves one
-	for _, pr := range []chatPR{{write: true}, {}, {write: true, writeErr: errors.New("503")}} {
-		chatAgent = &chatFake{reply: `{"reply":"Ok.","learning":"Old tabs may hit a removed route until a reload","shared":false,"resolved":false}`}
+	// A learning steers later reviews: only who can push saves one. The same for what a reply decides on the finding,
+	// filed under the thread's first comment; a value that is no decision files nothing and fails no answer.
+	for _, tc := range []struct {
+		pr       chatPR
+		decision string // the JSON value
+		want     string
+	}{
+		{chatPR{write: true}, `"intended"`, "intended"},
+		{chatPR{}, `"intended"`, ""},
+		{chatPR{write: true, writeErr: errors.New("503")}, `"intended"`, ""},
+		{chatPR{write: true}, `" Wrong "`, "wrong"},
+		{chatPR{write: true}, `"maybe"`, ""},
+		{chatPR{write: true}, `false`, ""},
+	} {
+		pr := tc.pr
+		chatAgent = &chatFake{reply: `{"reply":"Ok.","learning":"Old tabs may hit a removed route until a reload","shared":false,"resolved":false,"decision":` + tc.decision + `}`}
 		e := &forge.Event{Kind: "pull_request_review_comment", Forge: "github"}
 		e.Repository.ID, e.Repository.CloneURL, e.Repository.FullName = 1, "file://"+origin, "o/r"
 		e.PullRequest.Number, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = 12, head, "main"
@@ -140,6 +154,10 @@ echo 1 > a.txt; git add .; git commit -q -m base; git checkout -q -b pr; echo 2 
 		if saved && !strings.Contains(learningsOf("o/r")[0], "(@ann, #12, ") { // the PR it came from, as the forge links it
 			t.Fatalf("no PR in %q", learningsOf("o/r"))
 		}
+		if got := tallyOf(t, "o/r").Decisions; got[12][1] != tc.want || len(got) > 1 || len(got[12]) > 1 {
+			t.Fatalf("write %v err %v, decision %s: filed %v, want %q", pr.write, pr.writeErr, tc.decision, got, tc.want)
+		}
 		_, _ = forgetLearnings("o/r", "old tabs")
+		_ = os.Remove(tallyFile("o/r"))
 	}
 }

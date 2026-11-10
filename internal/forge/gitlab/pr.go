@@ -170,7 +170,7 @@ func (p *pr) Threads() ([]forge.Thread, error) {
 		}
 		ts = append(ts, forge.Thread{
 			ID: d.ID, Comment: n.ID, Resolved: n.Resolved, Path: n.Position.NewPath,
-			Line: n.Position.NewLine, Original: n.Position.NewLine, Body: n.Body, Replies: forge.Answers(rs),
+			Line: n.Position.NewLine, Original: n.Position.NewLine, Body: n.Body, Replies: forge.Answers(rs), Notes: rs,
 			Addressed: forge.Addressed(rs),
 		})
 	}
