@@ -348,8 +348,15 @@ func TestOutcomesFoundBy(t *testing.T) {
 	defer func(v string) { Version = v }(Version)
 	proc.DataDir, Version = t.TempDir(), "v2.0.0"
 	stamp := forge.Stamp(forge.Run{Version: "v1.0.0", Review: "lab/big", Verify: "lab/small", SHA: "abcdef1234"})
-	if stamp == "" || forge.Stamp(forge.Run{Version: "v1", Review: "a b", SHA: "abcdef1"}) != "" {
+	edge := "edge-" + strings.Repeat("a", 40)
+	if stamp == "" || forge.Stamp(forge.Run{Version: "v1", Review: "a b", SHA: "abcdef1"}) != "" ||
+		forge.Stamp(forge.Run{Version: edge, SHA: "abcdef1"}) == "" || forge.Stamp(forge.Run{Version: edge + edge, SHA: "abcdef1"}) != "" ||
+		forge.Stamp(forge.Run{Version: "v1", SHA: "ABCDEF1"}) != "" {
 		t.Fatalf("stamp %q", stamp)
+	}
+	if c := forge.Parse(forge.Clean(forge.Seal(forge.Finding{Run: stamp}))); strings.Contains(c.Body, "diffharbor") ||
+		strings.Contains(forge.Unseal("x"+forge.Seal(forge.Finding{Run: stamp})), "diffharbor") {
+		t.Fatalf("stamp left in %q", c.Body)
 	}
 	body := "_🟠 Major_ · **Leaks**\n\nbody"
 	long := strings.Repeat("m", 81)

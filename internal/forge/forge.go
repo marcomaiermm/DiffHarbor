@@ -192,7 +192,7 @@ func Redact(s string) string { return reportSecret.ReplaceAllString(s, "/…") }
 // Clean drops our hidden markers and state from a comment before it goes into a prompt, and report links' secrets.
 func Clean(s string) string {
 	s = Redact(s)
-	return text.Truncate(strings.TrimSpace(stateTag.ReplaceAllString(strings.NewReplacer(Mark, "", stickyMark, "").Replace(s), "")), 3000)
+	return text.Truncate(strings.TrimSpace(stateTag.ReplaceAllString(strings.NewReplacer(Mark, "", stickyMark, "").Replace(runTag.ReplaceAllString(s, "")), "")), 3000)
 }
 
 // MentionOf matches @handle for any of handles as a whole login (not @handle-other).

@@ -62,14 +62,14 @@ func prefixed(p, s string) string {
 type Run struct{ Version, Review, Verify, SHA string }
 
 // runTag is a finding's stamp, the last thing before Mark: a forged one a model quoted from the PR sits earlier in
-// the body. Fixed charset and lengths, so a body can't make it more than 220 bytes.
-var runTag = regexp.MustCompile(`<!-- diffharbor:run v=([\w.+-]{1,40}) r=([\w./:@+-]{0,80}) x=([\w./:@+-]{0,80}) s=([0-9a-f]{7,40}) -->\n` + Mark + `\s*$`)
+// the body. Fixed charset and lengths, so a stamp stays small; v= fits edge builds ("edge-" and a SHA).
+var runTag = regexp.MustCompile(`<!-- diffharbor:run v=([\w.+-]{1,64}) r=([\w./:@+-]{0,80}) x=([\w./:@+-]{0,80}) s=([0-9a-f]{7,40}) -->\r?\n` + Mark + `\s*$`)
 
 // Stamp is the run's hidden marker for Seal, "" when a value doesn't fit what ParseRun reads: a finding with none
 // counts with the fields empty.
 func Stamp(v Run) string {
 	s := fmt.Sprintf("<!-- diffharbor:run v=%s r=%s x=%s s=%s -->\n", v.Version, v.Review, v.Verify, v.SHA)
-	if !runTag.MatchString(s + Mark) {
+	if r := ParseRun(s + Mark); r != v {
 		return ""
 	}
 	return s
@@ -78,13 +78,15 @@ func Stamp(v Run) string {
 // Seal is what ends a finding's comment: its run's stamp and Mark.
 func Seal(c Finding) string { return "\n\n" + c.Run + Mark }
 
-// ParseRun reads the stamp off a comment of ours; ok is false for none or a malformed one.
-func ParseRun(body string) (r Run, ok bool) {
-	m := runTag.FindStringSubmatch(body)
-	if m == nil {
-		return r, false
+// Unseal is s without its stamp and Mark, for text that goes into a prompt or a page.
+func Unseal(s string) string { return strings.ReplaceAll(runTag.ReplaceAllString(s, ""), Mark, "") }
+
+// ParseRun reads the stamp off a comment of ours, the zero Run for none or a malformed one.
+func ParseRun(body string) Run {
+	if m := runTag.FindStringSubmatch(body); m != nil {
+		return Run{m[1], m[2], m[3], m[4]}
 	}
-	return Run{m[1], m[2], m[3], m[4]}, true
+	return Run{}
 }
 
 // Parse reads severity, title and the verifier's evidence back from a finding Format posted. A body Format

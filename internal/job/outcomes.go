@@ -246,7 +246,7 @@ func decideLeft(ctx context.Context, f forge.Forge, e *forge.Event, ts []forge.T
 		}
 		id := fmt.Sprint(t.Comment)
 		asked[id] = t.Comment
-		fmt.Fprintf(&b, "### %s %s\n%s\n", id, text.OneLine(t.Path, 100), text.Truncate(strings.ReplaceAll(forge.Redact(t.Body), forge.Mark, ""), 600))
+		fmt.Fprintf(&b, "### %s %s\n%s\n", id, text.OneLine(t.Path, 100), text.Truncate(forge.Unseal(forge.Redact(t.Body)), 600))
 		for _, n := range ns[max(0, len(ns)-maxDecideNotes):] {
 			who := "maintainer"
 			if n.Ours {
@@ -321,10 +321,10 @@ func Outcomes(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	var lost []string
 	day := time.Now().Format(time.DateOnly)
 	for _, t := range ts {
-		c := forge.Parse(t.Body)
+		c := forge.Parse(forge.Unseal(t.Body))
 		sev, title, path := cmp.Or(c.Severity, "other"), text.OneLine(cmp.Or(c.Title, c.Body), 100), text.OneLine(t.Path, 100)
 		o := classify(t, can)
-		run, _ := forge.ParseRun(t.Body) // t is ours: Threads keeps only our authors' first comments
+		run := forge.ParseRun(t.Body) // t is ours: Threads keeps only our authors' first comments
 		fs = append(fs, finding{
 			PR: n, Comment: t.Comment, Closed: day, Version: Version, Path: path, Title: title,
 			Severity: sev, Profile: profile, Outcome: o,
