@@ -60,6 +60,7 @@ type Data struct {
 	Dropped     []review.Comment  // what the verifier dropped, its reason in Evidence
 	Failed      []string          // files whose review part failed: not reviewed
 	Omitted     []string          // files the review left out, all of them or a piece: too large
+	Docs        []review.Doc      // the reference docs the review read: listed by title and link, never their text
 	Tests       checks.Tests      // what the checks' test runs report at SHA; empty when none ran
 	Sources     map[string]string // the head's text of changed files, for the lines between hunks (see Sources)
 }
@@ -161,6 +162,7 @@ var funcs = template.FuncMap{
 	"seq":      func(n int) []int { return make([]int, n) },
 	"wip":      func(subject string) bool { return wip.MatchString(strings.TrimSpace(subject)) },
 	"dir":      func(p string) string { return p[:strings.LastIndex(p, "/")+1] }, // "a/b/" of a/b/c.go: muted, the name stands out
+	"web":      func(u string) bool { return strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") },
 	"base":     func(p string) string { return p[strings.LastIndex(p, "/")+1:] },
 	"test": func(t string) string { // "a_test.go TestSave" of step.Tests: "TestSave"; a file alone stays
 		_, n, ok := strings.Cut(t, " ")

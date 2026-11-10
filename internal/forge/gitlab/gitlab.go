@@ -294,6 +294,8 @@ func (h *Hub) Parse(hd http.Header, body []byte) (*forge.Event, error) {
 			Path     string `json:"path_with_namespace"`
 			CloneURL string `json:"git_http_url"`
 			Default  string `json:"default_branch"`
+			Level    *int   `json:"visibility_level"` // 0 private, 10 internal, 20 public
+			Vis      string `json:"visibility"`
 		} `json:"project"`
 		Attrs   json.RawMessage `json:"object_attributes"`
 		MR      mr              `json:"merge_request"`
@@ -307,6 +309,10 @@ func (h *Hub) Parse(hd http.Header, body []byte) (*forge.Event, error) {
 	e := &forge.Event{Forge: "gitlab"}
 	e.Repository.ID, e.Repository.FullName, e.Repository.CloneURL = w.Project.ID, w.Project.Path, w.Project.CloneURL
 	e.Repository.DefaultBranch = w.Project.Default
+	e.Repository.Visibility = "public" // unknown too: only a payload that says private makes it so
+	if w.Project.Level != nil && *w.Project.Level == 0 || w.Project.Vis == "private" {
+		e.Repository.Visibility = "private"
+	}
 	e.Sender.Login = w.User.Username
 	switch w.Kind {
 	case "merge_request":

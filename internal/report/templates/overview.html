@@ -83,6 +83,7 @@
     </div>{{end}}
     </div>
   </section>
+  {{with .Docs}}<p class="mt-6 text-sm text-muted-foreground">Docs reached: {{range $i, $d := .}}{{if $i}}, {{end}}{{if web $d.URL}}<a href="{{$d.URL}}" target="_blank" rel="noopener">{{$d.Title}}</a>{{else}}{{$d.Title}}{{end}} ({{$d.Adapter}}){{end}}</p>{{end}}
 </section>
 {{end}}
 {{/* A place a model's text names, see view.Refs; a test's mark by how it ran, see view.Run. */}}

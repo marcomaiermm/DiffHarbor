@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 )
@@ -21,6 +22,8 @@ type Event struct {
 		CloneURL string `json:"clone_url"`
 		// "" in events queued before it was read: then any base branch gets reviewed
 		DefaultBranch string `json:"default_branch"`
+		// public, private or internal (GitHub); GitLab: private or public, see Private. "" in events queued before it was read
+		Visibility string `json:"visibility"`
 	} `json:"repository"`
 	PullRequest struct {
 		Number  int    `json:"number"`
@@ -42,8 +45,11 @@ type Event struct {
 			} `json:"repo"`
 		} `json:"head"`
 		Base struct {
-			SHA string `json:"sha"`
-			Ref string `json:"ref"`
+			SHA  string `json:"sha"`
+			Ref  string `json:"ref"`
+			Repo struct {
+				Visibility string `json:"visibility"` // from Refresh: the repo as it is now, not as the event was queued
+			} `json:"repo"`
 		} `json:"base"`
 	} `json:"pull_request"`
 	Issue struct {
@@ -72,6 +78,11 @@ type Event struct {
 			From string `json:"from"`
 		} `json:"body"`
 	} `json:"changes"`
+}
+
+// Private reports whether the repo is private. Internal and unknown count as public: fail closed.
+func (e *Event) Private() bool {
+	return cmp.Or(e.PullRequest.Base.Repo.Visibility, e.Repository.Visibility) == "private"
 }
 
 // Repo names the repo across forges: owner/repo on GitHub, gitlab/group/project on GitLab.

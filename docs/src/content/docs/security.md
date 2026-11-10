@@ -16,6 +16,7 @@ Within that:
 - git fetches and Pi's model calls go through a proxy in the server on `127.0.0.1`. They use random tokens that the server revokes when the Pi run (git: the job) ends.
 - A token reaches only its provider's model API or its job's repo (fetches, no push). The proxy adds the key there.
 - `NPM_REGISTRIES` tokens work the same way: installs read through the proxy, GETs only, with tokens that end with the checks.
+- `KNOWLEDGE_ADAPTERS` tokens stay in the server: it calls the adapters before the model runs, the PR's code never sees them. `linear` uses a server-wide key, so a repo can't enable it in `review.json`: only an owner listed for it there can. `itsaplan` has no adapter yet.
 
 ## Each job
 
@@ -62,6 +63,7 @@ Within that:
   - On a cloud VM, the metadata endpoint. Block `169.254.169.254` for the container there.
 - **The job's tokens** (same uid): it can spend model tokens and fetch the repo it already has. It can't keep a key.
 - **The registries' packages** while the checks install. So a PR from a fork gets no `NPM_REGISTRIES`.
+- **The docs the review reads** reach the model, so a finding can quote them into the PR's comments. So a PR from a fork gets no `KNOWLEDGE_ADAPTERS`, and a public repo none unless `knowledge_public`.
 - **Credentials Pi gets itself**, readable by the PR's code during the run:
   - A ChatGPT login: an access token that outlives the run, never the refresh token. Pi sends it only to OpenAI directly.
   - Bedrock with IAM keys, since SigV4 signs the host. `AWS_BEARER_TOKEN_BEDROCK` goes through the proxy.

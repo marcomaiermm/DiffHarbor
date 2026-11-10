@@ -106,6 +106,8 @@
     "base_branches": { "type": "array", "items": { "type": "string" }, "description": "Globs of base branches besides the default branch whose PRs get reviewed without asking." },
     "drafts": { "enum": ["manual", "opt_in", "off"], "description": "Draft PRs: manual (default) reviewed on @bot review; opt_in once asked, every later push too; off never." },
     "gitlab_findings": { "enum": ["review", "discussions"], "description": "GitLab: review posts the findings, answers and summary as one review, one email; discussions each on its own, an email each. Default: the server's GITLAB_FINDINGS." },
-    "tickets": { "type": "array", "items": { "type": "string" }, "description": "itsaplan or Linear projects (team keys) a PR may name; unset = any, [] = none." }
+    "tickets": { "type": "array", "items": { "type": "string" }, "description": "itsaplan or Linear projects (team keys) a PR may name; unset = any, [] = none." },
+    "knowledge": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}(:\\S{1,200})?$" } }, "description": "Reference docs for the review: a glob of changed files to adapters, 'name' or 'name:ref'. Names only, never URLs or tokens. Unset: off." },
+    "knowledge_public": { "type": "boolean", "description": "true: also read reference docs for a public (or internal) repo. Default off." }
   }
 }

@@ -14,6 +14,7 @@ import (
 	"diffharbor/internal/forge/github"
 	"diffharbor/internal/forge/gitlab"
 	"diffharbor/internal/job"
+	"diffharbor/internal/knowledge"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/report"
 	"diffharbor/internal/review"
@@ -117,6 +118,9 @@ func main() {
 		log.Fatal(err)
 	}
 	if _, err := checks.Registries(""); err != nil {
+		log.Fatal(err)
+	}
+	if _, err := knowledge.Remotes(""); err != nil {
 		log.Fatal(err)
 	}
 	if err := report.Load(os.Getenv("TEMPLATE_DIR")); err != nil {

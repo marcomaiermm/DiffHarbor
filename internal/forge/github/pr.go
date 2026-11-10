@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"diffharbor/internal/forge"
+	"diffharbor/internal/knowledge"
 	"diffharbor/internal/report"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 )
 
 // Hub takes the App's webhooks.
@@ -119,6 +121,14 @@ func (p *pr) NestedRules(ref string, files []string) string {
 }
 
 func (p *pr) Skills(ref string, dirs []string, dst string) { Skills(p.e, p.token, ref, dirs, dst) }
+
+var wikiOnce sync.Once
+
+// Wiki reads nothing: an App's installation token can't read a repo's wiki.
+func (p *pr) Wiki() ([]knowledge.File, error) {
+	wikiOnce.Do(func() { log.Println("knowledge: wiki: GitHub App tokens cannot read wikis, none read") })
+	return nil, nil
+}
 
 type comment struct {
 	ID        int64  `json:"id"`

@@ -524,3 +524,15 @@ func TestThreadsReplies(t *testing.T) {
 		t.Fatalf("%+v %v", ts, err)
 	}
 }
+
+func TestVisibility(t *testing.T) {
+	h := &Hub{"s"}
+	hd := http.Header{"X-Gitlab-Token": {"s"}}
+	for vis, want := range map[string]bool{`"visibility_level":0,`: true, `"visibility":"private",`: true, `"visibility_level":10,`: false, `"visibility_level":20,`: false, ``: false} {
+		body := `{"object_kind":"merge_request","project":{"id":5,` + vis + `"path_with_namespace":"g/p"},
+"object_attributes":{"iid":3,"state":"opened","action":"open","source_branch":"f","target_branch":"main"}}`
+		if e, err := h.Parse(hd, []byte(body)); err != nil || e.Private() != want {
+			t.Errorf("%q: private %v, %v", vis, e != nil && e.Private(), err)
+		}
+	}
+}

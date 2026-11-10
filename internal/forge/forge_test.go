@@ -226,3 +226,16 @@ func TestSummaryFolded(t *testing.T) {
 		t.Fatal(s)
 	}
 }
+
+func TestPrivate(t *testing.T) {
+	for _, tc := range []struct {
+		event, base string
+		want        bool
+	}{{"private", "", true}, {"public", "private", true}, {"private", "public", false}, {"internal", "", false}, {"", "", false}} {
+		var e Event
+		e.Repository.Visibility, e.PullRequest.Base.Repo.Visibility = tc.event, tc.base
+		if e.Private() != tc.want {
+			t.Errorf("%+v: got %v", tc, e.Private())
+		}
+	}
+}
