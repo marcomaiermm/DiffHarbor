@@ -74,6 +74,10 @@ func loadTally(f string) (t tally, err error) {
 	return t, nil
 }
 
+// maxLearnedPerClose bounds the learnings one close saves: a PR of many 👎 mustn't push the curated ones out of
+// the newest a review follows.
+const maxLearnedPerClose = 3
+
 // tallyMu guards the read-modify-write of record, like learningsMu.
 var tallyMu sync.Mutex
 
@@ -186,7 +190,7 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 	}
 	// The learnings before the count: learnOnce saves each once, and a PR counted is skipped on its next close.
 	if cfgErr == nil && cfg.Learnings.Learns() {
-		for _, l := range lost {
+		for _, l := range lost[:min(len(lost), maxLearnedPerClose)] {
 			if err := learnOnce(key, l); err != nil {
 				return err
 			}

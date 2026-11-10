@@ -5,6 +5,7 @@ import (
 	"diffharbor/internal/forge"
 	"diffharbor/internal/proc"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,6 +189,21 @@ func TestOutcomesFail(t *testing.T) {
 	b.Reset()
 	if err := Stats(&b, deep+"p"); err != nil || !strings.Contains(b.String(), deep+"p") {
 		t.Errorf("stats of a long repo: %v", err)
+	}
+}
+
+// One close saves at most maxLearnedPerClose learnings, and counts every decline.
+func TestOutcomesLearnCap(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	pr := &votePR{asked: map[string]int{}}
+	pr.cfg = `{}`
+	for i := range maxLearnedPerClose + 2 {
+		pr.ts = append(pr.ts, forge.Thread{Body: "_🟠 Major_ · **Races**\n\nbody", Path: fmt.Sprint(i, ".go"), Down: []string{"ann"}})
+	}
+	e := &forge.Event{Forge: "github"}
+	e.Repository.FullName, e.PullRequest.Number = "o/r", 7
+	if err := Outcomes(voteForge{pr: pr}, e); err != nil || len(learningsOf("o/r")) != maxLearnedPerClose || tallyOf(t, "o/r").Total[dismissed] != maxLearnedPerClose+2 {
+		t.Fatalf("%v %q %+v", err, learningsOf("o/r"), tallyOf(t, "o/r"))
 	}
 }
 

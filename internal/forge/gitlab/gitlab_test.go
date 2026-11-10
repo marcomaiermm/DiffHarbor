@@ -600,6 +600,26 @@ func TestVoted(t *testing.T) {
 	}
 }
 
+// 30 full pages of award emoji may not be all: Voted fails rather than count a part.
+func TestVotedTruncated(t *testing.T) {
+	Bot = "review-bot"
+	serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/discussions") {
+			fmt.Fprint(w, `[{"id":"d1","notes":[{"id":1,"body":"f `+forge.Mark+`","author":{"username":"review-bot"},"position":{"new_path":"a.ts","new_line":3}}]}]`)
+			return
+		}
+		n, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		w.Header().Set("X-Next-Page", strconv.Itoa(n+1))
+		fmt.Fprint(w, "["+strings.Repeat(`{"name":"thumbsup","user":{"username":"bo"}},`, 99)+`{"name":"thumbsup","user":{"username":"bo"}}]`)
+	})
+	e := &forge.Event{Forge: "gitlab"}
+	e.Repository.ID, e.PullRequest.Number = 5, 3
+	p, _ := (&Hub{}).Open(e)
+	if _, err := p.Voted(); err == nil {
+		t.Fatal("a truncated list counts")
+	}
+}
+
 func TestVisibility(t *testing.T) {
 	h := &Hub{"s"}
 	hd := http.Header{"X-Gitlab-Token": {"s"}}
