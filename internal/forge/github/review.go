@@ -21,7 +21,7 @@ func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, foot
 	send := func(cs []forge.Finding) error {
 		body := make([]map[string]any, 0, len(cs))
 		for _, c := range cs {
-			at := map[string]any{"path": c.Path, "line": c.Line, "side": "RIGHT", "body": forge.Format(c, "suggestion") + "\n\n" + forge.Mark}
+			at := map[string]any{"path": c.Path, "line": c.Line, "side": "RIGHT", "body": forge.Format(c, "suggestion") + forge.Seal(c)}
 			if c.Start > 0 {
 				at["line"] = c.End
 				if c.Start < c.End {

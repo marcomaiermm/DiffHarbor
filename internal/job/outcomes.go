@@ -50,16 +50,21 @@ type counts map[string]int
 
 // finding is one finding of a counted PR, kept to ask what the tables don't answer.
 type finding struct {
-	PR       int
-	Comment  int64  // the first comment of its thread: decide files a decision under it
-	Closed   string // the day it was counted
-	Version  string // the diffharbor that counted it, not the one that found it
-	Path     string
-	Title    string
-	Severity string
-	Profile  string
-	Outcome  string
-	Decision string `json:",omitempty"`
+	PR      int
+	Comment int64  // the first comment of its thread: decide files a decision under it
+	Closed  string // the day it was counted
+	Version string // the diffharbor that counted it, not the one that found it
+	// What found it, from the stamp on its comment (forge.Stamp); empty for one an older diffharbor posted.
+	FoundBy     string `json:",omitempty"` // diffharbor version
+	ReviewModel string `json:",omitempty"`
+	VerifyModel string `json:",omitempty"`
+	FoundSHA    string `json:",omitempty"`
+	Path        string
+	Title       string
+	Severity    string
+	Profile     string
+	Outcome     string
+	Decision    string `json:",omitempty"`
 }
 
 // tally is a repo's outcomes: PRs are the closed PRs counted already, so a reopened one isn't counted twice.
@@ -319,9 +324,11 @@ func Outcomes(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		c := forge.Parse(t.Body)
 		sev, title, path := cmp.Or(c.Severity, "other"), text.OneLine(cmp.Or(c.Title, c.Body), 100), text.OneLine(t.Path, 100)
 		o := classify(t, can)
+		run, _ := forge.ParseRun(t.Body) // t is ours: Threads keeps only our authors' first comments
 		fs = append(fs, finding{
 			PR: n, Comment: t.Comment, Closed: day, Version: Version, Path: path, Title: title,
 			Severity: sev, Profile: profile, Outcome: o,
+			FoundBy: run.Version, ReviewModel: run.Review, VerifyModel: run.Verify, FoundSHA: run.SHA,
 		})
 		// Only a writer's 👎 is a learning: a resolve may as well mean fixed.
 		if o != dismissed {
@@ -402,6 +409,15 @@ func Stats(w io.Writer, repo string) error {
 		if len(t.Findings) == 0 { // every PR counted before findings were kept
 			continue
 		}
+		found := map[string]counts{} // diffharbor version that found it -> outcome -> findings
+		for _, f := range t.Findings {
+			bump(found, cmp.Or(f.FoundBy, "-"), f.Outcome)
+		}
+		fmt.Fprintln(tw, "found by\tfindings\t"+strings.Join(outcomeNames, "\t"))
+		for _, k := range slices.Sorted(maps.Keys(found)) {
+			row(tw, k, found[k], outcomeNames)
+		}
+		fmt.Fprintln(tw)
 		by := map[string]counts{} // outcome -> decision -> findings
 		for _, f := range t.Findings {
 			d := cmp.Or(f.Decision, undecided)

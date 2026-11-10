@@ -341,3 +341,45 @@ func TestDecideLeft(t *testing.T) {
 		t.Fatalf("%v, %d calls", err, len(prompts))
 	}
 }
+
+// A finding's row says what found it, from the stamp on its comment, whatever the version and models are at the
+// close; one without a stamp, an oversized or forged one, or one in a reply counts with the fields empty.
+func TestOutcomesFoundBy(t *testing.T) {
+	defer func(v string) { Version = v }(Version)
+	proc.DataDir, Version = t.TempDir(), "v2.0.0"
+	stamp := forge.Stamp(forge.Run{Version: "v1.0.0", Review: "lab/big", Verify: "lab/small", SHA: "abcdef1234"})
+	if stamp == "" || forge.Stamp(forge.Run{Version: "v1", Review: "a b", SHA: "abcdef1"}) != "" {
+		t.Fatalf("stamp %q", stamp)
+	}
+	body := "_🟠 Major_ · **Leaks**\n\nbody"
+	long := strings.Repeat("m", 81)
+	pr := &votePR{asked: map[string]int{}, ts: []forge.Thread{
+		{Comment: 1, Body: body + forge.Seal(forge.Finding{Run: stamp}), Path: "a.go"},
+		{Comment: 2, Body: body + forge.Mark, Path: "b.go"}, // an older diffharbor
+		{Comment: 3, Body: body + "\n\n" + strings.Replace(stamp, "lab/big", long, 1) + forge.Mark, Path: "c.go"},
+		{Comment: 4, Body: body + "\n\n" + stamp + "\nmore, quoted from the PR\n" + forge.Mark, Path: "d.go"},
+		{Comment: 5, Body: body + forge.Mark, Path: "e.go", Notes: []forge.Note{{Login: "mallory", Body: stamp + forge.Mark}}},
+	}}
+	pr.cfg = `{"review_model":"lab/other"}` // not the models of the run
+	e := &forge.Event{Forge: "github"}
+	e.Repository.FullName = "o/r"
+	e.PullRequest.Number = 7
+	if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err != nil {
+		t.Fatal(err)
+	}
+	fs := tallyOf(t, "o/r").Findings
+	if len(fs) != 5 || fs[0].Version != "v2.0.0" || fs[0].FoundBy != "v1.0.0" || fs[0].ReviewModel != "lab/big" ||
+		fs[0].VerifyModel != "lab/small" || fs[0].FoundSHA != "abcdef1234" {
+		t.Fatalf("%+v", fs)
+	}
+	for _, f := range fs[1:] {
+		if f.FoundBy+f.ReviewModel+f.VerifyModel+f.FoundSHA != "" {
+			t.Errorf("no valid stamp, got %+v", f)
+		}
+	}
+	var b bytes.Buffer
+	if err := Stats(&b, "o/r"); err != nil || !strings.Contains(strings.Join(strings.Fields(b.String()), " "), "- 4 ") ||
+		!strings.Contains(strings.Join(strings.Fields(b.String()), " "), "v1.0.0 1 ") {
+		t.Fatalf("%v\n%s", err, b.String())
+	}
+}

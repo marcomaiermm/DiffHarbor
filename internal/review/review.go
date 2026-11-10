@@ -201,6 +201,7 @@ type Result struct {
 	Failed      []string          `json:"-"` // files of parts whose review failed: not reviewed
 	Dropped     []Comment         `json:"-"` // what the verifier dropped, its reason in Evidence
 	Tests       checks.Tests      `json:"-"` // what the checks' test runs report, per test
+	Run         string            `json:"-"` // forge.Stamp of the run: Post puts it on each finding
 }
 
 // Step is one step of the reading order: a few files and why they come here.

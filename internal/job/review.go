@@ -261,6 +261,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		p.Resolve(open[i], sha)
 	}
 	post := r
+	rm, vm := cfg.Models()
+	post.Run = forge.Stamp(forge.Run{Version: cmp.Or(Version, "dev"), Review: rm, Verify: vm, SHA: sha})
 	var reopened int
 	var free map[string]bool
 	post.Comments, reopened, free = reopen(p, gone, sha, r.Comments)
@@ -272,7 +274,6 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		kind = "incremental"
 	}
 	if agent.FallbackUntil.Load() > started.UnixMilli() { // some passes may have run on the fallback
-		rm, _ := cfg.Models()
 		kind += " · fallback " + agent.FallbackFor(rm, "review")
 	}
 	if len(omitted) > 0 { // the rest only by name: findings cover part of the PR

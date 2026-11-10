@@ -536,7 +536,7 @@ func (p *pr) place(c forge.Finding, lines map[string]old) (int, string, map[stri
 	if o.line > 0 {
 		pos["old_line"] = o.line
 	}
-	return line, inert(forge.Format(c, tag) + "\n\n" + forge.Mark), pos
+	return line, inert(forge.Format(c, tag) + forge.Seal(c)), pos
 }
 
 // discuss starts the discussion of one finding.
