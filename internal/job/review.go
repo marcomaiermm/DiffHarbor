@@ -293,7 +293,9 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		kind += " · ⚠️ review.json ignored: " + text.OneLine(cfgErr.Error(), 120)
 	}
 	n := 0
-	if posts(only == nil, post, seen, diff.NewLines(raw)) {
+	lines := diff.NewLines(raw)
+	posted := posts(only == nil, post, seen, lines)
+	if posted {
 		// Lines of the whole PR diff take inline comments, also in files this incremental review skipped: only
 		// a thread can be resolved once fixed.
 		if n, err = p.Post(sha, post, seen, raw,
@@ -322,11 +324,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	}
 	log.Printf("%s %s %s %s: %s", key, sha[:7], kind, stats, desc)
 	s.State = s.State.Update(r, sha, prFiles, only == nil)
-	risk := forge.Risked(openFindings(threads, open, r), failing(r.Tests))
+	risk := forge.Risked(stillOpen(threads, open, r, post, seen, lines, posted), failing(r.Tests))
 	s.State.Risk = &risk
-	if d := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); len(d) <= 140 { // GitHub's limit
-		desc = d
-	}
 	// a file with a piece left out isn't reviewed: the next push reviews it again
 	s.State.Patches = reviewedPatches(s.State.Patches, patches, slices.DeleteFunc(diff.Paths(d), func(f string) bool {
 		return slices.Contains(r.Failed, f) || slices.Contains(omitted, f)
@@ -361,6 +360,9 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		banner = "No actionable comments were generated in the latest review."
 	}
 	s.Write(banner, footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc)))
+	if d := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); len(d) <= 140 { // GitHub's limit
+		desc = d
+	}
 	return nil
 }
 
@@ -673,6 +675,24 @@ func openFindings(threads, open []forge.Thread, r review.Result) []review.Commen
 		}
 	}
 	return append(cs, r.Comments...)
+}
+
+// stillOpen is what is open after the post: the threads left open, the findings reopen brought back (r's not in
+// post) and, if the review posted, the ones Post sends, as Split keeps them.
+func stillOpen(threads, open []forge.Thread, r review.Result, post review.Result, seen []forge.Thread, lines map[string]string, posted bool) []review.Comment {
+	cs := openFindings(threads, open, review.Result{Fixed: r.Fixed})
+	for _, c := range r.Comments {
+		if !slices.Contains(post.Comments, c) {
+			cs = append(cs, c)
+		}
+	}
+	if posted {
+		inline, outside, folded := forge.Split(post, seen, lines)
+		for _, f := range slices.Concat(inline, outside, folded) {
+			cs = append(cs, f.Comment)
+		}
+	}
+	return cs
 }
 
 // reopen reopens the thread of each fixed finding (gone) that one of cs brings back, and returns the others to post,

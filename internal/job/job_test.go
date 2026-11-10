@@ -743,3 +743,34 @@ func TestFailing(t *testing.T) {
 		t.Fatal("failing:", n)
 	}
 }
+
+func TestStillOpen(t *testing.T) {
+	major := forge.Thread{ID: "a", Path: "a.go", Line: 5, Body: "_🟠 Major_ · **x**"}
+	resolved := forge.Thread{ID: "b", Path: "b.go", Line: 5, Resolved: true}
+	lines := map[string]string{"a.go:5": "", "b.go:5": "", "c.go:1": ""}
+	again := review.Comment{Path: "a.go", Line: 5, Severity: "major"}
+	for _, tc := range []struct {
+		name string
+		cs   []review.Comment
+		want string
+	}{
+		{"repeat of an open thread", []review.Comment{again}, "🟡 3/5 (1 major)"},
+		{"repeat on a resolved thread", []review.Comment{{Path: "b.go", Line: 5, Severity: "critical"}}, "🟡 3/5 (1 major)"},
+		{"new one posted", []review.Comment{{Path: "c.go", Line: 1, Severity: "major"}}, "🔴 4/5 (2 majors)"},
+	} {
+		r := review.Result{Comments: tc.cs}
+		threads := []forge.Thread{major, resolved}
+		cs := stillOpen(threads, nil, r, r, threads, lines, true)
+		if got := forge.Risked(cs, 0).String(); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	// reopened (not in post) counts, an unposted incremental review adds nothing
+	r := review.Result{Comments: []review.Comment{again}}
+	if cs := stillOpen(nil, nil, r, review.Result{}, nil, lines, false); len(cs) != 1 {
+		t.Errorf("reopened: %v", cs)
+	}
+	if cs := stillOpen(nil, nil, r, r, nil, lines, false); len(cs) != 0 {
+		t.Errorf("not posted: %v", cs)
+	}
+}

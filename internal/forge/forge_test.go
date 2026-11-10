@@ -266,6 +266,11 @@ func TestRisked(t *testing.T) {
 	if !strings.Contains(body, "**Merge risk:** 🟡 3/5 (1 major)") || parseState(body).Risk.Score != 3 {
 		t.Fatalf("render: %s", body)
 	}
+	for _, score := range []int{-1, 6, 99} { // an edited sticky mustn't panic the render
+		if body := (State{SHA: "a", Risk: &Risk{Score: score}}).render("", "", "", nil); !strings.Contains(body, "Merge risk") {
+			t.Fatalf("score %d: %s", score, body)
+		}
+	}
 	if old := (State{SHA: "a"}).render("", "", "", nil); strings.Contains(old, "Merge risk") || parseState(old).Risk != nil {
 		t.Fatal("old sticky shows a risk")
 	}

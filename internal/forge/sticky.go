@@ -120,13 +120,13 @@ func Risked(cs []review.Comment, failing int) Risk {
 		n[max(sev, 1)-1]++
 	}
 	var why []string
-	for i, w := range []string{"nit", "minor", "major", "critical"} {
-		if n[i] > 0 {
-			why = append([]string{text.Count(n[i], w)}, why...)
-		}
-	}
 	if failing > 0 {
-		why = append([]string{text.Count(failing, "failing test")}, why...)
+		why = append(why, text.Count(failing, "failing test"))
+	}
+	for i, w := range slices.Backward(review.Severities) {
+		if n[i] > 0 {
+			why = append(why, text.Count(n[i], w))
+		}
 	}
 	r := Risk{Why: strings.Join(why, ", ")}
 	switch {
@@ -146,7 +146,7 @@ func Risked(cs []review.Comment, failing int) Risk {
 
 // String is the score with its band's colour, 🟢 0-1, 🟡 2-3, 🔴 4-5, and why.
 func (r Risk) String() string {
-	s := fmt.Sprintf("%s %d/5", []string{"🟢", "🟡", "🔴"}[r.Score/2], r.Score)
+	s := fmt.Sprintf("%s %d/5", []string{"🟢", "🟡", "🔴"}[min(max(r.Score, 0), 5)/2], r.Score)
 	if r.Why != "" {
 		s += " (" + r.Why + ")"
 	}
