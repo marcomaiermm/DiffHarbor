@@ -85,14 +85,14 @@ type fakeMR struct {
 	drop        func(int) bool // the drafts GitLab doesn't place, by index
 	reject      bool           // a finding's draft refused (4xx)
 	fail        bool           // a finding's draft fails (5xx)
-	failSummary bool           // the summary's note fails
+	failSummary int            // the summary's first notes fail
 	failThreads bool           // the discussions don't read after publishing
 	failAnswer  bool           // an answer's draft fails
 	failPublish bool           // bulk_publish fails
 	drafts      []map[string]any
 	discussions []map[string]any
 	notes       []string // posted on their own
-	late        bool     // a note came after a finding's draft
+	order       []string // notes and publishings, as they came
 	published   int
 	states      []any // bulk_publish's reviewer_state
 	edited      string
@@ -144,6 +144,7 @@ func (f *fakeMR) serve() *pr {
 				return
 			}
 			f.published++
+			f.order = append(f.order, "publish")
 			f.states = append(f.states, b["reviewer_state"])
 		case "POST " + mr + "/discussions":
 			f.discussions = append(f.discussions, b)
@@ -166,11 +167,12 @@ func (f *fakeMR) serve() *pr {
 			}
 			out(ds)
 		case "POST " + mr + "/notes":
-			if f.failSummary {
+			if f.failSummary > 0 {
+				f.failSummary--
 				w.WriteHeader(500)
 				return
 			}
-			f.late = f.late || slices.ContainsFunc(f.drafts, func(d map[string]any) bool { return d["position"] != nil })
+			f.order = append(f.order, "note")
 			f.notes = append(f.notes, b["body"].(string))
 			out(map[string]any{"id": 9})
 		case "POST " + mr + "/discussions/d7/notes":
@@ -197,8 +199,8 @@ var (
 	postCtx = review.Comment{Path: "a.go", Line: 13, Body: "context line"}
 )
 
-// One review: the stale draft dropped; the summary a note of its own before the findings so it heads them and is
-// no thread to resolve; the answer and the findings drafted, published once. GitLab doesn't place the first
+// One review: the stale draft dropped; the answer and the findings drafted, published once; the summary a note of
+// its own before they are published, so it heads them and is no thread to resolve. GitLab doesn't place the first
 // finding: an older thread with its body on its line doesn't count, the summary gets it as plain code.
 func TestPost(t *testing.T) {
 	f := &fakeMR{t: t, stale: "old " + forge.Mark, drop: func(i int) bool { return i == 1 }}
@@ -206,7 +208,8 @@ func TestPost(t *testing.T) {
 	p.Resolve(forge.Thread{ID: "d7"}, "abcdef1")
 	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postFix, postCtx}}, []forge.Thread{{ID: "d0"}}, postDiff, "f")
 	pos := func(i int) map[string]any { return f.drafts[i]["position"].(map[string]any) }
-	if err != nil || n != 2 || !f.deleted || len(f.drafts) != 3 || f.published != 1 || f.states[0] != "reviewed" || len(f.notes) != 1 || f.late ||
+	if err != nil || n != 2 || !f.deleted || len(f.drafts) != 3 || f.published != 1 || f.states[0] != "reviewed" ||
+		!slices.Equal(f.order, []string{"note", "publish"}) ||
 		f.drafts[0]["in_reply_to_discussion_id"] != "d7" || f.drafts[0]["resolve_discussion"] != true ||
 		!strings.Contains(f.drafts[1]["note"].(string), "```suggestion:-1+0\n") ||
 		pos(1)["new_line"] != 12.0 || pos(2)["old_line"] != 3.0 || pos(2)["head_sha"] != "abcdef1" ||
@@ -217,24 +220,39 @@ func TestPost(t *testing.T) {
 	}
 }
 
-// The summary's note fails: no findings without it, the answers to fixed threads still go out.
+// The summary's note fails: the findings and the answers are published all the same, the summary comes after them.
+// Failing again, the review fails.
 func TestPostSummaryFails(t *testing.T) {
-	f := &fakeMR{t: t, failSummary: true}
-	p := f.serve()
-	p.Resolve(forge.Thread{ID: "d7"}, "abcdef1")
-	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx}}, nil, postDiff, "f")
-	if err == nil || n != 0 || f.published != 1 || len(f.drafts) != 1 || f.notes != nil {
-		t.Fatalf("post: %d %v %v %v", n, err, f.drafts, f.notes)
+	for fails, order := range map[int][]string{1: {"publish", "note"}, 2: {"publish"}} {
+		f := &fakeMR{t: t, failSummary: fails}
+		p := f.serve()
+		p.Resolve(forge.Thread{ID: "d7"}, "abcdef1")
+		n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx}}, nil, postDiff, "f")
+		if (err != nil) != (fails == 2) || n != 1 || len(f.drafts) != 2 || !slices.Equal(f.order, order) || f.edited != "" ||
+			fails == 1 && !strings.Contains(f.summary(), "Actionable comments posted: 1") {
+			t.Fatalf("post: %d %v %v %v", n, err, f.drafts, f.order)
+		}
 	}
 }
 
-// Every finding's draft refused (4xx): the summary is edited to keep them.
+// A note GitLab answers without an id is an error: editing "note 0" later would post a second one.
+func TestNoteNoID(t *testing.T) {
+	serve(t, func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, `{}`) })
+	e := &forge.Event{Forge: "gitlab"}
+	e.Repository.ID, e.PullRequest.Number = 5, 3
+	p, _ := (&Hub{}).Open(e)
+	if id, err := p.Note(0, "summary"); err == nil || id != 0 {
+		t.Fatalf("note: %d %v", id, err)
+	}
+}
+
+// Every finding's draft refused (4xx): the summary has them as it is posted, no edit.
 func TestPostRefused(t *testing.T) {
 	f := &fakeMR{t: t, reject: true}
 	p := f.serve()
 	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postCtx, postFix}}, nil, postDiff, "f")
-	if err != nil || n != 2 || f.published != 1 || len(f.notes) != 1 ||
-		!strings.Contains(f.edited, "Comments not posted inline (2)") || strings.Contains(f.edited, "Outside diff") || !strings.Contains(f.edited, "context line") {
+	if err != nil || n != 2 || f.published != 1 || len(f.notes) != 1 || f.edited != "" ||
+		!strings.Contains(f.summary(), "Comments not posted inline (2)") || strings.Contains(f.summary(), "Outside diff") || !strings.Contains(f.summary(), "context line") {
 		t.Fatalf("post: %d %v %v\n%s", n, err, f.notes, f.edited)
 	}
 }

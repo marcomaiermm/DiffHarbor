@@ -146,6 +146,9 @@ func (p *pr) Note(id int64, body string) (int64, error) {
 	}
 	var n note
 	err := call("POST", p.mr+"/notes", b, &n)
+	if err == nil && n.ID == 0 { // id 0 would post a new note where the caller means to edit this one
+		err = errors.New("note: GitLab's answer has no id")
+	}
 	return n.ID, err
 }
 
@@ -376,12 +379,6 @@ func (p *pr) discussions(inline, rest, folded []forge.Finding, raw, footer strin
 // email of its own. GitLab checks a draft's position only on publishing and drops one it can't place: a finding
 // with no discussion afterwards goes into the summary.
 func (p *pr) publish(inline, rest, folded []forge.Finding, threads []forge.Thread, raw, footer string) (int, error) {
-	summary := forge.Summary(inline, rest, folded, footer)
-	id, err := p.Note(0, summary) // first: it heads the findings
-	if err != nil {
-		p.Publish() // the answers to fixed threads still go out
-		return 0, err
-	}
 	lines := olds(raw)
 	var drafted []forge.Finding
 	var keys []string
@@ -400,10 +397,17 @@ func (p *pr) publish(inline, rest, folded []forge.Finding, threads []forge.Threa
 			break
 		}
 	}
+	// the summary once the drafts are made, before they are published: it heads the findings and, in its email
+	// too, has the ones GitLab refused
+	summary := forge.Summary(drafted, rest, folded, footer)
+	id, err := p.Note(0, summary)
+	if err != nil {
+		log.Println(p.e.Key(), "summary:", err) // after the findings then
+	}
 	_ = p.bulkPublish() // failing, the findings have no discussion: the summary takes them
 	posted, lost := p.published(drafted, keys, threads)
 	rest = append(rest, plain(lost)...)
-	if s := forge.Summary(posted, rest, folded, footer); s != summary { // refused, failed or dropped: it says what was posted
+	if s := forge.Summary(posted, rest, folded, footer); id == 0 || s != summary { // not posted yet, or GitLab dropped some
 		_, err = p.Note(id, s)
 	}
 	return len(posted) + len(rest), err
