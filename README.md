@@ -33,7 +33,7 @@ A small Go server takes the webhook and runs your checks on the changed lines. A
 
 ## Highlights
 
-- **Verified findings.** A second, cheaper model checks each finding in the code and drops what it can't back up.
+- **Verified findings.** A second, cheaper model checks each finding in the code and drops what it can't back up. A finding nothing in the codebase triggers today folds into the summary.
 - **Your own checks as context.** gitleaks, tsc, biome, eslint, oxlint, gofmt, vet, staticcheck, golangci-lint, deadcode, fallow, squawk, shellcheck, luacheck, actionlint, zizmor, osv-scanner and the tests of changed packages, on the changed lines.
 - **Incremental.** A push reviews only files whose changed lines changed. A rebase or a merge of main reviews nothing.
 - **Committable fixes.** A local fix becomes a suggestion block. Fixed findings get their threads resolved.
@@ -58,7 +58,7 @@ docker compose up -d
 1. **Diff.** On open, the whole PR against its merge base. On a push, only what changed since the last review.
 2. **Context.** The checks above, codegraph, co-change from git history, the PR's commit messages, the repo's rules and skills from the base branch, learnings and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings. Then it looks at the diff again in the same session without tools: up to 10 more at about a tenth of the cost. [`passes`](#passes) add up to two more finders.
-4. **Verify.** A cheaper model checks each finding in the code.
+4. **Verify.** A cheaper model checks each finding in the code and, for a defect, names what reaches the failing case in normal operation today; the comment shows it.
    The test the report names as proof runs against the base versions of the PR's code files (Go, or JS and TS with the package's vitest, jest, `bun test` or `node --test`; proofs and repros under `bun test` need bun on the server, the image has none). If it still passes there, that is a minor finding.
    For up to 3 major or critical findings per review the verifier also writes a minimal test that fails if the finding is right. It runs once, one at a time, in the sandbox and is deleted after (Go `-timeout=30s` inside a 60 s limit, the JS runners the 60 s limit; a test the file does not define is not run): a finding it reproduces shows the run in its comment, one whose test passes drops to minor, and where no test runs (or it doesn't build) nothing changes.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
@@ -356,6 +356,8 @@ Reviews can report defects (critical, major, minor) and, unless `min_severity` d
 | `quiet` | critical, major | minor, nits |
 | `chill` (default) | critical, major, minor | nits |
 | `assertive` | everything, nits too | |
+
+A kept defect for which the verifier names nothing that reaches it in normal operation folds under every profile, `assertive` too, unless it is critical.
 
 A push's review folds minor findings under `chill` too: most of a push fixes earlier findings, and the edge cases of each fix would open the next round of threads. `min_severity` drops findings before that, `minor` the nits. A folded finding has no thread: a later review of its file may report it again, and an incremental review that finds only folded ones posts nothing.
 
