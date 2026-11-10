@@ -497,3 +497,94 @@ func TestDocsBlock(t *testing.T) {
 		t.Errorf("cited: %q", c)
 	}
 }
+
+func TestAuthorsOf(t *testing.T) { // git ends each record with "\x00\n"
+	log := "Ann\nfix\n\nCo-Authored-By: Claude Opus 4 <noreply@anthropic.com>\n\x00\nBob\nx\n\nGenerated with [Claude Code]\n\x00\n" +
+		"codex[bot]\nfeat\n\x00\nCy\nuses codex in a title\n\x00\n\nuse codex cli\n\x00\nDi\nwip\n\nCo-authored-by: Gemini <g@google.com>\n\x00\nFo\nCo-authored-by: Claudette <c@x.io>\n\x00\nCodexia\nhi\n\x00\nEd\nCo-authored-by: Copilot <c@github.com>\n\x00\n" +
+		"Gu\nCo-authored-by: Codexia <c@x.io>\nCo-authored-by: Geminiano <g@x.io>\n\x00\nHo\ny\n\nGenerated with Claude Code\n\x00\n" +
+		"Ib\nz\n\nCo-authored-by: Claude <c@anthropic.com>\nCo-authored-by: Codex <c@openai.com>\n\x00\n" // two AIs: both
+	if got := authorsOf(log); !slices.Equal(got, []string{"anthropic", "anthropic", "openai", "google", "anthropic", "anthropic", "openai"}) {
+		t.Errorf("authors %v", got)
+	}
+}
+
+func TestInversion(t *testing.T) {
+	defer func(d, m, v, i string) {
+		proc.DataDir, agent.Model, agent.VerifyModel, agent.Inversion = d, m, v, i
+	}(proc.DataDir, agent.Model, agent.VerifyModel, agent.Inversion)
+	proc.DataDir, agent.Model, agent.VerifyModel, agent.Inversion = t.TempDir(), "", "", "on"
+	for _, k := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "AWS_REGION", "AZURE_OPENAI_API_KEY"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("ANTHROPIC_API_KEY", "k")
+	t.Setenv("OPENAI_API_KEY", "k")
+	const (
+		gpt, gptV = "openai/gpt-6.1-terra:high", "openai/gpt-6-luna:high"
+		cl, clV   = "anthropic/claude-sonnet-5-5:high", "anthropic/claude-haiku-5-5:low"
+	)
+	claude := []string{"anthropic"}
+	for _, c := range []struct {
+		name, json          string
+		authors             []string
+		agent, agentV       string // REVIEW_MODEL, VERIFY_MODEL
+		review, verify, why string
+	}{
+		{"no AI commits", `{}`, nil, "", "", gpt, gptV, ""},
+		{"default writes it", `{}`, []string{"openai"}, "", "", cl, clV, "commits by openai"},
+		{"other one wrote it", `{}`, claude, "", "", gpt, gptV, ""},
+		{"most commits count", `{}`, []string{"openai", "anthropic", "anthropic"}, "", "", gpt, gptV, ""},
+		{"most are the default's, one other", `{}`, []string{"openai", "openai", "anthropic"}, "", "", cl, clV, "commits by openai"},
+		{"tie", `{}`, []string{"openai", "anthropic"}, "", "", cl, clV, "commits by openai"},
+		{"env model inverts", `{}`, claude, "anthropic/x", "", gpt, gptV, "commits by anthropic"},
+		{"env verify model yields", `{}`, claude, "anthropic/x", "anthropic/v", gpt, gptV, "commits by anthropic"},
+		{"review.json pins", `{"review_model":"openai/y"}`, []string{"openai"}, "", "", "openai/y", gptV, ""},
+		{"off", `{"model_inversion":false}`, []string{"openai"}, "", "", gpt, gptV, ""},
+	} {
+		agent.Model, agent.VerifyModel = c.agent, c.agentV
+		cfg, err := LoadSettings(c.json)
+		cfg.Authors = c.authors
+		r, v := cfg.Models()
+		if err != nil || r != c.review || v != c.verify || cfg.Inversion() != c.why {
+			t.Errorf("%s: %v %q %q %q", c.name, err, r, v, cfg.Inversion())
+		}
+	}
+	agent.Model, agent.VerifyModel = "", ""
+	for _, c := range []struct{ env, json, review, verify string }{
+		{"", `{}`, gpt, gptV}, // off by default
+		{"off", `{}`, gpt, gptV},
+		{"", `{"model_inversion":true}`, cl, clV},
+		{"anthropic/y", `{}`, "anthropic/y", clV},
+		{"anthropic/y", `{"model_inversion":false}`, gpt, gptV},
+		{"openai/y", `{}`, cl, clV},   // the same maker: Matrix's
+		{"deepseek/y", `{}`, cl, clV}, // no key
+	} {
+		agent.Inversion = c.env
+		cfg, _ := LoadSettings(c.json)
+		cfg.Authors = []string{"openai"}
+		if r, v := cfg.Models(); r != c.review || v != c.verify {
+			t.Errorf("MODEL_INVERSION=%s %s: %q %q", c.env, c.json, r, v)
+		}
+	}
+	agent.Inversion = "on"
+	// Bedrock hosts Claude, Azure GPT: not another maker
+	t.Setenv("AWS_REGION", "r")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "k")
+	t.Setenv("OPENAI_API_KEY", "")
+	agent.Model, agent.VerifyModel = "anthropic/x", ""
+	cfg := Settings{Authors: claude}
+	if r, _ := cfg.Models(); r != "anthropic/x" || cfg.Inversion() != "" {
+		t.Errorf("no other maker with a key: %q", r)
+	}
+	agent.Model = "amazon-bedrock/global.anthropic.claude-sonnet-5-5:high"
+	if r, _ := cfg.Models(); r != agent.Model || cfg.Inversion() != "" {
+		t.Errorf("bedrock reviewing claude with no other maker: %q", r)
+	}
+	t.Setenv("OPENAI_API_KEY", "k")
+	if r, _ := cfg.Models(); r != gpt || cfg.Inversion() != "commits by anthropic" {
+		t.Errorf("bedrock reviewer: %q", r)
+	}
+	agent.Model = "google-vertex/gemini-x"
+	if cfg := (Settings{Authors: []string{"google"}}); cfg.Inversion() != "commits by google" {
+		t.Errorf("vertex reviewing gemini's commits: %q", cfg.Inversion())
+	}
+}

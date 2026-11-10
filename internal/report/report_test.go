@@ -809,6 +809,23 @@ func TestSince(t *testing.T) {
 	}
 }
 
+// Only a repro that failed shows as a test run; a refuted one is the verifier's word.
+func TestReproProof(t *testing.T) {
+	v := prepare(Data{SHA: "0123456789", Diff: "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n x\n+y\n", Findings: []review.Comment{
+		{Path: "a.go", Line: 2, Severity: "major", Title: "r", Evidence: review.Repro + "`go test` fails, as the finding predicts."},
+		{Path: "a.go", Line: 2, Severity: "minor", Title: "p", Evidence: "A test for it passes: `go test`; lowered to minor."},
+	}})
+	var got []string
+	for _, g := range v.Groups {
+		for _, f := range g.Items {
+			got = append(got, f.Title+" "+f.Proof)
+		}
+	}
+	if want := []string{"r Test run", "p AI cross-check"}; !slices.Equal(got, want) {
+		t.Errorf("proofs: %v", got)
+	}
+}
+
 func TestJudge(t *testing.T) {
 	const d = "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n x\n+y\n"
 	v := prepare(Data{SHA: "0123456789", Diff: d, Decisions: []review.Decision{{Text: "Retry?"}}, Flow: []review.Step{{Title: "s", Files: []string{"a.go"}}},

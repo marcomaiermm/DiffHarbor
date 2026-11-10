@@ -21,6 +21,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
   "tests": true,
   "review_model": "openai/gpt-6.1-sol",
   "verify_model": "anthropic/claude-haiku-5-5:low",
+  "model_inversion": true,
   "large_pr": "all",
   "max_parts": 4,
   "passes": [{}, {"max_lines": 1500}],
@@ -46,8 +47,9 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `ignore` | Globs. A path without one takes its folder. `!glob` takes paths back in: `["src/ui", "!src/ui/{chip,toast}.tsx"]`. Neither the model nor a check sees these files. |
 | `profile` | `quiet`, `chill` (default) or `assertive`: which findings go inline and which fold into the review's summary. See [Review profiles](#review-profiles). |
 | `min_severity` | `minor`, `major` or `critical`: findings below are dropped before verification, nowhere posted. `minor` drops the nits. |
-| `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. |
+| `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. The same switch allows the proof test (run against the base versions of the code files; Go, vitest, jest, `bun test`, `node --test`; proofs and repros under `bun test` need bun on the server, the image has none) and the verifier's repro tests for major and critical findings (3 per review, one at a time, Go `-timeout=30s` inside a 60 s limit and the JS runners the 60 s limit, deleted after the run). |
 | `review_model`, `verify_model` | Apply where the server sets none. The provider's key must be on the server. |
+| `model_inversion` | `true` switches to another provider's model when at least as many commits say the review model's provider's AI wrote them as any other AI (Claude Code, Codex, Gemini trailers; commits that name none don't count); `false` doesn't. Default: the server's `MODEL_INVERSION`, off. A pinned `review_model` never switches. The other provider's key must be on the server. |
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `passes` | Finders per part, at most 3. See [Passes](#passes). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
@@ -78,6 +80,8 @@ Reviews can report defects (critical, major, minor) and, unless `min_severity` d
 | `assertive` | everything, nits too | |
 
 A push's review folds minor findings under `chill` too: most of a push fixes earlier findings, and the edge cases of each fix would open the next round of threads. `min_severity` drops findings before that, `minor` the nits. A folded finding has no thread: a later review of its file may report it again, and an incremental review that finds only folded ones posts nothing.
+
+**Merge risk.** The walkthrough shows a score from 0 to 5, computed from what is still open, not by the model: 0 nothing open, 1 only nits (folded ones too), 2 a minor finding, 3 one major, 4 two majors or failing tests, 5 any critical. Findings from earlier reviews that are still open count by their severity (a minor if unknown). Colour: green 0-1, yellow 2-3, red 4-5. The `diffharbor` commit status adds it when the text fits GitHub's 140 characters.
 
 The first that sets a profile wins:
 

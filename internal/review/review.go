@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -51,7 +52,7 @@ Also add to the JSON, for the person who reviews it after you:
 "files":["<changed code file>"],"placed":{"<one of its files>":"<only where not obvious: a few words on why it sits in this step>"}}]
  the order to read the changed code files in, following the logic (entry point, then what it calls, then data and storage), 3-8 steps; tests, docs, data and mechanical edits stay out;
 "story":{"problem":"<one sentence, at most 20 words: what was wrong or missing before>","before":"<at most 25 words: one concrete case, an input or action and what happened>","after":"<at most 25 words: the same case now>",
-"before_at":"<path:line of the code that did it before, empty if outside the diff>","after_at":"<path:line of the code that does it now>","proof":"<the test that runs this case, as go test names it (TestX/sub), empty if none>"}
+"before_at":"<path:line of the code that did it before, empty if outside the diff>","after_at":"<path:line of the code that does it now>","proof":"<the test that runs this case: go test's name (TestX/sub), or suite > test in JS, empty if none>"}
  only for a change in behaviour a user or caller sees; omit it for refactors, tests, docs;
 "decisions":[{"text":"<a question only a person can answer: scope, product behaviour, architecture, risk; or an assumption the code makes that nothing states or checks (a single writer, the input fits in memory, the caller already authorized), asked as: does it hold?; no bug>","at":"<path:line it is about, empty if none>"}] max 3, [] if none;
 In the summary, put the place of each main claim right after it as (path:line).
@@ -140,10 +141,11 @@ type Comment struct {
 	Fix      string `json:"fix,omitempty"`
 	// Evidence is the verifier's reason to keep it, empty when no verify pass confirmed it. Not read from the
 	// review model's JSON: it must not vouch for itself.
-	Evidence string `json:"-"`
-	Fold     bool   `json:"-"`               // Settings.Fold: in the review's summary, folded, not inline
-	Again    *int   `json:"again,omitempty"` // the fixed earlier finding it brings back, an index into Input.Addressed
-	pass     int    // the reviewer pass that reported it: capped's limits hold per pass
+	Evidence string     `json:"-"`
+	Fold     bool       `json:"-"`               // Settings.Fold: in the review's summary, folded, not inline
+	Again    *int       `json:"again,omitempty"` // the fixed earlier finding it brings back, an index into Input.Addressed
+	pass     int        // the reviewer pass that reported it: capped's limits hold per pass
+	repro    *reproTest // the verifier's test for it
 }
 
 // Doc is a section of the docs the review reads as reference: never rules, so never in Trusted. Text is
@@ -267,8 +269,10 @@ type Input struct {
 	Addressed   []Comment         // resolved ones a commit fixed (forge.Thread.Addressed): one may come back
 	Closed      []Comment         // the other resolved ones: declined, or settled in their thread
 	Settings    Settings
-	Guide       bool // ask for Result.Flow and Decisions
-	split       bool // and with Guide for Result.Split: the PR reaches review.json's suggest_split
+	Guide       bool          // ask for Result.Flow and Decisions
+	repros      *atomic.Int32 // the repro tests this review ran, of maxRepros
+	reproSlot   chan struct{} // one repro runs at a time: parts share the checkout
+	split       bool          // and with Guide for Result.Split: the PR reaches review.json's suggest_split
 }
 
 // Analyze is the pipeline: checks + history as hints, then per part a review pass and a verification pass on its findings.
@@ -345,6 +349,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	head := fmt.Sprintf("# %s\n\n%s\n\n%s%s%s%s", in.Title, text.Truncate(in.Body, 2000), commits, in.Ticket, docsBlock(in.Docs), hints.String())
 	vm := cmp.Or(verify, agent.PassModel(rm, cmp.Or(map[string]string{"high": "high"}[lvl], "medium")))
 	sem := make(chan struct{}, partsAtOnce)
+	in.repros, in.reproSlot = new(atomic.Int32), make(chan struct{}, 1)
 	ps := make([]part, len(in.Parts))
 	if len(in.Parts) == 1 {
 		// One pass over the whole diff: about the findings of parts at a third fewer tokens, so only a diff past
@@ -378,6 +383,9 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 		wg.Wait()
 	}
 	r, tag, err := merge(ps, m, vm, ci)
+	if why := in.Settings.Inversion(); why != "" {
+		tag += " · " + why // the reviewer isn't the default's: say why
+	}
 	r.Tests = tests
 	r.Comments = append(r.Comments, proofOnBase(ctx, in.Sandbox, repo, r.Story.Proof, tests.Ran, in.Settings)...)
 	fold(r.Comments, in.Settings)
@@ -516,12 +524,16 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 	var kept, dropped []Comment
 	var fixed []int
 	var ok bool
+	sys := verifySystem + in.Trusted
+	if slices.ContainsFunc(diff.Paths(block), in.Settings.RunsTests) {
+		sys = verifySystem + reproSystem + in.Trusted
+	}
 	held(sem, func() {
-		out, err = in.Agent.Run(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted, task+block,
+		out, err = in.Agent.Run(ctx, in.Sandbox, "verify"+name, sys, task+block,
 			"Verify these findings. End with the JSON verdicts.", vm)
 		kept, dropped, fixed, ok = verdicts(r.Comments, r.Fixed, out, owns)
 		if err == nil && !ok {
-			out, err = in.Agent.Continue(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted, verifyRepair, vm)
+			out, err = in.Agent.Continue(ctx, in.Sandbox, "verify"+name, sys, verifyRepair, vm)
 			if err == nil {
 				kept, dropped, fixed, ok = verdicts(r.Comments, r.Fixed, out, owns)
 			}
@@ -532,7 +544,8 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 		r.Fixed = nil // resolving threads needs proof
 		return part{r: r, found: len(r.Comments)}
 	}
-	// lowered below min_severity, or to a nit past the nits' cap
+	held(sem, func() { reproduce(ctx, in, kept) })
+	// lowered below min_severity (a refuted repro too), or to a nit past the nits' cap
 	kept = capped(slices.DeleteFunc(kept, func(c Comment) bool { return !in.Settings.Keep(c) }))
 	// claimed fixed, but not: their threads stay open
 	var rejected []int
@@ -542,7 +555,7 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 		}
 	}
 	if len(rejected) > 0 && len(kept) > 0 {
-		kept, dropped = repeats(ctx, in, name, vm, sem, kept, dropped, rejected)
+		kept, dropped = repeats(ctx, in, name, vm, sys, sem, kept, dropped, rejected)
 	}
 	p := part{r: r, found: len(r.Comments), kept: len(kept), verified: true}
 	p.r.Fixed, p.r.Comments, p.r.Dropped = fixed, kept, dropped
@@ -551,7 +564,7 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 
 // repeats asks the verify session, tools off, which kept findings repeat a rejected claimed fix: its thread stays
 // open, the finding would post it twice. A failed answer keeps all: a thread twice beats a finding lost.
-func repeats(ctx context.Context, in Input, name, vm string, sem chan struct{}, kept, dropped []Comment, rejected []int) ([]Comment, []Comment) {
+func repeats(ctx context.Context, in Input, name, vm, sys string, sem chan struct{}, kept, dropped []Comment, rejected []int) ([]Comment, []Comment) {
 	earlier, ids := make([]Comment, len(rejected)), make([]int, len(rejected))
 	for k, i := range rejected {
 		earlier[k], ids[k] = in.Prior[i], len(kept)+k // numbered past the kept ones
@@ -559,7 +572,7 @@ func repeats(ctx context.Context, in Input, name, vm string, sem chan struct{}, 
 	var out string
 	var err error
 	held(sem, func() {
-		out, err = in.Agent.Continue(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted,
+		out, err = in.Agent.Continue(ctx, in.Sandbox, "verify"+name, sys,
 			fmt.Sprintf(repeatsTask, findings(earlier, ids), findings(kept, nil)), vm)
 	})
 	var v struct {
@@ -729,14 +742,15 @@ func capped(cs []Comment) []Comment {
 func verdicts(cs []Comment, claimed []int, text string, owns func(path string, line int) bool) (kept, dropped []Comment, _ []int, _ bool) {
 	var v struct {
 		Verdicts *[]struct {
-			I        int    `json:"i"`
-			Keep     bool   `json:"keep"`
-			Path     string `json:"path"`
-			Line     int    `json:"line"`
-			Evidence string `json:"evidence"`
-			Only     string `json:"only"`
-			Fix      *bool  `json:"fix"`
-			Severity string `json:"severity"`
+			I        int        `json:"i"`
+			Keep     bool       `json:"keep"`
+			Path     string     `json:"path"`
+			Line     int        `json:"line"`
+			Evidence string     `json:"evidence"`
+			Only     string     `json:"only"`
+			Fix      *bool      `json:"fix"`
+			Severity string     `json:"severity"`
+			Repro    *reproTest `json:"repro"`
 		} `json:"verdicts"`
 		Fixed []int `json:"fixed"`
 	}
@@ -772,7 +786,7 @@ func verdicts(cs []Comment, claimed []int, text string, owns func(path string, l
 			c.Prompt = strings.ReplaceAll(c.Prompt, fmt.Sprintf("line %d", c.Line), fmt.Sprintf("line %d", d.Line))
 			c.Line = d.Line
 		}
-		c.Evidence = cmp.Or(d.Evidence, "kept by the verifier")
+		c.Evidence, c.repro = cmp.Or(d.Evidence, "kept by the verifier"), d.Repro
 		if d.Only != "" { // the title, body and fix were written for the whole finding: the agent fixes the part that holds
 			c.Body += "\n\n_Only this part holds:_ " + d.Only
 			c.Prompt += "\nOnly this part holds, fix just that: " + d.Only

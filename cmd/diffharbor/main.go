@@ -77,6 +77,7 @@ func configure() server.Config {
 	proc.CacheDir = cmp.Or(os.Getenv("CACHE_DIR"), proc.CacheDir)
 	agent.Model, agent.VerifyModel = os.Getenv("REVIEW_MODEL"), os.Getenv("VERIFY_MODEL")
 	agent.FallbackModel, agent.FallbackVerifyModel = os.Getenv("FALLBACK_MODEL"), os.Getenv("FALLBACK_VERIFY_MODEL")
+	agent.Inversion = os.Getenv("MODEL_INVERSION")
 	ticket.URL, ticket.APIKey = os.Getenv("ITSAPLAN_URL"), os.Getenv("ITSAPLAN_API_KEY")
 	ticket.LinearKey, ticket.Provider = os.Getenv("LINEAR_API_KEY"), os.Getenv("TICKET_PROVIDER")
 	job.ReportURL = strings.TrimSuffix(os.Getenv("REPORT_URL"), "/")

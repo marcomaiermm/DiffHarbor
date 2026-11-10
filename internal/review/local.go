@@ -10,8 +10,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -188,6 +190,41 @@ func Messages(ctx context.Context, sb *proc.Sandbox) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// aiAuthors match a commit (author line, then message) to the provider of the AI that wrote it. Only clear signals:
+// Cursor and Copilot pick varying models. The commit is untrusted, it only picks a model.
+var aiAuthors = []struct {
+	provider string
+	re       *regexp.Regexp
+}{
+	{"anthropic", regexp.MustCompile(`(?im)^co-authored-by:\s*claude\b|generated with \[?claude code\b`)},
+	{"openai", regexp.MustCompile(`(?im)^co-authored-by:\s*codex\b|\A[^\n]*codex[^\n]*\[bot\]`)},
+	{"google", regexp.MustCompile(`(?im)^co-authored-by:\s*gemini\b|\A[^\n]*gemini-code-assist`)},
+}
+
+// Authors is the provider of the AI behind each of the PR's commits an AI wrote, from a Checkout: a commit of two AIs
+// names both. nil when git fails, which the log says: no model inversion then.
+func Authors(ctx context.Context, sb *proc.Sandbox) []string {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "log", "--no-merges", "--format=%an%n%B%x00", "refs/base..HEAD"))
+	if err != nil {
+		log.Println("authors:", err)
+		return nil
+	}
+	return authorsOf(string(out))
+}
+
+func authorsOf(log string) (ps []string) {
+	for c := range strings.SplitSeq(log, "\x00") {
+		for _, a := range aiAuthors {
+			if a.re.MatchString(strings.TrimPrefix(c, "\n")) {
+				ps = append(ps, a.provider)
+			}
+		}
+	}
+	return ps
 }
 
 // Behind lists the base's commits the PR doesn't have yet, newest first, from a Checkout: what moved on under it.

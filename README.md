@@ -59,7 +59,8 @@ docker compose up -d
 2. **Context.** The checks above, codegraph, co-change from git history, the PR's commit messages, the repo's rules and skills from the base branch, learnings and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings. Then it looks at the diff again in the same session without tools: up to 10 more at about a tenth of the cost. [`passes`](#passes) add up to two more finders.
 4. **Verify.** A cheaper model checks each finding in the code.
-   For Go, the test the report names as proof runs against the base versions of the PR's code files. If it still passes there, that is a minor finding.
+   The test the report names as proof runs against the base versions of the PR's code files (Go, or JS and TS with the package's vitest, jest, `bun test` or `node --test`; proofs and repros under `bun test` need bun on the server, the image has none). If it still passes there, that is a minor finding.
+   For up to 3 major or critical findings per review the verifier also writes a minimal test that fails if the finding is right. It runs once, one at a time, in the sandbox and is deleted after (Go `-timeout=30s` inside a 60 s limit, the JS runners the 60 s limit; a test the file does not define is not run): a finding it reproduces shows the run in its comment, one whose test passes drops to minor, and where no test runs (or it doesn't build) nothing changes.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
 **What the review reads:**
@@ -158,13 +159,15 @@ Differences to GitHub:
 
 | Variable | |
 |---|---|
-| `REVIEW_MODEL`, `VERIFY_MODEL` | Pin the models. The env wins over a repo's `review.json`. |
+| `REVIEW_MODEL`, `VERIFY_MODEL` | The models. The env wins over a repo's `review.json`; model inversion can still replace them. |
 | `FALLBACK_MODEL`, `FALLBACK_VERIFY_MODEL` | The fallback instead of the next provider. |
+| `MODEL_INVERSION` | Model inversion (below), off by default: `on` turns it on in every repo. A model (`openai/gpt-6.1-sol`) does too, as the one to switch to; without its key, the next provider's. A repo's `model_inversion` wins. |
 | `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `DEEPSEEK_BASE_URL` | A gateway in front of the provider (LiteLLM, your company's AI gateway), with the gateway's key. |
 | `AZURE_OPENAI_DEPLOYMENT_NAME_MAP` | Deployments not named like the models: `gpt-6.1-sol=review,gpt-6-luna=verify`. |
 
 - Bedrock in the EU: `amazon-bedrock/eu.anthropic.…`.
 - Each pass gets only its own provider's key.
+- Model inversion, off by default (`MODEL_INVERSION` or `"model_inversion": true` turn it on): when the AI of the review model's provider wrote at least as many of a PR's commits as any other AI (Claude Code, Codex or Gemini trailers, bot authors; commits without one don't count), `MODEL_INVERSION`'s model, else the next provider with a key, reviews and verifies, `REVIEW_MODEL` included. The walkthrough footer says so. A `review_model` in `review.json` keeps the model.
 
 > [!NOTE]
 > Use API keys. Pi can also log in with a ChatGPT subscription: `openai/…` without `OPENAI_API_KEY`, then `docker compose exec -it diffharbor diffharbor login`. Whether your plan's terms allow that for a review bot is yours to check. You use it at your own risk.
@@ -291,6 +294,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
   "tests": true,
   "review_model": "openai/gpt-6.1-sol",
   "verify_model": "anthropic/claude-haiku-5-5:low",
+  "model_inversion": true,
   "large_pr": "all",
   "max_parts": 4,
   "passes": [{}, {"max_lines": 1500}],
@@ -318,6 +322,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `min_severity` | `minor`, `major` or `critical`: findings below are dropped before verification, nowhere posted. `minor` drops the nits. |
 | `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. |
 | `review_model`, `verify_model` | Apply where the server sets none. The provider's key must be on the server. |
+| `model_inversion` | `true` switches to another provider's model when at least as many commits say the review model's provider's AI wrote them as any other AI (Claude Code, Codex, Gemini trailers; commits that name none don't count); `false` doesn't. Default: the server's `MODEL_INVERSION`, off. A pinned `review_model` never switches. The other provider's key must be on the server. |
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `passes` | Finders per part, at most 3. See [Passes](#passes). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
@@ -349,6 +354,8 @@ Reviews can report defects (critical, major, minor) and, unless `min_severity` d
 | `assertive` | everything, nits too | |
 
 A push's review folds minor findings under `chill` too: most of a push fixes earlier findings, and the edge cases of each fix would open the next round of threads. `min_severity` drops findings before that, `minor` the nits. A folded finding has no thread: a later review of its file may report it again, and an incremental review that finds only folded ones posts nothing.
+
+**Merge risk.** The walkthrough shows a score from 0 to 5, computed from what is still open, not by the model: 0 nothing open, 1 only nits (folded ones too), 2 a minor finding, 3 one major, 4 two majors or failing tests, 5 any critical. Findings from earlier reviews that are still open count by their severity (a minor if unknown). Colour: green 0-1, yellow 2-3, red 4-5. The `diffharbor` commit status adds it when the text fits GitHub's 140 characters.
 
 The first that sets a profile wins:
 
