@@ -73,10 +73,15 @@ type Event struct {
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"sender"`
-	Changes struct { // an edited comment's old body
+	Changes struct { // an edited comment's old body, an edited PR's old base
 		Body struct {
 			From string `json:"from"`
 		} `json:"body"`
+		Base struct {
+			Ref struct {
+				From string `json:"from"`
+			} `json:"ref"`
+		} `json:"base"`
 	} `json:"changes"`
 }
 

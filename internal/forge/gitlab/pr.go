@@ -171,6 +171,7 @@ func (p *pr) Threads() ([]forge.Thread, error) {
 		ts = append(ts, forge.Thread{
 			ID: d.ID, Comment: n.ID, Resolved: n.Resolved, Path: n.Position.NewPath,
 			Line: n.Position.NewLine, Original: n.Position.NewLine, Body: n.Body, Replies: forge.Answers(rs),
+			Addressed: forge.Addressed(rs),
 		})
 	}
 	return ts, err
@@ -185,7 +186,7 @@ type answer struct{ id, body string }
 
 // Resolve answers the thread and resolves it. In a review the answer is a draft that resolves it once published.
 func (p *pr) Resolve(t forge.Thread, sha string) {
-	body := fmt.Sprintf("✅ Addressed in `%s`\n\n%s", sha[:7], forge.Mark)
+	body := forge.AddressedIn(sha)
 	if p.batch() {
 		err := call("POST", p.mr+"/draft_notes", map[string]any{"note": body, "in_reply_to_discussion_id": t.ID, "resolve_discussion": true}, nil)
 		if err == nil {
@@ -196,6 +197,19 @@ func (p *pr) Resolve(t forge.Thread, sha string) {
 		log.Println(p.e.Key(), "draft answer:", err)
 	}
 	p.answer(answer{t.ID, body})
+}
+
+// Reopen answers the thread with the finding a commit brought back and reopens it, on its own: a draft can only
+// resolve.
+func (p *pr) Reopen(t forge.Thread, sha string, c forge.Finding) error {
+	body := forge.BackIn(sha, c, func(c forge.Finding) string { return inert(forge.Format(c, "")) })
+	if err := call("POST", fmt.Sprintf("%s/discussions/%s/notes", p.mr, url.PathEscape(t.ID)), map[string]string{"body": body}, nil); err != nil {
+		return err
+	}
+	if err := call("PUT", fmt.Sprintf("%s/discussions/%s?resolved=false", p.mr, url.PathEscape(t.ID)), nil, nil); err != nil {
+		log.Println(p.e.Key(), "reopen:", err) // answered: the finding is there, in a thread still resolved
+	}
+	return nil
 }
 
 // answer answers the thread on its own and resolves it.

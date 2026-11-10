@@ -36,7 +36,8 @@ const schema = `Output JSON only:
 "fixed":[<index of an earlier finding the code now fixes>],"comments":[{"path":"<file>","line":<line in new file>,"severity":"critical|major|minor|nit",
 "title":"<one line>","body":"<markdown: failing input or sequence, impact, fix with a short snippet unless fix carries it>",
 "prompt":"<for an AI agent: 'In <path> around line <n>, ...': change, edge cases, test>",
-"existing":"<only if the whole fix is one local edit: the current lines it replaces, copied exactly from the new file>","fix":"<their replacement, same indentation>"}]}
+"existing":"<only if the whole fix is one local edit: the current lines it replaces, copied exactly from the new file>","fix":"<their replacement, same indentation>",
+"again":<only if this change brings back an earlier finding listed as fixed: its number>}]}
 At most 10 findings that aren't nits, plus at most 5 nits, [] if none.`
 
 // splitSchema asks a large PR's guide for the changes that could each merge on their own: more than one asks to split.
@@ -140,7 +141,8 @@ type Comment struct {
 	// Evidence is the verifier's reason to keep it, empty when no verify pass confirmed it. Not read from the
 	// review model's JSON: it must not vouch for itself.
 	Evidence string `json:"-"`
-	Fold     bool   `json:"-"` // Settings.Fold: in the review's summary, folded, not inline
+	Fold     bool   `json:"-"`               // Settings.Fold: in the review's summary, folded, not inline
+	Again    *int   `json:"again,omitempty"` // the fixed earlier finding it brings back, an index into Input.Addressed
 	pass     int    // the reviewer pass that reported it: capped's limits hold per pass
 }
 
@@ -262,7 +264,8 @@ type Input struct {
 	Checks      []checks.Script   // the repo's own check scripts
 	Registries  []checks.Registry // the npm registries the installs read from
 	Prior       []Comment         // open findings from earlier reviews on these files
-	Closed      []Comment         // resolved ones: fixed or declined
+	Addressed   []Comment         // resolved ones a commit fixed (forge.Thread.Addressed): one may come back
+	Closed      []Comment         // the other resolved ones: declined, or settled in their thread
 	Settings    Settings
 	Guide       bool // ask for Result.Flow and Decisions
 	split       bool // and with Guide for Result.Split: the PR reaches review.json's suggest_split
@@ -328,12 +331,12 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	if len(in.Prior) > 0 {
 		fmt.Fprintf(&hints, "## Earlier findings, still open (report the ones the code now fixes in \"fixed\")\n\n%s", findings(in.Prior, nil))
 	}
+	// numbered after the open ones, so "fixed" can't name a resolved one, and "again" only a fixed one
+	if len(in.Addressed) > 0 {
+		fmt.Fprintf(&hints, "## Earlier findings, fixed by a commit (if this change brings one back, report it again with \"again\": its number)\n\n%s", findings(in.Addressed, after(len(in.Prior), len(in.Addressed))))
+	}
 	if len(in.Closed) > 0 {
-		ids := make([]int, len(in.Closed)) // numbered after the open ones, so "fixed" can't name a closed one
-		for k := range ids {
-			ids[k] = len(in.Prior) + k
-		}
-		fmt.Fprintf(&hints, "## Earlier findings, closed (fixed or declined by the maintainer; don't report them again unless this change brings the problem back; the same flaw left in a sibling field, deeper level or other caller is new)\n\n%s", findings(in.Closed, ids))
+		fmt.Fprintf(&hints, "## Earlier findings, closed (declined by the maintainer or settled in the thread; don't report them again unless this change brings the problem back; the same flaw left in a sibling field, deeper level or other caller is new)\n\n%s", findings(in.Closed, after(len(in.Prior)+len(in.Addressed), len(in.Closed))))
 	}
 	commits := ""
 	if in.Commits != "" {
@@ -457,6 +460,15 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 	}
 	slices.Sort(r.Fixed)
 	r.Fixed = slices.DeleteFunc(slices.Compact(r.Fixed), func(i int) bool { return i < 0 || i >= len(in.Prior) })
+	for i, c := range r.Comments { // "again" numbers the fixed ones after the open ones: to an index into in.Addressed
+		if c.Again != nil {
+			a := *c.Again - len(in.Prior)
+			r.Comments[i].Again = nil
+			if a >= 0 && a < len(in.Addressed) {
+				r.Comments[i].Again = &a
+			}
+		}
+	}
 	mine, all := diff.Paths(block), diff.Paths(strings.Join(in.Parts, ""))
 	here, every := diff.RightLines(block, true), diff.RightLines(strings.Join(in.Parts, ""), true)
 	// another part's file, or lines of a file in pieces, are its reviewer's: two parts reported one finding at two
@@ -822,6 +834,15 @@ func findings(cs []Comment, ids []int) string {
 		}
 	}
 	return b.String()
+}
+
+// after is n prompt numbers from first on.
+func after(first, n int) []int {
+	ids := make([]int, n)
+	for k := range ids {
+		ids[k] = first + k
+	}
+	return ids
 }
 
 // Level routes the thinking effort: risky paths and big diffs get more.

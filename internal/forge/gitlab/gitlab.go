@@ -300,7 +300,8 @@ func (h *Hub) Parse(hd http.Header, body []byte) (*forge.Event, error) {
 		Attrs   json.RawMessage `json:"object_attributes"`
 		MR      mr              `json:"merge_request"`
 		Changes struct {
-			Draft *struct{ Previous, Current bool } `json:"draft"`
+			Draft  *struct{ Previous, Current bool } `json:"draft"`
+			Target *struct{ Previous string }        `json:"target_branch"`
 		} `json:"changes"`
 	}
 	if err := json.Unmarshal(body, &w); err != nil {
@@ -340,6 +341,8 @@ func (h *Hub) Parse(hd http.Header, body []byte) (*forge.Event, error) {
 			e.Action = "ready_for_review"
 		case a.Action == "update" && d != nil && !d.Previous && d.Current:
 			e.Action = "converted_to_draft"
+		case a.Action == "update" && w.Changes.Target != nil: // retargeted: as GitHub's edited base
+			e.Action, e.Changes.Base.Ref.From = "edited", w.Changes.Target.Previous
 		default: // title, labels, approvals: nothing to review
 			return nil, nil
 		}

@@ -756,3 +756,22 @@ func TestDropNoID(t *testing.T) {
 		t.Fatal("kept its reports:", vs, err)
 	}
 }
+
+// GitHub's edited PR: a new base reviews (a stacked PR moved to main), a new title doesn't.
+func TestReviews(t *testing.T) {
+	for body, want := range map[string]bool{
+		`{"action":"edited","pull_request":{"number":1},"changes":{"base":{"ref":{"from":"feat"},"sha":{"from":"a1"}}}}`: true,
+		`{"action":"edited","pull_request":{"number":1},"changes":{"title":{"from":"old"}}}`:                             false,
+		`{"action":"synchronize","pull_request":{"number":1}}`:                                                           true,
+		`{"action":"labeled","pull_request":{"number":1}}`:                                                               false,
+	} {
+		var e forge.Event
+		if err := json.Unmarshal([]byte(body), &e); err != nil {
+			t.Fatal(err)
+		}
+		e.Kind = "pull_request"
+		if reviews(&e) != want {
+			t.Errorf("%s: reviews %v", body, !want)
+		}
+	}
+}

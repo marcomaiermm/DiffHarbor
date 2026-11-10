@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -259,5 +260,59 @@ func TestPostFolded(t *testing.T) {
 	}}, nil, src, "f")
 	if err != nil || n != 1 || len(sent.Comments) != 1 || sent.Comments[0]["line"] != 2.0 || !strings.Contains(sent.Body, "🧹 Nitpicks (1)") {
 		t.Fatalf("post: %d %v %+v", n, err, sent)
+	}
+}
+
+// A thread is addressed while our "✅ Addressed in" is its last reply: a person's reply after it, or the text in
+// theirs (also a user's named like the app), makes it settled in the thread instead.
+func TestThreadsAddressed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		node := func(id, replies string) string {
+			return `{"id":"` + id + `","isResolved":true,"comments":{"nodes":[{"databaseId":1,"path":"a.go","line":1,"body":"x ` + forge.Mark +
+				`","author":{"__typename":"Bot","login":"app"}}]},"replies":{"nodes":[` + replies + `]}}`
+		}
+		ok, _ := json.Marshal(forge.AddressedIn("abcdef1"))
+		ours := `{"databaseId":2,"body":` + string(ok) + `,"author":{"__typename":"Bot","login":"app"}}`
+		fmt.Fprint(w, `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[`+node("fixed", ours)+","+
+			node("declined", ours+`,{"databaseId":3,"body":"no, it's back","author":{"login":"kev"}}`)+","+
+			node("copied", `{"databaseId":2,"body":`+string(ok)+`,"author":{"__typename":"User","login":"kev"}}`)+","+
+			node("namesake", `{"databaseId":2,"body":`+string(ok)+`,"author":{"__typename":"User","login":"app"}}`)+`]}}}}}`)
+	}))
+	defer srv.Close()
+	APIURL, Slug = srv.URL, "app"
+	ts, err := Threads("o/r", 1, "t")
+	if err != nil || len(ts) != 4 || !ts[0].Addressed || ts[1].Addressed || ts[2].Addressed || ts[3].Addressed {
+		t.Fatalf("threads %+v %v", ts, err)
+	}
+}
+
+// A fixed finding back: answered in its thread, then reopened with a token that may (Contents: write). A failed
+// answer is an error, and nothing more is sent.
+func TestReopen(t *testing.T) {
+	AppKey, _ = rsa.GenerateKey(rand.Reader, 2048)
+	var sent []string
+	fail := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		sent = append(sent, r.URL.Path+" "+string(b))
+		if fail {
+			w.WriteHeader(http.StatusBadGateway)
+		}
+		fmt.Fprint(w, `{"token":"w","data":{}}`)
+	}))
+	defer srv.Close()
+	APIURL = srv.URL
+	e := &forge.Event{}
+	e.PullRequest.Number = 1
+	p := &pr{e: e, api: "/repos/o/r", token: "t"}
+	c := forge.Finding{Comment: review.Comment{Path: "a.go", Line: 42, Severity: "major", Title: "race", Body: "back"}}
+	if err := p.Reopen(forge.Thread{ID: "T", Comment: 9}, "abcdef1", c); err != nil || len(sent) != 3 ||
+		!strings.HasPrefix(sent[0], `/repos/o/r/pulls/1/comments/9/replies {"body":"🔁 Back in `+"`abcdef1`, at `a.go:42`"+`\n\n_🟠 Major_ · **race**`) ||
+		!strings.Contains(sent[1], `"contents":"write"`) || !strings.Contains(sent[2], `unresolveReviewThread(input:{threadId:$id})`) {
+		t.Fatalf("%q %v", sent, err)
+	}
+	sent, fail = nil, true
+	if err := p.Reopen(forge.Thread{ID: "T", Comment: 9}, "abcdef1", c); err == nil || len(sent) != 1 {
+		t.Fatalf("%q %v", sent, err)
 	}
 }
