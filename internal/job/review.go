@@ -218,6 +218,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	var regs []checks.Registry
 	var docs []review.Doc
 	commits := forge.Redact(review.Messages(ctx, sb))
+	cfg.Authors = review.Authors(ctx, sb)
 	if pr.Head.Repo.ID == e.Repository.ID { // a fork's author could name any ticket and read it in the review, or fetch the internal packages
 		tid, tk = ticket.Lookup(ctx, cfg.Tickets, pr.Title, pr.Head.Ref, pr.Body)
 		regs, _ = checks.Registries(e.Owner()) // main checked them

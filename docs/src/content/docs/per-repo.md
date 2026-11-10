@@ -21,6 +21,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
   "tests": true,
   "review_model": "openai/gpt-6.1-sol",
   "verify_model": "anthropic/claude-haiku-5-5:low",
+  "model_inversion": true,
   "large_pr": "all",
   "max_parts": 4,
   "passes": [{}, {"max_lines": 1500}],
@@ -48,6 +49,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `min_severity` | `minor`, `major` or `critical`: findings below are dropped before verification, nowhere posted. `minor` drops the nits. |
 | `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. The same switch allows the proof test (run against the base versions of the code files; Go, vitest, jest, `bun test`, `node --test`; proofs and repros under `bun test` need bun on the server, the image has none) and the verifier's repro tests for major and critical findings (3 per review, one at a time, Go `-timeout=30s` inside a 60 s limit and the JS runners the 60 s limit, deleted after the run). |
 | `review_model`, `verify_model` | Apply where the server sets none. The provider's key must be on the server. |
+| `model_inversion` | `true` switches to another provider's model when at least as many commits say the review model's provider's AI wrote them as any other AI (Claude Code, Codex, Gemini trailers; commits that name none don't count); `false` doesn't. Default: the server's `MODEL_INVERSION`, off. A pinned `review_model` never switches. The other provider's key must be on the server. |
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `passes` | Finders per part, at most 3. See [Passes](#passes). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
