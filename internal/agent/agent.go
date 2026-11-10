@@ -92,11 +92,11 @@ var (
 	// the primary can't serve: usage limit, outage, lost ChatGPT login. Pi already retried transient errors by then.
 	// deepseek-flash has no medium: Pi rounds it up to high.
 	FallbackModel string
-	// FallbackVerifyModel is FALLBACK_VERIFY_MODEL, the fallback for the verify pass.
-	FallbackVerifyModel string
 	// Inversion is MODEL_INVERSION: "off" turns model inversion off for every repo, a model (provider/id[:level])
 	// is the one Invert switches to. Unset = the first other maker in Matrix.
 	Inversion string
+	// FallbackVerifyModel is FALLBACK_VERIFY_MODEL, the fallback for the verify pass.
+	FallbackVerifyModel string
 	secretVar           = regexp.MustCompile(`KEY|SECRET|TOKEN`)
 	unavailable         = regexp.MustCompile(`(?i)usage limit|quota|rate.?limit|too many requests|\b(429|5\d\d)\b|overloaded|unavailable|capacity|ChatGPT login`)
 	// FallbackUntil is unix ms: until then passes go straight to the fallback.
