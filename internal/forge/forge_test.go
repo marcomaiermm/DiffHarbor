@@ -55,7 +55,7 @@ func TestPlaceDrift(t *testing.T) {
 	if Place(&c, lines); c.Start != 14 || c.Fix != "\tbaz()\n\n\tqux()\n" {
 		t.Fatalf("drift: %+v", c)
 	}
-	tie := Finding{Comment: review.Comment{Path: "a.go", Line: 12, Existing: "foo()", Fix: "y"}}
+	tie := Finding{Comment: review.Comment{Path: "a.go", Line: 12, Existing: "\tfoo()", Fix: "y"}}
 	if Place(&tie, lines); tie.Start != 0 {
 		t.Fatalf("tie placed: %+v", tie)
 	}
@@ -63,6 +63,32 @@ func TestPlaceDrift(t *testing.T) {
 	near.Line = 11
 	if Place(&near, lines); near.Start != 11 {
 		t.Fatalf("nearer: %+v", near)
+	}
+	// An exact copy beats a nearer one that differs in indentation; two exact ties do not fall back to a loose one.
+	sp := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,3 @@\n+    if a:\n+        return x\n+    return x\n")
+	exact := Finding{Comment: review.Comment{Path: "a.go", Line: 11, Existing: "    return x", Fix: "    return y"}}
+	if Place(&exact, sp); exact.Start != 12 || exact.Fix != "    return y" {
+		t.Fatalf("exact: %+v", exact)
+	}
+	// Indentation moves per line through the quote's pairs: 4 spaces over two depths on tabs.
+	tabs := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,2 @@\n+\tif a {\n+\t\treturn x\n")
+	deep := Finding{Comment: review.Comment{Path: "a.go", Line: 10, Existing: "    if a {\n        return x", Fix: "    if b {\n        return x\n    }"}}
+	if Place(&deep, tabs); deep.Start != 10 || deep.Fix != "\tif b {\n\t\treturn x\n\t}" || deep.Existing != "\tif a {\n\t\treturn x" {
+		t.Fatalf("deep: %+v", deep)
+	}
+	// A Fix at a depth the quote does not show, or a quote indented unlike the file, stays unplaced and untouched.
+	unseen := Finding{Comment: review.Comment{Path: "a.go", Line: 10, Existing: "    if a {", Fix: "    if a {\n            x()"}}
+	skew := Finding{Comment: review.Comment{Path: "a.go", Line: 10, Existing: "if a {\nreturn x", Fix: "if b {\nreturn x"}}
+	if Place(&unseen, tabs); unseen.Start != 0 || unseen.Fix != "    if a {\n            x()" {
+		t.Fatalf("unseen: %+v", unseen)
+	}
+	if Place(&skew, tabs); skew.Start != 0 || skew.Fix != "if b {\nreturn x" {
+		t.Fatalf("skew: %+v", skew)
+	}
+	// A quote without the base indent keeps a blank line of the Fix empty.
+	blank := Finding{Comment: review.Comment{Path: "a.go", Line: 11, Existing: "return x", Fix: "return y\n\nreturn z"}}
+	if Place(&blank, tabs); blank.Start != 11 || blank.Fix != "\t\treturn y\n\n\t\treturn z" {
+		t.Fatalf("blank: %+v", blank)
 	}
 }
 

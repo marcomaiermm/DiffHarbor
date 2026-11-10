@@ -113,51 +113,71 @@ func Parse(body string) review.Comment {
 
 // Place finds the lines c.Existing quotes in the diff, nearest to c.Line and at most 10 lines from it, and sets
 // c.Start and c.End to them. No match, or two equally near, leaves 0: the fix then shows as a plain code block.
-// Lines match ignoring indentation and trailing space, as models drift on both; Fix is then moved to the file's
-// indentation, so the committed lines don't change it.
+// Lines match exactly but for trailing space; only when none does, ignoring indentation too, as models drift on it.
+// Then Fix and Existing move to the file's indentation, line by line through the pairs the quote shows.
+// ponytail: a Fix at a depth the quote does not show, or a quote that indents differently than the file, stays a
+// diff block; extend the map from the file's neighbouring lines if that bites.
 func Place(c *Finding, lines map[string]string) {
 	if c.Existing == "" || c.Fix == "" || trim(c.Existing) == trim(c.Fix) {
 		return
 	}
 	want := strings.Split(trim(c.Existing), "\n")
-	best, tie := 11, false
-	var s0 int
-	for s := c.Line - len(want) - 10; s <= c.Line+10; s++ {
-		matches := true
-		for i, w := range want {
-			l, ok := lines[fmt.Sprintf("%s:%d", c.Path, s+i)]
-			if !ok || strings.TrimSpace(l) != strings.TrimSpace(w) {
-				matches = false
-				break
+	at := func(s, i int) string { return lines[fmt.Sprintf("%s:%d", c.Path, s+i)] }
+	// find returns the start of the nearest run of lines equal under same, 0 if none within 10 lines or two tie.
+	find := func(same func(l, w string) bool) (int, bool) {
+		best, tie, s0 := 11, false, 0
+		for s := c.Line - len(want) - 10; s <= c.Line+10; s++ {
+			matches := true
+			for i, w := range want {
+				if l, ok := lines[fmt.Sprintf("%s:%d", c.Path, s+i)]; !ok || !same(l, w) {
+					matches = false
+					break
+				}
+			}
+			if d := max(s-c.Line, c.Line-(s+len(want)-1), 0); matches && d <= best {
+				tie = d == best
+				best, s0 = d, s
 			}
 		}
-		if d := max(s-c.Line, c.Line-(s+len(want)-1), 0); matches && d <= best {
-			tie = d == best
-			best, s0 = d, s
-		}
+		return s0, best <= 10 && !tie
 	}
-	if best > 10 || tie {
+	s0, ok := find(func(l, w string) bool { return strings.TrimRight(l, " \t\r") == strings.TrimRight(w, " \t\r") })
+	if ok {
+		c.Start, c.End = s0, s0+len(want)-1
 		return
 	}
-	c.Start, c.End = s0, s0+len(want)-1
-	// the first line with code sets the indentation the model quoted, and the file's
+	if s0 != 0 { // two exact copies at the same distance: no looser guess
+		return
+	}
+	s0, ok = find(func(l, w string) bool { return strings.TrimSpace(l) == strings.TrimSpace(w) })
+	if !ok {
+		return
+	}
+	indent := func(s string) string { return s[:len(s)-len(strings.TrimLeft(s, " \t"))] }
+	to := map[string]string{} // the quote's indentation, by the file's
+	file := make([]string, len(want))
 	for i, w := range want {
+		file[i] = at(s0, i)
 		if strings.TrimSpace(w) == "" {
 			continue
 		}
-		l := lines[fmt.Sprintf("%s:%d", c.Path, s0+i)]
-		from, to := w[:len(w)-len(strings.TrimLeft(w, " \t"))], l[:len(l)-len(strings.TrimLeft(l, " \t"))]
-		if from != to {
-			fix := strings.Split(c.Fix, "\n")
-			for j, f := range fix {
-				if rest, ok := strings.CutPrefix(f, from); ok && strings.TrimSpace(f) != "" {
-					fix[j] = to + rest
-				}
-			}
-			c.Fix = strings.Join(fix, "\n")
+		if t, ok := to[indent(w)]; ok && t != indent(file[i]) {
+			return
 		}
-		break
+		to[indent(w)] = indent(file[i])
 	}
+	fix := strings.Split(c.Fix, "\n")
+	for j, f := range fix {
+		if strings.TrimSpace(f) == "" {
+			continue
+		}
+		t, ok := to[indent(f)]
+		if !ok {
+			return
+		}
+		fix[j] = t + strings.TrimLeft(f, " \t")
+	}
+	c.Start, c.End, c.Fix, c.Existing = s0, s0+len(want)-1, strings.Join(fix, "\n"), strings.Join(file, "\n")
 }
 
 // Split sorts a review's findings: the ones on diff lines (lines) to post inline, placed, the ones outside the
