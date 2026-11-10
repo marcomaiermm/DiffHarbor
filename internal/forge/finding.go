@@ -116,14 +116,15 @@ func Parse(body string) review.Comment {
 // Lines match exactly but for trailing space; only when none does, ignoring indentation too, as models drift on it.
 // Then Fix and Existing move to the file's indentation, line by line through the pairs the quote shows.
 // ponytail: a Fix at a depth the quote does not show, or a quote that indents differently than the file, stays a
-// diff block; extend the map from the file's neighbouring lines if that bites.
+// diff block; extend the map from the file's neighbouring lines if that bites. A quote that drifts alike over two
+// depths, with a Fix in the file's real indentation, moves the Fix one level too deep; no cheap guard keeps both.
 func Place(c *Finding, lines map[string]string) {
 	if c.Existing == "" || c.Fix == "" || trim(c.Existing) == trim(c.Fix) {
 		return
 	}
 	want := strings.Split(trim(c.Existing), "\n")
-	at := func(s, i int) string { return lines[fmt.Sprintf("%s:%d", c.Path, s+i)] }
-	// find returns the start of the nearest run of lines equal under same, 0 if none within 10 lines or two tie.
+	// find returns the start of the nearest run of lines equal under same, within 10 lines, and whether it is the only
+	// one that near; 0 if there is none.
 	find := func(same func(l, w string) bool) (int, bool) {
 		best, tie, s0 := 11, false, 0
 		for s := c.Line - len(want) - 10; s <= c.Line+10; s++ {
@@ -134,7 +135,7 @@ func Place(c *Finding, lines map[string]string) {
 					break
 				}
 			}
-			if d := max(s-c.Line, c.Line-(s+len(want)-1), 0); matches && d <= best {
+			if d := max(s-c.Line, c.Line-(s+len(want)-1), 0); matches && d <= min(best, 10) {
 				tie = d == best
 				best, s0 = d, s
 			}
@@ -149,15 +150,15 @@ func Place(c *Finding, lines map[string]string) {
 	if s0 != 0 { // two exact copies at the same distance: no looser guess
 		return
 	}
-	s0, ok = find(func(l, w string) bool { return strings.TrimSpace(l) == strings.TrimSpace(w) })
+	s0, ok = find(func(l, w string) bool { return strings.Trim(l, " \t\r") == strings.Trim(w, " \t\r") })
 	if !ok {
 		return
 	}
 	indent := func(s string) string { return s[:len(s)-len(strings.TrimLeft(s, " \t"))] }
-	to := map[string]string{} // the quote's indentation, by the file's
+	to := map[string]string{} // the file's indentation, by the quote's
 	file := make([]string, len(want))
 	for i, w := range want {
-		file[i] = at(s0, i)
+		file[i] = lines[fmt.Sprintf("%s:%d", c.Path, s0+i)]
 		if strings.TrimSpace(w) == "" {
 			continue
 		}

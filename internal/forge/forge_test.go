@@ -85,6 +85,28 @@ func TestPlaceDrift(t *testing.T) {
 	if Place(&skew, tabs); skew.Start != 0 || skew.Fix != "if b {\nreturn x" {
 		t.Fatalf("skew: %+v", skew)
 	}
+	// An exact copy ending 11 lines up is out of reach: the loose copy on the finding's line is placed.
+	far := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,12 @@\n+foo()\n+a\n+a\n+a\n+a\n+a\n+a\n+a\n+a\n+a\n+a\n+\tfoo()\n")
+	reach := Finding{Comment: review.Comment{Path: "a.go", Line: 21, Existing: "foo()", Fix: "bar()"}}
+	if Place(&reach, far); reach.Start != 21 || reach.Fix != "\tbar()" {
+		t.Fatalf("reach: %+v", reach)
+	}
+	// Only space and tab are indentation: a no-break space quote of a tab line stays unplaced.
+	nb := Finding{Comment: review.Comment{Path: "a.go", Line: 10, Existing: "\u00a0foo()", Fix: "\u00a0bar()"}}
+	if Place(&nb, diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,1 @@\n+\tfoo()\n")); nb.Start != 0 || nb.Fix != "\u00a0bar()" {
+		t.Fatalf("nbsp: %+v", nb)
+	}
+	// Two exact ties leave a looser guess out; a blank line of the quote must be blank in the file.
+	three := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,3 @@\n+\tfoo()\n+\t\tfoo()\n+\tfoo()\n")
+	tt := Finding{Comment: review.Comment{Path: "a.go", Line: 11, Existing: "\tfoo()", Fix: "\tbar()"}}
+	if Place(&tt, three); tt.Start != 0 || tt.Fix != "\tbar()" {
+		t.Fatalf("ties: %+v", tt)
+	}
+	gap := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,3 @@\n+\ta()\n+\n+\tb()\n")
+	g := Finding{Comment: review.Comment{Path: "a.go", Line: 10, Existing: "a()\n\nb()", Fix: "a()\nb()"}}
+	if Place(&g, gap); g.Start != 10 || g.End != 12 || g.Fix != "\ta()\n\tb()" {
+		t.Fatalf("gap: %+v", g)
+	}
 	// A quote without the base indent keeps a blank line of the Fix empty.
 	blank := Finding{Comment: review.Comment{Path: "a.go", Line: 11, Existing: "return x", Fix: "return y\n\nreturn z"}}
 	if Place(&blank, tabs); blank.Start != 11 || blank.Fix != "\t\treturn y\n\n\t\treturn z" {

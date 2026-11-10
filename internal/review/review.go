@@ -37,7 +37,7 @@ const schema = `Output JSON only:
 "fixed":[<index of an earlier finding the code now fixes>],"comments":[{"path":"<file>","line":<line in new file>,"severity":"critical|major|minor|nit",
 "title":"<one line>","body":"<markdown: failing input or sequence, impact, fix with a short snippet unless fix carries it>",
 "prompt":"<for an AI agent: 'In <path> around line <n>, ...': change, edge cases, test>",
-"existing":"<whenever the whole fix is an edit of a few adjacent lines in this file, not for one spanning places or needing a decision: the current lines it replaces, copied exactly from the new file>","fix":"<their replacement, same indentation>",
+"existing":"<whenever the whole fix edits a few adjacent lines here, not if it spans places or needs a decision: the current lines it replaces, copied exactly from the new file>","fix":"<their replacement, same indentation>",
 "again":<only if this change brings back an earlier finding listed as fixed: its number>}]}
 At most 10 findings that aren't nits, plus at most 5 nits, [] if none.`
 
