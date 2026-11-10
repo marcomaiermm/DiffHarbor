@@ -100,3 +100,20 @@ func TestVerdictRepro(t *testing.T) {
 		t.Fatalf("%+v", kept)
 	}
 }
+
+// defines: a repro runs only a test its own source defines.
+func TestDefines(t *testing.T) {
+	for _, c := range []struct {
+		r    reproTest
+		want bool
+	}{
+		{reproTest{File: "a_test.go", Name: "TestA", Source: "func TestA(t *testing.T) {}"}, true},
+		{reproTest{File: "a_test.go", Name: "TestA", Source: "func TestAB(t *testing.T) {}"}, false},
+		{reproTest{File: "a.test.ts", Name: "rejects empty", Source: `test("rejects empty", () => {})`}, true},
+		{reproTest{File: "a.test.ts", Name: "rejects empty", Source: `test("accepts", () => {})`}, false},
+	} {
+		if got := defines(&c.r); got != c.want {
+			t.Errorf("%s %q: %v", c.r.File, c.r.Name, got)
+		}
+	}
+}

@@ -43,6 +43,8 @@ func TestCmd(ctx context.Context, sb *proc.Sandbox, repo, file, proof string, li
 	}
 	pkg := filepath.Dir(pj)
 	f, _ := filepath.Rel(pkg, file)
+	// a path, not an option, and bun takes a bare name as a filter: "a.test.ts" runs data.test.ts too
+	f = "./" + f
 	pat := regexp.QuoteMeta(strings.ReplaceAll(proof, " > ", " ")) // runners match a test's name with its suites' joined by spaces
 	script, _ := sb.ReadFile(ctx, filepath.Join(repo, pj))
 	bun := Up(repo, pkg, "bun.lock", "bun.lockb", "bunfig.toml") != "" || strings.Contains(string(script), "bun test")
