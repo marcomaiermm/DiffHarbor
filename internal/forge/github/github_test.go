@@ -155,6 +155,9 @@ func TestSuggestion(t *testing.T) {
 	p := &pr{e: e, api: "/repos/o/r", token: "t"}
 	stamp := forge.Stamp(forge.Run{Version: "v1.0.0", Review: "lab/big", Verify: "lab/small", SHA: "abcdef1"})
 	n, err := p.Post("abc", review.Result{Comments: []review.Comment{c}, Run: stamp}, nil, src, "f")
+	if err != nil || len(sent) == 0 {
+		t.Fatalf("post: %v %v", err, sent)
+	}
 	if body, _ := sent[len(sent)-1]["body"].(string); !strings.HasSuffix(body, stamp+forge.Mark) || forge.ParseRun(body).Review != "lab/big" {
 		t.Fatalf("stamp: %q", body)
 	}

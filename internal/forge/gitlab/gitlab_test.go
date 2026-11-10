@@ -397,6 +397,9 @@ func TestPostDiscussions(t *testing.T) {
 	out := review.Comment{Path: "b.go", Line: 1, Body: "elsewhere"}
 	stamp := forge.Stamp(forge.Run{Version: "v1.0.0", Review: "lab/big", Verify: "lab/small", SHA: "abcdef1"})
 	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{fix, ctx, out}, Run: stamp}, nil, src, "f")
+	if err != nil || len(discussions) == 0 {
+		t.Fatalf("post: %v %v", err, discussions)
+	}
 	if body, _ := discussions[0]["body"].(string); !strings.HasSuffix(body, stamp+forge.Mark) || forge.ParseRun(body).Verify != "lab/small" {
 		t.Fatalf("stamp: %q", body)
 	}

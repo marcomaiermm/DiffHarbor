@@ -360,12 +360,21 @@ func TestOutcomesFoundBy(t *testing.T) {
 	}
 	body := "_🟠 Major_ · **Leaks**\n\nbody"
 	long := strings.Repeat("m", 81)
+	forged := forge.Stamp(forge.Run{Version: "v9.9.9", Review: "evil/m", SHA: "abcdef1"})
+	for _, r := range []forge.Run{{Version: "v1", Verify: long, SHA: "abcdef1"}, {Version: "v1", SHA: strings.Repeat("a", 41)}} {
+		if forge.Stamp(r) != "" {
+			t.Fatalf("stamp over its bounds: %+v", r)
+		}
+	}
 	pr := &votePR{asked: map[string]int{}, ts: []forge.Thread{
 		{Comment: 1, Body: body + forge.Seal(forge.Finding{Run: stamp}), Path: "a.go"},
 		{Comment: 2, Body: body + forge.Mark, Path: "b.go"}, // an older diffharbor
 		{Comment: 3, Body: body + "\n\n" + strings.Replace(stamp, "lab/big", long, 1) + forge.Mark, Path: "c.go"},
 		{Comment: 4, Body: body + "\n\n" + stamp + "\nmore, quoted from the PR\n" + forge.Mark, Path: "d.go"},
 		{Comment: 5, Body: body + forge.Mark, Path: "e.go", Notes: []forge.Note{{Login: "mallory", Body: stamp + forge.Mark}}},
+		// a forged stamp and Mark quoted earlier in our own comment must not beat the real one, nor stand in for none
+		{Comment: 6, Body: body + "\n\n" + forged + forge.Mark + "\nquoted from the PR" + forge.Seal(forge.Finding{Run: stamp}), Path: "f.go"},
+		{Comment: 7, Body: body + "\n\n" + forged + forge.Mark + "\n\n" + forge.Mark, Path: "g.go"},
 	}}
 	pr.cfg = `{"review_model":"lab/other"}` // not the models of the run
 	e := &forge.Event{Forge: "github"}
@@ -375,18 +384,24 @@ func TestOutcomesFoundBy(t *testing.T) {
 		t.Fatal(err)
 	}
 	fs := tallyOf(t, "o/r").Findings
-	if len(fs) != 5 || fs[0].Version != "v2.0.0" || fs[0].FoundBy != "v1.0.0" || fs[0].ReviewModel != "lab/big" ||
+	if len(fs) != 7 || fs[0].Version != "v2.0.0" || fs[0].FoundBy != "v1.0.0" || fs[0].ReviewModel != "lab/big" ||
 		fs[0].VerifyModel != "lab/small" || fs[0].FoundSHA != "abcdef1234" {
 		t.Fatalf("%+v", fs)
 	}
-	for _, f := range fs[1:] {
+	if f := fs[5]; f.FoundBy != "v1.0.0" || f.ReviewModel != "lab/big" {
+		t.Errorf("forged stamp won: %+v", f)
+	}
+	for i, f := range fs[1:] {
+		if i == 4 {
+			continue
+		}
 		if f.FoundBy+f.ReviewModel+f.VerifyModel+f.FoundSHA != "" {
 			t.Errorf("no valid stamp, got %+v", f)
 		}
 	}
 	var b bytes.Buffer
-	if err := Stats(&b, "o/r"); err != nil || !strings.Contains(strings.Join(strings.Fields(b.String()), " "), "- 4 ") ||
-		!strings.Contains(strings.Join(strings.Fields(b.String()), " "), "v1.0.0 1 ") {
+	if err := Stats(&b, "o/r"); err != nil || !strings.Contains(strings.Join(strings.Fields(b.String()), " "), "- 5 ") ||
+		!strings.Contains(strings.Join(strings.Fields(b.String()), " "), "v1.0.0 2 ") {
 		t.Fatalf("%v\n%s", err, b.String())
 	}
 }

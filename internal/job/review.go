@@ -262,7 +262,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	}
 	post := r
 	rm, vm := cfg.Models()
-	// ponytail: a run that fell back mid-way is stamped with the configured models; per-pass models would need the agent to report them
+	// ponytail: a run is stamped with the configured models: after a fallback, or for a finding of a later review.json
+	// pass, they are not its own; per-pass models would need the agent to report them.
 	post.Run = forge.Stamp(forge.Run{Version: cmp.Or(Version, "dev"), Review: rm, Verify: vm, SHA: sha[:min(len(sha), 12)]})
 	var reopened int
 	var free map[string]bool
