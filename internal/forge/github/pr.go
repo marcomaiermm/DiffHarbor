@@ -170,6 +170,10 @@ func (p *pr) Threads() ([]forge.Thread, error) {
 	return Threads(p.e.Repository.FullName, p.e.PullRequest.Number, p.token)
 }
 
+func (p *pr) Voted() ([]forge.Thread, error) {
+	return Voted(p.e.Repository.FullName, p.e.PullRequest.Number, p.token)
+}
+
 func (p *pr) Resolve(t forge.Thread, sha string) {
 	Resolve(p.e, p.api, p.e.PullRequest.Number, p.token, t, sha)
 }

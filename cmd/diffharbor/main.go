@@ -3,6 +3,7 @@
 //	diffharbor       serve on :3000
 //	diffharbor login log in to a model subscription (ChatGPT/Codex) in Pi, stored in $DATA_DIR/pi
 //	diffharbor dry   review `git diff HEAD` of cwd, print JSON
+//	diffharbor stats [repo] print what became of the findings of closed PRs, per repo: owner/repo, gitlab/group/project
 //	go test         self-check
 package main
 
@@ -110,6 +111,19 @@ func configure() server.Config {
 func main() {
 	log.Printf("diffharbor %s", version)
 	cfg := configure()
+	if len(os.Args) > 1 && os.Args[1] == "stats" {
+		if len(os.Args) > 3 {
+			log.Fatal("usage: diffharbor stats [owner/repo | gitlab/group/project]")
+		}
+		repo := ""
+		if len(os.Args) > 2 {
+			repo = os.Args[2]
+		}
+		if err := job.Stats(os.Stdout, repo); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if proc.AsPi { // git and Pi run as a repo's user, next to the PR's code: they get the vault's tokens, not the keys
 		if err := vault.Start(); err != nil {
 			log.Fatal(err)

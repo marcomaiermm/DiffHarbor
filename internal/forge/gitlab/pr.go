@@ -177,6 +177,34 @@ func (p *pr) Threads() ([]forge.Thread, error) {
 	return ts, err
 }
 
+// Voted reads the award emoji of each of our finding notes, but of an addressed one: that outcome is set.
+func (p *pr) Voted() ([]forge.Thread, error) {
+	ts, err := p.Threads()
+	for i, t := range ts {
+		if t.Addressed {
+			continue
+		}
+		as, err := all[struct {
+			Name string `json:"name"`
+			User struct {
+				Username string `json:"username"`
+			} `json:"user"`
+		}](fmt.Sprintf("%s/notes/%d/award_emoji?per_page=100", p.mr, t.Comment))
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range as {
+			switch a.Name {
+			case "thumbsup":
+				ts[i].Up = append(ts[i].Up, a.User.Username)
+			case "thumbsdown":
+				ts[i].Down = append(ts[i].Down, a.User.Username)
+			}
+		}
+	}
+	return ts, err
+}
+
 func (p *pr) resolve(id string) error {
 	return call("PUT", fmt.Sprintf("%s/discussions/%s?resolved=true", p.mr, url.PathEscape(id)), nil, nil)
 }

@@ -286,6 +286,34 @@ func TestThreadsAddressed(t *testing.T) {
 	}
 }
 
+// Voted asks for the reactions on the first comment, Threads doesn't. Past the first 100 of a kind it reads them
+// all from REST.
+func TestVoted(t *testing.T) {
+	var q []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/o/r/pulls/comments/1/reactions" && r.URL.Query().Get("content") == "+1" {
+			fmt.Fprint(w, `[{"user":{"login":"bo"}},{"user":{"login":"ed"}}]`)
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		q = append(q, string(b))
+		fmt.Fprint(w, `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[`+
+			`{"id":"a","isResolved":true,"comments":{"nodes":[{"databaseId":1,"body":"x `+forge.Mark+
+			`","author":{"__typename":"Bot","login":"app"},"up":{"totalCount":2,"nodes":[{"user":{"login":"bo"}}]},"down":{"totalCount":2,"nodes":[{"user":{"login":"cy"}},{"user":{"login":"di"}}]}}]}},`+
+			`{"id":"b","isResolved":true,"comments":{"nodes":[{"databaseId":2,"body":"x `+forge.Mark+
+			`","author":{"__typename":"Bot","login":"app"}}]}}]}}}}}`)
+	}))
+	defer srv.Close()
+	APIURL, Slug = srv.URL, "app"
+	ts, err := Voted("o/r", 1, "t")
+	if err != nil || len(ts) != 2 || !slices.Equal(ts[0].Up, []string{"bo", "ed"}) || !slices.Equal(ts[0].Down, []string{"cy", "di"}) || len(q) != 1 {
+		t.Fatalf("%+v %v", ts, err)
+	}
+	if _, err := Threads("o/r", 1, "t"); err != nil || !strings.Contains(q[0], "reactions") || strings.Contains(q[1], "reactions") {
+		t.Fatalf("%v %q", err, q)
+	}
+}
+
 // A fixed finding back: answered in its thread, then reopened with a token that may (Contents: write). A failed
 // answer is an error, and nothing more is sent.
 func TestReopen(t *testing.T) {
