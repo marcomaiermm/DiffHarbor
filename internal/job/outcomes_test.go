@@ -99,7 +99,7 @@ func TestOutcomes(t *testing.T) {
 	}
 	var b bytes.Buffer
 	if err := Stats(&b, "o/r"); err != nil || !strings.Contains(b.String(), "all") || !strings.Contains(b.String(), "severity major") ||
-		!strings.Contains(b.String(), "profile quiet") || !strings.Contains(b.String(), "resolved") || !strings.Contains(b.String(), "75%") {
+		!strings.Contains(b.String(), "profile quiet") || !strings.Contains(strings.Join(strings.Fields(b.String()), " "), "all 8 12% 12% 38% 25% 12%") {
 		t.Fatalf("%v\n%s", err, b.String())
 	}
 }

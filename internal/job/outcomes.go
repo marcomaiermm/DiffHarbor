@@ -197,7 +197,7 @@ func Stats(w io.Writer, repo string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, t := range ts {
 		fmt.Fprintf(tw, "%s\t%d PR(s)\n\n", t.Repo, len(t.PRs))
-		fmt.Fprintln(tw, "\tfindings\taddressed\taccepted\tdismissed\tresolved\tignored")
+		fmt.Fprintln(tw, "\tfindings\t"+strings.Join(outcomeNames, "\t"))
 		row(tw, "all", t.Total)
 		for _, g := range []struct {
 			name string
