@@ -6,6 +6,7 @@ import (
 	"diffharbor/internal/proc"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -175,6 +176,18 @@ func TestOutcomesFail(t *testing.T) {
 	}
 	if tallyFile("a__b/c") == tallyFile("a/b__c") {
 		t.Error("tally files collide")
+	}
+	// A GitLab project deep in groups: its escaped name is longer than a file name may be.
+	deep := "gitlab/" + strings.Repeat("group/", 40)
+	if a, b := tallyFile(deep+"p"), tallyFile(deep+"q"); a == b || len(filepath.Base(a)) > 255 {
+		t.Errorf("long tally files: %s %s", a, b)
+	}
+	if ok, err := record(deep+"p", 1, "chill", []string{"major"}, []string{ignored}); !ok || err != nil || tallyOf(t, deep+"p").Repo != deep+"p" {
+		t.Errorf("long repo: %v %v", ok, err)
+	}
+	b.Reset()
+	if err := Stats(&b, deep+"p"); err != nil || !strings.Contains(b.String(), deep+"p") {
+		t.Errorf("stats of a long repo: %v", err)
 	}
 }
 

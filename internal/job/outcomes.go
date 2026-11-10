@@ -2,6 +2,7 @@ package job
 
 import (
 	"cmp"
+	"crypto/sha256"
 	"diffharbor/internal/forge"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/review"
@@ -45,9 +46,14 @@ type tally struct {
 	Profile  map[string]counts
 }
 
-// tallyFile escapes key's slashes: a__b/c and a/b__c are two files.
+// tallyFile escapes key's slashes: a__b/c and a/b__c are two files. A file name holds 255 bytes: a longer one, a
+// GitLab project deep in groups, is the key's hash, and the tally has the name.
 func tallyFile(key string) string {
-	return filepath.Join(proc.DataDir, "outcomes", url.PathEscape(key)+".json")
+	name := url.PathEscape(key)
+	if len(name) > 200 {
+		name = fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
+	}
+	return filepath.Join(proc.DataDir, "outcomes", name+".json")
 }
 
 func readTally(key string) (tally, error) { return loadTally(tallyFile(key)) }
