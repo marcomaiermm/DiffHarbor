@@ -33,8 +33,8 @@ var outcomeNames = []string{addressed, accepted, dismissed, ignored}
 // counts is outcome -> findings.
 type counts map[string]int
 
-// Tally is a repo's outcomes: PRs are the closed PRs counted already, so a reopened one isn't counted twice.
-type Tally struct {
+// tally is a repo's outcomes: PRs are the closed PRs counted already, so a reopened one isn't counted twice.
+type tally struct {
 	Repo     string
 	PRs      []int
 	Total    counts
@@ -46,7 +46,7 @@ func tallyFile(key string) string {
 	return filepath.Join(proc.DataDir, "outcomes", strings.ReplaceAll(key, "/", "__")+".json")
 }
 
-func readTally(key string) (t Tally) {
+func readTally(key string) (t tally) {
 	b, _ := os.ReadFile(tallyFile(key))
 	_ = json.Unmarshal(b, &t)
 	return t
@@ -110,8 +110,6 @@ func record(key string, pr int, profile string, sevs, outs []string) (bool, erro
 
 // Outcomes counts what became of our findings on e's closed PR, and saves the declined ones as learnings unless
 // review.json's learnings.outcomes is false. Its errors only log: the PR's reports go whatever happens here.
-// ponytail: a thread resolved by the chat pass after a decline counts as dismissed and learns the decline too;
-// telling it apart means reading the whole thread, not Answers' last three.
 func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 	defer proc.Recovered(func(pe error) { err = pe })
 	key, n := e.Repo(), e.PullRequest.Number
@@ -123,7 +121,7 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 		return err
 	}
 	if err := p.Refresh(); err != nil {
-		log.Println(e.Key(), "refresh:", err) // the event has the PR, as it was when it closed
+		log.Println(e.Key(), "refresh:", err)
 	}
 	cfg, _ := review.LoadSettings(p.File(e.PullRequest.Base.SHA, "review.json"))
 	profile := cmp.Or(bodyProfile(e.PullRequest.Body), cfg.Profile, "default")
@@ -133,6 +131,9 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 	}
 	writers := map[string]bool{}
 	can := func(login string) bool {
+		if login == "" {
+			return false
+		}
 		ok, seen := writers[login]
 		if !seen {
 			var err error
@@ -146,9 +147,12 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 	var sevs, outs, lost []string
 	for _, t := range ts {
 		c := forge.Parse(t.Body)
-		sevs, outs = append(sevs, cmp.Or(c.Severity, "other")), append(outs, classify(t, can))
-		if outs[len(outs)-1] == dismissed {
-			lost = append(lost, fmt.Sprintf("- Maintainers declined a %s finding: %s (%s)", cmp.Or(c.Severity, "minor"),
+		sev := cmp.Or(c.Severity, "other")
+		o := classify(t, can)
+		sevs, outs = append(sevs, sev), append(outs, o)
+		// A learning needs a writer's word: a 👎, or a resolve by one (the chat pass and the PR author don't count).
+		if o == dismissed && (slices.ContainsFunc(t.Down, can) || can(t.Resolver)) {
+			lost = append(lost, fmt.Sprintf("- Maintainers declined a %s finding: %s (%s)", sev,
 				text.OneLine(cmp.Or(c.Title, c.Body), 100), text.OneLine(t.Path, 100)))
 		}
 	}
@@ -173,14 +177,14 @@ func learnOnce(key, entry string) error {
 
 // Stats prints the tally of repo, or of every repo with one, as plain text.
 func Stats(w io.Writer, repo string) error {
-	var ts []Tally
+	var ts []tally
 	if repo != "" {
 		ts = append(ts, readTally(repo))
 	} else {
 		fs, _ := filepath.Glob(filepath.Join(proc.DataDir, "outcomes", "*.json"))
 		for _, f := range fs {
 			b, _ := os.ReadFile(f) //nolint:gosec // Glob of our own dir
-			var t Tally
+			var t tally
 			if json.Unmarshal(b, &t) == nil {
 				ts = append(ts, t)
 			}
@@ -191,7 +195,7 @@ func Stats(w io.Writer, repo string) error {
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, t := range ts {
-		fmt.Fprintf(tw, "%s\t%d PRs\n\n", t.Repo, len(t.PRs))
+		fmt.Fprintf(tw, "%s\t%d PR(s)\n\n", t.Repo, len(t.PRs))
 		fmt.Fprintln(tw, "\tfindings\taddressed\taccepted\tdismissed\tignored")
 		row(tw, "all", t.Total)
 		for _, g := range []struct {

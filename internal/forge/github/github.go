@@ -483,7 +483,10 @@ func threads(repo string, n int, token string, votes bool) ([]forge.Thread, erro
 						Nodes []struct {
 							ID         string `json:"id"`
 							IsResolved bool   `json:"isResolved"`
-							Comments   struct {
+							ResolvedBy struct {
+								Login string `json:"login"`
+							} `json:"resolvedBy"`
+							Comments struct {
 								Nodes []struct {
 									DatabaseID   int64  `json:"databaseId"`
 									Path         string `json:"path"`
@@ -518,7 +521,7 @@ func threads(repo string, n int, token string, votes bool) ([]forge.Thread, erro
 			extra = " up:reactions(content:THUMBS_UP,first:20){nodes{user{login}}} down:reactions(content:THUMBS_DOWN,first:20){nodes{user{login}}}"
 		}
 		err := graphql(token, `query($o:String!,$r:String!,$n:Int!,$a:String){repository(owner:$o,name:$r){pullRequest(number:$n){
-reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{databaseId path line originalLine body author{__typename login}`+extra+`}} replies:comments(last:3){nodes{databaseId body author{__typename login}}}}}}}}`,
+reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isResolved resolvedBy{login} comments(first:1){nodes{databaseId path line originalLine body author{__typename login}`+extra+`}} replies:comments(last:3){nodes{databaseId body author{__typename login}}}}}}}}`,
 			map[string]any{"o": owner, "r": name, "n": n, "a": after}, &d)
 		if err != nil {
 			return nil, err
@@ -538,8 +541,10 @@ reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isRes
 					rs = append(rs, forge.Note{ID: r.DatabaseID, Login: r.Author.Login, Body: r.Body, Ours: ours(r.Author.Type, r.Author.Login)})
 				}
 			}
-			ts = append(ts, forge.Thread{ID: t.ID, Comment: c.DatabaseID, Resolved: t.IsResolved, Path: c.Path, Line: c.Line, Original: c.OriginalLine, Body: c.Body, Replies: forge.Answers(rs),
-				Addressed: forge.Addressed(rs), Up: c.Up.logins(), Down: c.Down.logins()})
+			ts = append(ts, forge.Thread{
+				ID: t.ID, Comment: c.DatabaseID, Resolved: t.IsResolved, Resolver: t.ResolvedBy.Login, Path: c.Path, Line: c.Line, Original: c.OriginalLine, Body: c.Body, Replies: forge.Answers(rs),
+				Addressed: forge.Addressed(rs), Up: c.Up.logins(), Down: c.Down.logins(),
+			})
 		}
 		if !rt.PageInfo.HasNextPage {
 			break

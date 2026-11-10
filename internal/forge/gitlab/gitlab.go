@@ -409,9 +409,12 @@ type note struct {
 	Body     string `json:"body"`
 	System   bool   `json:"system"`
 	Resolved bool   `json:"resolved"`
-	Created  string `json:"created_at"`
-	Updated  string `json:"updated_at"` // resolving the thread moves it too: then chat may answer twice, not never
-	Author   struct {
+	Resolver struct {
+		Username string `json:"username"`
+	} `json:"resolved_by"`
+	Created string `json:"created_at"`
+	Updated string `json:"updated_at"` // resolving the thread moves it too: then chat may answer twice, not never
+	Author  struct {
 		Username string `json:"username"`
 	} `json:"author"`
 	Position *struct {

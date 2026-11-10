@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -529,6 +530,31 @@ func TestThreadsReplies(t *testing.T) {
 	ts, err := p.Threads()
 	if err != nil || len(ts) != 1 || !ts[0].Resolved || ts[0].Replies != "\n\n**@kev**: won't split" {
 		t.Fatalf("%+v %v", ts, err)
+	}
+}
+
+// Voted reads the award emoji of each finding but an addressed one, and Threads names who resolved: not the bot.
+func TestVoted(t *testing.T) {
+	Bot = "review-bot"
+	var asked []string
+	serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/discussions") {
+			ok, _ := json.Marshal(forge.AddressedIn("abcdef1"))
+			fmt.Fprint(w, `[{"id":"d1","notes":[{"id":1,"body":"f `+forge.Mark+`","resolved":true,"resolved_by":{"username":"ann"},"author":{"username":"review-bot"},"position":{"new_path":"a.ts","new_line":3}}]},`+
+				`{"id":"d2","notes":[{"id":2,"body":"f `+forge.Mark+`","resolved":true,"resolved_by":{"username":"review-bot"},"author":{"username":"review-bot"},"position":{"new_path":"b.ts","new_line":3}},`+
+				`{"id":4,"body":`+string(ok)+`,"author":{"username":"review-bot"}}]}]`)
+			return
+		}
+		asked = append(asked, r.URL.Path)
+		fmt.Fprint(w, `[{"name":"thumbsup","user":{"username":"bo"}},{"name":"thumbsdown","user":{"username":"cy"}},{"name":"heart","user":{"username":"di"}}]`)
+	})
+	e := &forge.Event{Forge: "gitlab"}
+	e.Repository.ID, e.PullRequest.Number = 5, 3
+	p, _ := (&Hub{}).Open(e)
+	ts, err := p.Voted()
+	if err != nil || len(ts) != 2 || !slices.Equal(ts[0].Up, []string{"bo"}) || !slices.Equal(ts[0].Down, []string{"cy"}) ||
+		ts[0].Resolver != "ann" || ts[1].Resolver != "" || !ts[1].Addressed || len(asked) != 1 || !strings.HasSuffix(asked[0], "/notes/1/award_emoji") {
+		t.Fatalf("%+v %q %v", ts, asked, err)
 	}
 }
 

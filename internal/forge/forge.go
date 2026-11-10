@@ -117,6 +117,7 @@ type Thread struct {
 	ID       string // GitHub: GraphQL node id; GitLab: discussion id
 	Comment  int64  // id of the first comment
 	Resolved bool
+	Resolver string // who resolved it; blank for us (the chat pass) or when unknown
 	Path     string
 	Line     int // 0 when the line is outdated
 	Original int

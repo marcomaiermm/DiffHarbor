@@ -88,7 +88,7 @@ docker compose up -d
 
 When a maintainer corrects the bot or states a convention, the bot saves the rule with its reason, the PR and the date in `/data/learnings/`, unless one already says it or it only holds for now. It keeps the newest 100 per repo and per owner. A review follows the newest 30 of each, a newer one over an older one it contradicts. [`learnings`](#per-repo-settings) in `review.json` changes that.
 
-**Outcomes.** When a PR closes, the bot counts what became of each finding: addressed (its "Addressed in" reply), accepted (👍), dismissed (resolved without a fix, or 👎) or ignored (still open). Only 👍 and 👎 by people who can push to the repo count. A dismissed finding also becomes a learning (`learnings.outcomes` in `review.json` turns that off). A PR counts once, however often it closes. `diffharbor stats [owner/repo]` prints the counts per repo, by severity and by profile (the PR's, else `review.json`'s top-level one), from `/data/outcomes/`.
+**Outcomes.** When a PR closes, the bot counts what became of each finding: addressed (its "Addressed in" reply), accepted (👍), dismissed (resolved without a fix, or 👎) or ignored (still open). Only 👍 and 👎 by people who can push to the repo count. A finding dismissed by a 👎 or a resolve of such a person also becomes a learning (`learnings.outcomes` in `review.json` turns that off). A PR counts once, however often it closes. `diffharbor stats [owner/repo]` prints the counts per repo, by severity and by profile (the PR's, else `review.json`'s top-level one), from `/data/outcomes/`.
 
 ## Configuration
 
@@ -240,7 +240,7 @@ Before the review, the server fetches the doc sections that mention what the PR 
 
 | Variable | |
 |---|---|
-| `DATA_DIR`, `CACHE_DIR` | Data (learnings, pending reviews, reports, logins, the repos' uids) and per-repo caches. `/data` and `/cache` in the image. Keep both on volumes, apart. |
+| `DATA_DIR`, `CACHE_DIR` | Data (learnings, outcomes, pending reviews, reports, logins, the repos' uids) and per-repo caches. `/data` and `/cache` in the image. Keep both on volumes, apart. |
 | `MAX_JOBS` | How many jobs (reviews, answers) run at once. Default `1`. Jobs of one repo always run one after another, so a higher value helps when several repos have PRs at the same time. Raise `mem_limit`, `cpus` and `pids_limit` with it. Above `1`, jobs of different repos share `/tmp`, `/var/tmp`, `/dev/shm`, the loopback network, the process list and the container's limits while they run, see [Jobs at once](#jobs-at-once). |
 | `DOCKER_HOST` | With the `dind` service: Docker for testcontainers in the checks, isolated with [Sysbox](https://github.com/nestybox/sysbox) (install it on the host). Drop both if your tests don't need Docker. |
 

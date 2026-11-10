@@ -154,6 +154,14 @@ type thread struct {
 	Notes []note `json:"notes"`
 }
 
+// resolver is who resolved the note's thread, blank when it was us.
+func resolver(n note) string {
+	if n.Resolver.Username == Bot {
+		return ""
+	}
+	return n.Resolver.Username
+}
+
 func (p *pr) Threads() ([]forge.Thread, error) {
 	ds, err := all[thread](p.mr + "/discussions?per_page=100")
 	var ts []forge.Thread
@@ -169,7 +177,7 @@ func (p *pr) Threads() ([]forge.Thread, error) {
 			}
 		}
 		ts = append(ts, forge.Thread{
-			ID: d.ID, Comment: n.ID, Resolved: n.Resolved, Path: n.Position.NewPath,
+			ID: d.ID, Comment: n.ID, Resolved: n.Resolved, Resolver: resolver(n), Path: n.Position.NewPath,
 			Line: n.Position.NewLine, Original: n.Position.NewLine, Body: n.Body, Replies: forge.Answers(rs),
 			Addressed: forge.Addressed(rs),
 		})
