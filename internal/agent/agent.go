@@ -288,9 +288,9 @@ func Default() string {
 	return Matrix[0].Review
 }
 
-// maker is the lab behind a provider's models: Bedrock hosts Claude, Azure GPT.
+// maker is the lab behind a provider's models: Bedrock hosts Claude, Azure GPT, Vertex Gemini.
 func maker(provider string) string {
-	return cmp.Or(map[string]string{"amazon-bedrock": "anthropic", "azure": "openai"}[provider], provider)
+	return cmp.Or(map[string]string{"amazon-bedrock": "anthropic", "azure": "openai", "google-vertex": "google"}[provider], provider)
 }
 
 // Invert is the review and verify model of the first provider in Matrix with credentials and another maker than

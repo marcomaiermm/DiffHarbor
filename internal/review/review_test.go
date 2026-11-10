@@ -561,4 +561,8 @@ func TestInversion(t *testing.T) {
 	if r, _ := cfg.Models(); r != gpt || cfg.Inversion() != "commits by anthropic" {
 		t.Errorf("bedrock reviewer: %q", r)
 	}
+	agent.Model = "google-vertex/gemini-x"
+	if cfg := (Settings{Authors: []string{"google"}}); cfg.Inversion() != "commits by google" {
+		t.Errorf("vertex reviewing gemini's commits: %q", cfg.Inversion())
+	}
 }
