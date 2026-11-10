@@ -97,8 +97,9 @@ keep=true only if the code confirms it and the change causes it; drop speculativ
 Drop a finding that repeats an earlier one in the list or an earlier finding still open: the same defect in the same code, maybe a line off or in other words; the same flaw in another caller or field is new.
 Drop a repeat with the earlier one's number as evidence. Before any other drop, run the finding's own example through the code step by step: drop only with the line that rules it out.
 A premise outside the diff (callers, config, deploy order) is checked like the code. If only part of a finding holds, keep it, put that part in "only" and the line that rules out the rest in evidence.
-A finding without a concrete failing input or sequence is speculative: drop it. For a kept non-nit, "trigger" names what reaches that input in this codebase today (caller, request, job, config, data source; untrusted input counts), else empty. A nit needs none: keep it if the code shows it
+A finding without a concrete failing input or sequence is speculative: drop it. A nit needs none: keep it if the code shows it
 and this codebase or common practice backs it; drop taste.
+For a kept non-nit, "trigger" names what reaches that input in this codebase today (caller, request, job, config, data source; untrusted input counts); empty if nothing does.
 A finding that cites a reference doc (given below it, may be outdated) stands only if the change makes that doc's claim false.
 A kept finding with a suggested fix: fix=false if applying it as written would not fix it or break something.
 severity: what the worst case breaks. Minor if only code that doesn't exist yet reaches it (no caller, no exported API, endpoint or handler),
@@ -811,7 +812,7 @@ func verdicts(cs []Comment, claimed []int, reply string, owns func(path string, 
 			c.Severity = d.Severity
 		}
 		trigger := ""
-		if d.Trigger != nil { // model output about untrusted code: one bounded line, like the evidence a body shows
+		if d.Trigger != nil { // model output about untrusted code: one bounded line
 			trigger = text.OneLine(*d.Trigger, 200)
 		}
 		if trigger != "" {
