@@ -47,6 +47,25 @@ func TestPlace(t *testing.T) {
 	}
 }
 
+// Existing quoted in another indentation, with CRLF, still places, and Fix moves to the file's indentation; the same
+// lines twice at the same distance from the finding's line stay unplaced, at different distances the nearer wins.
+func TestPlaceDrift(t *testing.T) {
+	lines := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,5 @@\n+\tx := 1\n+\tfoo()\n+\tx := 1\n+\tfoo()\n+\tbar()\n")
+	c := Finding{Comment: review.Comment{Path: "a.go", Line: 14, Existing: "    bar()\r\n", Fix: "    baz()\n\n    qux()\n"}}
+	if Place(&c, lines); c.Start != 14 || c.Fix != "\tbaz()\n\n\tqux()\n" {
+		t.Fatalf("drift: %+v", c)
+	}
+	tie := Finding{Comment: review.Comment{Path: "a.go", Line: 12, Existing: "foo()", Fix: "y"}}
+	if Place(&tie, lines); tie.Start != 0 {
+		t.Fatalf("tie placed: %+v", tie)
+	}
+	near := tie
+	near.Line = 11
+	if Place(&near, lines); near.Start != 11 {
+		t.Fatalf("nearer: %+v", near)
+	}
+}
+
 // An inline finding a few lines off an open or closed thread is its repeat; past 5 lines, in another file, outside
 // the diff or folded it is new, on the thread's own line never.
 func TestSplitNearThread(t *testing.T) {

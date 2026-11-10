@@ -112,26 +112,51 @@ func Parse(body string) review.Comment {
 }
 
 // Place finds the lines c.Existing quotes in the diff, nearest to c.Line and at most 10 lines from it, and sets
-// c.Start and c.End to them. No match leaves 0: the fix then shows as a plain code block.
+// c.Start and c.End to them. No match, or two equally near, leaves 0: the fix then shows as a plain code block.
+// Lines match ignoring indentation and trailing space, as models drift on both; Fix is then moved to the file's
+// indentation, so the committed lines don't change it.
 func Place(c *Finding, lines map[string]string) {
 	if c.Existing == "" || c.Fix == "" || trim(c.Existing) == trim(c.Fix) {
 		return
 	}
 	want := strings.Split(trim(c.Existing), "\n")
-	best := 11
+	best, tie := 11, false
+	var s0 int
 	for s := c.Line - len(want) - 10; s <= c.Line+10; s++ {
 		matches := true
 		for i, w := range want {
 			l, ok := lines[fmt.Sprintf("%s:%d", c.Path, s+i)]
-			if !ok || strings.TrimRight(l, " \t\r") != strings.TrimRight(w, " \t\r") {
+			if !ok || strings.TrimSpace(l) != strings.TrimSpace(w) {
 				matches = false
 				break
 			}
 		}
-		e := s + len(want) - 1
-		if d := max(s-c.Line, c.Line-e, 0); matches && d < best {
-			best, c.Start, c.End = d, s, e
+		if d := max(s-c.Line, c.Line-(s+len(want)-1), 0); matches && d <= best {
+			tie = d == best
+			best, s0 = d, s
 		}
+	}
+	if best > 10 || tie {
+		return
+	}
+	c.Start, c.End = s0, s0+len(want)-1
+	// the first line with code sets the indentation the model quoted, and the file's
+	for i, w := range want {
+		if strings.TrimSpace(w) == "" {
+			continue
+		}
+		l := lines[fmt.Sprintf("%s:%d", c.Path, s0+i)]
+		from, to := w[:len(w)-len(strings.TrimLeft(w, " \t"))], l[:len(l)-len(strings.TrimLeft(l, " \t"))]
+		if from != to {
+			fix := strings.Split(c.Fix, "\n")
+			for j, f := range fix {
+				if rest, ok := strings.CutPrefix(f, from); ok && strings.TrimSpace(f) != "" {
+					fix[j] = to + rest
+				}
+			}
+			c.Fix = strings.Join(fix, "\n")
+		}
+		break
 	}
 }
 
