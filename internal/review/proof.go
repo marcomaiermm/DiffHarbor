@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"diffharbor/internal/checks"
 	"diffharbor/internal/proc"
 	"fmt"
 	"log"
@@ -17,9 +18,9 @@ const Ran = "Ran on the base: "
 // proofOnBase runs the test proof ("TestX/sub", Story.Proof) against the base versions of the PR's code files, in a
 // worktree of head in sb's dir: test files stay the PR's, the checkout is untouched. A test that still passes there does
 // not prove the change: a finding on the test. Minor, not major: the run is exact, but the proof is the model's pick
-// and the change may be covered elsewhere. Go only (go test names); tests, the run of head's tests, says whether
-// proof already fails on head. A test not found once in the changed test files, review.json turning its tests off,
-// or any error, skips it.
+// and the change may be covered elsewhere. Go (go test names) and JS ("suite > test", checks.TestCmd's runners);
+// tests, the run of head's tests, says whether proof already fails on head. A test not found once in the changed test
+// files, review.json turning its tests off, no JS runner, or any error, skips it.
 func proofOnBase(ctx context.Context, sb *proc.Sandbox, repo, proof string, tests map[string]string, cfg Settings) []Comment {
 	if proof == "" || tests[proof] == "fail" {
 		return nil
@@ -38,8 +39,13 @@ func proofOnBase(ctx context.Context, sb *proc.Sandbox, repo, proof string, test
 	if err != nil {
 		return nil
 	}
-	top, subs, _ := strings.Cut(proof, "/")
-	decl := regexp.MustCompile(`(?m)^func ` + regexp.QuoteMeta(top) + `\(`)
+	top, _, _ := strings.Cut(proof, "/")
+	last := proof
+	if i := strings.LastIndex(proof, " > "); i >= 0 {
+		last = proof[i+3:]
+	}
+	goDecl := regexp.MustCompile(`(?m)^func ` + regexp.QuoteMeta(top) + `\(`)
+	jsDecl := regexp.MustCompile("['\"`]" + regexp.QuoteMeta(last) + "['\"`]")
 	var added, restore []string // code files the PR adds, and those it changes or deletes
 	var testFile string
 	var line, found int
@@ -47,7 +53,7 @@ func proofOnBase(ctx context.Context, sb *proc.Sandbox, repo, proof string, test
 	for i := 0; i+1 < len(f); i += 2 {
 		status, p := f[i], f[i+1]
 		switch {
-		case !strings.HasSuffix(p, "_test.go"):
+		case !checks.IsTest(p):
 			if status == "A" {
 				added = append(added, p)
 			} else {
@@ -55,6 +61,10 @@ func proofOnBase(ctx context.Context, sb *proc.Sandbox, repo, proof string, test
 			}
 		case status != "D":
 			if b, err := sb.ReadFile(ctx, filepath.Join(repo, p)); err == nil { // as the repo's user: the PR's symlink reads nothing of root's
+				decl := jsDecl
+				if strings.HasSuffix(p, ".go") {
+					decl = goDecl
+				}
 				if m := decl.FindIndex(b); m != nil {
 					testFile, line, found = p, 1+strings.Count(string(b[:m[0]]), "\n"), found+1
 				}
@@ -62,6 +72,10 @@ func proofOnBase(ctx context.Context, sb *proc.Sandbox, repo, proof string, test
 		}
 	}
 	if found != 1 || !cfg.RunsTests(testFile) && !cfg.LeftToCI(testFile) {
+		return nil
+	}
+	dir, cmd := checks.TestCmd(ctx, sb, repo, testFile, proof, 90*time.Second)
+	if cmd == nil {
 		return nil
 	}
 	wt := filepath.Join(sb.Dir, "proof")
@@ -82,19 +96,11 @@ func proofOnBase(ctx context.Context, sb *proc.Sandbox, repo, proof string, test
 			return nil
 		}
 	}
-	run := "^" + regexp.QuoteMeta(top) + "$"
-	for s := range strings.SplitSeq(subs, "/") {
-		if s != "" {
-			run += "/^" + regexp.QuoteMeta(s) + "$"
-		}
+	if !strings.HasSuffix(testFile, ".go") {
+		linkModules(ctx, sb, repo, wt, dir)
 	}
-	out := proc.Capped{N: 1 << 20}
-	c := sb.Command(ctx, filepath.Join(wt, filepath.Dir(testFile)), append(sb.ToolEnv(), "NO_COLOR=1"),
-		"go", "test", "-v", "-short", "-count=1", "-timeout=90s", "-run", run, ".")
-	c.Stdout, c.Stderr = &out, &out
-	_ = c.Run() // a build or test failure is the proof holding
-	// no tests to run prints "ok" too: only the test's own PASS line counts
-	if !strings.Contains(out.String(), "--- PASS: "+proof+" (") {
+	// no tests to run prints "ok" too: only the test's own pass line counts
+	if checks.Outcome(runTest(ctx, sb, filepath.Join(wt, dir), cmd), proof) != "pass" {
 		return nil
 	}
 	ev := Ran + proof + " passes without the change to the code, so it does not prove it."
@@ -108,4 +114,26 @@ func proofOnBase(ctx context.Context, sb *proc.Sandbox, repo, proof string, test
 		return nil
 	}
 	return []Comment{fd}
+}
+
+// runTest runs cmd in dir and returns its output: a build or test failure is a result, not an error.
+func runTest(ctx context.Context, sb *proc.Sandbox, dir string, cmd []string) string {
+	out := proc.Capped{N: 1 << 20}
+	c := sb.Command(ctx, dir, append(sb.ToolEnv(), "NO_COLOR=1"), cmd[0], cmd[1:]...)
+	c.Stdout, c.Stderr = &out, &out
+	_ = c.Run()
+	return out.String()
+}
+
+// linkModules links the checkout's node_modules, in dir and each parent, into the worktree wt: the checks installed
+// them there. ponytail: a workspace package they link resolves to the checkout's (head) code, not wt's.
+func linkModules(ctx context.Context, sb *proc.Sandbox, repo, wt, dir string) {
+	for d := dir; ; d = filepath.Dir(d) {
+		if m := filepath.Join(repo, d, "node_modules"); proc.Exists(m) {
+			_, _ = proc.Run(sb.Command(ctx, wt, nil, "ln", "-s", "--", m, filepath.Join(wt, d, "node_modules")))
+		}
+		if d == "." {
+			return
+		}
+	}
 }

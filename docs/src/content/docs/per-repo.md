@@ -46,7 +46,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `ignore` | Globs. A path without one takes its folder. `!glob` takes paths back in: `["src/ui", "!src/ui/{chip,toast}.tsx"]`. Neither the model nor a check sees these files. |
 | `profile` | `quiet`, `chill` (default) or `assertive`: which findings go inline and which fold into the review's summary. See [Review profiles](#review-profiles). |
 | `min_severity` | `minor`, `major` or `critical`: findings below are dropped before verification, nowhere posted. `minor` drops the nits. |
-| `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. |
+| `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. The same switch allows the proof test (run against the base versions of the code files; Go, vitest, jest, `bun test`, `node --test`) and the verifier's repro tests for major and critical findings (3 per review, 30 s each, deleted after the run). |
 | `review_model`, `verify_model` | Apply where the server sets none. The provider's key must be on the server. |
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `passes` | Finders per part, at most 3. See [Passes](#passes). |

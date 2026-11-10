@@ -59,7 +59,8 @@ docker compose up -d
 2. **Context.** The checks above, codegraph, co-change from git history, the PR's commit messages, the repo's rules and skills from the base branch, learnings and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings. Then it looks at the diff again in the same session without tools: up to 10 more at about a tenth of the cost. [`passes`](#passes) add up to two more finders.
 4. **Verify.** A cheaper model checks each finding in the code.
-   For Go, the test the report names as proof runs against the base versions of the PR's code files. If it still passes there, that is a minor finding.
+   The test the report names as proof runs against the base versions of the PR's code files (Go, or JS and TS with the package's vitest, jest, `bun test` or `node --test`). If it still passes there, that is a minor finding.
+   For up to 3 major or critical findings per review the verifier also writes a minimal test that fails if the finding is right. It runs once, with a 30 s limit, in the sandbox and is deleted after: a finding it reproduces shows the run in its comment, one whose test passes drops to minor, and where no test runs (or it doesn't build) nothing changes.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
 **What the review reads:**
