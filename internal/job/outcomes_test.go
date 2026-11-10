@@ -143,7 +143,7 @@ func TestOutcomesFail(t *testing.T) {
 	if err := os.MkdirAll(f+".tmp", 0o700); err != nil { // the tally's write fails
 		t.Fatal(err)
 	}
-	if err := Outcomes(voteForge{pr: pr}, e); err == nil || len(learningsOf("o/r")) != 0 || len(tallyOf(t, "o/r").PRs) != 0 {
+	if err := Outcomes(voteForge{pr: pr}, e); err == nil || len(learningsOf("o/r")) != 1 || len(tallyOf(t, "o/r").PRs) != 0 {
 		t.Fatalf("%v %q", err, learningsOf("o/r"))
 	}
 	_ = os.Remove(f + ".tmp")
@@ -191,8 +191,8 @@ func TestOutcomesFail(t *testing.T) {
 	}
 }
 
-// One close saves at most maxLearnedPerClose new learnings, and counts every decline. One the repo has, or a
-// second of the same, takes no place. A retry after a failed count adds no more.
+// One close saves its first maxLearnedPerClose distinct declines, and counts every one. A second of the same
+// takes no place, one the repo has does. A retry after a failed count saves the same ones, so no more.
 func TestOutcomesLearnCap(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	decline := func(n int, paths ...string) error {
@@ -213,13 +213,13 @@ func TestOutcomesLearnCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths := []string{"0.go", "1.go", "1.go", "2.go", "3.go", "4.go", "5.go", "6.go"}
-	if err := decline(7, paths...); err == nil || len(learningsOf("o/r")) != 1 {
+	if err := decline(7, paths...); err == nil || len(learningsOf("o/r")) != maxLearnedPerClose {
 		t.Fatalf("%v %q", err, learningsOf("o/r"))
 	}
 	_ = os.Remove(f + ".tmp")
 	err := decline(7, paths...)
 	ls := learningsOf("o/r")
-	if err != nil || len(ls) != 1+maxLearnedPerClose || !strings.Contains(ls[3], "(3.go") || tallyOf(t, "o/r").Total[dismissed] != 1+len(paths) {
+	if err != nil || len(ls) != maxLearnedPerClose || !strings.Contains(ls[2], "(2.go") || tallyOf(t, "o/r").Total[dismissed] != 1+len(paths) {
 		t.Fatalf("%v %q %+v", err, ls, tallyOf(t, "o/r"))
 	}
 }
@@ -228,7 +228,7 @@ func TestOutcomesLearnCap(t *testing.T) {
 func TestLearnOnce(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	for _, l := range []string{"- X (a, b)", "- X (a)", "- X (a)"} {
-		if _, err := learnOnce("o/r", l); err != nil {
+		if err := learnOnce("o/r", l); err != nil {
 			t.Fatal(err)
 		}
 	}

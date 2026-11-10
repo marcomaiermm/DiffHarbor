@@ -74,8 +74,8 @@ func loadTally(f string) (t tally, err error) {
 	return t, nil
 }
 
-// maxLearnedPerClose bounds the new learnings one close saves (ones the repo has don't count): a PR of many 👎
-// mustn't push the curated ones out of the newest a review follows.
+// maxLearnedPerClose bounds the learnings one close saves, its first distinct declines: a PR of many 👎 mustn't
+// push the curated ones out of the newest a review follows.
 const maxLearnedPerClose = 3
 
 // tallyMu guards the read-modify-write of record, like learningsMu.
@@ -135,8 +135,7 @@ func record(key string, pr int, profile string, sevs, outs []string) (bool, erro
 }
 
 // Outcomes counts what became of our findings on e's closed PR, and saves the declined ones as learnings unless
-// review.json's learnings.outcomes is false. On an error before the count the PR isn't counted: its next close
-// tries again.
+// review.json's learnings.outcomes is false. On an error the PR isn't counted: its next close tries again.
 func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 	defer proc.Recovered(func(pe error) { err = pe })
 	key, n := e.Repo(), e.PullRequest.Number
@@ -181,48 +180,41 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 		o := classify(t, can)
 		sevs, outs = append(sevs, sev), append(outs, o)
 		// Only a writer's 👎 is a learning: a resolve may as well mean fixed.
-		if o == dismissed {
-			lost = append(lost, fmt.Sprintf("- Maintainers declined a %s finding: %s (%s)", sev,
-				text.OneLine(cmp.Or(c.Title, c.Body), 100), text.OneLine(t.Path, 100)))
+		if o != dismissed {
+			continue
+		}
+		if l := fmt.Sprintf("- Maintainers declined a %s finding: %s (%s)", sev,
+			text.OneLine(cmp.Or(c.Title, c.Body), 100), text.OneLine(t.Path, 100)); !slices.Contains(lost, l) {
+			lost = append(lost, l)
 		}
 	}
 	if canErr != nil {
 		return fmt.Errorf("can write: %w", canErr) // a non-writer's vote would count
 	}
-	// The count before the learnings: only the close that counts the PR saves them, so a retry never adds past
-	// maxLearnedPerClose. A failed save isn't tried again: they are a bounded few anyway.
-	counted, err := record(key, n, profile, sevs, outs)
-	if err != nil || !counted || cfgErr != nil || !cfg.Learnings.Learns() {
-		return err
-	}
-	saved := 0
-	for _, l := range lost {
-		if saved == maxLearnedPerClose {
-			break
-		}
-		ok, err := learnOnce(key, l)
-		if err != nil {
-			return err
-		}
-		if ok {
-			saved++
+	// The learnings before the count: learnOnce saves each once, and a PR counted is skipped on its next close.
+	// The same first few whatever the repo has: a retry picks them again and adds none past the cap.
+	if cfgErr == nil && cfg.Learnings.Learns() {
+		for _, l := range lost[:min(len(lost), maxLearnedPerClose)] {
+			if err := learnOnce(key, l); err != nil {
+				return err
+			}
 		}
 	}
-	return nil
+	_, err = record(key, n, profile, sevs, outs)
+	return err
 }
 
-// learnOnce saves entry as a learning unless the repo has it, whatever its date (addLearning's ", 2006-01-02)"),
-// and says whether it did.
-func learnOnce(key, entry string) (bool, error) {
+// learnOnce saves entry as a learning unless the repo has it, whatever its date (addLearning's ", 2006-01-02)").
+func learnOnce(key, entry string) error {
 	p := strings.TrimSuffix(entry, ")") + ", "
 	if slices.ContainsFunc(learningsOf(key), func(l string) bool {
 		d, ok := strings.CutPrefix(l, p)
 		_, err := time.Parse(time.DateOnly+")", d)
 		return ok && err == nil
 	}) {
-		return false, nil
+		return nil
 	}
-	return true, addLearning(key, entry, time.Now())
+	return addLearning(key, entry, time.Now())
 }
 
 // Stats prints the tally of repo, or of every repo with one, as plain text.
