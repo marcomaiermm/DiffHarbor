@@ -110,6 +110,8 @@ func judge(v *view, found []*finding) {
 		}
 		if strings.HasPrefix(fd.Evidence, review.Ran) { // a run, no model
 			fd.Proof, fd.Shown = "Test run on the base", true
+		} else if strings.HasPrefix(fd.Evidence, review.Repro) {
+			fd.Proof, fd.Shown = "Test run", true
 		}
 		if fd.Proof == "" {
 			fd.Proof = "AI cross-check"

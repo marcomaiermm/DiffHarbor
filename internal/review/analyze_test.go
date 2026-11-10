@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"diffharbor/internal/proc"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,7 +18,9 @@ type fakeAgent struct {
 	mu      sync.Mutex // parts run at once
 	replies map[string][]string
 	calls   []string
+	systems map[string]string // the last system prompt per pass name
 	tasks   map[string]string // the last task per pass name
+	cont    [][2]string       // the name and system prompt of each Continue
 	panics  []string          // the passes whose Run panics
 }
 
@@ -30,9 +33,13 @@ func (f *fakeAgent) reply(name string) (string, error) {
 	return q[0], nil
 }
 
-func (f *fakeAgent) Run(_ context.Context, _ *proc.Sandbox, name, _, task, _, _ string) (string, error) {
+func (f *fakeAgent) Run(_ context.Context, _ *proc.Sandbox, name, system, task, _, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.systems == nil {
+		f.systems = map[string]string{}
+	}
+	f.systems[name] = system
 	f.calls = append(f.calls, name)
 	if f.tasks == nil {
 		f.tasks = map[string]string{}
@@ -45,9 +52,10 @@ func (f *fakeAgent) Run(_ context.Context, _ *proc.Sandbox, name, _, task, _, _ 
 }
 
 // Continue answers a second look from name+" again", with nothing more found when none is queued.
-func (f *fakeAgent) Continue(_ context.Context, _ *proc.Sandbox, name, _, task, _ string) (string, error) {
+func (f *fakeAgent) Continue(_ context.Context, _ *proc.Sandbox, name, system, task, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.cont = append(f.cont, [2]string{name, system})
 	if strings.HasPrefix(task, repeatsTask[:30]) {
 		f.calls = append(f.calls, name+" repeats")
 		return f.reply(name + " repeats")
@@ -110,6 +118,11 @@ func TestAnalyze(t *testing.T) {
 		r, stats, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: dir}, Title: "t", Settings: s, Parts: parts})
 		if err != nil {
 			t.Fatal(err)
+		}
+		for _, c := range f.cont { // a repair, a second look or a repeat check keeps its pass' system prompt
+			if c[1] != f.systems[c[0]] {
+				t.Errorf("%s: system prompt differs from Run's", c[0])
+			}
 		}
 		return r, stats, f.calls
 	}
@@ -200,6 +213,11 @@ func TestAnalyze(t *testing.T) {
 		r, _, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: t.TempDir()}, Parts: []string{md}, Prior: []Comment{{Path: "a.md", Line: 1, Body: "race"}}})
 		if err != nil {
 			t.Fatal(err)
+		}
+		for _, c := range f.cont {
+			if c[1] != f.systems[c[0]] {
+				t.Errorf("%s: system prompt differs from Run's", c[0])
+			}
 		}
 		return r, f.calls
 	}
@@ -315,5 +333,62 @@ func TestAnalyzeAgain(t *testing.T) {
 		!strings.Contains(task, "fixed by a commit (if this change brings one back, report it again with \"again\": its number)\n\n### 1 · a.md:1 · major · fixed1") ||
 		!strings.Contains(task, "### 2 · a.md:1 · major · fixed2") || !strings.Contains(task, "### 3 · a.md:1 · major · declined") {
 		t.Fatalf("again %v %v\n%s", again, err, task)
+	}
+}
+
+// The verifier's repros run before the keep filter: a reproduced finding keeps its run, a refuted one is lowered and
+// so dropped under min_severity; the repro prompt is there only where tests run.
+func TestAnalyzeRepro(t *testing.T) {
+	defer func(pi bool) { proc.AsPi = pi }(proc.AsPi)
+	proc.AsPi = false
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for f, s := range map[string]string{"go.mod": "module m\n\ngo 1.21\n", "f.go": "package m\n\nfunc F() int { return 1 }\n"} {
+		if err := os.WriteFile(filepath.Join(repo, f), []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const d = "diff --git a/f.go b/f.go\n--- a/f.go\n+++ b/f.go\n@@ -1 +1,2 @@\n x\n+y\n"
+	repro := func(file, name, body string) string {
+		src := "package m\n\nimport \"testing\"\n\nfunc " + name + "(t *testing.T) { " + body + " }\n"
+		b, _ := json.Marshal(map[string]string{"file": file, "name": name, "source": src})
+		return string(b)
+	}
+	review := `{"summary":"s","comments":[{"path":"f.go","line":2,"severity":"major","title":"a","body":"b"},{"path":"f.go","line":1,"severity":"major","title":"c","body":"b"}]}`
+	verify := `{"verdicts":[{"i":0,"keep":true,"repro":` + repro("a_test.go", "TestA", "if F() == 1 { t.Fatal(\"F is 1\") }") +
+		`},{"i":1,"keep":true,"repro":` + repro("c_test.go", "TestC", "if F() != 1 { t.Fatal() }") + `}]}`
+	run := func(s Settings) (Result, *fakeAgent) {
+		f := &fakeAgent{replies: map[string][]string{"review": {review}, "verify": {verify}}}
+		r, _, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: dir}, Title: "t", Settings: s, Parts: []string{d}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r, f
+	}
+	s, err := LoadSettings(`{"min_severity":"major"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, f := run(s)
+	if len(r.Comments) != 1 || r.Comments[0].Title != "a" || !strings.HasPrefix(r.Comments[0].Evidence, Repro) ||
+		!strings.Contains(r.Comments[0].Body, "```") || !strings.Contains(r.Comments[0].Body, "F is 1") {
+		t.Errorf("repros: %+v", r.Comments)
+	}
+	if !strings.Contains(f.systems["verify"], reproSystem) {
+		t.Error("no repro prompt where tests run")
+	}
+	if m, _ := filepath.Glob(filepath.Join(repo, "*_test.go")); len(m) != 0 {
+		t.Errorf("left behind: %v", m)
+	}
+	off, err := LoadSettings(`{"tests":false}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, f = run(off)
+	if len(r.Comments) != 2 || strings.HasPrefix(r.Comments[0].Evidence, Repro) || strings.Contains(f.systems["verify"], reproSystem) {
+		t.Errorf("tests off: %+v", r.Comments)
 	}
 }

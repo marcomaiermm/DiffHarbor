@@ -256,13 +256,7 @@ func Run(ctx context.Context, sb *proc.Sandbox, scripts []Script, patch string, 
 			}
 			section("install"+titled(filepath.Dir(lock)), res, -20)
 		}
-		// bin finds a tool in the package's node_modules/.bin or a parent's (workspaces hoist them); "" = none.
-		bin := func(t string) string {
-			if p := Up(repo, dir, filepath.Join("node_modules/.bin", t)); p != "" {
-				return filepath.Join(repo, p)
-			}
-			return ""
-		}
+		bin := func(t string) string { return binUp(repo, dir, t) }
 		at := func(f string) bool { return has(filepath.Join(dir, f)) }
 		if tsc := bin("tsc"); at("tsconfig.json") && tsc != "" {
 			res := run(tsc, "--noEmit", "-p", ".")
