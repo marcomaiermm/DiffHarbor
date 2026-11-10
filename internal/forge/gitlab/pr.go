@@ -122,7 +122,7 @@ func (p *pr) Wiki() ([]knowledge.File, error) {
 	var fs []knowledge.File
 	for _, w := range ws[:min(len(ws), 100)] {
 		if w.Format == "markdown" {
-			fs = append(fs, knowledge.File{ID: "wiki/" + w.Slug, Title: "wiki: " + w.Title, URL: web + "/-/wikis/" + w.Slug, Text: w.Content})
+			fs = append(fs, knowledge.File{ID: "wiki/" + w.Slug, Title: "wiki: " + w.Title, URL: web + "/-/wikis/" + w.Slug, Text: w.Content, GitLab: true})
 		}
 	}
 	return fs, nil

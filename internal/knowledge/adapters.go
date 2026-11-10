@@ -2,6 +2,7 @@ package knowledge
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
@@ -137,7 +138,7 @@ func (e Env) docs(ctx context.Context, r Request, changed []string) ([]Section, 
 			return nil //nolint:nilerr // left out, like a large file
 		}
 		n++
-		out = append(out, onTopic(Split(File{ID: rel, Title: rel, URL: e.Blob + rel, Text: string(src)}), r)...)
+		out = append(out, onTopic(Split(File{ID: rel, Title: rel, URL: e.Blob + rel, Text: string(src), GitLab: e.GitLab}), r)...)
 		return nil
 	})
 	return out, err
@@ -199,26 +200,37 @@ func linear(ctx context.Context, r Request) ([]Section, error) {
 	if ticket.LinearKey == "" {
 		return nil, nil
 	}
-	const fields = "id title url content updatedAt"
-	type doc struct{ ID, Title, URL, Content, UpdatedAt string }
+	const fields = "id slugId title url content updatedAt"
+	type doc struct{ ID, SlugID, Title, URL, Content, UpdatedAt string }
 	var out []Section
 	add := func(d doc) {
 		out = append(out, Split(File{ID: d.ID, Title: d.Title, URL: d.URL, Updated: d.UpdatedAt, Text: d.Content})...)
 	}
-	seen := map[string]bool{} // by Linear's id: a document a ref and a search both find counts once
-	for _, ref := range r.Refs {
-		id := ref
+	// by Linear's id and slug id, the two a ref can name: a document refs, links and a search find is read once
+	seen := map[string]bool{}
+	// a ref to the whole document first: all its sections are then explicit, a ref to one of them still finds it
+	refs := slices.Clone(r.Refs)
+	slices.SortStableFunc(refs, func(a, b string) int {
+		return cmp.Compare(b2i(strings.Contains(a, "#")), b2i(strings.Contains(b, "#")))
+	})
+	for _, ref := range refs {
+		page, _, _ := strings.Cut(ref, "#") // the document; the anchor names a section of it
+		id := page
 		if m := linearLink.FindStringSubmatch(ref); m != nil {
 			id = m[1] // a link the PR names: its id goes to Linear's API, the link is never opened
-		} else if !linearID.MatchString(ref) { // another URL, or another adapter's ref: not ours
+		} else if !linearID.MatchString(page) { // another URL, or another adapter's ref: not ours
+			continue
+		}
+		if seen[id] { // read for another ref already
 			continue
 		}
 		var res struct{ Document *doc }
 		if err := gql(ctx, "query($id: String!) { document(id: $id) { "+fields+" } }", map[string]any{"id": id}, &res); err == nil && res.Document != nil &&
-			!seen[res.Document.ID] { // an id and a link to one document: the first ref has it
-			seen[res.Document.ID] = true
-			res.Document.ID = ref // explicit() compares with the ref: a slug id or a link
-			add(*res.Document)
+			!seen[res.Document.ID] {
+			d := *res.Document
+			seen[d.ID], seen[d.SlugID] = true, true
+			d.ID = page // explicit() compares with the ref: a slug id or a link, and a section's ref with its anchor
+			add(d)
 		} // a ref that isn't a document of Linear's: skipped
 	}
 	for _, e := range r.Entities[:min(len(r.Entities), maxSearches)] {
@@ -228,7 +240,7 @@ func linear(ctx context.Context, r Request) ([]Section, error) {
 		}
 		for _, d := range res.SearchDocuments.Nodes {
 			if !seen[d.ID] {
-				seen[d.ID] = true
+				seen[d.ID], seen[d.SlugID] = true, true
 				add(d)
 			}
 		}
