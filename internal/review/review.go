@@ -466,6 +466,8 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 			r.Comments[i].Again = nil
 			if a >= 0 && a < len(in.Addressed) {
 				r.Comments[i].Again = &a
+			} else {
+				log.Printf("again %d: no fixed finding has that number, posted as new", *c.Again)
 			}
 		}
 	}

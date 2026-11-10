@@ -666,7 +666,7 @@ func reopen(p forge.PR, gone []forge.Thread, sha string, cs []review.Comment) (p
 	done := map[int]bool{}
 	free = map[string]bool{}
 	for _, c := range cs {
-		if c.Again != nil {
+		if c.Again != nil && *c.Again >= 0 && *c.Again < len(gone) { // Analyze bounds it: no panic if that changes
 			t := gone[*c.Again]
 			if !c.Fold && !done[*c.Again] && t.Path == c.Path {
 				err := p.Reopen(t, sha, forge.Finding{Comment: c})
