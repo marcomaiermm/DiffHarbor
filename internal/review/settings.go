@@ -83,9 +83,13 @@ type SyntaxTheme struct {
 
 // Learnings is review.json's learnings, applied when they are read: a lower max hides the oldest, it deletes nothing.
 type Learnings struct {
-	Max        *int `json:"max"`          // the newest of the repo's and of the owner's each; unset 30, 0 = none, at most MaxLearnings
-	MaxAgeDays int  `json:"max_age_days"` // older ones are left out; 0 = any age, an undated one never ages
+	Max        *int  `json:"max"`          // the newest of the repo's and of the owner's each; unset 30, 0 = none, at most MaxLearnings
+	MaxAgeDays int   `json:"max_age_days"` // older ones are left out; 0 = any age, an undated one never ages
+	Outcomes   *bool `json:"outcomes"`     // a finding the maintainers declined becomes a learning; unset true, false = counted only
 }
+
+// Learns reports whether declined findings become learnings by themselves.
+func (l Learnings) Learns() bool { return l.Outcomes == nil || *l.Outcomes }
 
 // MaxLearnings is the most learnings kept per repo and per owner, and review.json's highest max.
 const MaxLearnings = 100

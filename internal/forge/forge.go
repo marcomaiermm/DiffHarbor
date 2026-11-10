@@ -68,6 +68,9 @@ type PR interface {
 	Note(id int64, body string) (int64, error)
 	// Threads are our inline findings on the PR.
 	Threads() ([]Thread, error)
+	// Voted is Threads with Up and Down filled: who reacted 👍 and 👎 on each finding. Only the outcome collection
+	// reads reactions; they cost a call per thread on GitLab.
+	Voted() ([]Thread, error)
 	// Configure takes the repo's review.json, before Resolve and Post.
 	Configure(cfg review.Settings)
 	// Resolve answers a thread whose finding sha fixed, then resolves it. On GitLab the answer may wait for Post or
@@ -122,6 +125,7 @@ type Thread struct {
 	// Addressed(): resolved by our "✅ Addressed in", nobody replied since. A commit fixed it: one bringing it back
 	// reopens it.
 	Addressed bool
+	Up, Down  []string // Voted(): logins that reacted 👍 and 👎 on the finding
 }
 
 // AddressedIn is Resolve's answer: sha fixed the thread's finding.

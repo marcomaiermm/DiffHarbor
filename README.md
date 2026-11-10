@@ -88,6 +88,8 @@ docker compose up -d
 
 When a maintainer corrects the bot or states a convention, the bot saves the rule with its reason, the PR and the date in `/data/learnings/`, unless one already says it or it only holds for now. It keeps the newest 100 per repo and per owner. A review follows the newest 30 of each, a newer one over an older one it contradicts. [`learnings`](#per-repo-settings) in `review.json` changes that.
 
+**Outcomes.** When a PR closes, the bot counts what became of each finding: addressed (its "Addressed in" reply), accepted (👍), dismissed (resolved without a fix, or 👎) or ignored (still open). Only 👍 and 👎 by people who can push to the repo count. A dismissed finding also becomes a learning (`learnings.outcomes` in `review.json` turns that off). A PR counts once, however often it closes. `diffharbor stats [owner/repo]` prints the counts per repo, by severity and by profile (the PR's, else `review.json`'s top-level one), from `/data/outcomes/`.
+
 ## Configuration
 
 All settings are environment variables in `.env` next to `compose.yml`.
@@ -299,7 +301,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
   "install_scripts": false,
   "base_branches": ["develop", "release/*"],
   "drafts": "manual",
-  "learnings": {"max": 30, "max_age_days": 180},
+  "learnings": {"max": 30, "max_age_days": 180, "outcomes": true},
   "gitlab_findings": "review",
   "checks": [".review/checks.sh"],
   "packages": {
@@ -325,7 +327,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
 | `base_branches` | Globs of base branches whose PRs get reviewed, besides the default branch. A PR into any other (`main` → `prod`) is skipped with a green status. `@<bot> review` still reviews it. |
 | `drafts` | `manual` (default): a draft PR gets a review on `@<bot> review`, then once marked ready. `opt_in`: once someone asked with `@<bot> review`, every later push of the draft gets one too, like any PR. `off`: never; `@<bot> review` says so. |
-| `learnings` | `max`: how many of the newest learnings of the repo and of the owner a review and the chat follow, each. `0` is none, at most 100, default 30. `max_age_days`: older ones are left out. Default: any age. A learning saved before dates were kept never ages. Both only hide, nothing is deleted. |
+| `learnings` | `max`: how many of the newest learnings of the repo and of the owner a review and the chat follow, each. `0` is none, at most 100, default 30. `max_age_days`: older ones are left out. Default: any age. A learning saved before dates were kept never ages. Both only hide, nothing is deleted. `outcomes`: when a PR closes, a finding a maintainer declined (resolved without a fix, or 👎 by someone who can push) is saved as a learning; `false` only counts them. Default `true`. |
 | `gitlab_findings` | `review`: the findings, the answers to fixed threads and the summary are one review, one email; a suggestion GitLab can't place goes into the summary as code. `discussions`: each on its own, an email each; a refused suggestion is retried as plain code on its line. Default: the server's `GITLAB_FINDINGS`. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |

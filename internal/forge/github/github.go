@@ -443,6 +443,31 @@ func Patches(api string, n int, token string) (map[string]string, error) {
 
 // Threads returns our threads on the PR.
 func Threads(repo string, n int, token string) ([]forge.Thread, error) {
+	return threads(repo, n, token, false)
+}
+
+// Voted is Threads with the logins that reacted 👍 and 👎 on the finding, the first 20 of each.
+func Voted(repo string, n int, token string) ([]forge.Thread, error) {
+	return threads(repo, n, token, true)
+}
+
+// react is a comment's reactions of one kind in the query.
+type react struct {
+	Nodes []struct {
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	} `json:"nodes"`
+}
+
+func (r react) logins() (ls []string) {
+	for _, n := range r.Nodes {
+		ls = append(ls, n.User.Login)
+	}
+	return ls
+}
+
+func threads(repo string, n int, token string, votes bool) ([]forge.Thread, error) {
 	owner, name, _ := strings.Cut(repo, "/")
 	var ts []forge.Thread
 	var after *string
@@ -469,6 +494,8 @@ func Threads(repo string, n int, token string) ([]forge.Thread, error) {
 										Type  string `json:"__typename"`
 										Login string `json:"login"`
 									} `json:"author"`
+									Up   react `json:"up"`
+									Down react `json:"down"`
 								} `json:"nodes"`
 							} `json:"comments"`
 							Replies struct {
@@ -486,8 +513,12 @@ func Threads(repo string, n int, token string) ([]forge.Thread, error) {
 				} `json:"pullRequest"`
 			} `json:"repository"`
 		}
+		extra := ""
+		if votes {
+			extra = " up:reactions(content:THUMBS_UP,first:20){nodes{user{login}}} down:reactions(content:THUMBS_DOWN,first:20){nodes{user{login}}}"
+		}
 		err := graphql(token, `query($o:String!,$r:String!,$n:Int!,$a:String){repository(owner:$o,name:$r){pullRequest(number:$n){
-reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{databaseId path line originalLine body author{__typename login}}} replies:comments(last:3){nodes{databaseId body author{__typename login}}}}}}}}`,
+reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{databaseId path line originalLine body author{__typename login}`+extra+`}} replies:comments(last:3){nodes{databaseId body author{__typename login}}}}}}}}`,
 			map[string]any{"o": owner, "r": name, "n": n, "a": after}, &d)
 		if err != nil {
 			return nil, err
@@ -508,7 +539,7 @@ reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isRes
 				}
 			}
 			ts = append(ts, forge.Thread{ID: t.ID, Comment: c.DatabaseID, Resolved: t.IsResolved, Path: c.Path, Line: c.Line, Original: c.OriginalLine, Body: c.Body, Replies: forge.Answers(rs),
-				Addressed: forge.Addressed(rs)})
+				Addressed: forge.Addressed(rs), Up: c.Up.logins(), Down: c.Down.logins()})
 		}
 		if !rt.PageInfo.HasNextPage {
 			break
