@@ -147,16 +147,18 @@ What happens per review, in this order:
 
 1. **Names** from the diff: the declarations on changed lines with names of more than one word (`refundOrder`, `refund_order`; a one-word name like `posts` is in any prose), `SCREAMING_CASE` config keys on changed lines, and the changed paths. Config keys first, then symbols, then paths, at most 40.
 2. **Adapters:** the ones whose globs in `review.json` match a changed file, asked in parallel with the names. They also get the links in the PR description, its commits and the linked ticket, and their `name:ref` entries, so a page the PR links can be found by its link. The server opens none of these links.
-3. **Check:** the server keeps a section only if one of those links or `name:ref` entries points at it, or it names one of the names as a whole word. Generic file names (`index.ts`, `main.go`, `README.md`) don't count alone.
+3. **Check:** the server keeps a section only if one of those links or `name:ref` entries points at it, or it names one of the names as a whole word. A generic file name (`index.ts`, `main.go`, `README.md`) doesn't count alone, at the repo's root neither: a path like `cmd/api/main.go` does.
 4. **Order:** sections a link or `name:ref` entry points at first, then the ones that name more of the names, then by id. Each at most 2000 characters, 8000 in all, whole sections only: what doesn't fit is left out.
 5. **Prompt:** the sections go to the review as reference that may be outdated, the same for every pass. The verifier sees only the sections a finding cites.
 
 Per repo, in `review.json`: a glob of changed files, and the adapters to ask. Names only, never URLs or tokens. Without the key nothing is asked.
 
 ```json
-"knowledge": {
-  "**": ["docs"],
-  "internal/refund/**": ["wiki", "linear:<doc-id>", "acmewiki"]
+{
+  "knowledge": {
+    "**": ["docs"],
+    "internal/refund/**": ["wiki", "linear:<doc-id>", "acmewiki"]
+  }
 }
 ```
 
@@ -190,7 +192,7 @@ acme linear
 - An adapter's error or timeout (10 s) costs that adapter only, and only what it hadn't returned yet: `linear` keeps the documents it fetched before a failed search, `docs` the files it read in time.
 - The report lists the sections that were read (title and link, not their text).
 
-**What it read:** the report's overview shows "Docs reached" with each section's title, link and adapter. The server logs one line per review, for example `acme/api#12 knowledge: docs, linear: 9 sections returned, 3 kept, 4120 chars`, and a line per adapter that failed. Nothing kept for weeks? Then the docs rarely name the code: add `name:ref` entries to `review.json` for the folders a page describes.
+**What it read:** the report's overview shows "Docs reached" with each section's title, link and adapter. The server logs one line per review, for example `acme/api#12 knowledge: docs, linear: 9 sections returned, 3 kept, 4120 chars`, and a line per adapter that failed. Nothing kept for weeks? Then the docs rarely name the code: point the code's glob at the page that describes it, `"internal/refund/**": ["docs:docs/refunds.md"]`. A ref names a page by its id or link, or one section of it (`docs/refunds.md#window`), never a folder.
 
 ### Remote adapters (experimental)
 
@@ -204,7 +206,7 @@ Content-Type: application/json
 {"version": 1, "repo": "acme/api", "refs": ["https://wiki.corp/p/12", "page-12"],
  "entities": [{"name": "RefundOrder", "kind": "symbol", "hop": 0}], "max_chars": 2000}
 
-200 {"sections": [{"id": "page-12#window", "title": "Refunds", "url": "https://wiki.corp/p/12",
+200 {"sections": [{"id": "page-12#window", "title": "Refunds", "url": "https://wiki.corp/p/12#window",
                    "updated": "2026-05-01T12:00:00Z", "text": "markdown"}]}
 ```
 
@@ -213,23 +215,64 @@ Content-Type: application/json
 - Resolve the refs you know and ignore the rest. An entity may be ignored. **Never fetch a ref as a URL**: it comes from a PR's text. Parse ids out of URLs on hosts you own only.
 - Answer `400` to a `version` you don't know. Section `text` at most 2000 characters. The answer at most 1 MB, in 10 s, no redirects (the server doesn't follow them).
 - Unknown fields are ignored on both sides. Fields are only added, never removed or redefined; a break bumps `version`.
-- The server keeps a section only if it passes its own check (above), so false positives cost nothing.
+- A section needs an `id`; one without is skipped. `updated` is RFC 3339 or left out, anything else is dropped. A section's `url` is its page's link plus `#<anchor>`: then a link to the page names all its sections.
+- The server checks all of the answer itself (above), so false positives cost nothing but their share of the 1 MB.
 
-A complete adapter in Go, as `internal/knowledge`'s test runs it:
+An adapter in Go, its handler as `internal/knowledge`'s test runs it:
 
 ```go
-http.HandleFunc("/lookup", func(w http.ResponseWriter, r *http.Request) {
-	var req Request // the types of internal/knowledge, or your own with the same JSON
-	if r.Header.Get("Authorization") != "Bearer "+token || json.NewDecoder(r.Body).Decode(&req) != nil || req.Version != 1 {
-		http.Error(w, "no", http.StatusBadRequest)
-		return
+// A remote adapter: run it with ADAPTER_TOKEN set, list it as "acme acmewiki https://<host>/lookup <token>".
+package main
+
+import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/json"
+	"log"
+	"net/http"
+	"os"
+)
+
+// Request and Section are the contract's JSON (version 1); unknown fields are ignored.
+type Request struct {
+	Version  int      `json:"version"`
+	Refs     []string `json:"refs"`
+	Entities []struct {
+		Name string `json:"name"`
+		Kind string `json:"kind"`
+	} `json:"entities"`
+}
+
+type Section struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	Updated string `json:"updated,omitempty"`
+	Text    string `json:"text"`
+}
+
+func main() {
+	token := os.Getenv("ADAPTER_TOKEN")
+	if token == "" { // else "Bearer " alone would pass
+		log.Fatal("ADAPTER_TOKEN is not set")
 	}
-	var ss []Section
-	for _, e := range req.Entities {
-		ss = append(ss, Section{ID: "wiki-" + e.Name, Title: "About " + e.Name, URL: "https://wiki.example/" + e.Name, Text: "How " + e.Name + " works"})
-	}
-	json.NewEncoder(w).Encode(map[string]any{"sections": ss})
-})
+	want := sha256.Sum256([]byte("Bearer " + token))
+	http.HandleFunc("POST /lookup", func(w http.ResponseWriter, r *http.Request) {
+		got := sha256.Sum256([]byte(r.Header.Get("Authorization")))
+		var req Request
+		if subtle.ConstantTimeCompare(got[:], want[:]) != 1 ||
+			json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req) != nil || req.Version != 1 {
+			http.Error(w, "no", http.StatusBadRequest)
+			return
+		}
+		ss := []Section{}
+		for _, e := range req.Entities { // your source goes here: the sections that name e.Name
+			ss = append(ss, Section{ID: "wiki-" + e.Name, Title: "About " + e.Name, URL: "https://wiki.example/" + e.Name, Text: "How " + e.Name + " works"})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"sections": ss})
+	})
+	log.Fatal(http.ListenAndServe(":8080", nil))
+}
 ```
 
 ## Storage and Docker

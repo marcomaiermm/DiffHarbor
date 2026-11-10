@@ -214,7 +214,8 @@ func linear(ctx context.Context, r Request) ([]Section, error) {
 			continue
 		}
 		var res struct{ Document *doc }
-		if err := gql(ctx, "query($id: String!) { document(id: $id) { "+fields+" } }", map[string]any{"id": id}, &res); err == nil && res.Document != nil {
+		if err := gql(ctx, "query($id: String!) { document(id: $id) { "+fields+" } }", map[string]any{"id": id}, &res); err == nil && res.Document != nil &&
+			!seen[res.Document.ID] { // an id and a link to one document: the first ref has it
 			seen[res.Document.ID] = true
 			res.Document.ID = ref // explicit() compares with the ref: a slug id or a link
 			add(*res.Document)
