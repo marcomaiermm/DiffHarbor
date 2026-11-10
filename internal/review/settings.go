@@ -569,9 +569,9 @@ func (cfg Settings) Keep(c Comment) bool {
 
 // Fold reports whether c goes folded into the review's summary instead of inline, by its file's profile: a nit
 // unless assertive, a minor one under quiet. A finding the verifier found no trigger for folds under every profile,
-// a critical one excepted. It sits here so FoldPush, which calls Fold, folds it too.
+// a major or critical one excepted: folded, a push could show none of it. It sits here so FoldPush, which calls Fold, folds it too.
 func (cfg Settings) Fold(c Comment) bool {
-	if c.noCause && c.Severity != "critical" {
+	if c.noCause && !Blocks(c.Severity) {
 		return true
 	}
 	switch cmp.Or(cfg.Override, cfg.at(c.Path).Profile) {

@@ -592,18 +592,18 @@ func TestInversion(t *testing.T) {
 // A kept defect no caller or source reaches folds whatever the profile, a critical one and nits excepted; a pass
 // that never answered the question folds nothing.
 func TestTrigger(t *testing.T) {
-	cs := []Comment{{Severity: "major"}, {Severity: "major"}, {Severity: "critical"}, {Severity: "nit"}}
+	cs := []Comment{{Severity: "minor"}, {Severity: "minor"}, {Severity: "critical"}, {Severity: "nit"}, {Severity: "major"}}
 	run := func(reply string) []Comment {
 		kept, _, _, ok := verdicts(cs, nil, `{"verdicts":[`+reply+`]}`, nil)
-		if !ok || len(kept) != 4 {
+		if !ok || len(kept) != 5 {
 			t.Fatalf("%v %+v", ok, kept)
 		}
 		return kept
 	}
 	long := strings.Repeat("x ", 300)
-	kept := run(`{"i":0,"keep":true,"trigger":"POST /orders sends it"},{"i":1,"keep":true,"trigger":""},{"i":2,"keep":true},{"i":3,"keep":true}`)
+	kept := run(`{"i":0,"keep":true,"trigger":"POST /orders sends it"},{"i":1,"keep":true,"trigger":""},{"i":2,"keep":true},{"i":3,"keep":true},{"i":4,"keep":true}`)
 	cfg := Settings{Override: "assertive"}
-	for i, want := range []bool{false, true, false, false} {
+	for i, want := range []bool{false, true, false, false, false} {
 		if got := cfg.Fold(kept[i]); got != want {
 			t.Errorf("finding %d: fold %v", i, got)
 		}
@@ -614,10 +614,10 @@ func TestTrigger(t *testing.T) {
 	if !strings.Contains(kept[0].Body, "_Trigger:_ POST /orders sends it") || strings.Contains(kept[1].Body, "Trigger") {
 		t.Errorf("body: %q %q", kept[0].Body, kept[1].Body)
 	}
-	if b := run(`{"i":0,"keep":true,"trigger":"` + long + `"},{"i":1,"keep":true},{"i":2,"keep":true},{"i":3,"keep":true}`)[0].Body; len(b) > 250 {
+	if b := run(`{"i":0,"keep":true,"trigger":"` + long + `"},{"i":1,"keep":true},{"i":2,"keep":true},{"i":3,"keep":true},{"i":4,"keep":true}`)[0].Body; len(b) > 250 {
 		t.Errorf("trigger not bounded: %d", len(b))
 	}
-	for i, c := range run(`{"i":0,"keep":true},{"i":1,"keep":true},{"i":2,"keep":true},{"i":3,"keep":true}`) {
+	for i, c := range run(`{"i":0,"keep":true},{"i":1,"keep":true},{"i":2,"keep":true},{"i":3,"keep":true},{"i":4,"keep":true}`) {
 		if cfg.Fold(c) {
 			t.Errorf("finding %d folded by a pass without the field", i)
 		}

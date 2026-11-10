@@ -357,7 +357,7 @@ Reviews can report defects (critical, major, minor) and, unless `min_severity` d
 | `chill` (default) | critical, major, minor | nits |
 | `assertive` | everything, nits too | |
 
-A kept defect for which the verifier names nothing that reaches it in normal operation folds under every profile, `assertive` too, unless it is critical.
+A kept defect for which the verifier names nothing that reaches it in normal operation folds under every profile, `assertive` too, unless it is major or critical.
 
 A push's review folds minor findings under `chill` too: most of a push fixes earlier findings, and the edge cases of each fix would open the next round of threads. `min_severity` drops findings before that, `minor` the nits. A folded finding has no thread: a later review of its file may report it again, and an incremental review that finds only folded ones posts nothing.
 
