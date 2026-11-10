@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
@@ -287,28 +288,29 @@ func Default() string {
 	return Matrix[0].Review
 }
 
-// Invert is the review and verify model of another provider than review's, when review's provider wrote most of the
-// commits: authors has the provider of each commit an AI wrote. The first other provider in Matrix with credentials
-// and no commit of its own; "" = review stays.
-func Invert(review string, authors []string) (rm, vm string) {
-	n := func(p string) (c int) {
-		for _, a := range authors {
-			if a == p {
-				c++
-			}
-		}
-		return c
+// maker is the lab behind a provider's models: Bedrock hosts Claude, Azure GPT.
+func maker(provider string) string {
+	return cmp.Or(map[string]string{"amazon-bedrock": "anthropic", "azure": "openai"}[provider], provider)
+}
+
+// Invert is the review and verify model of the first provider in Matrix with credentials and another maker than
+// review's, when review's maker wrote most of the commits: authors has the maker of each commit an AI wrote. by
+// names that maker. "" = review stays.
+func Invert(review string, authors []string) (rm, vm, by string) {
+	n := map[string]int{}
+	for _, a := range authors {
+		n[a]++
 	}
-	own := providerOf(review)
-	if n(own) == 0 || slices.ContainsFunc(authors, func(a string) bool { return n(a) > n(own) }) {
-		return "", ""
+	own := maker(providerOf(review))
+	if n[own] == 0 || n[own] < slices.Max(slices.Collect(maps.Values(n))) {
+		return "", "", ""
 	}
 	for _, r := range Matrix {
-		if n(r.Name) == 0 && Available(r.Name) {
-			return r.Review, r.Verify
+		if maker(r.Name) != own && Available(r.Name) {
+			return r.Review, r.Verify, own
 		}
 	}
-	return "", ""
+	return "", "", ""
 }
 
 // VerifyFor is the verify model to pair with review: the cheap one of its provider, "" = review verifies.

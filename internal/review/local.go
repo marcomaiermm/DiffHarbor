@@ -197,7 +197,7 @@ var aiAuthors = []struct {
 	provider string
 	re       *regexp.Regexp
 }{
-	{"anthropic", regexp.MustCompile(`(?im)^co-authored-by:\s*claude|generated with \[claude code\]`)},
+	{"anthropic", regexp.MustCompile(`(?im)^co-authored-by:\s*claude\b|generated with \[claude code\]`)},
 	{"openai", regexp.MustCompile(`(?im)^co-authored-by:\s*codex|\A[^\n]*codex`)},
 	{"google", regexp.MustCompile(`(?im)^co-authored-by:\s*gemini|\A[^\n]*gemini-code-assist`)},
 }
@@ -216,7 +216,7 @@ func Authors(ctx context.Context, sb *proc.Sandbox) []string {
 func authorsOf(log string) (ps []string) {
 	for c := range strings.SplitSeq(log, "\x00") {
 		for _, a := range aiAuthors {
-			if a.re.MatchString(strings.TrimLeft(c, "\n")) {
+			if a.re.MatchString(strings.TrimPrefix(c, "\n")) {
 				ps = append(ps, a.provider)
 				break
 			}

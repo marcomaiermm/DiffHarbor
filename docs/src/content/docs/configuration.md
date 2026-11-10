@@ -63,13 +63,14 @@ Differences to GitHub:
 
 | Variable | |
 |---|---|
-| `REVIEW_MODEL`, `VERIFY_MODEL` | Pin the models. The env wins over a repo's `review.json`. |
+| `REVIEW_MODEL`, `VERIFY_MODEL` | The models. The env wins over a repo's `review.json`; model inversion can still replace them. |
 | `FALLBACK_MODEL`, `FALLBACK_VERIFY_MODEL` | The fallback instead of the next provider. |
 | `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `DEEPSEEK_BASE_URL` | A gateway in front of the provider (LiteLLM, your company's AI gateway), with the gateway's key. |
 | `AZURE_OPENAI_DEPLOYMENT_NAME_MAP` | Deployments not named like the models: `gpt-6.1-sol=review,gpt-6-luna=verify`. |
 
 - Bedrock in the EU: `amazon-bedrock/eu.anthropic.…`.
 - Each pass gets only its own provider's key.
+- Model inversion: when the AI of the review model's provider wrote most of a PR's commits (Claude Code, Codex or Gemini trailers, bot authors), the next provider with a key reviews and verifies, `REVIEW_MODEL` included. The walkthrough footer says so. A `review_model` in `review.json` or `"model_inversion": false` keeps the model.
 
 :::note
 Use API keys. Pi can also log in with a ChatGPT subscription: `openai/…` without `OPENAI_API_KEY`, then `docker compose exec -it diffharbor diffharbor login`. Whether your plan's terms allow that for a review bot is yours to check. You use it at your own risk.

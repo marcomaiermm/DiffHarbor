@@ -190,27 +190,24 @@ func bySeverity(a, b Comment) int { return Rank(b.Severity) - Rank(a.Severity) }
 // another provider's when that one's model wrote the PR. An empty verify model means the review model verifies.
 func (cfg Settings) Models() (review, verify string) {
 	review = cmp.Or(agent.Model, cfg.ReviewModel, agent.Default())
-	verify = agent.VerifyFor(review)
-	if r, v := cfg.inverted(review); r != "" {
-		review, verify = r, v
+	if r, v, _ := cfg.inverted(review); r != "" {
+		return r, cmp.Or(cfg.VerifyModel, v) // the env's models are the operator's default: they yield
 	}
-	return review, cmp.Or(agent.VerifyModel, cfg.VerifyModel, verify)
+	return review, cmp.Or(agent.VerifyModel, cfg.VerifyModel, agent.VerifyFor(review))
 }
 
 // inverted is agent.Invert unless review.json pins the review model or turns model_inversion off.
-func (cfg Settings) inverted(review string) (string, string) {
+func (cfg Settings) inverted(review string) (rm, vm, by string) {
 	if cfg.ReviewModel != "" || cfg.ModelInversion != nil && !*cfg.ModelInversion {
-		return "", ""
+		return "", "", ""
 	}
 	return agent.Invert(review, cfg.Authors)
 }
 
 // Inversion says why Models picked another provider's model ("" = it didn't).
 func (cfg Settings) Inversion() string {
-	review := cmp.Or(agent.Model, cfg.ReviewModel, agent.Default())
-	if r, _ := cfg.inverted(review); r != "" {
-		p, _, _ := strings.Cut(review, "/")
-		return "commits by " + p
+	if r, _, by := cfg.inverted(cmp.Or(agent.Model, cfg.ReviewModel, agent.Default())); r != "" {
+		return "commits by " + by
 	}
 	return ""
 }
