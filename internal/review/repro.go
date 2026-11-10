@@ -74,15 +74,12 @@ func defines(r *reproTest) bool {
 	return regexp.MustCompile(`(?m)^func ` + regexp.QuoteMeta(r.Name) + `\(\w+ \*testing\.T\)`).MatchString(r.Source)
 }
 
-// lexists is proc.Exists without following symlinks: a dangling one the PR placed is a file too.
-func lexists(p string) bool { _, err := os.Lstat(p); return err == nil }
-
 // runRepro runs r in the checkout, the file removed after, and returns the command, its output and the outcome
 // ("fail", "pass", "" = not run). Only a new file in an existing dir: the PR's files are never overwritten.
 func runRepro(ctx context.Context, sb *proc.Sandbox, r *reproTest) (cmd, out, res string) {
 	repo := sb.Repo()
 	p := filepath.Join(repo, r.File)
-	if lexists(p) {
+	if _, err := os.Lstat(p); err == nil { // not proc.Exists: a dangling symlink the PR placed is a file too
 		return "", "file exists", ""
 	}
 	dir, args := checks.TestCmd(ctx, sb, repo, r.File, r.Name, reproTimeout)

@@ -120,7 +120,7 @@ func TestAnalyze(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, c := range f.cont { // a repair, a second look or a repeat check keeps its pass' system prompt
-			if c[1] != f.systems[strings.TrimSuffix(c[0], " again")] {
+			if c[1] != f.systems[c[0]] {
 				t.Errorf("%s: system prompt differs from Run's", c[0])
 			}
 		}
@@ -213,6 +213,11 @@ func TestAnalyze(t *testing.T) {
 		r, _, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: t.TempDir()}, Parts: []string{md}, Prior: []Comment{{Path: "a.md", Line: 1, Body: "race"}}})
 		if err != nil {
 			t.Fatal(err)
+		}
+		for _, c := range f.cont {
+			if c[1] != f.systems[c[0]] {
+				t.Errorf("%s: system prompt differs from Run's", c[0])
+			}
 		}
 		return r, f.calls
 	}

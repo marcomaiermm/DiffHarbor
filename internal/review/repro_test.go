@@ -19,7 +19,7 @@ func TestReproduce(t *testing.T) {
 	if err := os.Mkdir(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for f, s := range map[string]string{"go.mod": "module m\n\ngo 1.21\n", "f.go": "package m\n\nfunc F() int { return 1 }\n", "mine_test.go": "package m\n"} {
+	for f, s := range map[string]string{"go.mod": "module m\n\ngo 1.21\n", "f.go": "package m\n\nfunc F() int { return 1 }\n", "mine_test.go": "package m\n\nimport \"testing\"\n\nfunc TestMine(t *testing.T) {}\n", "../go.mod": "module m\n\ngo 1.21\n"} {
 		if err := os.WriteFile(filepath.Join(repo, f), []byte(s), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -75,6 +75,8 @@ func TestReproduce(t *testing.T) {
 
 // A dangling symlink at the repro path is a file: it stays and nothing runs.
 func TestReproSymlink(t *testing.T) {
+	defer func(pi bool) { proc.AsPi = pi }(proc.AsPi)
+	proc.AsPi = false
 	sb := &proc.Sandbox{Dir: t.TempDir()}
 	if err := os.Mkdir(sb.Repo(), 0o755); err != nil {
 		t.Fatal(err)

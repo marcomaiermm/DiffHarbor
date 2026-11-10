@@ -19,8 +19,8 @@ const Ran = "Ran on the base: "
 // worktree of head in sb's dir: test files stay the PR's, the checkout is untouched. A test that still passes there does
 // not prove the change: a finding on the test. Minor, not major: the run is exact, but the proof is the model's pick
 // and the change may be covered elsewhere. Go (go test names) and JS ("suite > test", checks.TestCmd's runners);
-// tests, the run of head's tests, says whether proof already fails on head (it only knows Go test names). A test not found once in the changed test
-// files, review.json turning its tests off, no JS runner, or any error, skips it.
+// tests, the run of head's tests, says whether proof already fails on head (it only knows Go test names). A test not
+// found once in the changed test files, review.json turning its tests off, no JS runner, or any error, skips it.
 func proofOnBase(ctx context.Context, sb *proc.Sandbox, repo, proof string, tests map[string]string, cfg Settings) []Comment {
 	if proof == "" || tests[proof] == "fail" {
 		return nil
