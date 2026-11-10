@@ -73,6 +73,9 @@ type PR interface {
 	// Resolve answers a thread whose finding sha fixed, then resolves it. On GitLab the answer may wait for Post or
 	// Publish, to go out with the review.
 	Resolve(t Thread, sha string)
+	// Reopen answers a resolved thread with c, a finding a commit (sha) brought back, and reopens it. An error:
+	// nothing was posted.
+	Reopen(t Thread, sha string, c Finding) error
 	// Publish sends what Resolve held back when no Post follows.
 	Publish()
 	// Post sends the findings of a review of sha: on lines of the PR's diff raw inline, the rest in one comment.
@@ -116,6 +119,24 @@ type Thread struct {
 	Original int
 	Body     string
 	Replies  string // Answers(): the last replies, where a maintainer declines what the finding or our answer said
+	// Addressed(): resolved by our "✅ Addressed in", nobody replied since. A commit fixed it: one bringing it back
+	// reopens it.
+	Addressed bool
+}
+
+// AddressedIn is Resolve's answer: sha fixed the thread's finding.
+func AddressedIn(sha string) string { return fmt.Sprintf("%s`%s`\n\n%s", addressed, sha[:7], Mark) }
+
+const addressed = "✅ Addressed in "
+
+// Addressed reports whether a thread's last reply (ns) is our AddressedIn.
+func Addressed(ns []Note) bool {
+	return len(ns) > 0 && ns[len(ns)-1].Ours && strings.HasPrefix(ns[len(ns)-1].Body, addressed)
+}
+
+// BackIn is Reopen's answer: the finding c, back in sha. format is the forge's Format, made safe for it.
+func BackIn(sha string, c Finding, format func(Finding) string) string {
+	return fmt.Sprintf("🔁 Back in `%s`, at `%s:%d`\n\n%s\n\n%s", sha[:7], c.Path, c.Line, format(c), Mark)
 }
 
 // Answers are a thread's last replies after its first comment, cleaned and cut short for a prompt.

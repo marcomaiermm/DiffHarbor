@@ -277,3 +277,43 @@ func TestExplain(t *testing.T) {
 		t.Error("no declarations, still a call")
 	}
 }
+
+// "again" names a fixed earlier finding by its number, after the open ones: it comes back as an index into
+// Addressed. A number of an open or a closed one, or none, names nothing.
+func TestAnalyzeAgain(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "repo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "repo", "a.md"), []byte("x\na\nb\nc\nd\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	finding := func(line int, again string) string {
+		return fmt.Sprintf(`{"path":"a.md","line":%d,"severity":"major","title":"t%d","body":"b"%s}`, line, line, again)
+	}
+	f := &fakeAgent{replies: map[string][]string{
+		"review": {`{"summary":"s","comments":[` + finding(2, `,"again":2`) + "," + finding(3, `,"again":0`) + "," +
+			finding(4, `,"again":3`) + "," + finding(5, "") + `]}`},
+		"verify": {`{"verdicts":[{"i":0,"keep":true},{"i":1,"keep":true},{"i":2,"keep":true},{"i":3,"keep":true}]}`},
+	}}
+	earlier := func(title string) Comment {
+		return Comment{Path: "a.md", Line: 1, Severity: "major", Title: title, Body: "b"}
+	}
+	r, _, err := Analyze(context.Background(), Input{
+		Agent: f, Sandbox: &proc.Sandbox{Dir: dir}, Title: "t", Parts: []string{"diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1 +1,5 @@\n x\n+a\n+b\n+c\n+d\n"},
+		Prior: []Comment{earlier("open")}, Addressed: []Comment{earlier("fixed1"), earlier("fixed2")}, Closed: []Comment{earlier("declined")},
+	})
+	again := map[string]string{}
+	for _, c := range r.Comments {
+		again[c.Title] = "nil"
+		if c.Again != nil {
+			again[c.Title] = fmt.Sprint(*c.Again)
+		}
+	}
+	task := f.tasks["review"]
+	if err != nil || fmt.Sprint(again) != "map[t2:1 t3:nil t4:nil t5:nil]" ||
+		!strings.Contains(task, "fixed by a commit (if this change brings one back, report it again with \"again\": its number)\n\n### 1 · a.md:1 · major · fixed1") ||
+		!strings.Contains(task, "### 2 · a.md:1 · major · fixed2") || !strings.Contains(task, "### 3 · a.md:1 · major · declined") {
+		t.Fatalf("again %v %v\n%s", again, err, task)
+	}
+}

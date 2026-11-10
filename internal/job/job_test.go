@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -683,5 +684,54 @@ func TestChatAnswersOnFailedAccessCheck(t *testing.T) {
 	e.Comment.Body = "why?"
 	if err := Chat(t.Context(), deniedForge{pr: &deniedPR{}}, regexp.MustCompile(`@bot`), e); err == nil || !strings.Contains(err.Error(), "no repository id") {
 		t.Fatal("Chat stopped elsewhere:", err)
+	}
+}
+
+// reopenPR records the threads Reopen answered; refuse makes the forge refuse them.
+type reopenPR struct {
+	forge.PR
+	refuse   bool
+	reopened []string
+}
+
+func (p *reopenPR) Reopen(t forge.Thread, _ string, _ forge.Finding) error {
+	if p.refuse {
+		return errors.New("refused")
+	}
+	p.reopened = append(p.reopened, t.ID)
+	return nil
+}
+
+// A fixed finding back reopens its thread, once; a folded one, one on another file and one the forge refuses post,
+// without their thread to keep them off the line. A folded one at its thread's line is posted, folded.
+func TestReopen(t *testing.T) {
+	at := func(i int) *int { return &i }
+	gone := []forge.Thread{{ID: "a", Path: "a.go"}, {ID: "b", Path: "b.go"}}
+	cs := []review.Comment{
+		{Path: "a.go", Title: "back", Again: at(0)},
+		{Path: "a.go", Title: "twice", Again: at(0)},
+		{Path: "a.go", Title: "folded", Again: at(1), Fold: true},
+		{Path: "c.go", Title: "moved", Again: at(1)},
+		{Path: "b.go", Title: "new"},
+	}
+	p := &reopenPR{}
+	post, n, free := reopen(p, gone, "abcdef1", cs)
+	titles := func(cs []review.Comment) (ts []string) {
+		for _, c := range cs {
+			ts = append(ts, c.Title)
+		}
+		return ts
+	}
+	if n != 1 || !slices.Equal(p.reopened, []string{"a"}) || !slices.Equal(titles(post), []string{"twice", "folded", "moved", "new"}) ||
+		fmt.Sprint(free) != "map[b:true]" {
+		t.Fatalf("reopened %v %d, post %v, free %v", p.reopened, n, titles(post), free)
+	}
+	gone[1].Line = 7
+	seen := slices.DeleteFunc(slices.Clone(gone), func(t forge.Thread) bool { return free[t.ID] })
+	if _, _, folded := forge.Split(review.Result{Comments: []review.Comment{{Path: "b.go", Line: 7, Title: "folded", Again: at(1), Fold: true}}}, seen, nil); len(folded) != 1 {
+		t.Fatalf("folded at its thread's line: %v", folded)
+	}
+	if post, n, free := reopen(&reopenPR{refuse: true}, gone, "abcdef1", cs); n != 0 || len(post) != len(cs) || fmt.Sprint(free) != "map[a:true b:true]" {
+		t.Fatalf("refused %v: %d, post %v", free, n, titles(post))
 	}
 }

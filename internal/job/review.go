@@ -180,20 +180,22 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		return err
 	}
 	// Every earlier finding of the PR, also on files this push left alone or renamed: findings go on the whole PR
-	// diff. The model must not repeat them and may report open ones fixed. Closed ones were fixed or declined;
-	// without them a declined finding comes back on the next push.
+	// diff. The model must not repeat them and may report open ones fixed. A fixed one it may report back, which
+	// reopens its thread; without the closed ones a declined finding comes back on the next push.
 	files := diff.Paths(d)
-	var open []forge.Thread
-	var prior, closed []review.Comment
+	var open, gone []forge.Thread
+	var prior, addressed, closed []review.Comment
 	// the newest 100: about 150 KB at most, as each is cut to its first comment and three short replies
 	for _, t := range threads[max(0, len(threads)-100):] {
 		// with the replies: a point declined there would come back as a new finding
 		c := review.Comment{Path: t.Path, Line: cmp.Or(t.Line, t.Original), Body: text.Truncate(strings.ReplaceAll(forge.Redact(t.Body), forge.Mark, ""), 600) + t.Replies}
-		if t.Resolved {
+		switch {
+		case t.Resolved && t.Addressed:
+			gone, addressed = append(gone, t), append(addressed, c)
+		case t.Resolved:
 			closed = append(closed, c)
-		} else {
-			open = append(open, t)
-			prior = append(prior, c)
+		default:
+			open, prior = append(open, t), append(prior, c)
 		}
 	}
 
@@ -230,7 +232,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	}
 	r, stats, err := review.Analyze(ctx, review.Input{
 		Agent: agent.Pi{}, Sandbox: sb, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: commits, Ticket: tk, Docs: docs, Parts: parts,
-		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings)), Checks: scripts, Registries: regs, Prior: prior, Closed: closed, Settings: cfg,
+		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings)), Checks: scripts, Registries: regs, Prior: prior, Addressed: addressed, Closed: closed, Settings: cfg,
 		Guide: guide && only == nil, // an incremental review sees a few files: the last full one's reading order stays
 	})
 	if err == nil {
@@ -257,6 +259,12 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	for _, i := range r.Fixed {
 		p.Resolve(open[i], sha)
 	}
+	post := r
+	var reopened int
+	var free map[string]bool
+	post.Comments, reopened, free = reopen(p, gone, sha, r.Comments)
+	// one back but not reopened posts anew: its resolved thread mustn't keep it off the line
+	seen := slices.DeleteFunc(slices.Clone(threads), func(t forge.Thread) bool { return free[t.ID] })
 
 	kind := "full"
 	if only != nil {
@@ -285,19 +293,29 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		kind += " · ⚠️ review.json ignored: " + text.OneLine(cfgErr.Error(), 120)
 	}
 	n := 0
-	if posts(only == nil, r, threads, diff.NewLines(raw)) {
+	if posts(only == nil, post, seen, diff.NewLines(raw)) {
 		// Lines of the whole PR diff take inline comments, also in files this incremental review skipped: only
 		// a thread can be resolved once fixed.
-		if n, err = p.Post(sha, r, threads, raw,
+		if n, err = p.Post(sha, post, seen, raw,
 			fmt.Sprintf("%s · %s · %s · %ds", stats, kind, sha[:7], int(time.Since(started).Round(time.Second).Seconds()))); err != nil {
 			return err
 		}
 	} else {
 		p.Publish() // the answers to fixed threads
 	}
+	n += reopened
+	still := -len(r.Fixed) // earlier findings left open: all open threads, not the newest 100 the review saw
+	for _, t := range threads {
+		if !t.Resolved {
+			still++
+		}
+	}
 	desc = text.Count(n, "finding")
 	if len(r.Fixed) > 0 {
 		desc += fmt.Sprintf(", %d fixed", len(r.Fixed))
+	}
+	if still > 0 {
+		desc += fmt.Sprintf(", %d earlier still open", still)
 	}
 	if len(r.Failed) > 0 { // their part failed: not green, the next push or `@app review` reviews them
 		desc, state = desc+", "+text.Count(len(r.Failed), "file")+" not reviewed", "error"
@@ -331,7 +349,10 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		s.State.Report = writeReport(e, s.State.Secret, s.State.Report, d)
 	}
 	banner := ""
-	if n == 0 {
+	switch {
+	case n == 0 && still > 0:
+		banner = fmt.Sprintf("No actionable comments were generated in the latest review; %s from earlier reviews still open.", text.Count(still, "finding"))
+	case n == 0:
 		banner = "No actionable comments were generated in the latest review."
 	}
 	s.Write(banner, footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc)))
@@ -636,6 +657,33 @@ func openFindings(threads, open []forge.Thread, r review.Result) []review.Commen
 		}
 	}
 	return append(cs, r.Comments...)
+}
+
+// reopen reopens the thread of each fixed finding (gone) that one of cs brings back, and returns the others to post,
+// how many it reopened and the threads of those it brings back but left resolved (by ID): posted anew at its line,
+// Split would drop one there. A folded one stays folded; one on another file than its thread, or refused, posts anew.
+func reopen(p forge.PR, gone []forge.Thread, sha string, cs []review.Comment) (post []review.Comment, n int, free map[string]bool) {
+	done := map[int]bool{}
+	free = map[string]bool{}
+	for _, c := range cs {
+		if c.Again != nil && *c.Again >= 0 && *c.Again < len(gone) { // Analyze bounds it: no panic if that changes
+			t := gone[*c.Again]
+			if !c.Fold && !done[*c.Again] && t.Path == c.Path {
+				err := p.Reopen(t, sha, forge.Finding{Comment: c})
+				if err == nil {
+					done[*c.Again] = true
+					continue
+				}
+				log.Println("reopen:", err)
+			}
+			free[t.ID] = true
+		}
+		post = append(post, c)
+	}
+	for i := range done { // a repeat of one reopened: its thread holds it off
+		delete(free, gone[i].ID)
+	}
+	return post, len(done), free
 }
 
 // reviewedPatches is the patch IDs to remember: now's for the files reviewed, the last reviewed one for a file left out

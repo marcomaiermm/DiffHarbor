@@ -476,6 +476,7 @@ func Threads(repo string, n int, token string) ([]forge.Thread, error) {
 									DatabaseID int64  `json:"databaseId"`
 									Body       string `json:"body"`
 									Author     struct {
+										Type  string `json:"__typename"`
 										Login string `json:"login"`
 									} `json:"author"`
 								} `json:"nodes"`
@@ -486,7 +487,7 @@ func Threads(repo string, n int, token string) ([]forge.Thread, error) {
 			} `json:"repository"`
 		}
 		err := graphql(token, `query($o:String!,$r:String!,$n:Int!,$a:String){repository(owner:$o,name:$r){pullRequest(number:$n){
-reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{databaseId path line originalLine body author{__typename login}}} replies:comments(last:3){nodes{databaseId body author{login}}}}}}}}`,
+reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{databaseId path line originalLine body author{__typename login}}} replies:comments(last:3){nodes{databaseId body author{__typename login}}}}}}}}`,
 			map[string]any{"o": owner, "r": name, "n": n, "a": after}, &d)
 		if err != nil {
 			return nil, err
@@ -497,16 +498,17 @@ reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isRes
 				continue
 			}
 			c := t.Comments.Nodes[0]
-			if a := c.Author; a.Type != "Bot" || strings.TrimSuffix(a.Login, "[bot]") != Slug { // the mark is copyable, the author isn't
+			if !ours(c.Author.Type, c.Author.Login) { // the mark is copyable, the author isn't
 				continue
 			}
 			var rs []forge.Note
 			for _, r := range t.Replies.Nodes {
 				if r.DatabaseID != c.DatabaseID {
-					rs = append(rs, forge.Note{ID: r.DatabaseID, Login: r.Author.Login, Body: r.Body})
+					rs = append(rs, forge.Note{ID: r.DatabaseID, Login: r.Author.Login, Body: r.Body, Ours: ours(r.Author.Type, r.Author.Login)})
 				}
 			}
-			ts = append(ts, forge.Thread{ID: t.ID, Comment: c.DatabaseID, Resolved: t.IsResolved, Path: c.Path, Line: c.Line, Original: c.OriginalLine, Body: c.Body, Replies: forge.Answers(rs)})
+			ts = append(ts, forge.Thread{ID: t.ID, Comment: c.DatabaseID, Resolved: t.IsResolved, Path: c.Path, Line: c.Line, Original: c.OriginalLine, Body: c.Body, Replies: forge.Answers(rs),
+				Addressed: forge.Addressed(rs)})
 		}
 		if !rt.PageInfo.HasNextPage {
 			break
@@ -516,10 +518,15 @@ reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isRes
 	return ts, nil
 }
 
+// ours is whether a GraphQL author is the app: a Bot, its login there without "[bot]" (REST adds it).
+func ours(typename, login string) bool {
+	return typename == "Bot" && strings.TrimSuffix(login, "[bot]") == Slug
+}
+
 // Resolve answers a thread whose finding a later commit fixed, then resolves it.
 func Resolve(e *forge.Event, api string, n int, token string, t forge.Thread, sha string) {
 	err := Call("POST", fmt.Sprintf("%s/pulls/%d/comments/%d/replies", api, n, t.Comment), token,
-		map[string]string{"body": fmt.Sprintf("✅ Addressed in `%s`\n\n%s", sha[:7], forge.Mark)}, nil)
+		map[string]string{"body": forge.AddressedIn(sha)}, nil)
 	if err == nil {
 		err = ResolveThread(e, t.ID)
 	}
@@ -528,12 +535,28 @@ func Resolve(e *forge.Event, api string, n int, token string, t forge.Thread, sh
 	}
 }
 
+// Reopen answers a resolved thread with the finding a commit brought back, then reopens it.
+func Reopen(e *forge.Event, api string, n int, token string, t forge.Thread, sha string, c forge.Finding) error {
+	err := Call("POST", fmt.Sprintf("%s/pulls/%d/comments/%d/replies", api, n, t.Comment), token,
+		map[string]string{"body": forge.BackIn(sha, c, func(c forge.Finding) string { return forge.Format(c, "") })}, nil)
+	if err != nil {
+		return err
+	}
+	if err := threadState(e, t.ID, "unresolveReviewThread"); err != nil {
+		log.Println("reopen:", err) // answered: the finding is there, in a thread still resolved
+	}
+	return nil
+}
+
 // ResolveThread needs Contents: write, GitHub refuses it to an app with Pull requests: write only. So it gets its
 // own token, which stays in this process: the review's token reaches git, which runs as the repo's user.
-func ResolveThread(e *forge.Event, id string) error {
+func ResolveThread(e *forge.Event, id string) error { return threadState(e, id, "resolveReviewThread") }
+
+// threadState runs mutation, resolveReviewThread or unresolveReviewThread, on thread id.
+func threadState(e *forge.Event, id, mutation string) error {
 	token, err := Mint(e, map[string]string{"contents": "write", "pull_requests": "write"})
 	if err != nil {
 		return fmt.Errorf("token with Contents: write (app permission): %w", err)
 	}
-	return graphql(token, `mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id}}}`, map[string]any{"id": id}, nil)
+	return graphql(token, `mutation($id:ID!){`+mutation+`(input:{threadId:$id}){thread{id}}}`, map[string]any{"id": id}, nil)
 }

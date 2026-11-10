@@ -174,6 +174,10 @@ func (p *pr) Resolve(t forge.Thread, sha string) {
 	Resolve(p.e, p.api, p.e.PullRequest.Number, p.token, t, sha)
 }
 
+func (p *pr) Reopen(t forge.Thread, sha string, c forge.Finding) error {
+	return Reopen(p.e, p.api, p.e.PullRequest.Number, p.token, t, sha, c)
+}
+
 // root is the review comment's thread: GitHub points every reply at the thread's first comment.
 func (p *pr) root() int64 { return cmp.Or(p.e.Comment.InReplyTo, p.e.Comment.ID) }
 

@@ -175,6 +175,12 @@ func (p *pool) exec(ctx context.Context, e *forge.Event, t *task) {
 	}
 }
 
+// reviews reports whether a PR event asks for a review: new code, or a new base (retarget). A stacked PR skipped for
+// its base, then moved to main, would merge unreviewed; Review skips a head it reviewed already.
+func reviews(e *forge.Event) bool {
+	return e.Kind == "pull_request" && (actions[e.Action] || e.Action == "edited" && e.Changes.Base.Ref.From != "")
+}
+
 // closing is a PR closed: its reports go.
 func closing(e *forge.Event) bool {
 	return e.Kind == "pull_request" && e.Action == "closed"
@@ -291,7 +297,7 @@ func Serve(cfg Config) {
 				return
 			}
 			jobs.stop(e)
-		case e.Kind == "pull_request" && actions[e.Action]:
+		case reviews(e):
 			if err := pushed(e); err != nil {
 				log.Println(e.Key(), "pending:", err)
 				w.WriteHeader(http.StatusInternalServerError)

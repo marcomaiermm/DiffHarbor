@@ -47,6 +47,13 @@ func TestParse(t *testing.T) {
 	if e, _ := h.Parse(hd, []byte(strings.Replace(push, `"oldrev":"a"`, `"title":"x"`, 1))); e != nil {
 		t.Fatal("a title edit is no push")
 	}
+	// with a push too: a full review against the new base, not an incremental one
+	moved := strings.Replace(push, `"object_attributes"`, `"changes":{"target_branch":{"previous":"f0","current":"main"}},"object_attributes"`, 1)
+	for _, retarget := range []string{strings.Replace(moved, `"oldrev":"a"`, `"title":"x"`, 1), moved} {
+		if e, err := h.Parse(hd, []byte(retarget)); err != nil || e.Action != "edited" || e.Changes.Base.Ref.From != "f0" {
+			t.Fatalf("retarget: %+v %v", e, err)
+		}
+	}
 	reply := `{"object_kind":"note","user":{"id":7,"username":"dev"},"project":{"id":5,"path_with_namespace":"g/s/p"},"merge_request":{"iid":3},
 "object_attributes":{"id":2,"note":"why?","noteable_type":"MergeRequest","type":"DiffNote","discussion_id":"d1","position":{"new_path":"a.go"}}}`
 	e, err = h.Parse(hd, []byte(reply))
@@ -562,5 +569,34 @@ func TestRefreshVisibility(t *testing.T) {
 		if err := p.Refresh(); err != nil || e.Private() != want {
 			t.Errorf("%q: private %v, %v", vis, e.Private(), err)
 		}
+	}
+}
+
+// A fixed finding back: answered in its thread with the finding, quick actions inert, then reopened. A failed
+// answer posts nothing more.
+func TestReopen(t *testing.T) {
+	var sent []string
+	fail := false
+	serve(t, func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]string
+		json.NewDecoder(r.Body).Decode(&b)
+		sent = append(sent, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery+" "+b["body"])
+		if fail {
+			w.WriteHeader(http.StatusBadGateway)
+		}
+		fmt.Fprint(w, `{}`)
+	})
+	e := &forge.Event{Forge: "gitlab"}
+	e.Repository.ID, e.PullRequest.Number = 5, 3
+	o, _ := (&Hub{}).Open(e)
+	c := forge.Finding{Comment: review.Comment{Severity: "major", Title: "race", Body: "back\n/merge"}}
+	if err := o.Reopen(forge.Thread{ID: "d7"}, "abcdef1", c); err != nil || len(sent) != 2 ||
+		!strings.HasPrefix(sent[0], "POST /projects/5/merge_requests/3/discussions/d7/notes? 🔁 Back in `abcdef1`") || !strings.Contains(sent[0], "\n\\/merge") ||
+		!strings.HasSuffix(sent[0], forge.Mark) || sent[1] != "PUT /projects/5/merge_requests/3/discussions/d7?resolved=false " {
+		t.Fatalf("%q %v", sent, err)
+	}
+	sent, fail = nil, true
+	if err := o.Reopen(forge.Thread{ID: "d7"}, "abcdef1", c); err == nil || len(sent) != 1 {
+		t.Fatalf("%q %v", sent, err)
 	}
 }
