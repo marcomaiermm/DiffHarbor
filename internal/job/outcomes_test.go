@@ -30,11 +30,11 @@ func (p *votePR) CanWrite(l string) (bool, error) {
 
 func tallyOf(t *testing.T, key string) tally {
 	t.Helper()
-	tl, err := readTally(key)
+	cs, _, err := readLog(logFile(key))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tl
+	return sum(key, cs)
 }
 
 type voteForge struct {
@@ -65,7 +65,8 @@ func TestClassify(t *testing.T) {
 	}
 }
 
-// A close counts once and saves declined findings as learnings; learnings.outcomes: false only counts.
+// A PR counts once, as its last close left it, and saves declined findings as learnings; learnings.outcomes: false
+// only counts.
 func TestOutcomes(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	body := func(sev, title string) string {
@@ -89,7 +90,7 @@ func TestOutcomes(t *testing.T) {
 		}
 	}
 	tl := tallyOf(t, "o/r")
-	if len(tl.PRs) != 1 || tl.Total[addressed] != 1 || tl.Total[dismissed] != 1 || tl.Total[resolved] != 2 || tl.Total[accepted] != 1 || tl.Total[ignored] != 1 ||
+	if tl.PRs != 1 || tl.Total[addressed] != 1 || tl.Total[dismissed] != 1 || tl.Total[resolved] != 2 || tl.Total[accepted] != 1 || tl.Total[ignored] != 1 ||
 		tl.Severity["major"][dismissed] != 1 || tl.Profile["quiet"][accepted] != 1 {
 		t.Fatalf("%+v", tl)
 	}
@@ -97,8 +98,26 @@ func TestOutcomes(t *testing.T) {
 	if len(ls) != 1 || !strings.HasPrefix(ls[0], "- Maintainers declined a major finding: Races (b.go, ") {
 		t.Fatalf("%q", ls)
 	}
-	if pr.asked["ann"] != 1 || pr.asked["mallory"] != 1 || pr.asked[""] != 0 {
-		t.Errorf("CanWrite asked %v, want once per login", pr.asked)
+	if pr.asked["ann"] != 2 || pr.asked["mallory"] != 2 || pr.asked[""] != 0 {
+		t.Errorf("CanWrite asked %v, want once per login and close", pr.asked)
+	}
+	cs, _, _ := readLog(logFile("o/r"))
+	if len(cs) != 2 || cs[1].PR != 7 || cs[1].Profile != "quiet" || cs[1].Closed.IsZero() ||
+		cs[1].Findings[1] != (finding{"major", dismissed, "b.go", "Races"}) {
+		t.Fatalf("%+v", cs)
+	}
+	// Reopened, the 👎 taken back and closed: the PR's last close counts, the learning stays.
+	was := pr.ts[1].Down
+	pr.ts[1].Down = nil
+	if err := Outcomes(voteForge{pr: pr}, e); err != nil {
+		t.Fatal(err)
+	}
+	if tl := tallyOf(t, "o/r"); tl.PRs != 1 || tl.Total[dismissed] != 0 || tl.Total[ignored] != 2 || len(learningsOf("o/r")) != 1 {
+		t.Fatalf("%+v", tl)
+	}
+	pr.ts[1].Down = was
+	if err := Outcomes(voteForge{pr: pr}, e); err != nil {
+		t.Fatal(err)
 	}
 	dismiss := func(n int, title, path string) {
 		e.PullRequest.Number, pr.ts = n, []forge.Thread{{Body: body("major", title), Path: path, Down: []string{"ann"}}}
@@ -120,9 +139,9 @@ func TestOutcomes(t *testing.T) {
 	}
 }
 
-// What fails counts nothing and is tried again on the next close: a tally that doesn't read (it stays as it is), a
-// CanWrite error, a tally that doesn't write (its learnings are saved already, once). A review.json that doesn't
-// parse counts, but learns nothing.
+// What fails logs nothing and is tried again on the next close: a log that can't be written (its learnings are
+// saved already, once), a CanWrite error, a log with a line that doesn't read (it stays as it is). A review.json that
+// doesn't parse counts, but learns nothing. Half a last line, left by a crash, is no line: the next close writes over it.
 func TestOutcomesFail(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	pr := &votePR{asked: map[string]int{}, ts: []forge.Thread{{Body: "_🟠 Major_ · **Races**\n\nbody", Path: "b.go", Down: []string{"ann"}}}}
@@ -130,16 +149,16 @@ func TestOutcomesFail(t *testing.T) {
 	e := &forge.Event{Forge: "github"}
 	e.Repository.FullName = "o/r"
 	e.PullRequest.Number = 7
-	f := tallyFile("o/r")
-	if err := os.MkdirAll(f+".tmp", 0o700); err != nil { // the tally's write fails
+	f := logFile("o/r")
+	if err := os.MkdirAll(f, 0o700); err != nil { // the log can't be written
 		t.Fatal(err)
 	}
-	if err := Outcomes(voteForge{pr: pr}, e); err == nil || len(learningsOf("o/r")) != 1 || len(tallyOf(t, "o/r").PRs) != 0 {
+	if err := Outcomes(voteForge{pr: pr}, e); err == nil || len(learningsOf("o/r")) != 1 {
 		t.Fatalf("%v %q", err, learningsOf("o/r"))
 	}
-	_ = os.Remove(f + ".tmp")
+	_ = os.Remove(f)
 	pr.canFail = true
-	if err := Outcomes(voteForge{pr: pr}, e); err == nil || len(tallyOf(t, "o/r").PRs) != 0 {
+	if err := Outcomes(voteForge{pr: pr}, e); err == nil || tallyOf(t, "o/r").PRs != 0 {
 		t.Fatalf("CanWrite failed: %v %+v", err, tallyOf(t, "o/r"))
 	}
 	pr.canFail = false
@@ -147,22 +166,37 @@ func TestOutcomesFail(t *testing.T) {
 		t.Fatalf("%v %q %+v", err, learningsOf("o/r"), tallyOf(t, "o/r"))
 	}
 	pr.cfg, pr.ts[0].Path, e.PullRequest.Number = `{"learnings":`, "e.go", 8
-	if err := Outcomes(voteForge{pr: pr}, e); err != nil || len(learningsOf("o/r")) != 1 || len(tallyOf(t, "o/r").PRs) != 2 {
+	if err := Outcomes(voteForge{pr: pr}, e); err != nil || len(learningsOf("o/r")) != 1 || tallyOf(t, "o/r").PRs != 2 {
 		t.Fatalf("broken review.json: %v %q", err, learningsOf("o/r"))
 	}
-	if err := os.WriteFile(f, []byte("{"), 0o600); err != nil {
+	whole, _ := os.ReadFile(f)
+	if err := os.WriteFile(f, append(whole, `{"pr":9,"find`...), 0o600); err != nil { // a crash amid the append
 		t.Fatal(err)
 	}
-	e.PullRequest.Number = 9
 	var b bytes.Buffer
+	if err := Stats(&b, "o/r"); err != nil || tallyOf(t, "o/r").PRs != 2 {
+		t.Fatalf("half a last line: %v", err)
+	}
+	e.PullRequest.Number = 9
+	if err := Outcomes(voteForge{pr: pr}, e); err != nil || tallyOf(t, "o/r").PRs != 3 {
+		t.Fatalf("after half a last line: %v", err)
+	}
+	broken := append([]byte("{\n"), whole...)
+	if err := os.WriteFile(f, broken, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.PullRequest.Number = 10
 	if err := Outcomes(voteForge{pr: pr}, e); err == nil || Stats(&b, "o/r") == nil || Stats(&b, "") == nil {
-		t.Fatal("a broken tally reads")
+		t.Fatal("a broken log reads")
 	}
-	if got, _ := os.ReadFile(f); string(got) != "{" {
-		t.Fatalf("broken tally overwritten: %q", got)
+	if got, _ := os.ReadFile(f); !bytes.Equal(got, broken) {
+		t.Fatalf("broken log written to: %q", got)
 	}
-	if tallyFile("a__b/c") == tallyFile("a/b__c") {
-		t.Error("tally files collide")
+	if logFile("a__b/c") == logFile("a/b__c") {
+		t.Error("log files collide")
+	}
+	if err := Stats(&b, "o/none"); err == nil {
+		t.Error("stats of a repo without a log")
 	}
 }
 

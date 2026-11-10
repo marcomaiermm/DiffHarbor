@@ -1,6 +1,7 @@
 package job
 
 import (
+	"bytes"
 	"cmp"
 	"diffharbor/internal/forge"
 	"diffharbor/internal/proc"
@@ -36,40 +37,84 @@ var outcomeNames = []string{addressed, accepted, dismissed, resolved, ignored}
 // counts is outcome -> findings.
 type counts map[string]int
 
-// tally is a repo's outcomes: PRs are the closed PRs counted already, so a reopened one isn't counted twice.
+// finding is one of our findings on a closed PR and what became of it.
+type finding struct {
+	Severity string `json:"severity"`
+	Outcome  string `json:"outcome"`
+	Path     string `json:"path"`
+	Title    string `json:"title"`
+}
+
+// closed is a line of a repo's log: a PR's close and its findings. The log keeps what was seen, not its sums: stats
+// counts anew on each run, so a new question or a changed count needs no old data rewritten.
+type closed struct {
+	PR       int       `json:"pr"`
+	Closed   time.Time `json:"closed"`
+	Profile  string    `json:"profile"`
+	Findings []finding `json:"findings"`
+}
+
+// tally is the sum of a repo's log.
 type tally struct {
 	Repo     string
-	PRs      []int
+	PRs      int
 	Total    counts
 	Severity map[string]counts
 	Profile  map[string]counts
 }
 
-// tallyFile escapes key's slashes: a__b/c and a/b__c are two files.
-func tallyFile(key string) string {
-	return filepath.Join(proc.DataDir, "outcomes", url.PathEscape(key)+".json")
+// logFile escapes key's slashes: a__b/c and a/b__c are two files.
+func logFile(key string) string {
+	return filepath.Join(proc.DataDir, "outcomes", url.PathEscape(key)+".jsonl")
 }
 
-func readTally(key string) (tally, error) { return loadTally(tallyFile(key)) }
-
-// loadTally reads the tally in f, an empty one if there's none yet. One that doesn't read is an error: record
-// mustn't start it over.
-func loadTally(f string) (t tally, err error) {
+// readLog reads the closes in f, none if there's no file yet, and where its whole lines end: a crash amid an append
+// leaves half a last line, which isn't one. Any other line that doesn't read is an error.
+func readLog(f string) (cs []closed, end int64, err error) {
 	b, err := os.ReadFile(f) //nolint:gosec // our data dir
 	if errors.Is(err, os.ErrNotExist) {
-		return t, nil
+		return nil, 0, nil
 	}
 	if err != nil {
-		return t, err
+		return nil, 0, err
 	}
-	if err := json.Unmarshal(b, &t); err != nil {
-		return t, fmt.Errorf("%s: %w", f, err)
+	b = b[:bytes.LastIndexByte(b, '\n')+1]
+	for i, l := range bytes.Split(b, []byte("\n")) {
+		if len(l) == 0 { // after the last line's \n
+			continue
+		}
+		var c closed
+		if err := json.Unmarshal(l, &c); err != nil {
+			return nil, 0, fmt.Errorf("%s:%d: %w", f, i+1, err)
+		}
+		cs = append(cs, c)
 	}
-	return t, nil
+	return cs, int64(len(b)), nil
 }
 
-// tallyMu guards the read-modify-write of record, like learningsMu.
-var tallyMu sync.Mutex
+// sum counts cs. A PR closed again after a reopen has several lines, the last one counts.
+func sum(repo string, cs []closed) tally {
+	t := tally{Repo: repo, Total: counts{}, Severity: map[string]counts{}, Profile: map[string]counts{}}
+	last := map[int]int{}
+	for i, c := range cs {
+		last[c.PR] = i
+	}
+	t.PRs = len(last)
+	for i, c := range cs {
+		if last[c.PR] != i {
+			continue
+		}
+		for _, f := range c.Findings {
+			t.Total[f.Outcome]++
+			bump(t.Severity, f.Severity, f.Outcome)
+			bump(t.Profile, c.Profile, f.Outcome)
+		}
+	}
+	return t
+}
+
+// logMu guards record's read and append, like learningsMu.
+var logMu sync.Mutex
 
 // classify is the outcome of a finding's thread; can says whether a login may push: on a public repo anyone can react.
 // A 👎 wins over a 👍.
@@ -94,44 +139,36 @@ func bump(m map[string]counts, k, o string) {
 	m[k][o]++
 }
 
-// record adds a closed PR's outcomes (severity and the PR's profile per finding) to key's tally. It reports false
-// when the PR was counted before.
-func record(key string, pr int, profile string, sevs, outs []string) (bool, error) {
-	tallyMu.Lock()
-	defer tallyMu.Unlock()
-	t, err := readTally(key)
-	if err != nil || slices.Contains(t.PRs, pr) {
-		return false, err
-	}
-	t.Repo, t.PRs = key, append(t.PRs, pr)
-	if t.Total == nil {
-		t.Total, t.Severity, t.Profile = counts{}, map[string]counts{}, map[string]counts{}
-	}
-	for i, o := range outs {
-		t.Total[o]++
-		bump(t.Severity, sevs[i], o)
-		bump(t.Profile, profile, o)
-	}
-	b, _ := json.Marshal(t)
-	f := tallyFile(key)
-	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
-		return false, err
-	}
-	// Through a rename: stats never reads half a file.
-	if err := os.WriteFile(f+".tmp", b, 0o600); err != nil {
-		return false, err
-	}
-	return true, os.Rename(f+".tmp", f)
-}
-
-// Outcomes counts what became of our findings on e's closed PR, and saves the declined ones as learnings unless
-// review.json's learnings.outcomes is false. On an error the PR isn't counted: its next close tries again.
-func Outcomes(f forge.Forge, e *forge.Event) (err error) {
-	defer proc.Recovered(func(pe error) { err = pe })
-	key, n := e.Repo(), e.PullRequest.Number
-	if t, err := readTally(key); err != nil || slices.Contains(t.PRs, n) {
+// record appends c to key's log, over half a last line if a crash left one. A log that doesn't read stays as it is.
+func record(key string, c closed) (err error) {
+	logMu.Lock()
+	defer logMu.Unlock()
+	f := logFile(key)
+	_, end, err := readLog(f)
+	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+		return err
+	}
+	b, _ := json.Marshal(c)
+	w, err := os.OpenFile(f, os.O_WRONLY|os.O_CREATE, 0o600) //nolint:gosec // logFile escapes the key: no / left
+	if err != nil {
+		return err
+	}
+	defer func() { err = cmp.Or(err, w.Close()) }()
+	if err := w.Truncate(end); err != nil {
+		return err
+	}
+	_, err = w.WriteAt(append(b, '\n'), end) // one write: stats reads the line whole or, as half a last one, not at all
+	return err
+}
+
+// Outcomes logs what became of our findings on e's closed PR, and saves the declined ones as learnings unless
+// review.json's learnings.outcomes is false. On an error the close isn't logged: the PR's next close tries again.
+func Outcomes(f forge.Forge, e *forge.Event) (err error) {
+	defer proc.Recovered(func(pe error) { err = pe })
+	key := e.Repo()
 	p, err := f.Open(e)
 	if err != nil {
 		return err
@@ -163,22 +200,21 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 		}
 		return ok
 	}
-	var sevs, outs, lost []string
+	c := closed{PR: e.PullRequest.Number, Closed: time.Now().UTC().Truncate(time.Second), Profile: profile, Findings: []finding{}}
+	var lost []string
 	for _, t := range ts {
-		c := forge.Parse(t.Body)
-		sev := cmp.Or(c.Severity, "other")
-		o := classify(t, can)
-		sevs, outs = append(sevs, sev), append(outs, o)
+		p := forge.Parse(t.Body)
+		fd := finding{cmp.Or(p.Severity, "other"), classify(t, can), text.OneLine(t.Path, 100), text.OneLine(cmp.Or(p.Title, p.Body), 100)}
+		c.Findings = append(c.Findings, fd)
 		// Only a writer's 👎 is a learning: a resolve may as well mean fixed.
-		if o == dismissed {
-			lost = append(lost, fmt.Sprintf("- Maintainers declined a %s finding: %s (%s)", sev,
-				text.OneLine(cmp.Or(c.Title, c.Body), 100), text.OneLine(t.Path, 100)))
+		if fd.Outcome == dismissed {
+			lost = append(lost, fmt.Sprintf("- Maintainers declined a %s finding: %s (%s)", fd.Severity, fd.Title, fd.Path))
 		}
 	}
 	if canErr != nil {
 		return fmt.Errorf("can write: %w", canErr) // a non-writer's vote would count
 	}
-	// The learnings before the count: learnOnce saves each once, and a PR counted is skipped on its next close.
+	// The learnings before the log: learnOnce saves each once, so a close that fails after them can try again.
 	if cfgErr == nil && cfg.Learnings.Learns() {
 		for _, l := range lost {
 			if err := learnOnce(key, l); err != nil {
@@ -186,8 +222,7 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 			}
 		}
 	}
-	_, err = record(key, n, profile, sevs, outs)
-	return err
+	return record(key, c)
 }
 
 // learnOnce saves entry as a learning unless the repo has it, whatever its date (addLearning's ", 2006-01-02)").
@@ -203,26 +238,28 @@ func learnOnce(key, entry string) error {
 	return addLearning(key, entry, time.Now())
 }
 
-// Stats prints the tally of repo, or of every repo with one, as plain text.
+// Stats prints the tally of repo, or of every repo with a log, as plain text.
 func Stats(w io.Writer, repo string) error {
-	fs := []string{tallyFile(repo)}
+	fs := []string{logFile(repo)}
 	if repo == "" {
-		fs, _ = filepath.Glob(filepath.Join(proc.DataDir, "outcomes", "*.json"))
+		fs, _ = filepath.Glob(filepath.Join(proc.DataDir, "outcomes", "*.jsonl"))
 	}
 	var ts []tally
 	for _, f := range fs {
-		t, err := loadTally(f)
+		cs, _, err := readLog(f)
 		if err != nil {
 			return err
 		}
-		ts = append(ts, t)
+		if name, err := url.PathUnescape(strings.TrimSuffix(filepath.Base(f), ".jsonl")); err == nil && len(cs) > 0 {
+			ts = append(ts, sum(name, cs))
+		}
 	}
-	if len(ts) == 0 || repo != "" && ts[0].Repo == "" {
+	if len(ts) == 0 {
 		return fmt.Errorf("no outcomes yet: they are counted as PRs close")
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, t := range ts {
-		fmt.Fprintf(tw, "%s\t%d PR(s)\n\n", t.Repo, len(t.PRs))
+		fmt.Fprintf(tw, "%s\t%d PR(s)\n\n", t.Repo, t.PRs)
 		fmt.Fprintln(tw, "\tfindings\t"+strings.Join(outcomeNames, "\t"))
 		row(tw, "all", t.Total)
 		for _, g := range []struct {

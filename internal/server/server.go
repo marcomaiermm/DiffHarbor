@@ -197,7 +197,7 @@ func drop(e *forge.Event) error {
 		return fmt.Errorf("deleting reports: %w", err)
 	}
 	_ = os.Remove(f)
-	// after the cleanup, best effort: what the PR's findings came to, counted once however often it closes
+	// after the cleanup, best effort: what the PR's findings came to, logged at each close, counted once
 	if fg := forges[e.Forge]; fg != nil {
 		if err := job.Outcomes(fg, e); err != nil {
 			log.Println(e.Key(), "outcomes:", err)
