@@ -551,7 +551,7 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 		}
 	}
 	if len(rejected) > 0 && len(kept) > 0 {
-		kept, dropped = repeats(ctx, in, name, vm, sem, kept, dropped, rejected)
+		kept, dropped = repeats(ctx, in, name, vm, sys, sem, kept, dropped, rejected)
 	}
 	p := part{r: r, found: len(r.Comments), kept: len(kept), verified: true}
 	p.r.Fixed, p.r.Comments, p.r.Dropped = fixed, kept, dropped
@@ -560,7 +560,7 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 
 // repeats asks the verify session, tools off, which kept findings repeat a rejected claimed fix: its thread stays
 // open, the finding would post it twice. A failed answer keeps all: a thread twice beats a finding lost.
-func repeats(ctx context.Context, in Input, name, vm string, sem chan struct{}, kept, dropped []Comment, rejected []int) ([]Comment, []Comment) {
+func repeats(ctx context.Context, in Input, name, vm, sys string, sem chan struct{}, kept, dropped []Comment, rejected []int) ([]Comment, []Comment) {
 	earlier, ids := make([]Comment, len(rejected)), make([]int, len(rejected))
 	for k, i := range rejected {
 		earlier[k], ids[k] = in.Prior[i], len(kept)+k // numbered past the kept ones
@@ -568,7 +568,7 @@ func repeats(ctx context.Context, in Input, name, vm string, sem chan struct{}, 
 	var out string
 	var err error
 	held(sem, func() {
-		out, err = in.Agent.Continue(ctx, in.Sandbox, "verify"+name, verifySystem+in.Trusted,
+		out, err = in.Agent.Continue(ctx, in.Sandbox, "verify"+name, sys,
 			fmt.Sprintf(repeatsTask, findings(earlier, ids), findings(kept, nil)), vm)
 	})
 	var v struct {

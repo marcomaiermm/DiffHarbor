@@ -41,7 +41,7 @@ func TestReproduce(t *testing.T) {
 	if c := cs[0]; c.Severity != "major" || !strings.HasPrefix(c.Evidence, Repro+"`go test") || !strings.Contains(c.Body, "F is 1") {
 		t.Errorf("reproduced: %+v", c)
 	}
-	if c := cs[1]; c.Severity != "minor" || !strings.HasPrefix(c.Evidence, Repro) || !strings.Contains(c.Evidence, "passes") {
+	if c := cs[1]; c.Severity != "minor" || strings.HasPrefix(c.Evidence, Repro) || !strings.Contains(c.Evidence, "passes") {
 		t.Errorf("refuted: %+v", c)
 	}
 	skipped := []Comment{ // a build error, the budget, the PR's own file, not a test file, a minor finding

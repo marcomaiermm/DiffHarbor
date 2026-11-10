@@ -54,7 +54,7 @@ func reproduce(ctx context.Context, in Input, kept []Comment) {
 		case "pass":
 			log.Printf("repro refuted %s:%d %s: `%s` passes", c.Path, c.Line, c.Title, cmd)
 			c.Severity = "minor"
-			c.Evidence = Repro + "`" + cmd + "` passes though the finding predicts a failure; lowered to minor."
+			c.Evidence = "A test for it passes: `" + cmd + "` passes though the finding predicts a failure; lowered to minor."
 			c.Body += "\n\n" + c.Evidence
 		default:
 			log.Printf("repro not attempted %s:%d %s: %s", c.Path, c.Line, c.Title, text.Tail(strings.TrimSpace(out)))
