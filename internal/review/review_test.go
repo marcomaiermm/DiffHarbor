@@ -507,8 +507,10 @@ func TestAuthorsOf(t *testing.T) { // git ends each record with "\x00\n"
 }
 
 func TestInversion(t *testing.T) {
-	defer func(d, m, v string) { proc.DataDir, agent.Model, agent.VerifyModel = d, m, v }(proc.DataDir, agent.Model, agent.VerifyModel)
-	proc.DataDir, agent.Model, agent.VerifyModel = t.TempDir(), "", ""
+	defer func(d, m, v, i string) {
+		proc.DataDir, agent.Model, agent.VerifyModel, agent.Inversion = d, m, v, i
+	}(proc.DataDir, agent.Model, agent.VerifyModel, agent.Inversion)
+	proc.DataDir, agent.Model, agent.VerifyModel, agent.Inversion = t.TempDir(), "", "", "on"
 	for _, k := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "AWS_REGION", "AZURE_OPENAI_API_KEY"} {
 		t.Setenv(k, "")
 	}
@@ -544,21 +546,24 @@ func TestInversion(t *testing.T) {
 			t.Errorf("%s: %v %q %q %q", c.name, err, r, v, cfg.Inversion())
 		}
 	}
-	defer func(i string) { agent.Inversion = i }(agent.Inversion)
 	agent.Model, agent.VerifyModel = "", ""
-	gpts := Settings{Authors: []string{"openai"}}
-	for _, c := range []struct{ env, review, verify string }{
-		{"off", gpt, gptV},
-		{"anthropic/y", "anthropic/y", clV},
-		{"openai/y", cl, clV},   // the same maker: Matrix's
-		{"deepseek/y", cl, clV}, // no key
+	for _, c := range []struct{ env, json, review, verify string }{
+		{"", `{}`, gpt, gptV}, // off by default
+		{"off", `{}`, gpt, gptV},
+		{"", `{"model_inversion":true}`, cl, clV},
+		{"anthropic/y", `{}`, "anthropic/y", clV},
+		{"anthropic/y", `{"model_inversion":false}`, gpt, gptV},
+		{"openai/y", `{}`, cl, clV},   // the same maker: Matrix's
+		{"deepseek/y", `{}`, cl, clV}, // no key
 	} {
 		agent.Inversion = c.env
-		if r, v := gpts.Models(); r != c.review || v != c.verify {
-			t.Errorf("MODEL_INVERSION=%s: %q %q", c.env, r, v)
+		cfg, _ := LoadSettings(c.json)
+		cfg.Authors = []string{"openai"}
+		if r, v := cfg.Models(); r != c.review || v != c.verify {
+			t.Errorf("MODEL_INVERSION=%s %s: %q %q", c.env, c.json, r, v)
 		}
 	}
-	agent.Inversion = ""
+	agent.Inversion = "on"
 	// Bedrock hosts Claude, Azure GPT: not another maker
 	t.Setenv("AWS_REGION", "r")
 	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "k")

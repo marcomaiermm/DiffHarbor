@@ -158,13 +158,13 @@ Differences to GitHub:
 |---|---|
 | `REVIEW_MODEL`, `VERIFY_MODEL` | The models. The env wins over a repo's `review.json`; model inversion can still replace them. |
 | `FALLBACK_MODEL`, `FALLBACK_VERIFY_MODEL` | The fallback instead of the next provider. |
-| `MODEL_INVERSION` | Model inversion (below): `off` turns it off in every repo. A model (`openai/gpt-6.1-sol`) is the one to switch to; without its key, the next provider's. |
+| `MODEL_INVERSION` | Model inversion (below), off by default: `on` turns it on in every repo. A model (`openai/gpt-6.1-sol`) does too, as the one to switch to; without its key, the next provider's. A repo's `model_inversion` wins. |
 | `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `DEEPSEEK_BASE_URL` | A gateway in front of the provider (LiteLLM, your company's AI gateway), with the gateway's key. |
 | `AZURE_OPENAI_DEPLOYMENT_NAME_MAP` | Deployments not named like the models: `gpt-6.1-sol=review,gpt-6-luna=verify`. |
 
 - Bedrock in the EU: `amazon-bedrock/eu.anthropic.…`.
 - Each pass gets only its own provider's key.
-- Model inversion: when the AI of the review model's provider wrote most of a PR's commits (Claude Code, Codex or Gemini trailers, bot authors), `MODEL_INVERSION`'s model, else the next provider with a key, reviews and verifies, `REVIEW_MODEL` included. The walkthrough footer says so. `MODEL_INVERSION=off`, a `review_model` in `review.json` or `"model_inversion": false` keeps the model.
+- Model inversion, off by default (`MODEL_INVERSION` or `"model_inversion": true` turn it on): when the AI of the review model's provider wrote most of a PR's commits (Claude Code, Codex or Gemini trailers, bot authors), `MODEL_INVERSION`'s model, else the next provider with a key, reviews and verifies, `REVIEW_MODEL` included. The walkthrough footer says so. A `review_model` in `review.json` keeps the model.
 
 > [!NOTE]
 > Use API keys. Pi can also log in with a ChatGPT subscription: `openai/…` without `OPENAI_API_KEY`, then `docker compose exec -it diffharbor diffharbor login`. Whether your plan's terms allow that for a review bot is yours to check. You use it at your own risk.
@@ -319,7 +319,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `min_severity` | `minor`, `major` or `critical`: findings below are dropped before verification, nowhere posted. `minor` drops the nits. |
 | `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. |
 | `review_model`, `verify_model` | Apply where the server sets none. The provider's key must be on the server. |
-| `model_inversion` | `false` turns off the switch to another provider's model when most commits say the review model's provider's AI wrote them (Claude Code, Codex, Gemini trailers). A pinned `review_model` never switches. Default on; `MODEL_INVERSION=off` on the server turns it off everywhere. The other provider's key must be on the server. |
+| `model_inversion` | `true` switches to another provider's model when most commits say the review model's provider's AI wrote them (Claude Code, Codex, Gemini trailers); `false` doesn't. Default: the server's `MODEL_INVERSION`, off. A pinned `review_model` never switches. The other provider's key must be on the server. |
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `passes` | Finders per part, at most 3. See [Passes](#passes). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |

@@ -27,8 +27,8 @@ type Settings struct {
 	// the server's env: a model whose provider has no key there fails the review.
 	ReviewModel string `json:"review_model"`
 	VerifyModel string `json:"verify_model"`
-	// false: reviews don't switch to another provider's model when the review model's provider wrote the commits.
-	// A pinned review_model never switches.
+	// true: reviews switch to another provider's model when the review model's provider wrote the commits; unset =
+	// MODEL_INVERSION, off by default. A pinned review_model never switches.
 	ModelInversion *bool `json:"model_inversion"`
 	// A diff past diff.Max reviews in parts of up to diff.Max, one review and verify pass each, at most MaxParts.
 	// "all" (default): always in parts; "ask": code first up to diff.Max, the walkthrough offers a box to tick for
@@ -196,9 +196,14 @@ func (cfg Settings) Models() (review, verify string) {
 	return review, cmp.Or(agent.VerifyModel, cfg.VerifyModel, agent.VerifyFor(review))
 }
 
-// inverted is agent.Invert unless review.json pins the review model or turns model_inversion off.
+// inverted is agent.Invert where model_inversion, else MODEL_INVERSION, turns it on, unless review.json pins the
+// review model.
 func (cfg Settings) inverted(review string) (rm, vm, by string) {
-	if cfg.ReviewModel != "" || cfg.ModelInversion != nil && !*cfg.ModelInversion {
+	on := agent.Inversion == "on" || strings.Contains(agent.Inversion, "/")
+	if cfg.ModelInversion != nil {
+		on = *cfg.ModelInversion
+	}
+	if cfg.ReviewModel != "" || !on {
 		return "", "", ""
 	}
 	return agent.Invert(review, cfg.Authors)

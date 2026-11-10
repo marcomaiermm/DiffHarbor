@@ -92,8 +92,9 @@ var (
 	// the primary can't serve: usage limit, outage, lost ChatGPT login. Pi already retried transient errors by then.
 	// deepseek-flash has no medium: Pi rounds it up to high.
 	FallbackModel string
-	// Inversion is MODEL_INVERSION: "off" turns model inversion off for every repo, a model (provider/id[:level])
-	// is the one Invert switches to. Unset = the first other maker in Matrix.
+	// Inversion is MODEL_INVERSION: "on" or a model (provider/id[:level], the one Invert switches to) turns model
+	// inversion on where review.json doesn't turn it off. Unset or "off": only where review.json turns it on, to the
+	// first other maker in Matrix.
 	Inversion string
 	// FallbackVerifyModel is FALLBACK_VERIFY_MODEL, the fallback for the verify pass.
 	FallbackVerifyModel string
@@ -298,17 +299,17 @@ func maker(provider string) string {
 
 // Invert is the review and verify model of MODEL_INVERSION, else of the first provider in Matrix, with credentials
 // and another maker than review's, when review's maker wrote most of the commits: authors has the maker of each
-// commit an AI wrote. by names that maker. "" = review stays, as with MODEL_INVERSION=off.
+// commit an AI wrote. by names that maker. "" = review stays.
 func Invert(review string, authors []string) (rm, vm, by string) {
 	n := map[string]int{}
 	for _, a := range authors {
 		n[a]++
 	}
 	own := maker(providerOf(review))
-	if Inversion == "off" || n[own] == 0 || n[own] < slices.Max(slices.Collect(maps.Values(n))) {
+	if n[own] == 0 || n[own] < slices.Max(slices.Collect(maps.Values(n))) {
 		return "", "", ""
 	}
-	if p := providerOf(Inversion); Inversion != "" && maker(p) != own && Available(p) {
+	if p := providerOf(Inversion); strings.Contains(Inversion, "/") && maker(p) != own && Available(p) {
 		return Inversion, VerifyFor(Inversion), own
 	}
 	for _, r := range Matrix {
