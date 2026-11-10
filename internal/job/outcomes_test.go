@@ -57,7 +57,7 @@ func TestOutcomes(t *testing.T) {
 	pr := &votePR{asked: map[string]int{}, ts: []forge.Thread{
 		{Body: body("major", "Leaks"), Path: "a.go", Addressed: true},
 		{Body: body("major", "Races"), Path: "b.go", Down: []string{"ann", "mallory"}},
-		{Body: body("minor", "Naming"), Path: "c.go", Up: []string{"ann"}},
+		{Body: body("minor", "Naming"), Path: "c.go", Up: []string{"ann"}, Resolved: true, Resolver: "ann"}, // accepted, then resolved: no learning
 		{Body: body("minor", "Typo"), Path: "d.go"},
 		{Body: body("minor", "Spam"), Path: "f.go", Resolved: true, Resolver: "mallory"}, // the PR's author may resolve
 		{Body: body("minor", "Stale"), Path: "g.go", Resolved: true, Resolver: "ann"},
@@ -82,7 +82,7 @@ func TestOutcomes(t *testing.T) {
 		!strings.HasPrefix(ls[1], "- Maintainers declined a minor finding: Stale (g.go, ") {
 		t.Fatalf("%q", ls)
 	}
-	if pr.asked["ann"] != 1 || pr.asked["mallory"] != 1 {
+	if pr.asked["ann"] != 1 || pr.asked["mallory"] != 1 || pr.asked[""] != 0 {
 		t.Errorf("CanWrite asked %v, want once per login", pr.asked)
 	}
 	dismiss := func(n int, title, path string) {
