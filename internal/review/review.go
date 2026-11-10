@@ -271,6 +271,7 @@ type Input struct {
 	Settings    Settings
 	Guide       bool          // ask for Result.Flow and Decisions
 	repros      *atomic.Int32 // the repro tests this review ran, of maxRepros
+	reproSlot   chan struct{} // one repro runs at a time: parts share the checkout
 	split       bool          // and with Guide for Result.Split: the PR reaches review.json's suggest_split
 }
 
@@ -348,7 +349,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	head := fmt.Sprintf("# %s\n\n%s\n\n%s%s%s%s", in.Title, text.Truncate(in.Body, 2000), commits, in.Ticket, docsBlock(in.Docs), hints.String())
 	vm := cmp.Or(verify, agent.PassModel(rm, cmp.Or(map[string]string{"high": "high"}[lvl], "medium")))
 	sem := make(chan struct{}, partsAtOnce)
-	in.repros = new(atomic.Int32)
+	in.repros, in.reproSlot = new(atomic.Int32), make(chan struct{}, 1)
 	ps := make([]part, len(in.Parts))
 	if len(in.Parts) == 1 {
 		// One pass over the whole diff: about the findings of parts at a third fewer tokens, so only a diff past

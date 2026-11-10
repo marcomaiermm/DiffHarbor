@@ -20,6 +20,7 @@ type fakeAgent struct {
 	calls   []string
 	systems map[string]string // the last system prompt per pass name
 	tasks   map[string]string // the last task per pass name
+	cont    [][2]string       // the name and system prompt of each Continue
 	panics  []string          // the passes whose Run panics
 }
 
@@ -51,9 +52,10 @@ func (f *fakeAgent) Run(_ context.Context, _ *proc.Sandbox, name, system, task, 
 }
 
 // Continue answers a second look from name+" again", with nothing more found when none is queued.
-func (f *fakeAgent) Continue(_ context.Context, _ *proc.Sandbox, name, _, task, _ string) (string, error) {
+func (f *fakeAgent) Continue(_ context.Context, _ *proc.Sandbox, name, system, task, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.cont = append(f.cont, [2]string{name, system})
 	if strings.HasPrefix(task, repeatsTask[:30]) {
 		f.calls = append(f.calls, name+" repeats")
 		return f.reply(name + " repeats")
@@ -116,6 +118,11 @@ func TestAnalyze(t *testing.T) {
 		r, stats, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: dir}, Title: "t", Settings: s, Parts: parts})
 		if err != nil {
 			t.Fatal(err)
+		}
+		for _, c := range f.cont { // a repair, a second look or a repeat check keeps its pass' system prompt
+			if c[1] != f.systems[strings.TrimSuffix(c[0], " again")] {
+				t.Errorf("%s: system prompt differs from Run's", c[0])
+			}
 		}
 		return r, stats, f.calls
 	}

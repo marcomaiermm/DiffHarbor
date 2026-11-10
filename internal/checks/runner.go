@@ -35,7 +35,7 @@ func TestCmd(ctx context.Context, sb *proc.Sandbox, repo, file, proof string, li
 				run += "/^" + regexp.QuoteMeta(s) + "$"
 			}
 		}
-		return dir, []string{"go", "test", "-v", "-short", "-count=1", "-timeout=" + limit.String(), "-run", run, "."}
+		return dir, []string{"go", "test", "-v", "-short", "-count=1", "-timeout=" + limit.String(), "-run=" + run, "."}
 	}
 	pj := Up(repo, dir, "package.json")
 	if !jsFile.MatchString(file) || pj == "" {
@@ -48,11 +48,11 @@ func TestCmd(ctx context.Context, sb *proc.Sandbox, repo, file, proof string, li
 	bun := Up(repo, pkg, "bun.lock", "bun.lockb", "bunfig.toml") != "" || strings.Contains(string(script), "bun test")
 	switch vitest, jest := binUp(repo, pkg, "vitest"), binUp(repo, pkg, "jest"); {
 	case vitest != "":
-		return pkg, []string{vitest, "run", "--reporter=verbose", "-t", pat, f}
+		return pkg, []string{vitest, "run", "--reporter=verbose", "--testNamePattern=" + pat, f}
 	case jest != "":
-		return pkg, []string{jest, "--ci", "--verbose", "-t", pat, "--runTestsByPath", f}
+		return pkg, []string{jest, "--ci", "--verbose", "--testNamePattern=" + pat, "--runTestsByPath", f}
 	case bun:
-		return pkg, []string{"bun", "test", "-t", pat, f}
+		return pkg, []string{"bun", "test", "--test-name-pattern=" + pat, f}
 	case strings.Contains(string(script), "node --test"):
 		return pkg, []string{"node", "--test", "--test-name-pattern=" + pat, f}
 	}

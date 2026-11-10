@@ -7,7 +7,9 @@ import (
 	"diffharbor/internal/text"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -43,10 +45,11 @@ func reproduce(ctx context.Context, in Input, kept []Comment) {
 		c := &kept[i]
 		r := c.repro
 		if r == nil || !Blocks(c.Severity) || r.Name == "" || r.Source == "" || !filepath.IsLocal(r.File) || !checks.IsTest(r.File) ||
-			!in.Settings.RunsTests(r.File) || in.repros.Add(1) > maxRepros {
+			!defines(r) || !in.Settings.RunsTests(r.File) || in.repros.Add(1) > maxRepros {
 			continue
 		}
-		cmd, out, res := runRepro(ctx, in.Sandbox, r)
+		var cmd, out, res string
+		held(in.reproSlot, func() { cmd, out, res = runRepro(ctx, in.Sandbox, r) })
 		switch res {
 		case "fail":
 			c.Evidence = Repro + "`" + cmd + "` fails, as the finding predicts."
@@ -62,12 +65,24 @@ func reproduce(ctx context.Context, in Input, kept []Comment) {
 	}
 }
 
+// defines reports whether r's source defines the test it runs: a name of a test already in the checkout must not
+// refute a finding by passing. Go: func Name(t *testing.T); JS: the name occurs in the source.
+func defines(r *reproTest) bool {
+	if !strings.HasSuffix(r.File, ".go") {
+		return strings.Contains(r.Source, r.Name)
+	}
+	return regexp.MustCompile(`(?m)^func ` + regexp.QuoteMeta(r.Name) + `\(\w+ \*testing\.T\)`).MatchString(r.Source)
+}
+
+// lexists is proc.Exists without following symlinks: a dangling one the PR placed is a file too.
+func lexists(p string) bool { _, err := os.Lstat(p); return err == nil }
+
 // runRepro runs r in the checkout, the file removed after, and returns the command, its output and the outcome
 // ("fail", "pass", "" = not run). Only a new file in an existing dir: the PR's files are never overwritten.
 func runRepro(ctx context.Context, sb *proc.Sandbox, r *reproTest) (cmd, out, res string) {
 	repo := sb.Repo()
 	p := filepath.Join(repo, r.File)
-	if proc.Exists(p) {
+	if lexists(p) {
 		return "", "file exists", ""
 	}
 	dir, args := checks.TestCmd(ctx, sb, repo, r.File, r.Name, reproTimeout)

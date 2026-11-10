@@ -36,7 +36,7 @@ func TestReproduce(t *testing.T) {
 		major(test("c_test.go", "TestBroken", "undefined()")),
 		major(test("d_test.go", "TestOver", "t.Fatal()")), // the budget of 3 is spent
 	}
-	in := Input{Sandbox: sb, repros: new(atomic.Int32)}
+	in := Input{Sandbox: sb, repros: new(atomic.Int32), reproSlot: make(chan struct{}, 1)}
 	reproduce(t.Context(), in, cs)
 	if c := cs[0]; c.Severity != "major" || !strings.HasPrefix(c.Evidence, Repro+"`go test") || !strings.Contains(c.Body, "F is 1") {
 		t.Errorf("reproduced: %+v", c)
@@ -44,11 +44,15 @@ func TestReproduce(t *testing.T) {
 	if c := cs[1]; c.Severity != "minor" || strings.HasPrefix(c.Evidence, Repro) || !strings.Contains(c.Evidence, "passes") {
 		t.Errorf("refuted: %+v", c)
 	}
-	skipped := []Comment{ // a build error, the budget, the PR's own file, not a test file, a minor finding
+	other := test("g_test.go", "TestF", "t.Fatal()")
+	other.Name = "TestMine" // a name the source doesn't define
+	skipped := []Comment{   // a build error, the budget, the PR's own file, not a test file, a minor finding, outside the repo, no such test
 		cs[2], cs[3], major(test("mine_test.go", "TestMine", "t.Fatal()")), major(test("e.go", "TestE", "t.Fatal()")),
 		{Path: "f.go", Severity: "minor", repro: test("f_test.go", "TestMinor", "t.Fatal()")},
+		major(test("../x_test.go", "TestX", "t.Fatal()")), major(other),
 	}
-	reproduce(t.Context(), Input{Sandbox: sb, repros: new(atomic.Int32)}, skipped[2:])
+	in2 := Input{Sandbox: sb, repros: new(atomic.Int32), reproSlot: make(chan struct{}, 1)}
+	reproduce(t.Context(), in2, skipped[2:])
 	reproduce(t.Context(), in, skipped[:2])
 	for i, c := range skipped {
 		if c.Evidence != "" || c.Body != "b" && i != 4 || c.Severity != "major" && i != 4 {
@@ -63,9 +67,27 @@ func TestReproduce(t *testing.T) {
 		t.Fatal(err)
 	}
 	off := []Comment{major(test("a_test.go", "TestFails", "t.Fatal()"))}
-	reproduce(t.Context(), Input{Sandbox: sb, repros: new(atomic.Int32), Settings: cfg}, off)
+	reproduce(t.Context(), Input{Sandbox: sb, repros: new(atomic.Int32), reproSlot: make(chan struct{}, 1), Settings: cfg}, off)
 	if off[0].Evidence != "" {
 		t.Errorf("tests off: %+v", off[0])
+	}
+}
+
+// A dangling symlink at the repro path is a file: it stays and nothing runs.
+func TestReproSymlink(t *testing.T) {
+	sb := &proc.Sandbox{Dir: t.TempDir()}
+	if err := os.Mkdir(sb.Repo(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(sb.Repo(), "a_test.go")
+	if err := os.Symlink("nowhere", p); err != nil {
+		t.Fatal(err)
+	}
+	if _, out, res := runRepro(t.Context(), sb, &reproTest{File: "a_test.go", Name: "TestA"}); res != "" || out != "file exists" {
+		t.Errorf("%q %q", out, res)
+	}
+	if _, err := os.Lstat(p); err != nil {
+		t.Errorf("removed: %v", err)
 	}
 }
 
