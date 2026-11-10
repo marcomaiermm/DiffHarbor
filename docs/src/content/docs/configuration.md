@@ -137,6 +137,101 @@ team-a @team-a https://art.corp/artifactory/api/npm/team-a/ <token>
 - Yarn Berry gets the default registry only. Its scopes come from `.yarnrc.yml`.
 - Use read-only tokens.
 
+## Reference docs
+
+Before the review runs, the server looks for the doc sections that mention what the PR changes (symbols it declares, config keys like `REFUND_WINDOW_DAYS`, changed paths) and puts them into the prompt as reference material. The model never searches docs itself and holds no token for them. If the change makes a claim in a section false, the review reports a minor finding that cites the section's link.
+
+For example: the PR raises `REFUND_WINDOW_DAYS` from 14 to 30, and the wiki's "Refunds" page still says 14 days. The review puts a minor finding on the changed line ("The Refunds page says 14 days", with the link), so the page gets fixed with the code.
+
+What happens per review, in this order:
+
+1. **Names** from the diff: the declarations on changed lines with names of more than one word (`refundOrder`, `refund_order`; a one-word name like `posts` is in any prose), `SCREAMING_CASE` config keys on changed lines, and the changed paths. Config keys first, then symbols, then paths, at most 40.
+2. **Adapters:** the ones whose globs in `review.json` match a changed file, asked in parallel with the names. They also get the links in the PR description, its commits and the linked ticket, and their `name:ref` entries, so a page the PR links can be found by its link. The server opens none of these links.
+3. **Check:** the server keeps a section only if one of those links or `name:ref` entries points at it, or it names one of the names as a whole word. Generic file names (`index.ts`, `main.go`, `README.md`) don't count alone.
+4. **Order:** sections a link or `name:ref` entry points at first, then the ones that name more of the names, then by id. Each at most 2000 characters, 8000 in all, whole sections only: what doesn't fit is left out.
+5. **Prompt:** the sections go to the review as reference that may be outdated, the same for every pass. The verifier sees only the sections a finding cites.
+
+Per repo, in `review.json`: a glob of changed files, and the adapters to ask. Names only, never URLs or tokens. Without the key nothing is asked.
+
+```json
+"knowledge": {
+  "**": ["docs"],
+  "internal/refund/**": ["wiki", "linear:<doc-id>", "acmewiki"]
+}
+```
+
+| Adapter | |
+|---|---|
+| `docs` | The repo's `*.md`, read from the checkout as the merge base left it: files the PR changes, changelogs (`CHANGELOG.md`, `CHANGES.md`, `HISTORY.md`, `NEWS.md`), symlinks, hidden folders, `node_modules/`, `vendor/`, `third_party/` and `testdata/` are skipped; at most 300 files of 256 KB. Split at `#` to `###` headings. `docs:<path>` ranks that file's sections first. |
+| `wiki` | GitLab: the project's wiki (markdown pages, the first 100), read with the bot's token. GitHub: nothing, an App's installation token can't read wikis. |
+| `linear` | Linear documents: a search for the first 5 changed names, `linear:<doc-id>` by id, and the Linear document links in the PR description, its commits and ticket (the server asks Linear's API for the id, it doesn't open the link). Uses `LINEAR_API_KEY`, only for owners listed for it below. |
+| any name in `KNOWLEDGE_ADAPTERS` | A [remote adapter](#remote-adapters-experimental). |
+
+`KNOWLEDGE_ADAPTERS` is the server's list of what an owner may use, in the style of `NPM_REGISTRIES`:
+
+```text
+acme acmewiki https://knowledge.corp/lookup <token>,
+acme linear
+```
+
+- **Entries:** `<owner> <name> <url> <token>` for a remote adapter, `<owner> linear` to let that owner use the server's `LINEAR_API_KEY`. Split by commas or newlines. A name is `[a-z][a-z0-9-]{0,30}` and not `docs`, `wiki`, `linear` or `itsaplan`.
+- **Owner:** like `NPM_REGISTRIES`: the repo's owner (GitLab: `gitlab/<group>`) or `*`. An owner's own entry beats `*` for its name.
+- **URLs** only come from this variable, never from a repo or a PR. An invalid entry stops the server at start, naming its number, never the entry.
+- `itsaplan` has no adapter yet.
+
+**Guards:**
+
+- Only for PRs from the repo itself, never from a fork.
+- Only for private repos. `"knowledge_public": true` in `review.json` opts a public (or GitLab internal) repo in. Where the forge doesn't say, the repo counts as public.
+- The sections go into the prompt's head as reference material that may be outdated, never into the trusted rules. The verifier gets only the sections a finding cites.
+- The server checks every section itself: it keeps one only if it came from an explicit ref, or names a changed symbol, config key or path (whole words; short symbols and generic file names like `index.ts` don't count). 2000 characters per section, 8000 in all, whole sections only.
+- `forge.Redact` strips the secrets from report links in the text. It does **not** scrub credentials or other secrets a doc contains: whoever can edit the docs can reach the model, and a finding that quotes it reaches the PR's comments. Keep secrets out of what an adapter serves.
+- The server never fetches a URL it finds in a PR, commit or ticket: those only go to adapters as data.
+- An adapter's error or timeout (10 s) costs that adapter only, and only what it hadn't returned yet: `linear` keeps the documents it fetched before a failed search, `docs` the files it read in time.
+- The report lists the sections that were read (title and link, not their text).
+
+**What it read:** the report's overview shows "Docs reached" with each section's title, link and adapter. The server logs one line per review, for example `acme/api#12 knowledge: docs, linear: 9 sections returned, 3 kept, 4120 chars`, and a line per adapter that failed. Nothing kept for weeks? Then the docs rarely name the code: add `name:ref` entries to `review.json` for the folders a page describes.
+
+### Remote adapters (experimental)
+
+A remote adapter is an HTTP service. The contract may still change; it is versioned.
+
+```text
+POST <url>
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{"version": 1, "repo": "acme/api", "refs": ["https://wiki.corp/p/12", "page-12"],
+ "entities": [{"name": "RefundOrder", "kind": "symbol", "hop": 0}], "max_chars": 2000}
+
+200 {"sections": [{"id": "page-12#window", "title": "Refunds", "url": "https://wiki.corp/p/12",
+                   "updated": "2026-05-01T12:00:00Z", "text": "markdown"}]}
+```
+
+- `kind` is `symbol`, `path` or `config`. `refs` are links the PR names and the refs of the repo's `review.json` for this adapter. `max_chars` is the most a section's `text` may have. `refs` and `entities` are always arrays, maybe empty.
+- Read-only, deterministic: the same request and source give the same sections.
+- Resolve the refs you know and ignore the rest. An entity may be ignored. **Never fetch a ref as a URL**: it comes from a PR's text. Parse ids out of URLs on hosts you own only.
+- Answer `400` to a `version` you don't know. Section `text` at most 2000 characters. The answer at most 1 MB, in 10 s, no redirects (the server doesn't follow them).
+- Unknown fields are ignored on both sides. Fields are only added, never removed or redefined; a break bumps `version`.
+- The server keeps a section only if it passes its own check (above), so false positives cost nothing.
+
+A complete adapter in Go, as `internal/knowledge`'s test runs it:
+
+```go
+http.HandleFunc("/lookup", func(w http.ResponseWriter, r *http.Request) {
+	var req Request // the types of internal/knowledge, or your own with the same JSON
+	if r.Header.Get("Authorization") != "Bearer "+token || json.NewDecoder(r.Body).Decode(&req) != nil || req.Version != 1 {
+		http.Error(w, "no", http.StatusBadRequest)
+		return
+	}
+	var ss []Section
+	for _, e := range req.Entities {
+		ss = append(ss, Section{ID: "wiki-" + e.Name, Title: "About " + e.Name, URL: "https://wiki.example/" + e.Name, Text: "How " + e.Name + " works"})
+	}
+	json.NewEncoder(w).Encode(map[string]any{"sections": ss})
+})
+```
+
 ## Storage and Docker
 
 | Variable | |

@@ -12,6 +12,7 @@ import (
 	"diffharbor/internal/checks"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/forge"
+	"diffharbor/internal/knowledge"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/report"
 	"diffharbor/internal/review"
@@ -213,12 +214,22 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	started := time.Now()
 	var tid, tk string
 	var regs []checks.Registry
+	var docs []review.Doc
+	commits := forge.Redact(review.Messages(ctx, sb))
 	if pr.Head.Repo.ID == e.Repository.ID { // a fork's author could name any ticket and read it in the review, or fetch the internal packages
 		tid, tk = ticket.Lookup(ctx, cfg.Tickets, pr.Title, pr.Head.Ref, pr.Body)
 		regs, _ = checks.Registries(e.Owner()) // main checked them
+		// what a doc says reaches the PR's comments: private repos only unless review.json opts in. Before Analyze:
+		// docs reads the checkout as the merge base left it, its checks run the PR's code there.
+		if picks := cfg.KnowledgeFor(prFiles); len(picks) > 0 && (e.Private() || cfg.KnowledgePublic) {
+			docs = knowledge.Lookup(ctx, knowledge.Env{
+				Key: key, Owner: e.Owner(), Repo: e.Repository.FullName, Diff: raw, Texts: []string{pr.Body, commits, tk},
+				Sb: sb, Blob: p.Links().Blob, Wiki: p.Wiki, Redact: forge.Redact,
+			}, picks)
+		}
 	}
 	r, stats, err := review.Analyze(ctx, review.Input{
-		Agent: agent.Pi{}, Sandbox: sb, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: forge.Redact(review.Messages(ctx, sb)), Ticket: tk, Parts: parts,
+		Agent: agent.Pi{}, Sandbox: sb, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: commits, Ticket: tk, Docs: docs, Parts: parts,
 		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings)), Checks: scripts, Registries: regs, Prior: prior, Closed: closed, Settings: cfg,
 		Guide: guide && only == nil, // an incremental review sees a few files: the last full one's reading order stays
 	})
@@ -306,7 +317,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(sb, raw), Themes: cfg.SyntaxTheme,
 			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, sb),
 			Conflicts: pr.Mergeable != nil && !*pr.Mergeable, Forge: p.Links(),
-			Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(sb, raw),
+			Docs: docs, Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(sb, raw),
 		}
 		// what the new code is for, where no doc comment or commit says: one call, the provider's small model
 		if keys, texts := report.Asks(d); len(keys) > 0 {

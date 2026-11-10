@@ -27,6 +27,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
   "report": "auto",
   "suggest_split": {"lines": 300, "files": 20},
   "tickets": ["ABC"],
+  "knowledge": {"**": ["docs"]},
   "install_scripts": false,
   "base_branches": ["develop", "release/*"],
   "drafts": "manual",
@@ -52,6 +53,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
 | `suggest_split` | See [Split suggestion](#split-suggestion). |
 | `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
+| `knowledge`, `knowledge_public` | Reference docs for the review. See [Reference docs](../configuration/#reference-docs). |
 | `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
 | `base_branches` | Globs of base branches whose PRs get reviewed, besides the default branch. A PR into any other (`main` → `prod`) is skipped with a green status. `@<bot> review` still reviews it. |
 | `drafts` | `manual` (default): a draft PR gets a review on `@<bot> review`, then once marked ready. `opt_in`: once someone asked with `@<bot> review`, every later push of the draft gets one too, like any PR. `off`: never; `@<bot> review` says so. |

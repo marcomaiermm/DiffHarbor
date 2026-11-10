@@ -228,6 +228,12 @@ team-a @team-a https://art.corp/artifactory/api/npm/team-a/ <token>
 - Yarn Berry gets the default registry only. Its scopes come from `.yarnrc.yml`.
 - Use read-only tokens.
 
+### Reference docs
+
+Before the review, the server fetches the doc sections that mention what the PR changes and gives them to the model as reference material. A change that makes a section wrong gets a minor finding with the section's link. Sources: the repo's `*.md` (`docs`), the GitLab wiki (`wiki`), Linear documents (`linear`), or your own HTTP service. Only for private repos and PRs from the repo itself.
+
+`KNOWLEDGE_ADAPTERS` lists, per owner, the remote adapters (`<owner> <name> <url> <token>`) and who may use `linear` (`<owner> linear`). Setup, the `review.json` key, the adapter contract and the guards: [Reference docs](https://marcomaiermm.github.io/DiffHarbor/configuration/#reference-docs).
+
 ### Storage and Docker
 
 | Variable | |
@@ -289,6 +295,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
   "report": "auto",
   "suggest_split": {"lines": 300, "files": 20},
   "tickets": ["ABC"],
+  "knowledge": {"**": ["docs"]},
   "install_scripts": false,
   "base_branches": ["develop", "release/*"],
   "drafts": "manual",
@@ -314,6 +321,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
 | `suggest_split` | See [Split suggestion](#split-suggestion). |
 | `tickets` | The itsaplan or Linear projects (team keys) a PR may name. |
+| `knowledge`, `knowledge_public` | Reference docs for the review. See [Reference docs](https://marcomaiermm.github.io/DiffHarbor/configuration/#reference-docs). |
 | `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
 | `base_branches` | Globs of base branches whose PRs get reviewed, besides the default branch. A PR into any other (`main` → `prod`) is skipped with a green status. `@<bot> review` still reviews it. |
 | `drafts` | `manual` (default): a draft PR gets a review on `@<bot> review`, then once marked ready. `opt_in`: once someone asked with `@<bot> review`, every later push of the draft gets one too, like any PR. `off`: never; `@<bot> review` says so. |
@@ -441,6 +449,7 @@ Within that:
 - git fetches and Pi's model calls go through a proxy in the server on `127.0.0.1`. They use random tokens that the server revokes when the Pi run (git: the job) ends.
 - A token reaches only its provider's model API or its job's repo (fetches, no push). The proxy adds the key there.
 - `NPM_REGISTRIES` tokens work the same way: installs read through the proxy, GETs only, with tokens that end with the checks.
+- `KNOWLEDGE_ADAPTERS` tokens stay in the server, which calls the adapters before the model runs. `linear`'s server-wide key needs an owner entry there, a repo can't enable it.
 
 ### Each job
 
@@ -487,6 +496,7 @@ Within that:
   - On a cloud VM, the metadata endpoint. Block `169.254.169.254` for the container there.
 - **The job's tokens** (same uid): it can spend model tokens and fetch the repo it already has. It can't keep a key.
 - **The registries' packages** while the checks install. So a PR from a fork gets no `NPM_REGISTRIES`.
+- **The docs the review reads** reach the model, so a finding can quote them into the PR's comments. So a PR from a fork gets no `KNOWLEDGE_ADAPTERS`, and a public repo none unless `knowledge_public`.
 - **Credentials Pi gets itself**, readable by the PR's code during the run:
   - A ChatGPT login: an access token that outlives the run, never the refresh token. Pi sends it only to OpenAI directly.
   - Bedrock with IAM keys, since SigV4 signs the host. `AWS_BEARER_TOKEN_BEDROCK` goes through the proxy.

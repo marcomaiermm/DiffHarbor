@@ -49,6 +49,11 @@ type Settings struct {
 	Checks []string `json:"checks"` // scripts run after the built-in checks, default .review/checks.sh
 	// itsaplan projects whose tickets a PR may name ("WID"); unset = any, [] = none. Never for a PR from a fork.
 	Tickets []string `json:"tickets"`
+	// Reference docs for the review, by glob of changed files: "name" or "name:ref" of a docs adapter (README). Names
+	// only, never URLs or tokens. Unset: off. Only for PRs from the repo itself, and for a private repo unless
+	// KnowledgePublic: what a doc says reaches the model, and so the PR's comments.
+	Knowledge       map[string][]string `json:"knowledge"`
+	KnowledgePublic bool                `json:"knowledge_public"`
 	// true: the checks' installs run lifecycle scripts (postinstall, native builds); default off, a dependency's
 	// script would run as the repo's user next to the PR's code.
 	InstallScripts bool `json:"install_scripts"`
@@ -67,6 +72,7 @@ type Settings struct {
 	Override         string         `json:"-"` // this review's profile (the PR's), over the top's and the packages'
 	CITests          string         // checks.CITests: the CI file running the tests; unless "tests" says otherwise, the review doesn't
 	pkgs             []pkgRule      // longest pattern first
+	know             []knowRule     // Knowledge's globs, in order
 }
 
 // SyntaxTheme is a Shiki theme for each color mode.
@@ -129,6 +135,26 @@ type pkgSettings struct {
 	// What goes inline and what folds into the review's summary: "quiet" folds minor ones and nits, "chill" (default)
 	// nits, "assertive" none. min_severity drops what is below it first, "minor" the nits.
 	Profile string `json:"profile"`
+}
+
+type knowRule struct {
+	re    *regexp.Regexp
+	picks []string
+}
+
+// knowEntry is a Knowledge entry: an adapter's name, and after a colon a ref for it (no URL).
+var knowEntry = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}(:\S{1,200})?$`)
+
+// KnowledgeFor returns the Knowledge entries of the globs the files match, sorted, each once.
+func (cfg Settings) KnowledgeFor(files []string) []string {
+	var out []string
+	for _, r := range cfg.know {
+		if slices.ContainsFunc(files, r.re.MatchString) {
+			out = append(out, r.picks...)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 type pkgRule struct {
@@ -399,6 +425,18 @@ func LoadSettings(s string) (Settings, error) {
 	sp := &cfg.SuggestSplit
 	if sp.skipRe, sp.keepRe, err = globsRe(sp.Skip); err != nil {
 		return Settings{}, fmt.Errorf("suggest_split: skip: %w", err)
+	}
+	for _, g := range slices.Sorted(maps.Keys(cfg.Knowledge)) {
+		re, err := globRe(g)
+		if err != nil {
+			return Settings{}, fmt.Errorf("knowledge: %w", err)
+		}
+		for _, e := range cfg.Knowledge[g] {
+			if !knowEntry.MatchString(e) || strings.Contains(e, "://") {
+				return Settings{}, fmt.Errorf("knowledge %q: %q: want an adapter's name, or name:ref (no URL)", g, e)
+			}
+		}
+		cfg.know = append(cfg.know, knowRule{re, cfg.Knowledge[g]})
 	}
 	for _, p := range slices.SortedFunc(maps.Keys(cfg.Packages), func(a, b string) int { return cmp.Compare(len(b), len(a)) }) {
 		ps := cfg.Packages[p]

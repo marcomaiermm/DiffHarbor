@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/forge"
+	"diffharbor/internal/knowledge"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/report"
 	"diffharbor/internal/review"
@@ -103,6 +104,22 @@ func (p *pr) Skills(ref string, dirs []string, dst string) {
 			return
 		}
 	}
+}
+
+// Wiki lists the markdown pages of the project's wiki with their content, the first 100 (the API has no page).
+func (p *pr) Wiki() ([]knowledge.File, error) {
+	var ws []struct{ Slug, Title, Content, Format string }
+	if err := call("GET", p.api+"/wikis?with_content=1", nil, &ws); err != nil {
+		return nil, err
+	}
+	web, _, _ := strings.Cut(p.e.PullRequest.HTMLURL, "/-/merge_requests/")
+	var fs []knowledge.File
+	for _, w := range ws[:min(len(ws), 100)] {
+		if w.Format == "markdown" {
+			fs = append(fs, knowledge.File{ID: "wiki/" + w.Slug, Title: "wiki: " + w.Title, URL: web + "/-/wikis/" + w.Slug, Text: w.Content})
+		}
+	}
+	return fs, nil
 }
 
 func (p *pr) Notes() ([]forge.Note, error) {

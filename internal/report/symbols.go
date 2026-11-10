@@ -88,6 +88,19 @@ var (
 	}
 )
 
+// Declared are the names the diff's added and removed lines declare, by decl: no checkout read.
+func Declared(diffText string) []string {
+	var out []string
+	for l := range strings.SplitSeq(diffText, "\n") {
+		if l != "" && (l[0] == '+' || l[0] == '-') && !strings.HasPrefix(l, "+++") && !strings.HasPrefix(l, "---") {
+			if m := decl.FindStringSubmatch(strings.TrimSpace(l[1:])); m != nil {
+				out = append(out, m[2])
+			}
+		}
+	}
+	return out
+}
+
 // Symbols indexes sb's checkout for the names the diff shows: their declarations (Go parsed, other languages
 // by the line that declares them) and who names them: codegraph's resolved edges where the review indexed the
 // checkout, else the lines that name them, by name. The index's queries run in sb, as the repo's user.

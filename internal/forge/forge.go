@@ -3,6 +3,7 @@
 package forge
 
 import (
+	"diffharbor/internal/knowledge"
 	"diffharbor/internal/report"
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
@@ -59,6 +60,8 @@ type PR interface {
 	NestedRules(ref string, files []string) string
 	// Skills copies the review skills at ref, from the first of dirs that exists, under dst.
 	Skills(ref string, dirs []string, dst string)
+	// Wiki returns the repo's wiki pages (markdown), none when the forge can't read them.
+	Wiki() ([]knowledge.File, error)
 	// Notes are the PR's top-level comments, oldest first.
 	Notes() ([]Note, error)
 	// Note posts a top-level comment (id 0) or edits ours, and returns its id.
