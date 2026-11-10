@@ -95,7 +95,8 @@
       "additionalProperties": false,
       "properties": {
         "max": { "type": "integer", "minimum": 0, "maximum": 100, "description": "The newest learnings of the repo and of the owner a review follows, each. 0 = none. Default 30." },
-        "max_age_days": { "type": "integer", "minimum": 0, "description": "Leave out learnings older than this. 0 = any age (default)." }
+        "max_age_days": { "type": "integer", "minimum": 0, "description": "Leave out learnings older than this. 0 = any age (default)." },
+        "outcomes": { "type": "boolean", "description": "When a PR closes, save a finding a maintainer declined with 👎 as a learning. false = only count it. Default true." }
       },
       "description": "What reviews and the chat follow of the saved learnings. Only hides, deletes nothing."
     },
