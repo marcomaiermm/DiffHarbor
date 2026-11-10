@@ -75,20 +75,20 @@ Read the finding, then the code at `path:line` and what it calls. Check that the
 Reply on GitHub (`<comment>` from step 2):
 
 ```sh
-gh api "repos/<owner>/<repo>/pulls/<n>/comments/<comment>/replies" -F body=@- <<'EOF'
+gh api "repos/<owner>/<repo>/pulls/<n>/comments/<comment>/replies" -F body=@- <<'REPLY'
 <reason>
-EOF
+REPLY
 ```
 
 On GitLab (`<discussion>` from step 2):
 
 ```sh
-glab api -X POST "projects/:id/merge_requests/<iid>/discussions/<discussion>/notes" -F body=@- <<'EOF'
+glab api -X POST "projects/:id/merge_requests/<iid>/discussions/<discussion>/notes" -F body=@- <<'REPLY'
 <reason>
-EOF
+REPLY
 ```
 
-The reason goes through stdin with a quoted `'EOF'`, so the shell expands nothing in it; never inline it as `-f body='...'`.
+The reason goes through stdin with a quoted `'REPLY'`, so the shell expands nothing in it; never inline it as `-f body='...'`.
 
 ## 4. Test, commit, push
 
