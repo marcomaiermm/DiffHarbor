@@ -14,9 +14,17 @@ import (
 // votePR serves voted threads; only ann may push.
 type votePR struct {
 	skipPR
-	ts      []forge.Thread
-	asked   map[string]int // CanWrite calls per login
-	canFail bool
+	ts          []forge.Thread
+	asked       map[string]int // CanWrite calls per login
+	canFail     bool
+	refreshFail bool
+}
+
+func (p *votePR) Refresh() error {
+	if p.refreshFail {
+		return errors.New("503")
+	}
+	return p.skipPR.Refresh()
 }
 
 func (p *votePR) Voted() ([]forge.Thread, error) { return p.ts, nil }
@@ -121,7 +129,7 @@ func TestOutcomes(t *testing.T) {
 }
 
 // What fails counts nothing and is tried again on the next close: a tally that doesn't read (it stays as it is), a
-// CanWrite error, a tally that doesn't write (its learnings are saved already, once). A review.json that doesn't
+// CanWrite or Refresh error, a tally that doesn't write (its learnings are saved already, once). A review.json that doesn't
 // parse counts, but learns nothing.
 func TestOutcomesFail(t *testing.T) {
 	proc.DataDir = t.TempDir()
@@ -142,7 +150,11 @@ func TestOutcomesFail(t *testing.T) {
 	if err := Outcomes(voteForge{pr: pr}, e); err == nil || len(tallyOf(t, "o/r").PRs) != 0 {
 		t.Fatalf("CanWrite failed: %v %+v", err, tallyOf(t, "o/r"))
 	}
-	pr.canFail = false
+	pr.canFail, pr.refreshFail = false, true // the description may be gone, and its profile with it
+	if err := Outcomes(voteForge{pr: pr}, e); err == nil || len(tallyOf(t, "o/r").PRs) != 0 {
+		t.Fatalf("Refresh failed: %v %+v", err, tallyOf(t, "o/r"))
+	}
+	pr.refreshFail = false
 	if err := Outcomes(voteForge{pr: pr}, e); err != nil || len(learningsOf("o/r")) != 1 || tallyOf(t, "o/r").Total[dismissed] != 1 {
 		t.Fatalf("%v %q %+v", err, learningsOf("o/r"), tallyOf(t, "o/r"))
 	}

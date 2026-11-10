@@ -3,7 +3,7 @@
 //	diffharbor       serve on :3000
 //	diffharbor login log in to a model subscription (ChatGPT/Codex) in Pi, stored in $DATA_DIR/pi
 //	diffharbor dry   review `git diff HEAD` of cwd, print JSON
-//	diffharbor stats [owner/repo] print what became of the findings of closed PRs, per repo
+//	diffharbor stats [repo] print what became of the findings of closed PRs, per repo: owner/repo, gitlab/group/project
 //	go test         self-check
 package main
 
@@ -112,7 +112,7 @@ func main() {
 	cfg := configure()
 	if len(os.Args) > 1 && os.Args[1] == "stats" {
 		if len(os.Args) > 3 {
-			log.Fatal("usage: diffharbor stats [owner/repo]")
+			log.Fatal("usage: diffharbor stats [owner/repo | gitlab/group/project]")
 		}
 		repo := ""
 		if len(os.Args) > 2 {

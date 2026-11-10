@@ -136,8 +136,8 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 	if err != nil {
 		return err
 	}
-	if err := p.Refresh(); err != nil {
-		log.Println(e.Key(), "refresh:", err)
+	if err := p.Refresh(); err != nil { // it may have emptied the description: the profile would be a guess
+		return err
 	}
 	cfg, cfgErr := review.LoadSettings(p.File(e.PullRequest.Base.SHA, "review.json"))
 	if cfgErr != nil {
