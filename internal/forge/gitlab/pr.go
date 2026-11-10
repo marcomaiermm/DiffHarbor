@@ -333,6 +333,17 @@ func (p *pr) discussions(inline, rest, folded []forge.Finding, raw, footer strin
 // own summary (bulk_publish's note) is a note of its own, an email more. GitLab checks a draft's position only on
 // publishing and drops one it can't place: a finding with no discussion afterwards goes into the summary.
 func (p *pr) publish(inline, rest, folded []forge.Finding, threads []forge.Thread, raw, footer string) (int, error) {
+	// the summary's draft first: GitLab publishes drafts in the order they were made, the summary heads the findings
+	summary := forge.Summary(inline, rest, folded, footer)
+	var d struct {
+		ID int64 `json:"id"`
+	}
+	ok := true                         // the summary is drafted as it goes out
+	bodies := []string{inert(summary)} // what it may go out as
+	if err := call("POST", p.mr+"/draft_notes", map[string]string{"note": bodies[0]}, &d); err != nil {
+		log.Println(p.e.Key(), "draft summary:", err) // a note of its own then
+		ok = false
+	}
 	lines := olds(raw)
 	var drafted []forge.Finding
 	var keys []string
@@ -351,21 +362,24 @@ func (p *pr) publish(inline, rest, folded []forge.Finding, threads []forge.Threa
 			break
 		}
 	}
-	summary := forge.Summary(drafted, rest, folded, footer)
-	err := call("POST", p.mr+"/draft_notes", map[string]string{"note": inert(summary)}, nil)
-	if err != nil {
-		log.Println(p.e.Key(), "draft summary:", err) // a note of its own then
+	if s := forge.Summary(drafted, rest, folded, footer); ok && s != summary { // a refused finding: the summary has it
+		bodies = append(bodies, inert(s)) // a failed update may have gone through (a timeout)
+		if err := call("PUT", fmt.Sprintf("%s/draft_notes/%d", p.mr, d.ID), map[string]string{"note": bodies[1]}, nil); err != nil {
+			log.Println(p.e.Key(), "draft summary:", err) // published as either, edited after
+			ok = false
+		}
 	}
 	before, beforeErr := p.newest()
 	pubErr := p.bulkPublish()
 	posted, lost := p.published(drafted, keys, threads)
-	if pubErr == nil && err == nil && len(lost) == 0 {
+	if pubErr == nil && ok && len(lost) == 0 {
 		return len(posted) + len(rest), nil
 	}
-	// publishing failed, no summary draft, or GitLab dropped some: the summary says what was posted
+	// publishing failed, the summary isn't right, or GitLab dropped some: the summary says what was posted
 	var id int64
-	if err = beforeErr; err == nil {
-		id, err = p.ours(inert(summary), before)
+	err := beforeErr
+	if err == nil {
+		id, err = p.ours(before, bodies...)
 	}
 	if err != nil {
 		log.Println(p.e.Key(), "notes:", err) // a second summary rather than an older one edited
@@ -445,8 +459,8 @@ func (p *pr) newest() (int64, error) {
 	return ns[0].ID, nil
 }
 
-// ours is the id of our note with this body after note after, 0 if there is none.
-func (p *pr) ours(body string, after int64) (int64, error) {
+// ours is the id of our note with one of these bodies after note after, 0 if there is none.
+func (p *pr) ours(after int64, bodies ...string) (int64, error) {
 	for page := 1; page <= 10; page++ { // a review's notes: up to 80 findings and their answers
 		var ns []note
 		if err := call("GET", fmt.Sprintf("%s/notes?sort=desc&order_by=created_at&per_page=100&page=%d", p.mr, page), nil, &ns); err != nil {
@@ -456,7 +470,7 @@ func (p *pr) ours(body string, after int64) (int64, error) {
 			if n.ID <= after {
 				return 0, nil
 			}
-			if n.forge().Ours && strings.TrimSpace(n.Body) == strings.TrimSpace(body) {
+			if n.forge().Ours && slices.ContainsFunc(bodies, func(b string) bool { return strings.TrimSpace(b) == strings.TrimSpace(n.Body) }) {
 				return n.ID, nil
 			}
 		}
