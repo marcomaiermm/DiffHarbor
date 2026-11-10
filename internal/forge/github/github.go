@@ -477,7 +477,10 @@ func (r react) logins(repo string, id int64, content, token string) (ls []string
 				Login string `json:"login"`
 			} `json:"user"`
 		}](fmt.Sprintf("/repos/%s/pulls/comments/%d/reactions?content=%s&per_page=100", repo, id, url.QueryEscape(content)), token)
-		if err == nil && (cut || len(r.Nodes) < r.TotalCount) { // a partial list mustn't count
+		switch { // a partial list mustn't count
+		case err == nil && cut:
+			err = fmt.Errorf("comment %d: %s reactions cut off at %d", id, content, len(r.Nodes))
+		case err == nil && len(r.Nodes) < r.TotalCount:
 			err = fmt.Errorf("comment %d: %d of %d %s reactions read", id, len(r.Nodes), r.TotalCount, content)
 		}
 	}

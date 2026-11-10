@@ -135,7 +135,8 @@ func record(key string, pr int, profile string, sevs, outs []string) (bool, erro
 }
 
 // Outcomes counts what became of our findings on e's closed PR, and saves the declined ones as learnings unless
-// review.json's learnings.outcomes is false. On an error the PR isn't counted: its next close tries again.
+// review.json's learnings.outcomes is false. On an error before the count the PR isn't counted: its next close
+// tries again.
 func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 	defer proc.Recovered(func(pe error) { err = pe })
 	key, n := e.Repo(), e.PullRequest.Number
@@ -188,25 +189,26 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 	if canErr != nil {
 		return fmt.Errorf("can write: %w", canErr) // a non-writer's vote would count
 	}
-	// The learnings before the count: learnOnce saves each once, and a PR counted is skipped on its next close.
-	if cfgErr == nil && cfg.Learnings.Learns() {
-		// ponytail: a retry after a failed save may add up to the cap again; tag entries with the PR if that matters.
-		saved := 0
-		for _, l := range lost {
-			if saved == maxLearnedPerClose {
-				break
-			}
-			ok, err := learnOnce(key, l)
-			if err != nil {
-				return err
-			}
-			if ok {
-				saved++
-			}
+	// The count before the learnings: only the close that counts the PR saves them, so a retry never adds past
+	// maxLearnedPerClose. A failed save isn't tried again: they are a bounded few anyway.
+	counted, err := record(key, n, profile, sevs, outs)
+	if err != nil || !counted || cfgErr != nil || !cfg.Learnings.Learns() {
+		return err
+	}
+	saved := 0
+	for _, l := range lost {
+		if saved == maxLearnedPerClose {
+			break
+		}
+		ok, err := learnOnce(key, l)
+		if err != nil {
+			return err
+		}
+		if ok {
+			saved++
 		}
 	}
-	_, err = record(key, n, profile, sevs, outs)
-	return err
+	return nil
 }
 
 // learnOnce saves entry as a learning unless the repo has it, whatever its date (addLearning's ", 2006-01-02)"),

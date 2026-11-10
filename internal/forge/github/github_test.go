@@ -319,12 +319,12 @@ func TestVoted(t *testing.T) {
 		t.Fatalf("%v %q", err, q)
 	}
 	up = 3
-	if _, err := Voted("o/r", 1, "t"); err == nil {
-		t.Fatal("a truncated list counts")
+	if _, err := Voted("o/r", 1, "t"); err == nil || !strings.Contains(err.Error(), "2 of 3") {
+		t.Fatalf("a truncated list counts: %v", err)
 	}
-	up, more = 2, true
-	if _, err := Voted("o/r", 1, "t"); err == nil {
-		t.Fatal("a cut-off list counts")
+	up, more = 2, true // 60 read of 2
+	if _, err := Voted("o/r", 1, "t"); err == nil || !strings.Contains(err.Error(), "cut off at 60") {
+		t.Fatalf("a cut-off list counts: %v", err)
 	}
 }
 
