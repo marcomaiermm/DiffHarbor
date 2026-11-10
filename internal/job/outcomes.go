@@ -7,10 +7,12 @@ import (
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -43,14 +45,27 @@ type tally struct {
 	Profile  map[string]counts
 }
 
+// tallyFile escapes key's slashes: a__b/c and a/b__c are two files.
 func tallyFile(key string) string {
-	return filepath.Join(proc.DataDir, "outcomes", strings.ReplaceAll(key, "/", "__")+".json")
+	return filepath.Join(proc.DataDir, "outcomes", url.PathEscape(key)+".json")
 }
 
-func readTally(key string) (t tally) {
-	b, _ := os.ReadFile(tallyFile(key))
-	_ = json.Unmarshal(b, &t)
-	return t
+func readTally(key string) (tally, error) { return loadTally(tallyFile(key)) }
+
+// loadTally reads the tally in f, an empty one if there's none yet. One that doesn't read is an error: record
+// mustn't start it over.
+func loadTally(f string) (t tally, err error) {
+	b, err := os.ReadFile(f) //nolint:gosec // our data dir
+	if errors.Is(err, os.ErrNotExist) {
+		return t, nil
+	}
+	if err != nil {
+		return t, err
+	}
+	if err := json.Unmarshal(b, &t); err != nil {
+		return t, fmt.Errorf("%s: %w", f, err)
+	}
+	return t, nil
 }
 
 // tallyMu guards the read-modify-write of record, like learningsMu.
@@ -84,9 +99,9 @@ func bump(m map[string]counts, k, o string) {
 func record(key string, pr int, profile string, sevs, outs []string) (bool, error) {
 	tallyMu.Lock()
 	defer tallyMu.Unlock()
-	t := readTally(key)
-	if slices.Contains(t.PRs, pr) {
-		return false, nil
+	t, err := readTally(key)
+	if err != nil || slices.Contains(t.PRs, pr) {
+		return false, err
 	}
 	t.Repo, t.PRs = key, append(t.PRs, pr)
 	if t.Total == nil {
@@ -110,12 +125,12 @@ func record(key string, pr int, profile string, sevs, outs []string) (bool, erro
 }
 
 // Outcomes counts what became of our findings on e's closed PR, and saves the declined ones as learnings unless
-// review.json's learnings.outcomes is false. Its errors only log: the PR's reports go whatever happens here.
+// review.json's learnings.outcomes is false. On an error the PR isn't counted: its next close tries again.
 func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 	defer proc.Recovered(func(pe error) { err = pe })
 	key, n := e.Repo(), e.PullRequest.Number
-	if slices.Contains(readTally(key).PRs, n) {
-		return nil
+	if t, err := readTally(key); err != nil || slices.Contains(t.PRs, n) {
+		return err
 	}
 	p, err := f.Open(e)
 	if err != nil {
@@ -124,22 +139,25 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 	if err := p.Refresh(); err != nil {
 		log.Println(e.Key(), "refresh:", err)
 	}
-	cfg, _ := review.LoadSettings(p.File(e.PullRequest.Base.SHA, "review.json"))
+	cfg, cfgErr := review.LoadSettings(p.File(e.PullRequest.Base.SHA, "review.json"))
+	if cfgErr != nil {
+		log.Println(e.Key(), "review.json:", cfgErr) // learnings.outcomes unknown: no learnings
+	}
 	profile := cmp.Or(bodyProfile(e.PullRequest.Body), cfg.Profile, "default")
 	ts, err := p.Voted()
 	if err != nil {
 		return err
 	}
 	writers := map[string]bool{}
+	var canErr error
 	can := func(login string) bool {
-		if login == "" {
+		if login == "" || canErr != nil {
 			return false
 		}
 		ok, seen := writers[login]
 		if !seen {
-			var err error
-			if ok, err = p.CanWrite(login); err != nil {
-				return false // not cached: a later thread asks again
+			if ok, canErr = p.CanWrite(login); canErr != nil {
+				return false
 			}
 			writers[login] = ok
 		}
@@ -157,20 +175,29 @@ func Outcomes(f forge.Forge, e *forge.Event) (err error) {
 				text.OneLine(cmp.Or(c.Title, c.Body), 100), text.OneLine(t.Path, 100)))
 		}
 	}
-	if fresh, err := record(key, n, profile, sevs, outs); err != nil || !fresh || !cfg.Learnings.Learns() {
-		return err
+	if canErr != nil {
+		return fmt.Errorf("can write: %w", canErr) // a non-writer's vote would count
 	}
-	for _, l := range lost {
-		if err := learnOnce(key, l); err != nil {
-			return err
+	// The learnings before the count: learnOnce saves each once, and a PR counted is skipped on its next close.
+	if cfgErr == nil && cfg.Learnings.Learns() {
+		for _, l := range lost {
+			if err := learnOnce(key, l); err != nil {
+				return err
+			}
 		}
 	}
-	return nil
+	_, err = record(key, n, profile, sevs, outs)
+	return err
 }
 
-// learnOnce saves entry as a learning unless the repo has it, whatever its date.
+// learnOnce saves entry as a learning unless the repo has it, whatever its date (addLearning's ", 2006-01-02)").
 func learnOnce(key, entry string) error {
-	if slices.ContainsFunc(learningsOf(key), func(l string) bool { return strings.HasPrefix(l, strings.TrimSuffix(entry, ")")+", ") }) {
+	p := strings.TrimSuffix(entry, ")") + ", "
+	if slices.ContainsFunc(learningsOf(key), func(l string) bool {
+		d, ok := strings.CutPrefix(l, p)
+		_, err := time.Parse(time.DateOnly+")", d)
+		return ok && err == nil
+	}) {
 		return nil
 	}
 	return addLearning(key, entry, time.Now())
@@ -178,18 +205,17 @@ func learnOnce(key, entry string) error {
 
 // Stats prints the tally of repo, or of every repo with one, as plain text.
 func Stats(w io.Writer, repo string) error {
+	fs := []string{tallyFile(repo)}
+	if repo == "" {
+		fs, _ = filepath.Glob(filepath.Join(proc.DataDir, "outcomes", "*.json"))
+	}
 	var ts []tally
-	if repo != "" {
-		ts = append(ts, readTally(repo))
-	} else {
-		fs, _ := filepath.Glob(filepath.Join(proc.DataDir, "outcomes", "*.json"))
-		for _, f := range fs {
-			b, _ := os.ReadFile(f) //nolint:gosec // Glob of our own dir
-			var t tally
-			if json.Unmarshal(b, &t) == nil {
-				ts = append(ts, t)
-			}
+	for _, f := range fs {
+		t, err := loadTally(f)
+		if err != nil {
+			return err
 		}
+		ts = append(ts, t)
 	}
 	if len(ts) == 0 || repo != "" && ts[0].Repo == "" {
 		return fmt.Errorf("no outcomes yet: they are counted as PRs close")

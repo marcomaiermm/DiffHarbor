@@ -4,21 +4,37 @@ import (
 	"bytes"
 	"diffharbor/internal/forge"
 	"diffharbor/internal/proc"
+	"errors"
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // votePR serves voted threads; only ann may push.
 type votePR struct {
 	skipPR
-	ts    []forge.Thread
-	asked map[string]int // CanWrite calls per login
+	ts      []forge.Thread
+	asked   map[string]int // CanWrite calls per login
+	canFail bool
 }
 
 func (p *votePR) Voted() ([]forge.Thread, error) { return p.ts, nil }
 func (p *votePR) CanWrite(l string) (bool, error) {
 	p.asked[l]++
+	if p.canFail {
+		return false, errors.New("503")
+	}
 	return l == "ann", nil
+}
+
+func tallyOf(t *testing.T, key string) tally {
+	t.Helper()
+	tl, err := readTally(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tl
 }
 
 type voteForge struct {
@@ -72,7 +88,7 @@ func TestOutcomes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	tl := readTally("o/r")
+	tl := tallyOf(t, "o/r")
 	if len(tl.PRs) != 1 || tl.Total[addressed] != 1 || tl.Total[dismissed] != 1 || tl.Total[resolved] != 2 || tl.Total[accepted] != 1 || tl.Total[ignored] != 1 ||
 		tl.Severity["major"][dismissed] != 1 || tl.Profile["quiet"][accepted] != 1 {
 		t.Fatalf("%+v", tl)
@@ -94,12 +110,72 @@ func TestOutcomes(t *testing.T) {
 	dismiss(8, "Panics", "e.go")
 	pr.cfg = `{}`
 	dismiss(9, "Races", "b.go") // declined again: one line still
-	if ls := learningsOf("o/r"); len(ls) != 1 || readTally("o/r").Total[dismissed] != 3 {
-		t.Fatalf("%q %+v", ls, readTally("o/r"))
+	if ls := learningsOf("o/r"); len(ls) != 1 || tallyOf(t, "o/r").Total[dismissed] != 3 {
+		t.Fatalf("%q %+v", ls, tallyOf(t, "o/r"))
 	}
 	var b bytes.Buffer
 	if err := Stats(&b, "o/r"); err != nil || !strings.Contains(b.String(), "all") || !strings.Contains(b.String(), "severity major") ||
 		!strings.Contains(b.String(), "profile quiet") || !strings.Contains(strings.Join(strings.Fields(b.String()), " "), "all 8 12% 12% 38% 25% 12%") {
 		t.Fatalf("%v\n%s", err, b.String())
+	}
+}
+
+// What fails counts nothing and is tried again on the next close: a tally that doesn't read (it stays as it is), a
+// CanWrite error, a tally that doesn't write (its learnings are saved already, once). A review.json that doesn't
+// parse counts, but learns nothing.
+func TestOutcomesFail(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	pr := &votePR{asked: map[string]int{}, ts: []forge.Thread{{Body: "_🟠 Major_ · **Races**\n\nbody", Path: "b.go", Down: []string{"ann"}}}}
+	pr.cfg = `{}`
+	e := &forge.Event{Forge: "github"}
+	e.Repository.FullName = "o/r"
+	e.PullRequest.Number = 7
+	f := tallyFile("o/r")
+	if err := os.MkdirAll(f+".tmp", 0o700); err != nil { // the tally's write fails
+		t.Fatal(err)
+	}
+	if err := Outcomes(voteForge{pr: pr}, e); err == nil || len(learningsOf("o/r")) != 1 || len(tallyOf(t, "o/r").PRs) != 0 {
+		t.Fatalf("%v %q", err, learningsOf("o/r"))
+	}
+	_ = os.Remove(f + ".tmp")
+	pr.canFail = true
+	if err := Outcomes(voteForge{pr: pr}, e); err == nil || len(tallyOf(t, "o/r").PRs) != 0 {
+		t.Fatalf("CanWrite failed: %v %+v", err, tallyOf(t, "o/r"))
+	}
+	pr.canFail = false
+	if err := Outcomes(voteForge{pr: pr}, e); err != nil || len(learningsOf("o/r")) != 1 || tallyOf(t, "o/r").Total[dismissed] != 1 {
+		t.Fatalf("%v %q %+v", err, learningsOf("o/r"), tallyOf(t, "o/r"))
+	}
+	pr.cfg, pr.ts[0].Path, e.PullRequest.Number = `{"learnings":`, "e.go", 8
+	if err := Outcomes(voteForge{pr: pr}, e); err != nil || len(learningsOf("o/r")) != 1 || len(tallyOf(t, "o/r").PRs) != 2 {
+		t.Fatalf("broken review.json: %v %q", err, learningsOf("o/r"))
+	}
+	if err := os.WriteFile(f, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.PullRequest.Number = 9
+	var b bytes.Buffer
+	if err := Outcomes(voteForge{pr: pr}, e); err == nil || Stats(&b, "o/r") == nil || Stats(&b, "") == nil {
+		t.Fatal("a broken tally reads")
+	}
+	if got, _ := os.ReadFile(f); string(got) != "{" {
+		t.Fatalf("broken tally overwritten: %q", got)
+	}
+	if tallyFile("a__b/c") == tallyFile("a/b__c") {
+		t.Error("tally files collide")
+	}
+}
+
+// learnOnce knows an entry whatever its date, and only that entry: not one whose path starts like it.
+func TestLearnOnce(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	for _, l := range []string{"- X (a, b)", "- X (a)", "- X (a)"} {
+		if err := learnOnce("o/r", l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := time.Now().Format(time.DateOnly)
+	if ls := learningsOf("o/r"); strings.Join(ls, "|") != "- X (a, b, "+d+")|- X (a, "+d+")" {
+		t.Fatalf("%q", ls)
 	}
 }

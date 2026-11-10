@@ -184,13 +184,13 @@ func (p *pr) Voted() ([]forge.Thread, error) {
 		if t.Addressed {
 			continue
 		}
-		var as []struct {
+		as, err := all[struct {
 			Name string `json:"name"`
 			User struct {
 				Username string `json:"username"`
 			} `json:"user"`
-		}
-		if err := call("GET", fmt.Sprintf("%s/notes/%d/award_emoji?per_page=100", p.mr, t.Comment), nil, &as); err != nil {
+		}](fmt.Sprintf("%s/notes/%d/award_emoji?per_page=100", p.mr, t.Comment))
+		if err != nil {
 			return nil, err
 		}
 		for _, a := range as {

@@ -533,7 +533,7 @@ func TestThreadsReplies(t *testing.T) {
 	}
 }
 
-// Voted reads the award emoji of each finding but an addressed one.
+// Voted reads the award emoji of each finding but an addressed one, every page.
 func TestVoted(t *testing.T) {
 	Bot = "review-bot"
 	var asked []string
@@ -546,14 +546,19 @@ func TestVoted(t *testing.T) {
 			return
 		}
 		asked = append(asked, r.URL.Path)
-		fmt.Fprint(w, `[{"name":"thumbsup","user":{"username":"bo"}},{"name":"thumbsdown","user":{"username":"cy"}},{"name":"heart","user":{"username":"di"}}]`)
+		if r.URL.Query().Get("page") == "1" {
+			w.Header().Set("X-Next-Page", "2")
+			fmt.Fprint(w, `[{"name":"thumbsup","user":{"username":"bo"}},{"name":"heart","user":{"username":"di"}}]`)
+			return
+		}
+		fmt.Fprint(w, `[{"name":"thumbsdown","user":{"username":"cy"}}]`)
 	})
 	e := &forge.Event{Forge: "gitlab"}
 	e.Repository.ID, e.PullRequest.Number = 5, 3
 	p, _ := (&Hub{}).Open(e)
 	ts, err := p.Voted()
 	if err != nil || len(ts) != 2 || !slices.Equal(ts[0].Up, []string{"bo"}) || !slices.Equal(ts[0].Down, []string{"cy"}) ||
-		!ts[1].Addressed || len(asked) != 1 || !strings.HasSuffix(asked[0], "/notes/1/award_emoji") {
+		!ts[1].Addressed || len(asked) != 2 || !strings.HasSuffix(asked[0], "/notes/1/award_emoji") {
 		t.Fatalf("%+v %q %v", ts, asked, err)
 	}
 }

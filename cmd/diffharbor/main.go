@@ -111,6 +111,9 @@ func main() {
 	log.Printf("diffharbor %s", version)
 	cfg := configure()
 	if len(os.Args) > 1 && os.Args[1] == "stats" {
+		if len(os.Args) > 3 {
+			log.Fatal("usage: diffharbor stats [owner/repo]")
+		}
 		repo := ""
 		if len(os.Args) > 2 {
 			repo = os.Args[2]
