@@ -402,7 +402,7 @@ func fold(cs []Comment, cfg Settings) {
 	}
 }
 
-// maxInline is how many findings a run posts inline, blocking ones on top: each thread costs a maintainer attention, and a
+// maxInline is how many findings a run posts inline, blocking ones first: each thread costs a maintainer attention, and a
 // run with many minor findings would flood the PR. A run posts fewer in practice, so 5 only bites on a flood.
 const maxInline = 5
 

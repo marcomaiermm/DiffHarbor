@@ -467,7 +467,8 @@ func TestCapped(t *testing.T) {
 	}
 }
 
-// A run posts at most 5 inline findings, the blocking ones never folded past that; the rest fold, the most severe stay inline.
+// A run posts at most 5 inline findings, the blocking ones never folded past that; the rest fold,
+// the most severe stay inline.
 func TestCapInline(t *testing.T) {
 	count := func(cs []Comment) (inline, folded int) {
 		for _, c := range cs {
@@ -479,7 +480,14 @@ func TestCapInline(t *testing.T) {
 		}
 		return
 	}
-	var cs []Comment
+	cs := []Comment{{Severity: "major"}, {Severity: "minor"}, {Severity: "nit"}}
+	CapInline(cs)
+	CapInline(nil)
+	if in, f := count(cs); in != 3 || f != 0 {
+		t.Fatalf("under the cap: %d inline, %d folded", in, f)
+	}
+
+	cs = nil
 	for range 8 {
 		cs = append(cs, Comment{Severity: "nit"})
 	}
