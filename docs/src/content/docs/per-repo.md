@@ -7,7 +7,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 
 | File | |
 |---|---|
-| `.review/rules.md` | Rules in prose for the prompt: what to report, which risks you accept. The root `AGENTS.md` (else `CLAUDE.md`) follows it; without a rules file it stands alone. |
+| `.review/rules.md` | Rules in prose for the prompt: what to report, which risks you accept. The root `AGENTS.md` (else `CLAUDE.md`) follows it. Without a rules file it stands alone. |
 | `.review/skills/` | Review skills in the [Agent Skills format](https://agentskills.io/specification). On GitHub, skills in `<owner>/.github` under `.review/skills/` apply to all of the owner's repos. |
 | `.review/checks.sh` | Your own checks from the base branch, run in the PR checkout with the changed files after `--`. Their output (120 lines each) goes into the prompt. The exit code doesn't count. |
 | `review.json` | Settings, in the repo root. All keys are optional. |
@@ -47,9 +47,9 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `ignore` | Globs. A path without one takes its folder. `!glob` takes paths back in: `["src/ui", "!src/ui/{chip,toast}.tsx"]`. Neither the model nor a check sees these files. |
 | `profile` | `quiet`, `chill` (default) or `assertive`: which findings go inline and which fold into the review's summary. See [Review profiles](#review-profiles). |
 | `min_severity` | `minor`, `major` or `critical`: findings below are dropped before verification, nowhere posted. `minor` drops the nits. |
-| `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. The same switch allows the proof test (run against the base versions of the code files; Go, vitest, jest, `bun test`, `node --test`; proofs and repros under `bun test` need bun on the server, the image has none) and the verifier's repro tests for major and critical findings (3 per review, one at a time, Go `-timeout=30s` inside a 60 s limit and the JS runners the 60 s limit, deleted after the run). |
+| `tests` | Run the tests of changed packages. Unset, they run only when no CI workflow does. The same switch allows the proof test (run against the base versions of the code files, with Go, vitest, jest, `bun test` or `node --test`, and proofs and repros under `bun test` need bun on the server, the image has none) and the verifier's repro tests for major and critical findings (3 per review, one at a time, Go `-timeout=30s` inside a 60 s limit and the JS runners the 60 s limit, deleted after the run). |
 | `review_model`, `verify_model` | Apply where the server sets none. The provider's key must be on the server. |
-| `model_inversion` | `true` switches to another provider's model when at least as many commits say the review model's provider's AI wrote them as any other AI (Claude Code, Codex, Gemini trailers; commits that name none don't count); `false` doesn't. Default: the server's `MODEL_INVERSION`, off. A pinned `review_model` never switches. The other provider's key must be on the server. |
+| `model_inversion` | `true` switches to another provider's model when at least as many commits say the review model's provider's AI wrote them as any other AI (Claude Code, Codex, Gemini trailers, commits that name none don't count). `false` doesn't. Default: the server's `MODEL_INVERSION`, off. A pinned `review_model` never switches. The other provider's key must be on the server. |
 | `large_pr`, `max_parts` | See [Large PRs](#large-prs). |
 | `passes` | Finders per part, at most 3. See [Passes](#passes). |
 | `report` | `auto` (from 10 changed files), `always` or `off`. |
@@ -58,9 +58,9 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `knowledge`, `knowledge_public` | Reference docs for the review. See [Reference docs](../configuration/#reference-docs). |
 | `install_scripts` | `true` runs lifecycle scripts (`postinstall`, native builds) in the checks' installs. Off by default: a dependency's script would run next to the PR's code. |
 | `base_branches` | Globs of base branches whose PRs get reviewed, besides the default branch. A PR into any other (`main` → `prod`) is skipped with a green status. `@<bot> review` still reviews it. |
-| `drafts` | `manual` (default): a draft PR gets a review on `@<bot> review`, then once marked ready. `opt_in`: once someone asked with `@<bot> review`, every later push of the draft gets one too, like any PR. `off`: never; `@<bot> review` says so. |
-| `learnings` | `max`: how many of the newest learnings of the repo and of the owner a review and the chat follow, each. `0` is none, at most 100, default 30. `max_age_days`: older ones are left out. Default: any age. A learning saved before dates were kept never ages. Both only hide, nothing is deleted. `outcomes`: when a PR closes, a finding a maintainer declined (👎 by someone who can push; a resolve alone says nothing) is kept as a declined finding, and so is one a maintainer's reply decided as intended, unlikely or wrong. Those are apart from the learnings, the newest 20 per repo, shown to reviews (`max_age_days` applies, `max` does not, except that `0` hides them too); `false` only counts them. Default `true`. |
-| `gitlab_findings` | `review`: the findings and the answers to fixed threads are one review, one email, after the summary as a note of its own (in the review GitLab would make it a thread to resolve); a suggestion GitLab can't place goes into the summary as code. `discussions`: each on its own, an email each; a refused suggestion is retried as plain code on its line. Default: the server's `GITLAB_FINDINGS`. |
+| `drafts` | `manual` (default): a draft PR gets a review on `@<bot> review`, then once marked ready. `opt_in`: once someone asked with `@<bot> review`, every later push of the draft gets one too, like any PR. `off`: never, and `@<bot> review` says so. |
+| `learnings` | `max`: how many of the newest learnings of the repo and of the owner a review and the chat follow, each. `0` is none, at most 100, default 30. `max_age_days`: older ones are left out. Default: any age. A learning saved before dates were kept never ages. Both only hide, nothing is deleted. `outcomes`: when a PR closes, a finding a maintainer declined (👎 by someone who can push, a resolve alone says nothing) is kept as a declined finding, and so is one a maintainer's reply decided as intended, unlikely or wrong. Those are apart from the learnings, the newest 20 per repo, shown to reviews (`max_age_days` applies, `max` does not, except that `0` hides them too). `false` only counts them. Default `true`. |
+| `gitlab_findings` | `review`: the findings and the answers to fixed threads are one review, one email, after the summary as a note of its own (in the review GitLab would make it a thread to resolve). A suggestion GitLab can't place goes into the summary as code. `discussions`: each on its own, an email each. A refused suggestion is retried as plain code on its line. Default: the server's `GITLAB_FINDINGS`. |
 | `rules`, `skills`, `checks` | Other paths for the files above. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part. The longest glob wins. |
@@ -71,7 +71,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 
 ## Review profiles
 
-Reviews can report defects (critical, major, minor) and, unless `min_severity` drops them, nits: naming, readability, a dead branch, an idiom of the codebase the change ignores, at most 5 per pass and never in place of a defect. The profile decides what goes inline as a thread and what folds into the review's summary, where nothing is lost and the prompt for AI agents still has it. Inline means on a diff line: a finding outside the diff goes into the summary whatever the profile.
+Reviews report defects (critical, major, minor) and nits. The profile decides what goes inline as a thread and what folds into the review's summary.
 
 | `profile` | Inline | Folded into the summary |
 |---|---|---|
@@ -79,11 +79,34 @@ Reviews can report defects (critical, major, minor) and, unless `min_severity` d
 | `chill` (default) | critical, major, minor | nits |
 | `assertive` | everything, nits too | |
 
-A kept defect for which the verifier names nothing that reaches it in normal operation folds under every profile, `assertive` too, unless it is major or critical.
+- **Nits:** naming, readability, a dead branch, an idiom of the codebase the change ignores. At most 5 per pass and never in place of a defect.
+- **Inline** means on a diff line. A finding outside the diff goes into the summary whatever the profile.
+- **Folded** findings stay in the summary, and the prompt for AI agents still has them. They have no thread: a later review of the file may report one again, and an incremental review that finds only folded ones posts nothing.
+- **`min_severity`** drops findings before any of this, `minor` the nits.
 
-A push's review folds minor findings under `chill` too: most of a push fixes earlier findings, and the edge cases of each fix would open the next round of threads. `min_severity` drops findings before that, `minor` the nits. A run posts at most 5 inline findings, but critical and major ones all stay inline: the most severe others fill what is left, the rest fold into the summary. A folded finding has no thread: a later review of its file may report it again, and an incremental review that finds only folded ones posts nothing.
+Folded under every profile:
 
-**Merge risk.** The walkthrough shows a score from 0 to 5, computed from what is still open, not by the model: 0 nothing open, 1 only nits (folded ones too), 2 a minor finding, 3 one major, 4 two majors or failing tests, 5 any critical. Findings from earlier reviews that are still open count by their severity (a minor if unknown). Colour: green 0-1, yellow 2-3, red 4-5. The `diffharbor` commit status adds it when the text fits GitHub's 140 characters.
+- A kept defect for which the verifier names nothing that reaches it in normal operation, `assertive` too, unless it is major or critical.
+- On a push, minor findings under `chill` too. Most of a push fixes earlier findings, and the edge cases of each fix would open the next round of threads.
+- What goes beyond 5 inline findings per run. Critical and major ones all stay inline, the most severe others fill what is left.
+
+### Merge risk
+
+The walkthrough shows a score from 0 to 5, computed from what is still open, not by the model.
+
+| Score | Open | Colour |
+|---|---|---|
+| 0 | nothing | green |
+| 1 | only nits, folded ones too | green |
+| 2 | a minor finding | yellow |
+| 3 | one major | yellow |
+| 4 | two majors or failing tests | red |
+| 5 | any critical | red |
+
+- Findings from earlier reviews that are still open count by their severity, a minor if unknown.
+- The `diffharbor` commit status adds the score when the text fits GitHub's 140 characters.
+
+### Who sets the profile
 
 The first that sets a profile wins:
 

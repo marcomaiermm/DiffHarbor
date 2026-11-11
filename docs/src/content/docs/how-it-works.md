@@ -3,25 +3,78 @@ title: How a review works
 description: The steps of a DiffHarbor review and how to talk to the bot.
 ---
 
-1. **Diff.** On open, the whole PR against its merge base. On a push, only what changed since the last review, and minor findings only on the lines the push touched, folded into the summary unless the profile is `assertive`. A push that finds only folded ones posts no review; a PR with a report still lists them there.
-2. **Context.** The checks, codegraph, co-change from git history, the PR's commit messages, the repo's rules and skills from the base branch, learnings and optionally the linked ticket.
+1. **Diff.** On open, the whole PR against its merge base. On a push, only what changed since the last review.
+2. **Context.** Your [checks](#checks), codegraph, co-change from git history, the PR's commit messages, the repo's rules and skills from the base branch, learnings and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings. Then it looks at the diff again in the same session without tools: up to 10 more at about a tenth of the cost. [`passes`](../per-repo/#passes) add up to two more finders.
-4. **Verify.** A cheaper model checks each finding in the code. For each kept defect the verifier also names what reaches the failing case in normal operation today (a caller, request, job, config or data source; untrusted input counts) and the comment shows it. One with none folds into the summary under every profile, a major or critical one excepted; a verify pass that gives no such answer folds nothing.
-5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`. A run posts at most 5 inline findings, but critical and major ones all stay inline; the others beyond that fold into the summary.
+4. **Verify.** A cheaper model checks each finding in the code and drops what it can't back up. See [Verification](#verification).
+5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
-**What the review reads:**
+The agent runs on [Pi](https://github.com/earendil-works/pi), a very slim agent harness, in a checkout of the PR with read, grep and bash.
+
+A run posts at most 5 inline findings. Critical and major ones all stay inline, the others beyond that fold into the summary.
+
+## Checks
+
+Run on the changed lines, when the repo uses them:
+
+gitleaks, tsc, biome, eslint, oxlint, gofmt, vet, staticcheck, golangci-lint, deadcode, fallow, squawk, shellcheck, luacheck, actionlint, zizmor, osv-scanner and the tests of changed packages.
+
+Your own go in [`.review/checks.sh`](../per-repo/).
+
+## What the review reads
 
 - Up to 60k characters per pass: code first, then tests, data, stylesheets and docs. Larger PRs can be reviewed [in parts](../per-repo/#large-prs).
 - Left out: lockfiles, build output, vendored code, binaries and generated code (by name, Drizzle's migration snapshots or a "Code generated … DO NOT EDIT" header).
 
-**Drafts** aren't reviewed until they are marked ready, unless someone asks with `@<bot> review`; [`drafts`](../per-repo/) can also review a draft's pushes once asked, or never.
+## Pushes
 
-**The queue.** Jobs run one at a time, or up to [`MAX_JOBS`](../configuration/#storage-and-docker) at once. A repo's jobs never run at the same time, nor those of a repo recreated under its name; repos take turns, so one with many PRs doesn't hold up the others. Within a repo, answers to comments go before reviews, not before an earlier close. A newer push replaces a waiting review of the same PR and stops a running one. Up to 100 jobs wait; past that the webhook gets a 503. GitHub doesn't retry it on its own: DiffHarbor asks GitHub to redeliver what got no 2xx in the last 6 hours, on start and every 30 minutes ([GitHub](../configuration/#github)). A GitLab webhook is retried only briefly. Waiting reviews survive a restart, as many as the queue takes; the rest run on their PR's next push or the next restart.
+- Only files whose changed lines changed are reviewed. A rebase or a merge of main reviews nothing.
+- Minor findings only on the lines the push touched, folded into the summary unless the profile is `assertive`.
+- A push that finds only folded ones posts no review. A PR with a report still lists them there.
+
+## Verification
+
+**Trigger.** For each kept defect the verifier names what reaches the failing case in normal operation today: a caller, request, job, config or data source. Untrusted input counts. The comment shows it.
+
+- A defect with no trigger folds into the summary under every profile, unless it is major or critical.
+- A verify pass that gives no such answer folds nothing.
+
+**Proof test.** The test the review names as proof of the change runs against the base versions of the PR's code files. If it still passes there, it doesn't prove the change, and the test gets a minor finding of its own: "Test passes without the change". Not run when [`tests`](../per-repo/#reviewjson-reference) is `false`.
+
+**Repro.** For up to 3 major or critical findings per review the verifier writes a minimal test that fails if the finding is right. It runs once, one at a time, in the sandbox and is deleted after. Only where the repo's tests run, see [`tests`](../per-repo/#reviewjson-reference).
+
+| The test | The finding |
+|---|---|
+| fails as predicted | shows the run in its comment |
+| passes | drops to minor |
+| doesn't run or doesn't build | stays as it is |
+
+Runners for both:
+
+- Go, or JS and TS with the package's vitest, jest, `bun test` or `node --test`. `bun test` needs bun on the server, the image has none.
+- A repro gets 60 s, in Go with `-timeout=30s`.
+- A proof test gets 2 minutes, in Go with `-timeout=1m30s`.
+- A test the file does not define is not run.
+
+## Drafts and skipped PRs
+
+**Drafts** aren't reviewed until they are marked ready, unless someone asks with `@<bot> review`. [`drafts`](../per-repo/) can also review a draft's pushes once asked, or never.
 
 **Skipped PRs** get a green status. `@<bot> review` still reviews them.
 
 - PRs from bots: Dependabot, Renovate, also a self-hosted one on a user token. Its branch starts with `renovate/` or `dependabot/`, or Renovate's hidden comments are in the description.
 - PRs into a branch other than the default branch or one in [`base_branches`](../per-repo/#reviewjson-reference).
+
+## The queue
+
+- Jobs run one at a time, or up to [`MAX_JOBS`](../configuration/#storage-and-docker) at once.
+- A repo's jobs never run at the same time, nor those of a repo recreated under its name.
+- Repos take turns, so one with many PRs doesn't hold up the others.
+- Within a repo, answers to comments go before reviews, not before an earlier close.
+- A newer push replaces a waiting review of the same PR and stops a running one.
+- Up to 100 jobs wait. Past that the webhook gets a 503.
+- GitHub doesn't retry a 503 on its own: DiffHarbor asks GitHub to redeliver what got no 2xx in the last 6 hours, on start and every 30 minutes ([GitHub](../configuration/#github)). A GitLab webhook is retried only briefly.
+- Waiting reviews survive a restart, as many as the queue takes. The rest run on their PR's next push or the next restart.
 
 ## Talking to the bot
 
@@ -35,10 +88,85 @@ description: The steps of a DiffHarbor review and how to talk to the bot.
 | `@<bot> learnings` | Lists the saved learnings of the repo and its owner. |
 | `@<bot> forget <text>` | Drops the learnings and declined findings containing the text. Only owners and members drop the owner's. |
 
-When a maintainer corrects the bot or states a convention, the bot saves the rule with its reason, the PR and the date in `/data/learnings/`, unless one already says it or it only holds for now. It keeps the newest 100 per repo and per owner. A review follows the newest 30 of each, a newer one over an older one it contradicts. [`learnings`](../per-repo/#reviewjson-reference) in `review.json` changes that.
+## Learnings
 
-**Outcomes.** When a PR closes, the bot counts what became of each finding with a thread of its own (one folded into the review's summary has none to vote on or resolve): addressed (its "Addressed in" reply), accepted (👍), dismissed (👎), resolved (resolved by hand: fixed or declined, the thread alone doesn't say) or ignored (still open). Only 👍 and 👎 by people who can push to the repo count. A dismissed finding, a 👎 by such a person, is also kept as a declined finding, and so is one whose decision (below) is intended, unlikely or wrong, with that reason in the line, unless the PR fixed it (`learnings.outcomes` in `review.json` turns that off). Only the bot's own title, severity and path go in, never a reply. A resolve alone never becomes one. Declined findings are kept apart from the learnings, in `/data/declined/`, the newest 20 per repo, so they never push the rules out. Reviews and the chat get them as their own section (maintainers declined these findings on these paths; don't report the same point on that code again unless the change makes it newly wrong), `@<bot> learnings` lists them and `@<bot> forget <text>` drops them too. A PR counts once, however often it closes.
+When a maintainer corrects the bot or states a convention, the bot saves the rule.
 
-**Decisions.** A reply often says what a thread's state doesn't. When the bot reads a reply in a finding's thread to answer it, it also notes what that reply decided about the finding: fixed (or agreed and about to be), wrong (the finding is incorrect), intended, unlikely (the case doesn't happen in practice), deferred (a ticket, another PR) or declined (not fixed, for another reason or none). That is part of the answer it writes anyway, not a model call of its own. Only replies by people who can push to the repo count, and the last one the bot read on a finding stands, also one after the PR closed. A reply it never read changes nothing: one for someone else after the PR closed, or one before the bot answered another person in the thread. When the PR closes, the threads a maintainer replied in that still have no decision (a reply the bot never answered, or answered without one), or that end with a maintainer's reply the bot never answered, go to the verify model in one call without tools: it reads the findings and their replies, nothing else, a fraction of a cent per PR. A reply that decides nothing (a question, a plain thanks) stays undecided, and so does a finding nobody replied to.
+- Saved with its reason, the PR and the date in `/data/learnings/`.
+- Not saved when one already says it or it only holds for now.
+- The newest 100 are kept per repo and per owner.
+- A review follows the newest 30 of each, a newer one over an older one it contradicts. [`learnings`](../per-repo/#reviewjson-reference) in `review.json` changes that.
 
-`diffharbor stats [owner/repo]` prints the counts per repo (a GitLab project is `gitlab/group/project`), by severity and by profile (the PR's, else `review.json`'s top-level one), then the decisions per outcome, from `/data/outcomes/`. A repo's file there also lists its findings one by one: PR, path, title, severity, profile, outcome, decision, and the day and diffharbor version that counted it. PRs counted before findings were listed stay in the counts only: the decisions start with the first PR closed after the upgrade. Each row also names what found the finding: the diffharbor version, review and verify model and head commit of the review that posted it, read from a hidden marker on its comment (empty for findings an older version posted), and `stats` prints the outcomes per finding version, `-` for those without one.
+## Outcomes
+
+When a PR closes, the bot counts what became of each finding.
+
+| Outcome | |
+|---|---|
+| addressed | The bot's "Addressed in" reply. |
+| accepted | 👍 |
+| dismissed | 👎 |
+| resolved | Resolved by hand: fixed or declined, the thread alone doesn't say. |
+| ignored | Still open. |
+
+- Only findings with a thread of their own count. One folded into the summary has none to vote on or resolve.
+- Only 👍 and 👎 by people who can push to the repo count.
+- A PR counts once, however often it closes.
+
+### Declined findings
+
+A finding becomes a declined finding when the PR didn't fix it and
+
+- a person who can push gave it a 👎, or
+- its [decision](#decisions) is intended, unlikely or wrong. That reason goes in the line.
+
+A resolve alone never makes one. `learnings.outcomes` in `review.json` turns this off.
+
+- Only the bot's own title, severity and path go in, never a reply.
+- Kept in `/data/declined/`, the newest 20 per repo, apart from the learnings so they never push the rules out.
+- Reviews and the chat get them as their own section: maintainers declined these findings on these paths, don't report the same point on that code again unless the change makes it newly wrong.
+- `@<bot> learnings` lists them, `@<bot> forget <text>` drops them.
+
+## Decisions
+
+A reply often says what a thread's state doesn't. When the bot reads a reply in a finding's thread to answer it, it also notes what that reply decided:
+
+| Decision | |
+|---|---|
+| fixed | Or agreed and about to be. |
+| wrong | The finding is incorrect. |
+| intended | |
+| unlikely | The case doesn't happen in practice. |
+| deferred | A ticket, another PR. |
+| declined | Not fixed, for another reason or none. |
+
+- It is part of the answer the bot writes anyway, not a model call of its own.
+- Only replies by people who can push to the repo count.
+- The last reply the bot read on a finding stands, also one after the PR closed.
+- A reply it never read changes nothing: one for someone else after the PR closed, or one before the bot answered another person in the thread.
+- A reply that decides nothing (a question, a plain thanks) stays undecided, and so does a finding nobody replied to.
+
+**On close**, some threads go to the verify model in one call without tools. It reads the findings and their replies, nothing else, a fraction of a cent per PR. These are the threads that
+
+- a maintainer replied in and that still have no decision (a reply the bot never answered, or answered without one), or
+- end with a maintainer's reply the bot never answered.
+
+## Stats
+
+```sh
+diffharbor stats [owner/repo]   # a GitLab project is gitlab/group/project
+```
+
+Prints, from `/data/outcomes/`:
+
+- the counts per repo, by severity and by profile (the PR's, else `review.json`'s top-level one),
+- the decisions per outcome,
+- the outcomes per finding version, `-` for findings without one.
+
+A repo's file there also lists its findings one by one:
+
+- PR, path, title, severity, profile, outcome and decision.
+- The day and diffharbor version that counted it.
+- What found it: the diffharbor version, review and verify model and head commit of the review that posted it. Read from a hidden marker on its comment, empty for findings an older version posted.
+
+PRs counted before findings were listed stay in the counts only: the decisions start with the first PR closed after the upgrade.

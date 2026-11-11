@@ -3,7 +3,7 @@ title: DiffHarbor
 description: Self-hosted AI code review for GitHub and GitLab.
 template: splash
 hero:
-  tagline: Self-hosted AI code review for GitHub and GitLab. It runs the linters and tests your repo already has, verifies every finding against the code, and comments only what holds up.
+  tagline: Self-hosted AI code review for GitHub and GitLab. Runs your linters and tests, verifies every finding, posts only what holds up.
   image:
     file: ../../assets/logo.png
   actions:
@@ -18,15 +18,15 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-A small Go server takes the webhook and runs your checks on the changed lines. An agent ([Pi](https://github.com/earendil-works/pi)) reviews the diff in a checkout with read, grep and bash. A second model verifies every finding against the code. What survives is posted as inline comments with committable suggestions.
+A small Go server takes the webhook and runs your checks on the changed lines. An agent reviews the diff in a checkout of the PR, and a second model checks every finding against the code before anything is posted.
 
 <CardGrid>
-	<Card title="Verified findings">A second, cheaper model checks each finding in the code and drops what it can't back up. A minor finding nothing in the codebase triggers today folds into the summary; a major or critical one stays inline.</Card>
-	<Card title="Your own checks as context">gitleaks, tsc, biome, eslint, oxlint, gofmt, vet, staticcheck, golangci-lint, deadcode, fallow, squawk, shellcheck, luacheck, actionlint, zizmor, osv-scanner and the tests of changed packages, on the changed lines.</Card>
-	<Card title="Incremental">A push reviews only files whose changed lines changed. A rebase or a merge of main reviews nothing.</Card>
-	<Card title="Committable fixes">A local fix becomes a suggestion block. Fixed findings get their threads resolved.</Card>
-	<Card title="Chat and learnings">Reply to a finding or mention the bot. Corrections become rules for the next reviews.</Card>
-	<Card title="Any model Pi supports">OpenAI, Anthropic, DeepSeek, AWS Bedrock, Azure OpenAI or a gateway in front of them, with automatic fallback.</Card>
-	<Card title="PR reports">An optional HTML page per PR with a reading order, diffs with findings, call graphs and merge risks.</Card>
-	<Card title="Small and self-hosted">One container, Go standard library only. Your code stays on your server and with your model provider.</Card>
+	<Card title="Verified findings">A second model checks every finding against the code and drops what it can't back up.</Card>
+	<Card title="Your own checks">tsc, eslint, biome, golangci-lint, gitleaks, osv-scanner, your tests [and more](how-it-works/#checks), on the changed lines.</Card>
+	<Card title="Incremental">A push reviews only what changed. A rebase reviews nothing.</Card>
+	<Card title="Committable fixes">Fixes come as suggestion blocks you can commit from the PR. Fixed threads get resolved.</Card>
+	<Card title="Learnings">Tell the bot once, and the next reviews follow the rule.</Card>
+	<Card title="Any model">OpenAI, Anthropic, DeepSeek, Bedrock, Azure OpenAI or your own gateway, with fallback to a second provider.</Card>
+	<Card title="PR reports">An optional HTML page per PR: reading order, diffs with findings, call graphs, merge risks.</Card>
+	<Card title="Self-hosted">One container, Go standard library only. Your code stays on your server and with your model provider.</Card>
 </CardGrid>
