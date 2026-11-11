@@ -112,27 +112,84 @@ func Parse(body string) review.Comment {
 }
 
 // Place finds the lines c.Existing quotes in the diff, nearest to c.Line and at most 10 lines from it, and sets
-// c.Start and c.End to them. No match leaves 0: the fix then shows as a plain code block.
+// c.Start and c.End to them. No match, or two equally near, leaves 0: the fix then shows as a plain code block.
+// Lines match exactly but for trailing space; only when none does, ignoring indentation too, as models drift on it.
+// Then Fix and Existing move to the file's indentation, line by line through the pairs the quote shows.
+// ponytail: a Fix at a depth the quote does not show, or a quote that indents differently than the file, stays a
+// diff block; extend the map from the file's neighbouring lines if that bites. A quote that drifts alike over two
+// depths, with a Fix in the file's real indentation, moves the Fix one level too deep; no cheap guard keeps both.
 func Place(c *Finding, lines map[string]string) {
 	if c.Existing == "" || c.Fix == "" || trim(c.Existing) == trim(c.Fix) {
 		return
 	}
 	want := strings.Split(trim(c.Existing), "\n")
-	best := 11
-	for s := c.Line - len(want) - 10; s <= c.Line+10; s++ {
-		matches := true
-		for i, w := range want {
-			l, ok := lines[fmt.Sprintf("%s:%d", c.Path, s+i)]
-			if !ok || strings.TrimRight(l, " \t\r") != strings.TrimRight(w, " \t\r") {
-				matches = false
-				break
+	// find returns the start of the nearest run of lines equal under same, within 10 lines, and whether it is the only
+	// one that near; 0 if there is none.
+	find := func(same func(l, w string) bool) (int, bool) {
+		best, tie, s0 := 11, false, 0
+		for s := c.Line - len(want) - 10; s <= c.Line+10; s++ {
+			matches := true
+			for i, w := range want {
+				if l, ok := lines[fmt.Sprintf("%s:%d", c.Path, s+i)]; !ok || !same(l, w) {
+					matches = false
+					break
+				}
+			}
+			if d := max(s-c.Line, c.Line-(s+len(want)-1), 0); matches && d <= min(best, 10) {
+				tie = d == best
+				best, s0 = d, s
 			}
 		}
-		e := s + len(want) - 1
-		if d := max(s-c.Line, c.Line-e, 0); matches && d < best {
-			best, c.Start, c.End = d, s, e
+		return s0, best <= 10 && !tie
+	}
+	s0, ok := find(func(l, w string) bool { return strings.TrimRight(l, " \t\r") == strings.TrimRight(w, " \t\r") })
+	if ok {
+		c.Start, c.End = s0, s0+len(want)-1
+		return
+	}
+	if s0 != 0 { // two exact copies at the same distance: no looser guess
+		return
+	}
+	s0, ok = find(func(l, w string) bool { return strings.Trim(l, " \t\r") == strings.Trim(w, " \t\r") })
+	if !ok {
+		return
+	}
+	indent := func(s string) string { return s[:len(s)-len(strings.TrimLeft(s, " \t"))] }
+	to := map[string]string{} // the file's indentation, by the quote's
+	file := make([]string, len(want))
+	for i, w := range want {
+		file[i] = lines[fmt.Sprintf("%s:%d", c.Path, s0+i)]
+		if strings.TrimSpace(w) == "" {
+			continue
+		}
+		q, f := indent(w), indent(file[i])
+		if t, ok := to[q]; ok && t != f {
+			return
+		}
+		to[q] = f
+	}
+	// A deeper quoted line is deeper in the file too, each depth beginning with the shallower one: else the Fix would
+	// lose or swap a level, and a tab next to a space has no order.
+	for q, f := range to {
+		for q2, f2 := range to {
+			deeper := strings.HasPrefix(q2, q)
+			if q != q2 && (deeper != (f != f2 && strings.HasPrefix(f2, f)) || !deeper && !strings.HasPrefix(q, q2)) {
+				return
+			}
 		}
 	}
+	fix := strings.Split(c.Fix, "\n")
+	for j, f := range fix {
+		if strings.TrimSpace(f) == "" {
+			continue
+		}
+		t, ok := to[indent(f)]
+		if !ok {
+			return
+		}
+		fix[j] = t + strings.TrimLeft(f, " \t")
+	}
+	c.Start, c.End, c.Fix, c.Existing = s0, s0+len(want)-1, strings.Join(fix, "\n"), strings.Join(file, "\n")
 }
 
 // Split sorts a review's findings: the ones on diff lines (lines) to post inline, placed, the ones outside the

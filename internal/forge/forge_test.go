@@ -47,6 +47,98 @@ func TestPlace(t *testing.T) {
 	}
 }
 
+// Existing quoted in another indentation, with CRLF, still places, and Fix moves to the file's indentation; the same
+// lines twice at the same distance from the finding's line stay unplaced, at different distances the nearer wins.
+func TestPlaceDrift(t *testing.T) {
+	lines := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,5 @@\n+\tx := 1\n+\tfoo()\n+\tx := 1\n+\tfoo()\n+\tbar()\n")
+	c := Finding{Comment: review.Comment{Path: "a.go", Line: 14, Existing: "    bar()\r\n", Fix: "    baz()\n\n    qux()\n"}}
+	if Place(&c, lines); c.Start != 14 || c.Fix != "\tbaz()\n\n\tqux()\n" {
+		t.Fatalf("drift: %+v", c)
+	}
+	tie := Finding{Comment: review.Comment{Path: "a.go", Line: 12, Existing: "\tfoo()", Fix: "y"}}
+	if Place(&tie, lines); tie.Start != 0 {
+		t.Fatalf("tie placed: %+v", tie)
+	}
+	near := tie
+	near.Line = 11
+	if Place(&near, lines); near.Start != 11 {
+		t.Fatalf("nearer: %+v", near)
+	}
+	// An exact copy beats a nearer one that differs in indentation; two exact ties do not fall back to a loose one.
+	sp := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,3 @@\n+    if a:\n+        return x\n+    return x\n")
+	exact := Finding{Comment: review.Comment{Path: "a.go", Line: 11, Existing: "    return x", Fix: "    return y"}}
+	if Place(&exact, sp); exact.Start != 12 || exact.Fix != "    return y" {
+		t.Fatalf("exact: %+v", exact)
+	}
+	// Indentation moves per line through the quote's pairs: 4 spaces over two depths on tabs.
+	tabs := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,2 @@\n+\tif a {\n+\t\treturn x\n")
+	deep := Finding{Comment: review.Comment{Path: "a.go", Line: 10, Existing: "    if a {\n        return x", Fix: "    if b {\n        return x\n    }"}}
+	if Place(&deep, tabs); deep.Start != 10 || deep.Fix != "\tif b {\n\t\treturn x\n\t}" || deep.Existing != "\tif a {\n\t\treturn x" {
+		t.Fatalf("deep: %+v", deep)
+	}
+	// A Fix at a depth the quote does not show, or a quote indented unlike the file, stays unplaced and untouched.
+	unseen := Finding{Comment: review.Comment{Path: "a.go", Line: 10, Existing: "    if a {", Fix: "    if a {\n            x()"}}
+	skew := Finding{Comment: review.Comment{Path: "a.go", Line: 10, Existing: "if a {\nreturn x", Fix: "if b {\nreturn x"}}
+	if Place(&unseen, tabs); unseen.Start != 0 || unseen.Fix != "    if a {\n            x()" {
+		t.Fatalf("unseen: %+v", unseen)
+	}
+	if Place(&skew, tabs); skew.Start != 0 || skew.Fix != "if b {\nreturn x" {
+		t.Fatalf("skew: %+v", skew)
+	}
+	// Two quoted depths on one depth of the file stay unplaced: the Fix would lose a level.
+	flat := diff.NewLines("diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,0 +10,2 @@\n+    foo()\n+    bar()\n")
+	two := Finding{Comment: review.Comment{Path: "a.py", Line: 10, Existing: "foo()\n bar()", Fix: "if x:\n baz()"}}
+	if Place(&two, flat); two.Start != 0 || two.Fix != "if x:\n baz()" {
+		t.Fatalf("two depths: %+v", two)
+	}
+	// Nor does a quote whose depths are the file's the other way round.
+	swap := Finding{Comment: review.Comment{Path: "a.py", Line: 10, Existing: "    foo()\nbar()", Fix: "    foo()\n    bar()"}}
+	if Place(&swap, diff.NewLines("diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,0 +10,2 @@\n+foo()\n+    bar()\n")); swap.Start != 0 {
+		t.Fatalf("swapped depths: %+v", swap)
+	}
+	mixed := Finding{Comment: review.Comment{Path: "a.py", Line: 10, Existing: " foo()\n\tbar()", Fix: "\tfoo()\n\tbar()"}}
+	if Place(&mixed, diff.NewLines("diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,0 +10,2 @@\n+\tfoo()\n+ bar()\n")); mixed.Start != 0 {
+		t.Fatalf("tab next to space: %+v", mixed)
+	}
+	// A drifted quote of a line inside a raw string: the Fix takes the file's leading space, the literal keeps it.
+	raw := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,3 @@\n+\tx := `\n+  hello\n+`\n")
+	lit := Finding{Comment: review.Comment{Path: "a.go", Line: 11, Existing: " hello", Fix: " hello!"}}
+	if Place(&lit, raw); lit.Start != 11 || lit.Fix != "  hello!" {
+		t.Fatalf("literal: %+v", lit)
+	}
+	wider := Finding{Comment: review.Comment{Path: "a.go", Line: 11, Existing: " hello", Fix: "   hello"}}
+	if Place(&wider, raw); wider.Start != 0 {
+		t.Fatalf("literal, other depth: %+v", wider)
+	}
+	// An exact copy ending 11 lines up is out of reach: the loose copy on the finding's line is placed.
+	far := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,12 @@\n+foo()\n+a\n+a\n+a\n+a\n+a\n+a\n+a\n+a\n+a\n+a\n+\tfoo()\n")
+	reach := Finding{Comment: review.Comment{Path: "a.go", Line: 21, Existing: "foo()", Fix: "bar()"}}
+	if Place(&reach, far); reach.Start != 21 || reach.Fix != "\tbar()" {
+		t.Fatalf("reach: %+v", reach)
+	}
+	// Only space and tab are indentation: a no-break space quote of a tab line stays unplaced.
+	nb := Finding{Comment: review.Comment{Path: "a.go", Line: 10, Existing: "\u00a0foo()", Fix: "\u00a0bar()"}}
+	if Place(&nb, diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,1 @@\n+\tfoo()\n")); nb.Start != 0 || nb.Fix != "\u00a0bar()" {
+		t.Fatalf("nbsp: %+v", nb)
+	}
+	// Two exact ties leave a looser guess out; a blank line of the quote must be blank in the file.
+	three := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,3 @@\n+\tfoo()\n+\t\tfoo()\n+\tfoo()\n")
+	tt := Finding{Comment: review.Comment{Path: "a.go", Line: 11, Existing: "\tfoo()", Fix: "\tbar()"}}
+	if Place(&tt, three); tt.Start != 0 || tt.Fix != "\tbar()" {
+		t.Fatalf("ties: %+v", tt)
+	}
+	gap := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,3 @@\n+\ta()\n+\n+\tb()\n")
+	g := Finding{Comment: review.Comment{Path: "a.go", Line: 10, Existing: "a()\n\nb()", Fix: "a()\nb()"}}
+	if Place(&g, gap); g.Start != 10 || g.End != 12 || g.Fix != "\ta()\n\tb()" {
+		t.Fatalf("gap: %+v", g)
+	}
+	// A quote without the base indent keeps a blank line of the Fix empty.
+	blank := Finding{Comment: review.Comment{Path: "a.go", Line: 11, Existing: "return x", Fix: "return y\n\nreturn z"}}
+	if Place(&blank, tabs); blank.Start != 11 || blank.Fix != "\t\treturn y\n\n\t\treturn z" {
+		t.Fatalf("blank: %+v", blank)
+	}
+}
+
 // An inline finding a few lines off an open or closed thread is its repeat; past 5 lines, in another file, outside
 // the diff or folded it is new, on the thread's own line never.
 func TestSplitNearThread(t *testing.T) {
