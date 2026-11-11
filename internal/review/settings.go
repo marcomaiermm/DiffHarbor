@@ -89,10 +89,10 @@ type SyntaxTheme struct {
 type Learnings struct {
 	Max        *int  `json:"max"`          // the newest of the repo's and of the owner's each; unset 30, 0 = none, at most MaxLearnings
 	MaxAgeDays int   `json:"max_age_days"` // older ones are left out; 0 = any age, an undated one never ages
-	Outcomes   *bool `json:"outcomes"`     // a finding the maintainers declined becomes a learning; unset true, false = counted only
+	Outcomes   *bool `json:"outcomes"`     // a finding the maintainers declined is kept as a declined finding; unset true, false = counted only
 }
 
-// Learns reports whether declined findings become learnings by themselves.
+// Learns reports whether declined findings are saved by themselves.
 func (l Learnings) Learns() bool { return l.Outcomes == nil || *l.Outcomes }
 
 // MaxLearnings is the most learnings kept per repo and per owner, and review.json's highest max.

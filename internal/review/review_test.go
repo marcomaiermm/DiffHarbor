@@ -41,10 +41,10 @@ func TestParse(t *testing.T) {
 }
 
 func TestTrustedContext(t *testing.T) {
-	if TrustedContext(" ", "") != "" || !strings.Contains(TrustedContext("use pnpm", "- x"), "## Learnings") {
+	if TrustedContext(" ", "", "") != "" || !strings.Contains(TrustedContext("use pnpm", "- x", ""), "contradicts)\n\n- x") {
 		t.Fatal("trustedContext")
 	}
-	if !strings.Contains(TrustedContext(strings.Repeat("x", 8000+4000+6000)+"nested", ""), "nested") {
+	if !strings.Contains(TrustedContext(strings.Repeat("x", 8000+4000+6000)+"nested", "", ""), "nested") {
 		t.Error("a full rules file and root conventions leave nested rules their 6000")
 	}
 }

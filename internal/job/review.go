@@ -233,7 +233,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	}
 	r, stats, err := review.Analyze(ctx, review.Input{
 		Agent: agent.Pi{}, Sandbox: sb, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: commits, Ticket: tk, Docs: docs, Parts: parts,
-		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings)), Checks: scripts, Registries: regs, Prior: prior, Addressed: addressed, Closed: closed, Settings: cfg,
+		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings), readDeclined(e.Repo(), cfg.Learnings)), Checks: scripts, Registries: regs, Prior: prior, Addressed: addressed, Closed: closed, Settings: cfg,
 		Guide: guide && only == nil, // an incremental review sees a few files: the last full one's reading order stays
 	})
 	if err == nil {

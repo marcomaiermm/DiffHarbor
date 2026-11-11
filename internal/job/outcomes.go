@@ -110,8 +110,8 @@ func loadTally(f string) (t tally, err error) {
 	return t, nil
 }
 
-// maxLearnedPerClose bounds the learnings one close saves, its first distinct declines: a PR of many 👎 mustn't
-// push the curated ones out of the newest a review follows.
+// maxLearnedPerClose bounds the decline lines one close saves, its first distinct declines, those with a reason
+// first: a PR of many 👎 mustn't flush the file's older ones.
 const maxLearnedPerClose = 3
 
 // tallyMu guards the read-modify-write of record, like learningsMu.
@@ -284,8 +284,9 @@ func decideLeft(ctx context.Context, f forge.Forge, e *forge.Event, ts []forge.T
 	return nil
 }
 
-// Outcomes counts what became of our findings on e's closed PR, and saves the declined ones as learnings unless
-// review.json's learnings.outcomes is false. On an error the PR isn't counted: its next close tries again.
+// Outcomes counts what became of our findings on e's closed PR, and saves the declined ones (voted down, or decided
+// intended, unlikely or wrong) as declined findings, a file apart from the learnings, unless review.json's
+// learnings.outcomes is false. On an error the PR isn't counted: its next close tries again.
 func Outcomes(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	defer proc.Recovered(func(pe error) { err = pe })
 	key, n := e.Repo(), e.PullRequest.Number
@@ -325,7 +326,6 @@ func Outcomes(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		return ok
 	}
 	var fs []finding
-	var lost []string
 	day := time.Now().Format(time.DateOnly)
 	for _, t := range ts {
 		c := forge.Parse(forge.Unseal(t.Body))
@@ -337,27 +337,12 @@ func Outcomes(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 			Severity: sev, Profile: profile, Outcome: o,
 			FoundBy: run.Version, ReviewModel: run.Review, VerifyModel: run.Verify, FoundSHA: run.SHA,
 		})
-		// Only a writer's 👎 is a learning: a resolve may as well mean fixed.
-		if o != dismissed {
-			continue
-		}
-		if l := fmt.Sprintf("- Maintainers declined a %s finding: %s (%s)", sev, title, path); !slices.Contains(lost, l) {
-			lost = append(lost, l)
-		}
 	}
 	if canErr != nil {
 		return fmt.Errorf("can write: %w", canErr) // a non-writer's vote would count
 	}
-	// The learnings before the count: learnOnce saves each once, and a PR counted is skipped on its next close.
-	// The same first few whatever the repo has: a retry picks them again and adds none past the cap.
-	if cfgErr == nil && cfg.Learnings.Learns() {
-		for _, l := range lost[:min(len(lost), maxLearnedPerClose)] {
-			if err := learnOnce(key, l); err != nil {
-				return err
-			}
-		}
-	}
-	// Best effort, like the decisions chat files: a failed call costs decisions, not the count.
+	// Best effort, like the decisions chat files: a failed call costs decisions, not the count. Before the declines:
+	// they use the decision it files.
 	rm, vm := cfg.Models()
 	if err := decideLeft(ctx, f, e, ts, can, tl.Decisions[n], cmp.Or(vm, agent.PassModel(rm, "low"))); err != nil {
 		log.Println(e.Key(), "decisions:", err)
@@ -365,21 +350,55 @@ func Outcomes(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	if canErr != nil {
 		return fmt.Errorf("can write: %w", canErr) // a writer's reply would be left out for good
 	}
+	// The declines before the count: learnOnce saves each once, and a PR counted is skipped on its next close. The
+	// same first few whatever the repo has: a retry picks them again and adds none past the cap, unless decideLeft
+	// failed before and decided now.
+	if cfgErr == nil && cfg.Learnings.Learns() {
+		if tl, err = readTally(key); err != nil {
+			return err
+		}
+		ls := declineLearnings(fs, tl.Decisions[n])
+		for _, l := range ls[:min(len(ls), maxLearnedPerClose)] {
+			if err := learnOnce(key, l); err != nil {
+				return err
+			}
+		}
+	}
 	_, err = record(key, n, fs)
 	return err
 }
 
-// learnOnce saves entry as a learning unless the repo has it, whatever its date (addLearning's ", 2006-01-02)").
-func learnOnce(key, entry string) error {
-	p := strings.TrimSuffix(entry, ")") + ", "
-	if slices.ContainsFunc(learningsOf(key), func(l string) bool {
-		d, ok := strings.CutPrefix(l, p)
-		_, err := time.Parse(time.DateOnly+")", d)
-		return ok && err == nil
-	}) {
-		return nil
+// declineLearnings is the decline lines of a closed PR's findings, those with a reason first: a finding a writer
+// voted down, or that a maintainer decided as intended, unlikely or wrong (by is the decision per thread), unless the
+// PR fixed it: that would tell later reviews to drop a point that was right. Only our own title, severity and path
+// and the decision word go in, never a reply: the lines are trusted context of later reviews.
+func declineLearnings(fs []finding, by map[int64]string) (ls []string) {
+	reason := func(f finding) bool {
+		d := by[f.Comment]
+		return f.Outcome != addressed && (d == "intended" || d == "unlikely" || d == "wrong")
 	}
-	return addLearning(key, entry, time.Now())
+	add := func(l string) {
+		if !slices.Contains(ls, l) {
+			ls = append(ls, l)
+		}
+	}
+	for _, f := range fs {
+		if reason(f) {
+			add(fmt.Sprintf(declinePrefix+"%s finding as %s: %s (%s)", f.Severity, by[f.Comment], f.Title, f.Path))
+		}
+	}
+	for _, f := range fs {
+		if f.Outcome == dismissed && !reason(f) { // a resolve alone may as well mean fixed
+			add(fmt.Sprintf(declinePrefix+"%s finding: %s (%s)", f.Severity, f.Title, f.Path))
+		}
+	}
+	return ls
+}
+
+// learnOnce saves entry as a decline line, once per day: a close tried again adds none, a decline said again on a
+// later PR is as new as that one.
+func learnOnce(key, entry string) error {
+	return addLine(declinedFile(key), entry, maxDeclined, time.Now())
 }
 
 // Stats prints the tally of repo, or of every repo with one, as plain text: the outcomes, then what the maintainers
