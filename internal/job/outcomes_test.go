@@ -450,6 +450,24 @@ func TestDeclinedApart(t *testing.T) {
 	if got := readDeclined("a/b", review.Learnings{MaxAgeDays: 30}); strings.Contains(got, "Old") || !strings.Contains(got, "New") {
 		t.Fatalf("max_age_days: %q", got)
 	}
+	// Declined again, the old line is today's and the last to go; a close tried again adds none.
+	for range 2 {
+		if err := learnOnce("a/b", "- Maintainers declined a minor finding: Old (a.go)"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ds, got := declinedOf("a/b"), readDeclined("a/b", review.Learnings{MaxAgeDays: 30}); len(ds) != 2 || !strings.Contains(ds[1], "Old") || !strings.Contains(got, "Old") {
+		t.Fatalf("again: %q", ds)
+	}
+	one := 1
+	// Decline lines an older version filed among the learnings take none of the rules' window.
+	addLearning("a/b", "- rule (@ann)", now)
+	for i := range 3 {
+		addLearning("a/b", fmt.Sprintf("- Maintainers declined a minor finding: L%d (a.go)", i), now)
+	}
+	if got := readLearnings("a", "a/b", review.Learnings{Max: &one}); !strings.Contains(got, "rule") || strings.Contains(got, "declined") {
+		t.Fatalf("legacy: %q", got)
+	}
 	ten, none := 10, 0
 	if got := readDeclined("o/r", review.Learnings{Max: &ten}); strings.Count(got, "\n") != maxDeclined {
 		t.Fatalf("max does not apply: %q", got)

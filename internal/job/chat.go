@@ -128,6 +128,9 @@ func declinedFile(key string) string {
 	return filepath.Join(proc.DataDir, "declined", strings.ReplaceAll(key, "/", "__")+".md")
 }
 
+// declinePrefix starts every decline line.
+const declinePrefix = "- Maintainers declined a "
+
 func linesOf(f string) []string {
 	b, _ := os.ReadFile(f) //nolint:gosec // our data dir
 	return strings.FieldsFunc(string(b), func(r rune) bool { return r == '\n' })
@@ -177,7 +180,8 @@ func fresh(lines []string, l review.Learnings) (kept []string) {
 func readLearnings(owner, repo string, l review.Learnings) string {
 	var b strings.Builder
 	for _, key := range []string{owner, repo} {
-		kept := fresh(learningsOf(key), l)
+		// Decline lines an older version filed here are no rules: they would fill the window.
+		kept := slices.DeleteFunc(fresh(learningsOf(key), l), func(s string) bool { return strings.HasPrefix(s, declinePrefix) })
 		for _, s := range kept[max(0, len(kept)-l.Limit()):] {
 			b.WriteString(s + "\n")
 		}
@@ -194,11 +198,18 @@ func readDeclined(repo string, l review.Learnings) string {
 	return strings.Join(append(fresh(linesOf(declinedFile(repo)), l), ""), "\n")
 }
 
-// addLine appends entry, dated, to the lines in f; the oldest past keep goes.
+// addLine appends entry, dated, to the lines in f; the oldest past keep goes. The same entry under an earlier date
+// goes too: said again, it is as new as today and last to fall out.
 func addLine(f, entry string, keep int, now time.Time) error {
 	learningsMu.Lock()
 	defer learningsMu.Unlock()
-	lines := append(linesOf(f), strings.TrimSuffix(entry, ")")+", "+now.Format(time.DateOnly)+")")
+	p := strings.TrimSuffix(entry, ")") + ", "
+	lines := slices.DeleteFunc(linesOf(f), func(l string) bool {
+		d, ok := strings.CutPrefix(l, p)
+		_, err := time.Parse(time.DateOnly+")", d)
+		return ok && err == nil
+	})
+	lines = append(lines, p+now.Format(time.DateOnly)+")")
 	return writeLines(f, lines[max(0, len(lines)-keep):])
 }
 

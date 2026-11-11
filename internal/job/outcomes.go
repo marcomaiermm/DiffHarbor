@@ -384,30 +384,20 @@ func declineLearnings(fs []finding, by map[int64]string) (ls []string) {
 	}
 	for _, f := range fs {
 		if reason(f) {
-			add(fmt.Sprintf("- Maintainers declined a %s finding as %s: %s (%s)", f.Severity, by[f.Comment], f.Title, f.Path))
+			add(fmt.Sprintf(declinePrefix+"%s finding as %s: %s (%s)", f.Severity, by[f.Comment], f.Title, f.Path))
 		}
 	}
 	for _, f := range fs {
 		if f.Outcome == dismissed && !reason(f) { // a resolve alone may as well mean fixed
-			add(fmt.Sprintf("- Maintainers declined a %s finding: %s (%s)", f.Severity, f.Title, f.Path))
+			add(fmt.Sprintf(declinePrefix+"%s finding: %s (%s)", f.Severity, f.Title, f.Path))
 		}
 	}
 	return ls
 }
 
-// learnOnce saves entry as a decline line unless the repo has it, whatever its date (addLine's ", 2006-01-02)").
-//
-// ponytail: lines of this shape an older version wrote into the learnings file are not migrated; they fall out of
-// that file by its own limit of 100. Move them over if that ever matters.
+// learnOnce saves entry as a decline line, once per day: a close tried again adds none, a decline said again on a
+// later PR is as new as that one.
 func learnOnce(key, entry string) error {
-	p := strings.TrimSuffix(entry, ")") + ", "
-	if slices.ContainsFunc(linesOf(declinedFile(key)), func(l string) bool {
-		d, ok := strings.CutPrefix(l, p)
-		_, err := time.Parse(time.DateOnly+")", d)
-		return ok && err == nil
-	}) {
-		return nil
-	}
 	return addLine(declinedFile(key), entry, maxDeclined, time.Now())
 }
 
