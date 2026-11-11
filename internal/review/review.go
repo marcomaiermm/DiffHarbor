@@ -407,10 +407,8 @@ func fold(cs []Comment, cfg Settings) {
 const maxInline = 5
 
 // CapInline folds the least severe inline findings past maxInline into the review's summary, nothing dropped. Critical
-// and major ones never fold here, even past maxInline, and take slots first. Run it last, on the whole run's comments,
-// after every other Fold decision (a push's FoldPush replaces the one fold made).
-// ponytail: a finding outside the diff, or within 5 lines of an existing thread, still takes a slot though Split puts it
-// in the summary or drops it; count what Split keeps inline if that starves real threads.
+// and major ones never fold here, even past maxInline, and take slots first. forge.Split runs it on the findings it
+// would post inline, after every other Fold decision: one outside the diff or next to a thread takes no slot.
 func CapInline(cs []Comment) {
 	var open []int
 	free := maxInline

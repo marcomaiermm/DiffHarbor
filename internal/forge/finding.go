@@ -138,6 +138,7 @@ func Place(c *Finding, lines map[string]string) {
 // Split sorts a review's findings: the ones on diff lines (lines) to post inline, placed, the ones outside the
 // diff, and the folded ones (Comment.Fold), anywhere. A thread's line gets nothing new, and an inline finding
 // none within 5 lines of one either: a repeat lands a line or two off the first.
+// Of the inline ones, review.CapInline folds the least severe past its cap.
 // ponytail: by position only, a different finding next to a thread goes too; compare titles if that bites.
 func Split(r review.Result, threads []Thread, lines map[string]string) (inline, outside, folded []Finding) {
 	for _, rc := range r.Comments { // review.Analyze caps them: 10 and 5 nits per pass
@@ -155,12 +156,27 @@ func Split(r review.Result, threads []Thread, lines map[string]string) (inline, 
 		case c.Fold:
 			folded = append(folded, c)
 		case ok:
-			c.OnDiff = true
-			Place(&c, lines)
 			inline = append(inline, c)
 		default:
 			outside = append(outside, c)
 		}
+	}
+	// The cap counts only what would open a thread: one near a thread or outside the diff takes no slot.
+	cs := make([]review.Comment, len(inline))
+	for i, c := range inline {
+		cs[i] = c.Comment
+	}
+	review.CapInline(cs)
+	all := inline
+	inline = nil
+	for i, c := range all {
+		if c.Fold = cs[i].Fold; c.Fold {
+			folded = append(folded, c)
+			continue
+		}
+		c.OnDiff = true
+		Place(&c, lines)
+		inline = append(inline, c)
 	}
 	return inline, outside, folded
 }

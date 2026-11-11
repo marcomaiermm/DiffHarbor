@@ -3,6 +3,7 @@ package forge
 import (
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -54,6 +55,24 @@ func TestSplitNearThread(t *testing.T) {
 		{Path: "a.ts", Line: 119}, {Path: "a.ts", Line: 120, Fold: true}, {Path: "a.ts", Line: 118, Fold: true}}}
 	inline, outside, folded := Split(r, []Thread{{Path: "a.ts", Line: 118, Resolved: true}, {Path: "a.ts", Line: 127}}, lines)
 	if len(inline) != 1 || inline[0].Path != "b.ts" || len(outside) != 2 || outside[0].Line != 115 || len(folded) != 1 || folded[0].Line != 120 {
+		t.Fatalf("inline %+v outside %+v folded %+v", inline, outside, folded)
+	}
+}
+
+// The cap counts what opens a thread: five findings next to a thread and two outside the diff leave all slots free.
+func TestSplitCap(t *testing.T) {
+	lines, r := map[string]string{}, review.Result{}
+	for i := range 5 {
+		lines[fmt.Sprintf("a.go:%d", 10+i)] = "x"
+		r.Comments = append(r.Comments, review.Comment{Path: "a.go", Line: 10 + i, Severity: "minor"})
+	}
+	r.Comments = append(r.Comments, review.Comment{Path: "c.go", Line: 1, Severity: "minor"}, review.Comment{Path: "c.go", Line: 2, Severity: "minor"})
+	for i := range 6 {
+		lines[fmt.Sprintf("b.go:%d", 10*i)] = "x"
+		r.Comments = append(r.Comments, review.Comment{Path: "b.go", Line: 10 * i, Severity: "minor"})
+	}
+	inline, outside, folded := Split(r, []Thread{{Path: "a.go", Line: 12}}, lines)
+	if len(inline) != 5 || inline[0].Path != "b.go" || !inline[0].OnDiff || len(outside) != 2 || len(folded) != 1 || folded[0].Line != 50 || !folded[0].Fold {
 		t.Fatalf("inline %+v outside %+v folded %+v", inline, outside, folded)
 	}
 }
