@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.9.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.8.1...v0.9.0) (2026-11-11)
+
+
+### Features
+
+* **chat:** learnings keep their reason and PR, skip repeats and one-offs ([#89](https://github.com/marcomaiermm/DiffHarbor/issues/89)) ([ec9fd05](https://github.com/marcomaiermm/DiffHarbor/commit/ec9fd05d35de1995ad1b423001e2fe64c910bc01))
+* **job:** count finding outcomes at close, learn from declined findings, stats ([#105](https://github.com/marcomaiermm/DiffHarbor/issues/105)) ([12027f3](https://github.com/marcomaiermm/DiffHarbor/commit/12027f340099b2c48c107a987bbd5939e4f8fc96))
+* **knowledge:** reference docs from the repo, GitLab wiki, Linear and remote adapters ([#96](https://github.com/marcomaiermm/DiffHarbor/issues/96)) ([4407a9a](https://github.com/marcomaiermm/DiffHarbor/commit/4407a9aaf35ceb7e0e6419c6758bda5631171e82))
+* **outcomes:** remember declined findings apart from the learnings ([#112](https://github.com/marcomaiermm/DiffHarbor/issues/112)) ([c3ad4a1](https://github.com/marcomaiermm/DiffHarbor/commit/c3ad4a1967a44acfb95a6ad8efeea8c07dc173fe))
+* **outcomes:** what maintainers decided per finding, kept per finding for stats ([#108](https://github.com/marcomaiermm/DiffHarbor/issues/108)) ([c8d150c](https://github.com/marcomaiermm/DiffHarbor/commit/c8d150c56cf7ad63674e14f2b180d150ef31fac8))
+* **review:** cap a run at 5 inline findings, fold the rest ([#111](https://github.com/marcomaiermm/DiffHarbor/issues/111)) ([7e52bf1](https://github.com/marcomaiermm/DiffHarbor/commit/7e52bf1b6a267e6f95541e3422ce66a06963b911))
+* **review:** fold kept findings the verifier finds no trigger for ([#109](https://github.com/marcomaiermm/DiffHarbor/issues/109)) ([4eff63a](https://github.com/marcomaiermm/DiffHarbor/commit/4eff63a9faa5234191fb0f09aa9a0e197bcc04a4))
+* **review:** invert the review model for commits another provider's AI wrote ([#100](https://github.com/marcomaiermm/DiffHarbor/issues/100)) ([9835f91](https://github.com/marcomaiermm/DiffHarbor/commit/9835f913b5003f543b07cc2dc2acfabc687f5a4b))
+* **review:** place more suggested fixes, ask for them on any small local edit ([#110](https://github.com/marcomaiermm/DiffHarbor/issues/110)) ([a5d008b](https://github.com/marcomaiermm/DiffHarbor/commit/a5d008b1ed4ae8bb87d6ce161f83b50e28255170))
+* **review:** repro tests for major findings, proof tests for JS and TS ([#103](https://github.com/marcomaiermm/DiffHarbor/issues/103)) ([28e0293](https://github.com/marcomaiermm/DiffHarbor/commit/28e0293030f3f76593069e2bf29e73e2e47f9978))
+* **walkthrough:** merge risk 0-5 from what is still open ([#101](https://github.com/marcomaiermm/DiffHarbor/issues/101)) ([36bcfa6](https://github.com/marcomaiermm/DiffHarbor/commit/36bcfa678387d01e8b8b1a198c14d19d99639a21))
+
+
+### Bug Fixes
+
+* **deps:** build on Go 1.27.4 for GO-2026-6859 ([#114](https://github.com/marcomaiermm/DiffHarbor/issues/114)) ([947e2d1](https://github.com/marcomaiermm/DiffHarbor/commit/947e2d109f28821215b721c18c20614685d5fa3f))
+* **gitlab:** the summary heads a review's findings ([#91](https://github.com/marcomaiermm/DiffHarbor/issues/91)) ([1f41ca5](https://github.com/marcomaiermm/DiffHarbor/commit/1f41ca5aec284013dbf30d5f0c69527859a1d79b))
+* **gitlab:** the summary is a note of its own, not a thread to resolve ([#107](https://github.com/marcomaiermm/DiffHarbor/issues/107)) ([18052b5](https://github.com/marcomaiermm/DiffHarbor/commit/18052b501d79a192cf9acae82cf826c5be36f17b))
+* **knowledge:** address review findings ([#97](https://github.com/marcomaiermm/DiffHarbor/issues/97)) ([1b871fe](https://github.com/marcomaiermm/DiffHarbor/commit/1b871fec3fbb3c3392424609e4457bfc1ac44e3e))
+* **knowledge:** forge heading anchors, Linear section links and aliases ([#98](https://github.com/marcomaiermm/DiffHarbor/issues/98)) ([c4a4686](https://github.com/marcomaiermm/DiffHarbor/commit/c4a46866ee93ef5896bc28be2dbcc808b4325aa5))
+* **outcomes:** a cut-off reaction list counts nothing, at most 3 learnings per close ([#106](https://github.com/marcomaiermm/DiffHarbor/issues/106)) ([f18fadf](https://github.com/marcomaiermm/DiffHarbor/commit/f18fadf7f01000dc3bc8c77fa92901e7580ea74d))
+* **review:** check a finding's premise outside the diff ([#87](https://github.com/marcomaiermm/DiffHarbor/issues/87)) ([c1160fd](https://github.com/marcomaiermm/DiffHarbor/commit/c1160fd56070ad39d13faec2c0df332b14ca4c55))
+* **review:** retargets, open earlier findings, regressions and pushback ([#99](https://github.com/marcomaiermm/DiffHarbor/issues/99)) ([300b983](https://github.com/marcomaiermm/DiffHarbor/commit/300b983e897c12a45415d0db5a3807ec93e29507))
+
 ## [0.8.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.8.0...v0.8.1) (2026-11-06)
 
 
