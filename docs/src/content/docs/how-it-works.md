@@ -6,7 +6,7 @@ description: The steps of a DiffHarbor review and how to talk to the bot.
 1. **Diff.** On open, the whole PR against its merge base. On a push, only what changed since the last review, and minor findings only on the lines the push touched, folded into the summary unless the profile is `assertive`. A push that finds only folded ones posts no review; a PR with a report still lists them there.
 2. **Context.** The checks, codegraph, co-change from git history, the PR's commit messages, the repo's rules and skills from the base branch, learnings and optionally the linked ticket.
 3. **Review.** The agent returns up to 10 findings. Then it looks at the diff again in the same session without tools: up to 10 more at about a tenth of the cost. [`passes`](../per-repo/#passes) add up to two more finders.
-4. **Verify.** A cheaper model checks each finding in the code.
+4. **Verify.** A cheaper model checks each finding in the code. For each kept defect the verifier also names what reaches the failing case in normal operation today (a caller, request, job, config or data source; untrusted input counts) and the comment shows it. One with none folds into the summary under every profile, a major or critical one excepted; a verify pass that gives no such answer folds nothing.
 5. **Result.** A walkthrough comment, inline comments and a commit status `diffharbor`.
 
 **What the review reads:**

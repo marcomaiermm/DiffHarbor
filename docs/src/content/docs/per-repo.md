@@ -79,6 +79,8 @@ Reviews can report defects (critical, major, minor) and, unless `min_severity` d
 | `chill` (default) | critical, major, minor | nits |
 | `assertive` | everything, nits too | |
 
+A kept defect for which the verifier names nothing that reaches it in normal operation folds under every profile, `assertive` too, unless it is major or critical.
+
 A push's review folds minor findings under `chill` too: most of a push fixes earlier findings, and the edge cases of each fix would open the next round of threads. `min_severity` drops findings before that, `minor` the nits. A folded finding has no thread: a later review of its file may report it again, and an incremental review that finds only folded ones posts nothing.
 
 **Merge risk.** The walkthrough shows a score from 0 to 5, computed from what is still open, not by the model: 0 nothing open, 1 only nits (folded ones too), 2 a minor finding, 3 one major, 4 two majors or failing tests, 5 any critical. Findings from earlier reviews that are still open count by their severity (a minor if unknown). Colour: green 0-1, yellow 2-3, red 4-5. The `diffharbor` commit status adds it when the text fits GitHub's 140 characters.
