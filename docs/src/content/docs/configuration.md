@@ -38,7 +38,7 @@ Add a webhook on the project or group: `https://<host>/webhook/gitlab`, with the
 | `GITLAB_TOKEN` | A bot user's token (or a project/group access token) with scope `api` and at least the Developer role. Its username is the bot: `@<username> review`. |
 | `GITLAB_READ_TOKEN` | Optional. A token with only `read_repository` for git's fetches. Without it they use the `api` token. Both stay in the server: git fetches through its proxy. |
 | `GITLAB_WEBHOOK_SECRET` | The webhook's secret token. |
-| `GITLAB_FINDINGS` | `review` (default): the findings and the answers to fixed threads are one review, one email, after the summary as a note of its own (in the review GitLab would make it a thread to resolve); a suggestion GitLab can't place goes into the summary as code. `discussions`: each on its own, an email each; a refused suggestion is retried as plain code on its line. Drafts a person has on the token's user when a review starts make it fall back to `discussions`; ones drafted during it go out with it, so give the bot an account of its own. A repo's `review.json` can say otherwise (`gitlab_findings`). |
+| `GITLAB_FINDINGS` | `review` (default): the findings and the answers to fixed threads are one review, one email, after the summary as a note of its own (in the review GitLab would make it a thread to resolve). A suggestion GitLab can't place goes into the summary as code. `discussions`: each on its own, an email each. A refused suggestion is retried as plain code on its line. Drafts a person has on the token's user when a review starts make it fall back to `discussions`. Ones drafted during it go out with it, so give the bot an account of its own. A repo's `review.json` can say otherwise (`gitlab_findings`). |
 
 Differences to GitHub:
 
@@ -63,15 +63,15 @@ Differences to GitHub:
 
 | Variable | |
 |---|---|
-| `REVIEW_MODEL`, `VERIFY_MODEL` | The models. The env wins over a repo's `review.json`; model inversion can still replace them. |
+| `REVIEW_MODEL`, `VERIFY_MODEL` | The models. The env wins over a repo's `review.json`. Model inversion can still replace them. |
 | `FALLBACK_MODEL`, `FALLBACK_VERIFY_MODEL` | The fallback instead of the next provider. |
-| `MODEL_INVERSION` | Model inversion (below), off by default: `on` turns it on in every repo. A model (`openai/gpt-6.1-sol`) does too, as the one to switch to; without its key, the next provider's. A repo's `model_inversion` wins. |
+| `MODEL_INVERSION` | Model inversion (below), off by default: `on` turns it on in every repo. A model (`openai/gpt-6.1-sol`) does too, as the one to switch to. Without its key, the next provider's. A repo's `model_inversion` wins. |
 | `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `DEEPSEEK_BASE_URL` | A gateway in front of the provider (LiteLLM, your company's AI gateway), with the gateway's key. |
 | `AZURE_OPENAI_DEPLOYMENT_NAME_MAP` | Deployments not named like the models: `gpt-6.1-sol=review,gpt-6-luna=verify`. |
 
 - Bedrock in the EU: `amazon-bedrock/eu.anthropic.…`.
 - Each pass gets only its own provider's key.
-- Model inversion, off by default (`MODEL_INVERSION` or `"model_inversion": true` turn it on): when the AI of the review model's provider wrote at least as many of a PR's commits as any other AI (Claude Code, Codex or Gemini trailers, bot authors; commits without one don't count), `MODEL_INVERSION`'s model, else the next provider with a key, reviews and verifies, `REVIEW_MODEL` included. The walkthrough footer says so. A `review_model` in `review.json` keeps the model.
+- Model inversion, off by default (`MODEL_INVERSION` or `"model_inversion": true` turn it on): when the AI of the review model's provider wrote at least as many of a PR's commits as any other AI (Claude Code, Codex or Gemini trailers, bot authors, commits without one don't count), `MODEL_INVERSION`'s model, else the next provider with a key, reviews and verifies, `REVIEW_MODEL` included. The walkthrough footer says so. A `review_model` in `review.json` keeps the model.
 
 :::note
 Use API keys. Pi can also log in with a ChatGPT subscription: `openai/…` without `OPENAI_API_KEY`, then `docker compose exec -it diffharbor diffharbor login`. Whether your plan's terms allow that for a review bot is yours to check. You use it at your own risk.
@@ -83,7 +83,7 @@ Use API keys. Pi can also log in with a ChatGPT subscription: `openai/…` witho
 
 - **What's on it:** a verdict, the findings by weight, a reading order, diffs with findings, call graphs and what the change reaches outside the PR. Before you merge: base commits the PR is behind on, conflicts, and open PRs changing the same files or lines. At the end a draft review to send from the forge yourself. The page posts nothing.
 - **Versions:** each reviewed head keeps one, the newest 10 stay. Closing the PR deletes them.
-- **Link:** `/r/<host>/id:<repo id>/<n>/<secret>`, by the repo's ID: a rename keeps it, a new repo under an old name gets its own. Links from before the ID (`/r/<host>/<repo>/<n>/<secret>`) keep working: the PR's next review moves its reports to the ID and redirects them. A PR that closes without one loses those under its current name; under a name the repo had before a rename they stay. The secret is random per PR (130 bits) and only the PR comment holds it. Any other `/r/` path is a 404.
+- **Link:** `/r/<host>/id:<repo id>/<n>/<secret>`, by the repo's ID: a rename keeps it, a new repo under an old name gets its own. Links from before the ID (`/r/<host>/<repo>/<n>/<secret>`) keep working: the PR's next review moves its reports to the ID and redirects them. A PR that closes without one loses those under its current name. Under a name the repo had before a rename they stay. The secret is random per PR (130 bits) and only the PR comment holds it. Any other `/r/` path is a 404.
 - **Older reports:** reports from before the secret no longer open. The next review writes one at the new link, closing the PR deletes the old.
 - **Reviewing banner:** while a review runs, the PR comment shows `/reviewing.svg` (and `-light`, `-dark` for GitHub's theme setting) from this server. Keep them public: GitHub fetches them through its image proxy. Without `REPORT_URL` it comes from the docs site.
 
@@ -147,7 +147,7 @@ For example: the PR raises `REFUND_WINDOW_DAYS` from 14 to 30, and the wiki's "R
 
 What happens per review, in this order:
 
-1. **Names** from the diff: the declarations on changed lines with names of more than one word (`refundOrder`, `refund_order`; a one-word name like `posts` is in any prose), `SCREAMING_CASE` config keys on changed lines, and the changed paths. Config keys first, then symbols, then paths, at most 40.
+1. **Names** from the diff: the declarations on changed lines with names of more than one word (`refundOrder`, `refund_order`, since a one-word name like `posts` is in any prose), `SCREAMING_CASE` config keys on changed lines, and the changed paths. Config keys first, then symbols, then paths, at most 40.
 2. **Adapters:** the ones whose globs in `review.json` match a changed file, asked in parallel with the names. They also get the links in the PR description, its commits and the linked ticket, and their `name:ref` entries, so a page the PR links can be found by its link. The server opens none of these links.
 3. **Check:** the server keeps a section only if one of those links or `name:ref` entries points at it, or it names one of the names as a whole word. A generic file name (`index.ts`, `main.go`, `README.md`) doesn't count alone, at the repo's root neither: a path like `cmd/api/main.go` does.
 4. **Order:** sections a link or `name:ref` entry points at first, then the ones that name more of the names, then by id. Each at most 2000 characters, 8000 in all, whole sections only: what doesn't fit is left out.
@@ -166,7 +166,7 @@ Per repo, in `review.json`: a glob of changed files, and the adapters to ask. Na
 
 | Adapter | |
 |---|---|
-| `docs` | The repo's `*.md`, read from the checkout as the merge base left it: files the PR changes, changelogs (`CHANGELOG.md`, `CHANGES.md`, `HISTORY.md`, `NEWS.md`), symlinks, hidden folders, `node_modules/`, `vendor/`, `third_party/` and `testdata/` are skipped; at most 300 files of 256 KB. Split at `#` to `###` headings. `docs:<path>` ranks that file's sections first. |
+| `docs` | The repo's `*.md`, read from the checkout as the merge base left it: files the PR changes, changelogs (`CHANGELOG.md`, `CHANGES.md`, `HISTORY.md`, `NEWS.md`), symlinks, hidden folders, `node_modules/`, `vendor/`, `third_party/` and `testdata/` are skipped. At most 300 files of 256 KB. Split at `#` to `###` headings. `docs:<path>` ranks that file's sections first. |
 | `wiki` | GitLab: the project's wiki (markdown pages, the first 100), read with the bot's token. GitHub: nothing, an App's installation token can't read wikis. |
 | `linear` | Linear documents: a search for the first 5 changed names, `linear:<doc-id>` by id, and the Linear document links in the PR description, its commits and ticket (the server asks Linear's API for the id, it doesn't open the link). Uses `LINEAR_API_KEY`, only for owners listed for it below. |
 | any name in `KNOWLEDGE_ADAPTERS` | A [remote adapter](#remote-adapters-experimental). |
@@ -188,7 +188,7 @@ acme linear
 - Only for PRs from the repo itself, never from a fork.
 - Only for private repos. `"knowledge_public": true` in `review.json` opts a public (or GitLab internal) repo in. Where the forge doesn't say, the repo counts as public.
 - The sections go into the prompt's head as reference material that may be outdated, never into the trusted rules. The verifier gets only the sections a finding cites.
-- The server checks every section itself: it keeps one only if it came from an explicit ref, or names a changed symbol, config key or path (whole words; short symbols and generic file names like `index.ts` don't count). 2000 characters per section, 8000 in all, whole sections only.
+- The server checks every section itself: it keeps one only if it came from an explicit ref, or names a changed symbol, config key or path (whole words, short symbols and generic file names like `index.ts` don't count). 2000 characters per section, 8000 in all, whole sections only.
 - `forge.Redact` strips the secrets from report links in the text. It does **not** scrub credentials or other secrets a doc contains: whoever can edit the docs can reach the model, and a finding that quotes it reaches the PR's comments. Keep secrets out of what an adapter serves.
 - The server never fetches a URL it finds in a PR, commit or ticket: those only go to adapters as data.
 - An adapter's error or timeout (10 s) costs that adapter only, and only what it hadn't returned yet: `linear` keeps the documents it fetched before a failed search, `docs` the files it read in time.
@@ -198,7 +198,7 @@ acme linear
 
 ### Remote adapters (experimental)
 
-A remote adapter is an HTTP service. The contract may still change; it is versioned.
+A remote adapter is an HTTP service. The contract may still change. It is versioned.
 
 ```text
 POST <url>
@@ -216,8 +216,8 @@ Content-Type: application/json
 - Read-only, deterministic: the same request and source give the same sections.
 - Resolve the refs you know and ignore the rest. An entity may be ignored. **Never fetch a ref as a URL**: it comes from a PR's text. Parse ids out of URLs on hosts you own only.
 - Answer `400` to a `version` you don't know. Section `text` at most 2000 characters. The answer at most 1 MB, in 10 s, no redirects (the server doesn't follow them).
-- Unknown fields are ignored on both sides. Fields are only added, never removed or redefined; a break bumps `version`.
-- A section needs an `id`; one without is skipped. `updated` is RFC 3339 or left out, anything else is dropped. A section's `url` is its page's link plus `#<anchor>`: then a link to the page names all its sections.
+- Unknown fields are ignored on both sides. Fields are only added, never removed or redefined. A break bumps `version`.
+- A section needs an `id`, one without is skipped. `updated` is RFC 3339 or left out, anything else is dropped. A section's `url` is its page's link plus `#<anchor>`: then a link to the page names all its sections.
 - The server checks all of the answer itself (above), so false positives cost nothing but their share of the 1 MB.
 
 An adapter in Go, its handler as `internal/knowledge`'s test runs it:
@@ -235,7 +235,7 @@ import (
 	"os"
 )
 
-// Request and Section are the contract's JSON (version 1); unknown fields are ignored.
+// Request and Section are the contract's JSON (version 1). Unknown fields are ignored.
 type Request struct {
 	Version  int      `json:"version"`
 	Refs     []string `json:"refs"`

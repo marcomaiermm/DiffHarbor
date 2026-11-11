@@ -20,7 +20,7 @@ import (
 	"strings"
 )
 
-// Remote is an adapter the operator set in KNOWLEDGE_ADAPTERS: an HTTP service (contract v1, see the README).
+// Remote is an adapter the operator set in KNOWLEDGE_ADAPTERS: an HTTP service (contract v1, see the docs).
 // Without a URL the entry only lets its owner use a built-in that has a server-wide key (linear).
 type Remote struct{ URL, Token string }
 

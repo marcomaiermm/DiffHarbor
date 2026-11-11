@@ -533,7 +533,7 @@ func Check() error {
 var tokenMu sync.Mutex
 
 // OpenAIToken is a bearer token from the ChatGPT login, valid for 20 more minutes at least.
-// Pi's ChatGPT login lives on the root-only data volume (log in once, see README). Pi runs as the job's user
+// Pi's ChatGPT login lives on the root-only data volume (log in once, see the docs). Pi runs as the job's user
 // next to PR code, so it only gets an access token that outlives the pass, never the refresh token.
 func OpenAIToken() (string, error) {
 	tokenMu.Lock()

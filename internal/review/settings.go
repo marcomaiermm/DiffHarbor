@@ -52,7 +52,7 @@ type Settings struct {
 	Checks []string `json:"checks"` // scripts run after the built-in checks, default .review/checks.sh
 	// itsaplan projects whose tickets a PR may name ("WID"); unset = any, [] = none. Never for a PR from a fork.
 	Tickets []string `json:"tickets"`
-	// Reference docs for the review, by glob of changed files: "name" or "name:ref" of a docs adapter (README). Names
+	// Reference docs for the review, by glob of changed files: "name" or "name:ref" of a docs adapter (see the docs). Names
 	// only, never URLs or tokens. Unset: off. Only for PRs from the repo itself, and for a private repo unless
 	// KnowledgePublic: what a doc says reaches the model, and so the PR's comments.
 	Knowledge       map[string][]string `json:"knowledge"`
