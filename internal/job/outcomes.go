@@ -233,7 +233,8 @@ var decideAsk = func(ctx context.Context, f forge.Forge, e *forge.Event, prompt,
 const maxDecideNotes = 6
 
 // decideLeft files a decision for each of ts a maintainer replied in and no reply decided yet: threads chat never
-// answered (it was down, the reply was for someone else, it had said its piece), or answered without one. One call
+// answered (it was down, the reply was for someone else, it had said its piece), or answered without one. A thread
+// with a decision is read again when a maintainer's reply ends it: chat answered none after it. One call
 // of the verify model without tools for the whole PR, none when nothing is left. Only what people who can push
 // wrote is read, next to our own replies.
 func decideLeft(ctx context.Context, f forge.Forge, e *forge.Event, ts []forge.Thread, can func(string) bool, has map[int64]string, model string) error {
@@ -241,13 +242,19 @@ func decideLeft(ctx context.Context, f forge.Forge, e *forge.Event, ts []forge.T
 	asked := map[string]int64{}
 	for _, t := range ts {
 		ns := slices.DeleteFunc(slices.Clone(t.Notes), func(n forge.Note) bool { return !n.Ours && !can(n.Login) })
-		if has[t.Comment] != "" || !slices.ContainsFunc(ns, func(n forge.Note) bool { return !n.Ours }) {
+		last := -1 // the last maintainer reply
+		for i, n := range ns {
+			if !n.Ours {
+				last = i
+			}
+		}
+		if last < 0 || has[t.Comment] != "" && last < len(ns)-1 {
 			continue
 		}
 		id := fmt.Sprint(t.Comment)
 		asked[id] = t.Comment
 		fmt.Fprintf(&b, "### %s %s\n%s\n", id, text.OneLine(t.Path, 100), text.Truncate(forge.Unseal(forge.Redact(t.Body)), 600))
-		for _, n := range ns[max(0, len(ns)-maxDecideNotes):] {
+		for _, n := range ns[min(last, max(0, len(ns)-maxDecideNotes)):] { // never without the maintainer's reply
 			who := "maintainer"
 			if n.Ours {
 				who = "bot"
@@ -322,7 +329,7 @@ func Outcomes(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 	day := time.Now().Format(time.DateOnly)
 	for _, t := range ts {
 		c := forge.Parse(forge.Unseal(t.Body))
-		sev, title, path := cmp.Or(c.Severity, "other"), text.OneLine(cmp.Or(c.Title, c.Body), 100), text.OneLine(t.Path, 100)
+		sev, title, path := cmp.Or(c.Severity, "other"), text.OneLine(cmp.Or(c.Title, c.Body), 100), text.OneLine(t.Path, 4096)
 		o := classify(t, can)
 		run := forge.ParseRun(t.Body) // t is ours: Threads keeps only our authors' first comments
 		fs = append(fs, finding{
@@ -351,9 +358,12 @@ func Outcomes(ctx context.Context, f forge.Forge, e *forge.Event) (err error) {
 		}
 	}
 	// Best effort, like the decisions chat files: a failed call costs decisions, not the count.
-	_, vm := cfg.Models()
-	if err := decideLeft(ctx, f, e, ts, can, tl.Decisions[n], vm); err != nil {
+	rm, vm := cfg.Models()
+	if err := decideLeft(ctx, f, e, ts, can, tl.Decisions[n], cmp.Or(vm, agent.PassModel(rm, "low"))); err != nil {
 		log.Println(e.Key(), "decisions:", err)
+	}
+	if canErr != nil {
+		return fmt.Errorf("can write: %w", canErr) // a writer's reply would be left out for good
 	}
 	_, err = record(key, n, fs)
 	return err

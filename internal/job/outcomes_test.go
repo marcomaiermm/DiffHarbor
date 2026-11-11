@@ -289,32 +289,38 @@ func TestLearnOnce(t *testing.T) {
 }
 
 // A close asks once about the threads a maintainer replied in and no reply decided: not about one chat decided, one
-// only a stranger replied in, or one nobody replied in. An answer about a thread it wasn't asked about files nothing.
+// only a stranger replied in, or one nobody replied in. One chat decided is asked about again when a maintainer
+// replied after chat's answer, and a maintainer's reply stays in the prompt behind any number of ours. An answer about a thread it wasn't asked about files nothing.
 func TestDecideLeft(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	defer func(a func(context.Context, forge.Forge, *forge.Event, string, string) (string, error)) {
 		decideAsk = a
 	}(decideAsk)
 	var prompts []string
-	answer := `sure: {"1":"Intended","2":"wrong","3":"fixed","4":"fixed","5":"maybe","6":"","99":"fixed"}`
+	answer := `sure: {"1":"Intended","2":"wrong","3":"fixed","4":"fixed","5":"maybe","6":"","7":"deferred","8":"unlikely","99":"fixed"}`
 	decideAsk = func(_ context.Context, _ forge.Forge, _ *forge.Event, prompt, _ string) (string, error) {
 		prompts = append(prompts, prompt)
 		return answer, nil
 	}
 	ann := func(s string) forge.Note { return forge.Note{Login: "ann", Body: s} }
+	bot := forge.Note{Login: "bot", Body: "ok", Ours: true}
 	pr := &votePR{asked: map[string]int{}, ts: []forge.Thread{
 		{Comment: 1, Body: "Leaks", Path: "a.go", Resolved: true, Notes: []forge.Note{ann("we want that"), {Login: "bot", Body: "ok", Ours: true}}},
-		{Comment: 2, Body: "Races", Path: "b.go", Notes: []forge.Note{ann("no")}}, // chat decided it
+		{Comment: 2, Body: "Races", Path: "b.go", Notes: []forge.Note{ann("no"), bot}}, // chat decided it
 		{Comment: 3, Body: "Naming", Path: "c.go", Notes: []forge.Note{{Login: "mallory", Body: "SECRET fixed"}}},
 		{Comment: 4, Body: "Typo", Path: "d.go"},
 		{Comment: 5, Body: "Spam", Path: "e.go", Notes: []forge.Note{ann("hm")}},
 		{Comment: 6, Body: "Stale", Path: "f.go", Notes: []forge.Note{ann("why?"), {Login: "mallory", Body: "SECRET"}}},
+		{Comment: 7, Body: "Late", Path: "g.go", Notes: []forge.Note{ann("done"), bot, ann("no, next sprint")}},
+		{Comment: 8, Body: "Deep", Path: "h.go", Notes: []forge.Note{ann("never happens"), bot, bot, bot, bot, bot, bot, bot}},
 	}}
 	pr.cfg = `{}`
 	e := &forge.Event{Forge: "github"}
 	e.Repository.FullName, e.PullRequest.Number = "o/r", 7
-	if err := decide("o/r", 7, 2, "declined"); err != nil {
-		t.Fatal(err)
+	for c, d := range map[int64]string{2: "declined", 7: "fixed"} {
+		if err := decide("o/r", 7, c, d); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err != nil {
 		t.Fatal(err)
@@ -323,11 +329,12 @@ func TestDecideLeft(t *testing.T) {
 	for _, f := range tallyOf(t, "o/r").Findings {
 		got = append(got, f.Decision)
 	}
-	if want := []string{"intended", "declined", "", "", "", ""}; !slices.Equal(got, want) {
+	if want := []string{"intended", "declined", "", "", "", "", "deferred", "unlikely"}; !slices.Equal(got, want) {
 		t.Errorf("decisions %q, want %q", got, want)
 	}
 	if len(prompts) != 1 || strings.Contains(prompts[0], "SECRET") || strings.Contains(prompts[0], "### 2 ") ||
-		!strings.Contains(prompts[0], "### 1 a.go\nLeaks\n- maintainer: we want that\n- bot: ok\n") || !strings.Contains(prompts[0], "### 6 f.go\nStale\n- maintainer: why?\n\n") {
+		!strings.Contains(prompts[0], "### 1 a.go\nLeaks\n- maintainer: we want that\n- bot: ok\n") || !strings.Contains(prompts[0], "### 6 f.go\nStale\n- maintainer: why?\n\n") ||
+		!strings.Contains(prompts[0], "- bot: ok\n- maintainer: no, next sprint\n") || !strings.Contains(prompts[0], "### 8 h.go\nDeep\n- maintainer: never happens\n") {
 		t.Errorf("prompts %q", prompts)
 	}
 	// Nothing left to ask: no call. A failed call or an answer without JSON costs the decisions, not the count.
@@ -339,6 +346,11 @@ func TestDecideLeft(t *testing.T) {
 	e.PullRequest.Number, pr.ts = 9, []forge.Thread{{Comment: 1, Body: "Leaks", Path: "a.go", Notes: []forge.Note{ann("no")}}}
 	if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err != nil || len(prompts) != 2 || len(tallyOf(t, "o/r").PRs) != 3 {
 		t.Fatalf("%v, %d calls", err, len(prompts))
+	}
+	// Who may push is unknown for a reply's author: the PR isn't counted, its next close asks again.
+	e.PullRequest.Number, pr.canFail = 10, true
+	if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err == nil || len(tallyOf(t, "o/r").PRs) != 3 {
+		t.Fatalf("CanWrite failed on a reply: %v", err)
 	}
 }
 

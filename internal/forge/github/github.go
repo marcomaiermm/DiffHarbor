@@ -541,7 +541,7 @@ func threads(repo string, n int, token string, votes bool) ([]forge.Thread, erro
 			extra = " up:reactions(content:THUMBS_UP,first:100){totalCount nodes{user{login}}} down:reactions(content:THUMBS_DOWN,first:100){totalCount nodes{user{login}}}"
 		}
 		err := graphql(token, `query($o:String!,$r:String!,$n:Int!,$a:String){repository(owner:$o,name:$r){pullRequest(number:$n){
-reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{databaseId path line originalLine body author{__typename login}`+extra+`}} replies:comments(last:3){nodes{databaseId body author{__typename login}}}}}}}}`,
+reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{databaseId path line originalLine body author{__typename login}`+extra+`}} replies:comments(last:10){nodes{databaseId body author{__typename login}}}}}}}}`,
 			map[string]any{"o": owner, "r": name, "n": n, "a": after}, &d)
 		if err != nil {
 			return nil, err
