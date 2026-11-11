@@ -5,7 +5,9 @@ import (
 	"context"
 	"diffharbor/internal/forge"
 	"diffharbor/internal/proc"
+	"diffharbor/internal/review"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -90,7 +92,7 @@ func TestOutcomes(t *testing.T) {
 		{Comment: 3, Body: body("minor", "Naming"), Path: "c.go", Up: []string{"ann"}, Resolved: true}, // accepted, then resolved
 		{Comment: 4, Body: body("minor", "Typo"), Path: "d.go"},
 		{Comment: 5, Body: body("minor", "Spam"), Path: "f.go", Resolved: true, Down: []string{"mallory"}}, // not a writer's 👎
-		{Comment: 6, Body: body("minor", "Stale"), Path: "g.go", Resolved: true},                           // resolved by hand: no learning, whatever the chat heard
+		{Comment: 6, Body: body("minor", "Stale"), Path: "g.go", Resolved: true},                           // resolved by hand: no learning by itself, the chat's "intended" makes it one
 	}}
 	e := &forge.Event{Forge: "github"}
 	e.Repository.FullName = "o/r"
@@ -134,8 +136,9 @@ func TestOutcomes(t *testing.T) {
 	if tl := tallyOf(t, "o/r"); len(tl.Findings) != 6 || tl.Findings[3].Decision != "fixed" || len(tl.Decisions) != 1 {
 		t.Fatalf("after the close: findings %+v, decisions %v", tl.Findings, tl.Decisions)
 	}
-	ls := learningsOf("o/r")
-	if len(ls) != 1 || !strings.HasPrefix(ls[0], "- Maintainers declined a major finding: Races (b.go, ") {
+	ls := declinedOf("o/r")
+	// Stale was decided intended in the chat (a resolve alone is no learning), Races was voted down.
+	if len(ls) != 2 || !strings.HasPrefix(ls[0], "- Maintainers declined a minor finding as intended: Stale (g.go, ") || !strings.HasPrefix(ls[1], "- Maintainers declined a major finding: Races (b.go, ") {
 		t.Fatalf("%q", ls)
 	}
 	if pr.asked["ann"] != 1 || pr.asked["mallory"] != 1 || pr.asked[""] != 0 {
@@ -151,7 +154,7 @@ func TestOutcomes(t *testing.T) {
 	dismiss(8, "Panics", "e.go")
 	pr.cfg = `{}`
 	dismiss(9, "Races", "b.go") // declined again: one line still
-	if ls := learningsOf("o/r"); len(ls) != 1 || tallyOf(t, "o/r").Total[dismissed] != 3 {
+	if ls := declinedOf("o/r"); len(ls) != 2 || tallyOf(t, "o/r").Total[dismissed] != 3 {
 		t.Fatalf("%q %+v", ls, tallyOf(t, "o/r"))
 	}
 	b.Reset()
@@ -193,8 +196,8 @@ func TestOutcomesFail(t *testing.T) {
 	if err := os.MkdirAll(f+".tmp", 0o700); err != nil { // the tally's write fails
 		t.Fatal(err)
 	}
-	if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err == nil || len(learningsOf("o/r")) != 1 || len(tallyOf(t, "o/r").PRs) != 0 {
-		t.Fatalf("%v %q", err, learningsOf("o/r"))
+	if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err == nil || len(declinedOf("o/r")) != 1 || len(tallyOf(t, "o/r").PRs) != 0 {
+		t.Fatalf("%v %q", err, declinedOf("o/r"))
 	}
 	_ = os.Remove(f + ".tmp")
 	pr.canFail = true
@@ -206,12 +209,12 @@ func TestOutcomesFail(t *testing.T) {
 		t.Fatalf("Refresh failed: %v %+v", err, tallyOf(t, "o/r"))
 	}
 	pr.refreshFail = false
-	if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err != nil || len(learningsOf("o/r")) != 1 || tallyOf(t, "o/r").Total[dismissed] != 1 {
-		t.Fatalf("%v %q %+v", err, learningsOf("o/r"), tallyOf(t, "o/r"))
+	if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err != nil || len(declinedOf("o/r")) != 1 || tallyOf(t, "o/r").Total[dismissed] != 1 {
+		t.Fatalf("%v %q %+v", err, declinedOf("o/r"), tallyOf(t, "o/r"))
 	}
 	pr.cfg, pr.ts[0].Path, e.PullRequest.Number = `{"learnings":`, "e.go", 8
-	if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err != nil || len(learningsOf("o/r")) != 1 || len(tallyOf(t, "o/r").PRs) != 2 {
-		t.Fatalf("broken review.json: %v %q", err, learningsOf("o/r"))
+	if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err != nil || len(declinedOf("o/r")) != 1 || len(tallyOf(t, "o/r").PRs) != 2 {
+		t.Fatalf("broken review.json: %v %q", err, declinedOf("o/r"))
 	}
 	if err := os.WriteFile(f, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
@@ -263,12 +266,12 @@ func TestOutcomesLearnCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths := []string{"0.go", "1.go", "1.go", "2.go", "3.go", "4.go", "5.go", "6.go"}
-	if err := decline(7, paths...); err == nil || len(learningsOf("o/r")) != maxLearnedPerClose {
-		t.Fatalf("%v %q", err, learningsOf("o/r"))
+	if err := decline(7, paths...); err == nil || len(declinedOf("o/r")) != maxLearnedPerClose {
+		t.Fatalf("%v %q", err, declinedOf("o/r"))
 	}
 	_ = os.Remove(f + ".tmp")
 	err := decline(7, paths...)
-	ls := learningsOf("o/r")
+	ls := declinedOf("o/r")
 	if err != nil || len(ls) != maxLearnedPerClose || !strings.Contains(ls[2], "(2.go") || tallyOf(t, "o/r").Total[dismissed] != 1+len(paths) {
 		t.Fatalf("%v %q %+v", err, ls, tallyOf(t, "o/r"))
 	}
@@ -283,7 +286,7 @@ func TestLearnOnce(t *testing.T) {
 		}
 	}
 	d := time.Now().Format(time.DateOnly)
-	if ls := learningsOf("o/r"); strings.Join(ls, "|") != "- X (a, b, "+d+")|- X (a, "+d+")" {
+	if ls := declinedOf("o/r"); strings.Join(ls, "|") != "- X (a, b, "+d+")|- X (a, "+d+")" {
 		t.Fatalf("%q", ls)
 	}
 }
@@ -332,6 +335,10 @@ func TestDecideLeft(t *testing.T) {
 	if want := []string{"intended", "declined", "", "", "", "", "deferred", "unlikely"}; !slices.Equal(got, want) {
 		t.Errorf("decisions %q, want %q", got, want)
 	}
+	// Threads 1 and 8 were decided by decideLeft in this close, thread 2's chat-filed "declined" gives no learning.
+	if ls := declinedOf("o/r"); len(ls) != 2 || !strings.Contains(ls[1], " as unlikely: Deep (h.go, ") || !strings.HasPrefix(ls[0], "- Maintainers declined a other finding as intended: Leaks (a.go, ") {
+		t.Errorf("learnings %q", ls)
+	}
 	if len(prompts) != 1 || strings.Contains(prompts[0], "SECRET") || strings.Contains(prompts[0], "### 2 ") ||
 		!strings.Contains(prompts[0], "### 1 a.go\nLeaks\n- maintainer: we want that\n- bot: ok\n") || !strings.Contains(prompts[0], "### 6 f.go\nStale\n- maintainer: why?\n\n") ||
 		!strings.Contains(prompts[0], "- bot: ok\n- maintainer: no, next sprint\n") || !strings.Contains(prompts[0], "### 8 h.go\nDeep\n- maintainer: never happens\n") {
@@ -343,14 +350,133 @@ func TestDecideLeft(t *testing.T) {
 		t.Fatalf("%v, %d calls", err, len(prompts))
 	}
 	answer = "I can't"
-	e.PullRequest.Number, pr.ts = 9, []forge.Thread{{Comment: 1, Body: "Leaks", Path: "a.go", Notes: []forge.Note{ann("no")}}}
+	e.PullRequest.Number, pr.ts = 9, []forge.Thread{{Comment: 1, Body: "Leaks", Path: "a.go", Down: []string{"ann"}, Notes: []forge.Note{ann("no")}}}
 	if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err != nil || len(prompts) != 2 || len(tallyOf(t, "o/r").PRs) != 3 {
 		t.Fatalf("%v, %d calls", err, len(prompts))
+	}
+	// The failed decideLeft still leaves the vote's learning.
+	if ls := declinedOf("o/r"); len(ls) != 3 || !strings.HasPrefix(ls[2], "- Maintainers declined a other finding: Leaks (a.go, ") {
+		t.Errorf("learnings %q", ls)
 	}
 	// Who may push is unknown for a reply's author: the PR isn't counted, its next close asks again.
 	e.PullRequest.Number, pr.canFail = 10, true
 	if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err == nil || len(tallyOf(t, "o/r").PRs) != 3 {
 		t.Fatalf("CanWrite failed on a reply: %v", err)
+	}
+}
+
+// A decision of intended, unlikely or wrong is a learning with its reason, voted down or not; deferred, declined and
+// fixed are not. A vote and a decision give the one line with the reason. Learning off gives none, the cap keeps the
+// reasons first, and the same PR closing again adds nothing.
+func TestOutcomesLearnDecided(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	th := func(c int64, title string, down ...string) forge.Thread {
+		return forge.Thread{Comment: c, Body: "_🟠 Major_ · **" + title + "**\n\nbody", Path: title + ".go", Down: down}
+	}
+	closePR := func(n int, cfg string, ts ...forge.Thread) {
+		pr := &votePR{asked: map[string]int{}, ts: ts}
+		pr.cfg = cfg
+		e := &forge.Event{Forge: "github"}
+		e.Repository.FullName, e.PullRequest.Number = "o/r", n
+		if err := Outcomes(t.Context(), voteForge{pr: pr}, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	decideAll := func(n int, ds map[int64]string) {
+		for c, d := range ds {
+			if err := decide("o/r", n, c, d); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	decideAll(1, map[int64]string{1: "intended", 2: "deferred", 3: "fixed", 4: "declined", 5: "wrong"})
+	closePR(1, `{"learnings":{"outcomes":false}}`, th(1, "A"), th(5, "E", "ann"))
+	if ls := declinedOf("o/r"); len(ls) != 0 {
+		t.Fatalf("learning off: %q", ls)
+	}
+	decideAll(2, map[int64]string{1: "intended", 2: "deferred", 3: "fixed", 4: "declined", 5: "wrong"})
+	closePR(2, `{}`, th(1, "A"), th(2, "B"), th(3, "C"), th(4, "D"), th(5, "E", "ann"))
+	d := time.Now().Format(time.DateOnly)
+	want := "- Maintainers declined a major finding as intended: A (A.go, " + d + ")|- Maintainers declined a major finding as wrong: E (E.go, " + d + ")"
+	if got := strings.Join(declinedOf("o/r"), "|"); got != want {
+		t.Fatalf("got %q", got)
+	}
+	closePR(2, `{}`, th(1, "A")) // closed again
+	if len(declinedOf("o/r")) != 2 {
+		t.Fatalf("%q", declinedOf("o/r"))
+	}
+	// Over the cap: the reasons first, then the votes.
+	decideAll(3, map[int64]string{7: "unlikely", 8: "intended", 9: "wrong"})
+	closePR(3, `{}`, th(6, "F", "ann"), th(7, "G"), th(8, "H"), th(9, "I"))
+	ls := declinedOf("o/r")
+	if len(ls) != 2+maxLearnedPerClose || strings.Contains(strings.Join(ls, "|"), "finding: F") {
+		t.Fatalf("%q", ls)
+	}
+}
+
+func declinedOf(key string) []string { return linesOf(declinedFile(key)) }
+
+// Declines land in a file of their own and leave the learnings alone; the 21st drops the oldest; 30 curated learnings
+// stay fully visible to a review however many declines came; a finding the PR fixed gives none even if a reply decided
+// it intended; forget drops from both files.
+func TestDeclinedApart(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	now := time.Now()
+	for i := range 30 {
+		addLearning("o/r", fmt.Sprintf("- rule%d (@ann)", i), now)
+	}
+	for i := range maxDeclined + 1 {
+		if err := learnOnce("o/r", fmt.Sprintf("- Maintainers declined a minor finding: D%d (a.go)", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ds := declinedOf("o/r")
+	if len(ds) != maxDeclined || !strings.HasPrefix(ds[0], "- Maintainers declined a minor finding: D1 (") || len(learningsOf("o/r")) != 30 {
+		t.Fatalf("%d declines %q, %d learnings", len(ds), ds, len(learningsOf("o/r")))
+	}
+	if got := readLearnings("o", "o/r", review.Learnings{}); strings.Count(got, "rule") != 30 || strings.Contains(got, "declined") {
+		t.Fatalf("learnings %q", got)
+	}
+	if got := readDeclined("o/r", review.Learnings{}); strings.Count(got, "\n") != maxDeclined {
+		t.Fatalf("declined %q", got)
+	}
+	old := now.AddDate(0, 0, -40)
+	if err := addLine(declinedFile("a/b"), "- Maintainers declined a minor finding: Old (a.go)", maxDeclined, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := addLine(declinedFile("a/b"), "- Maintainers declined a minor finding: New (a.go)", maxDeclined, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := readDeclined("a/b", review.Learnings{MaxAgeDays: 30}); strings.Contains(got, "Old") || !strings.Contains(got, "New") {
+		t.Fatalf("max_age_days: %q", got)
+	}
+	ten, none := 10, 0
+	if got := readDeclined("o/r", review.Learnings{Max: &ten}); strings.Count(got, "\n") != maxDeclined {
+		t.Fatalf("max does not apply: %q", got)
+	}
+	if got := readDeclined("o/r", review.Learnings{Max: &none}); got != "" {
+		t.Fatalf("max 0: %q", got)
+	}
+	if got := readDeclined("x/y", review.Learnings{}); got != "" || strings.Contains(review.TrustedContext("", "", got), "Declined") {
+		t.Fatalf("empty: %q", got)
+	}
+	if got := review.TrustedContext("", "", readDeclined("o/r", review.Learnings{})); !strings.Contains(got, "## Declined findings") || !strings.Contains(got, "D20 (a.go") {
+		t.Fatalf("trusted: %q", got)
+	}
+	e := &forge.Event{}
+	e.Repository.FullName = "o/r"
+	if got := learningsCommand("learnings", "bot", e); !strings.Contains(got, "**Declined findings**") || !strings.Contains(got, "rule29") || !strings.Contains(got, "D20") {
+		t.Fatalf("list: %q", got)
+	}
+	if got := learningsCommand("forget D20 (", "bot", e); !strings.Contains(got, "D20") || len(declinedOf("o/r")) != maxDeclined-1 {
+		t.Fatalf("forget: %q", got)
+	}
+	if got := learningsCommand("forget rule29", "bot", e); !strings.Contains(got, "rule29") || len(learningsOf("o/r")) != 29 {
+		t.Fatalf("forget: %q", got)
+	}
+	fs := []finding{{Comment: 1, Outcome: addressed}, {Comment: 2, Outcome: resolved, Title: "T", Severity: "minor"}}
+	if ls := declineLearnings(fs, map[int64]string{1: "intended", 2: "wrong"}); len(ls) != 1 || !strings.Contains(ls[0], " as wrong: T") {
+		t.Fatalf("addressed: %q", ls)
 	}
 }
 

@@ -1022,14 +1022,17 @@ func stack(ctx context.Context, sb *proc.Sandbox, repo string, files []string) s
 	return strings.Join(s, ", ")
 }
 
-// TrustedContext goes into the system prompt: written by maintainers, not by the PR.
-func TrustedContext(rules, learnings string) string {
+// TrustedContext goes into the system prompt: written by maintainers or kept from their decisions, not by the PR.
+func TrustedContext(rules, learnings, declined string) string {
 	var s strings.Builder
 	if rules = strings.TrimSpace(rules); rules != "" {
 		fmt.Fprintf(&s, "\n\n## Project rules (from the base branch, written by the maintainers)\n\n%s", text.Truncate(rules, 18_500)) // rules file 8000, root conventions 4000, nested 6000, headings
 	}
 	if learnings = strings.TrimSpace(learnings); learnings != "" {
 		fmt.Fprintf(&s, "\n\n## Learnings from earlier reviews (maintainer replies to your comments, dated; follow them, a newer one over an older one it contradicts)\n\n%s", learnings)
+	}
+	if declined = strings.TrimSpace(declined); declined != "" {
+		fmt.Fprintf(&s, "\n\n## Declined findings (maintainers declined these findings on these paths; do not report the same point on that code again unless the change makes it newly wrong)\n\n%s", declined)
 	}
 	return s.String()
 }

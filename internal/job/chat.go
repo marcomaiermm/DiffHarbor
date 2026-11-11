@@ -122,17 +122,28 @@ func learningsFile(key string) string {
 	return filepath.Join(proc.DataDir, "learnings", strings.ReplaceAll(key, "/", "__")+".md")
 }
 
-func learningsOf(key string) []string {
-	b, _ := os.ReadFile(learningsFile(key))
+// declinedFile is the repo's automatic decline lines, apart from the learnings: those are rules maintainers wrote on
+// purpose, and a review follows only the newest of them.
+func declinedFile(key string) string {
+	return filepath.Join(proc.DataDir, "declined", strings.ReplaceAll(key, "/", "__")+".md")
+}
+
+func linesOf(f string) []string {
+	b, _ := os.ReadFile(f) //nolint:gosec // our data dir
 	return strings.FieldsFunc(string(b), func(r rune) bool { return r == '\n' })
 }
 
-// learningsMu guards the read-modify-write of addLearning and forgetLearnings: an owner's file is shared by all of
+func learningsOf(key string) []string { return linesOf(learningsFile(key)) }
+
+// maxDeclined is the most decline lines kept per repo: a file of its own, small, so that declines expire as newer
+// ones arrive (a decline nobody repeats falls out) and never push the curated learnings out of a review's window.
+const maxDeclined = 20
+
+// learningsMu guards the read-modify-write of addLine and forgetLearnings: an owner's file is shared by all of
 // its repos, whose jobs run at once.
 var learningsMu sync.Mutex
 
-func writeLearnings(key string, lines []string) error {
-	f := learningsFile(key)
+func writeLines(f string, lines []string) error {
 	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
 		return err
 	}
@@ -143,23 +154,30 @@ func writeLearnings(key string, lines []string) error {
 	return os.Rename(f+".tmp", f)
 }
 
+func writeLearnings(key string, lines []string) error { return writeLines(learningsFile(key), lines) }
+
 // learnedRe is the date addLearning ends an entry with; entries from before have none and never age.
 var learnedRe = regexp.MustCompile(`, (\d{4}-\d{2}-\d{2})\)$`)
+
+// fresh is lines without those older than l's max_age_days.
+func fresh(lines []string, l review.Learnings) (kept []string) {
+	for _, s := range lines {
+		if m := learnedRe.FindStringSubmatch(s); m != nil && l.MaxAgeDays > 0 {
+			if t, err := time.Parse(time.DateOnly, m[1]); err == nil && time.Since(t) > time.Duration(l.MaxAgeDays)*24*time.Hour {
+				continue
+			}
+		}
+		kept = append(kept, s)
+	}
+	return kept
+}
 
 // readLearnings is what a review of repo follows: the owner's shared rules, then the repo's own, each its newest
 // up to l's max and age.
 func readLearnings(owner, repo string, l review.Learnings) string {
 	var b strings.Builder
 	for _, key := range []string{owner, repo} {
-		var kept []string
-		for _, s := range learningsOf(key) {
-			if m := learnedRe.FindStringSubmatch(s); m != nil && l.MaxAgeDays > 0 {
-				if t, err := time.Parse(time.DateOnly, m[1]); err == nil && time.Since(t) > time.Duration(l.MaxAgeDays)*24*time.Hour {
-					continue
-				}
-			}
-			kept = append(kept, s)
-		}
+		kept := fresh(learningsOf(key), l)
 		for _, s := range kept[max(0, len(kept)-l.Limit()):] {
 			b.WriteString(s + "\n")
 		}
@@ -167,30 +185,50 @@ func readLearnings(owner, repo string, l review.Learnings) string {
 	return b.String()
 }
 
-// addLearning appends one rule to a repo or owner, dated; the oldest past review.MaxLearnings goes.
-func addLearning(key, entry string, now time.Time) error {
-	learningsMu.Lock()
-	defer learningsMu.Unlock()
-	lines := append(learningsOf(key), strings.TrimSuffix(entry, ")")+", "+now.Format(time.DateOnly)+")")
-	return writeLearnings(key, lines[max(0, len(lines)-review.MaxLearnings):])
+// readDeclined is the repo's decline lines a review gets, newest 20 at most and l's age. A max of 0 (follow no
+// learnings) gives none; any other max leaves them alone, it is the curated rules' window.
+func readDeclined(repo string, l review.Learnings) string {
+	if l.Limit() == 0 {
+		return ""
+	}
+	return strings.Join(append(fresh(linesOf(declinedFile(repo)), l), ""), "\n")
 }
 
-// forgetLearnings drops key's learnings containing s, any case, and returns them.
-func forgetLearnings(key, s string) ([]string, error) {
+// addLine appends entry, dated, to the lines in f; the oldest past keep goes.
+func addLine(f, entry string, keep int, now time.Time) error {
 	learningsMu.Lock()
 	defer learningsMu.Unlock()
-	var kept, gone []string
-	for _, l := range learningsOf(key) {
-		if strings.Contains(strings.ToLower(l), strings.ToLower(s)) {
-			gone = append(gone, l)
-		} else {
-			kept = append(kept, l)
+	lines := append(linesOf(f), strings.TrimSuffix(entry, ")")+", "+now.Format(time.DateOnly)+")")
+	return writeLines(f, lines[max(0, len(lines)-keep):])
+}
+
+// addLearning appends one rule to a repo or owner, dated; the oldest past review.MaxLearnings goes.
+func addLearning(key, entry string, now time.Time) error {
+	return addLine(learningsFile(key), entry, review.MaxLearnings, now)
+}
+
+// forgetLearnings drops key's learnings and decline lines containing s, any case, and returns them.
+func forgetLearnings(key, s string) (gone []string, err error) {
+	learningsMu.Lock()
+	defer learningsMu.Unlock()
+	for _, f := range []string{learningsFile(key), declinedFile(key)} {
+		var kept, drop []string
+		for _, l := range linesOf(f) {
+			if strings.Contains(strings.ToLower(l), strings.ToLower(s)) {
+				drop = append(drop, l)
+			} else {
+				kept = append(kept, l)
+			}
+		}
+		if len(drop) == 0 {
+			continue
+		}
+		gone = append(gone, drop...)
+		if err := writeLines(f, kept); err != nil {
+			return gone, err
 		}
 	}
-	if len(gone) == 0 {
-		return nil, nil
-	}
-	return gone, writeLearnings(key, kept)
+	return gone, nil
 }
 
 // learningsCommand answers `learnings` (list them) and `forget <text>` (drop the ones containing text). Only an
@@ -229,6 +267,9 @@ func learningsCommand(cmd, bot string, e *forge.Event) string {
 		if ls := learningsOf(key); len(ls) > 0 {
 			fmt.Fprintf(&b, "**%s**\n\n%s\n\n", title, strings.Join(ls, "\n"))
 		}
+	}
+	if ds := linesOf(declinedFile(e.Repo())); len(ds) > 0 {
+		fmt.Fprintf(&b, "**Declined findings** (kept apart from the rules, the newest %d)\n\n%s\n\n", maxDeclined, strings.Join(ds, "\n"))
 	}
 	if b.Len() == 0 {
 		return "No learnings yet."
@@ -358,7 +399,8 @@ func indent(s string) int {
 }
 
 // bodyProfile is the profile a PR description names on a line of its own, "review: quiet", by hand or as a ticked
-// box of its template; the first, "" for none. HTML comments and code blocks don't count: a template's hint, an example.
+// box of its template; the first, "" for none. HTML comments and code blocks don't count: a template's hint, an
+// example.
 func bodyProfile(body string) string {
 	if m := bodyProfileRe.FindStringSubmatch(visible(body)); m != nil {
 		return strings.ToLower(m[1])
@@ -494,7 +536,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	cfg, _ := review.LoadSettings(p.File(pr.Base.SHA, "review.json")) // broken: defaults, the review says so
 	rules := cfg.ReadRules(func(n ...string) string { return p.File(pr.Base.SHA, n...) })
 	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(sb.Dir, "skills"))
-	system := chatSystem + review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings))
+	system := chatSystem + review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings), readDeclined(e.Repo(), cfg.Learnings))
 	rm, _ := cfg.Models()
 	m := agent.PassModel(rm, "medium")
 	out, err := chatAgent.Run(ctx, sb, "chat", system,
@@ -514,8 +556,9 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	if !ok {
 		return fmt.Errorf("chat returned no JSON, ends with %q", text.Tail(out))
 	}
-	// What the maintainer decided on our finding, for the outcome statistics. Before the reply: it holds whether or
-	// not ours gets posted, and a failure costs a count, not the answer.
+	// What the maintainer decided on our finding, for the outcome statistics and, if intended, unlikely or wrong, the
+	// declined findings. Before the reply: it holds whether or not ours gets posted, and a failure costs a count, not
+	// the answer.
 	if finding != 0 && maintainer {
 		dec, _ := a.Decision.(string)
 		if err := decide(e.Repo(), pr.Number, finding, dec); err != nil {
