@@ -195,7 +195,8 @@ func readDeclined(repo string, l review.Learnings) string {
 	if l.Limit() == 0 {
 		return ""
 	}
-	return strings.Join(append(fresh(linesOf(declinedFile(repo)), l), ""), "\n")
+	kept := fresh(linesOf(declinedFile(repo)), l)
+	return strings.Join(append(kept[max(0, len(kept)-maxDeclined):], ""), "\n") // a file edited by hand may hold more
 }
 
 // addLine appends entry, dated, to the lines in f; the oldest past keep goes. The same entry under an earlier date
