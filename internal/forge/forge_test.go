@@ -85,6 +85,22 @@ func TestPlaceDrift(t *testing.T) {
 	if Place(&skew, tabs); skew.Start != 0 || skew.Fix != "if b {\nreturn x" {
 		t.Fatalf("skew: %+v", skew)
 	}
+	// Two quoted depths on one depth of the file stay unplaced: the Fix would lose a level.
+	flat := diff.NewLines("diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,0 +10,2 @@\n+    foo()\n+    bar()\n")
+	two := Finding{Comment: review.Comment{Path: "a.py", Line: 10, Existing: "foo()\n bar()", Fix: "if x:\n baz()"}}
+	if Place(&two, flat); two.Start != 0 || two.Fix != "if x:\n baz()" {
+		t.Fatalf("two depths: %+v", two)
+	}
+	// A drifted quote of a line inside a raw string: the Fix takes the file's leading space, the literal keeps it.
+	raw := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,3 @@\n+\tx := `\n+  hello\n+`\n")
+	lit := Finding{Comment: review.Comment{Path: "a.go", Line: 11, Existing: " hello", Fix: " hello!"}}
+	if Place(&lit, raw); lit.Start != 11 || lit.Fix != "  hello!" {
+		t.Fatalf("literal: %+v", lit)
+	}
+	wider := Finding{Comment: review.Comment{Path: "a.go", Line: 11, Existing: " hello", Fix: "   hello"}}
+	if Place(&wider, raw); wider.Start != 0 {
+		t.Fatalf("literal, other depth: %+v", wider)
+	}
 	// An exact copy ending 11 lines up is out of reach: the loose copy on the finding's line is placed.
 	far := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,12 @@\n+foo()\n+a\n+a\n+a\n+a\n+a\n+a\n+a\n+a\n+a\n+a\n+\tfoo()\n")
 	reach := Finding{Comment: review.Comment{Path: "a.go", Line: 21, Existing: "foo()", Fix: "bar()"}}

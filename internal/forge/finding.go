@@ -155,17 +155,21 @@ func Place(c *Finding, lines map[string]string) {
 		return
 	}
 	indent := func(s string) string { return s[:len(s)-len(strings.TrimLeft(s, " \t"))] }
-	to := map[string]string{} // the file's indentation, by the quote's
+	to, from := map[string]string{}, map[string]string{} // the file's indentation by the quote's, and back
 	file := make([]string, len(want))
 	for i, w := range want {
 		file[i] = lines[fmt.Sprintf("%s:%d", c.Path, s0+i)]
 		if strings.TrimSpace(w) == "" {
 			continue
 		}
-		if t, ok := to[indent(w)]; ok && t != indent(file[i]) {
+		q, f := indent(w), indent(file[i])
+		if t, ok := to[q]; ok && t != f {
 			return
 		}
-		to[indent(w)] = indent(file[i])
+		if b, ok := from[f]; ok && b != q { // two quoted depths on one of the file's: the Fix would lose a level
+			return
+		}
+		to[q], from[f] = f, q
 	}
 	fix := strings.Split(c.Fix, "\n")
 	for j, f := range fix {
