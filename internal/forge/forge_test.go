@@ -96,6 +96,10 @@ func TestPlaceDrift(t *testing.T) {
 	if Place(&swap, diff.NewLines("diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,0 +10,2 @@\n+foo()\n+    bar()\n")); swap.Start != 0 {
 		t.Fatalf("swapped depths: %+v", swap)
 	}
+	mixed := Finding{Comment: review.Comment{Path: "a.py", Line: 10, Existing: " foo()\n\tbar()", Fix: "\tfoo()\n\tbar()"}}
+	if Place(&mixed, diff.NewLines("diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,0 +10,2 @@\n+\tfoo()\n+ bar()\n")); mixed.Start != 0 {
+		t.Fatalf("tab next to space: %+v", mixed)
+	}
 	// A drifted quote of a line inside a raw string: the Fix takes the file's leading space, the literal keeps it.
 	raw := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,0 +10,3 @@\n+\tx := `\n+  hello\n+`\n")
 	lit := Finding{Comment: review.Comment{Path: "a.go", Line: 11, Existing: " hello", Fix: " hello!"}}

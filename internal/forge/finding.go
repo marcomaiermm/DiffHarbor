@@ -168,9 +168,12 @@ func Place(c *Finding, lines map[string]string) {
 		}
 		to[q] = f
 	}
-	for q, f := range to { // a deeper quoted line is deeper in the file too: else the Fix would lose or swap a level
+	// A deeper quoted line is deeper in the file too, each depth beginning with the shallower one: else the Fix would
+	// lose or swap a level, and a tab next to a space has no order.
+	for q, f := range to {
 		for q2, f2 := range to {
-			if (len(q) < len(q2)) != (len(f) < len(f2)) {
+			deeper := strings.HasPrefix(q2, q)
+			if q != q2 && (deeper != (f != f2 && strings.HasPrefix(f2, f)) || !deeper && !strings.HasPrefix(q, q2)) {
 				return
 			}
 		}
