@@ -491,6 +491,16 @@ func TestInert(t *testing.T) {
 	if got := inert("// go\n/* c */\nsee /close"); got != "// go\n/* c */\nsee /close" {
 		t.Fatalf("%q", got)
 	}
+	for in, want := range map[string]string{
+		"(routes/legal.$page.tsx:16, routes/legal.$page.tsx:24)": `(routes/legal.\$page.tsx:16, routes/legal.\$page.tsx:24)`,
+		"`a.$b` costs $5, ``c`$d`` and \\$e":                     "`a.$b` costs \\$5, ``c`$d`` and \\$e",
+		"$a\n```suggestion:-0+0\nx := `$y`\n$z\n```\n$b":         "\\$a\n```suggestion:-0+0\nx := `$y`\n$z\n```\n\\$b",
+		"open `$a": "open `\\$a",
+	} {
+		if got := inert(in); got != want || inert(got) != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
 	var bodies []string
 	serve(t, func(_ http.ResponseWriter, r *http.Request) {
 		var b map[string]any

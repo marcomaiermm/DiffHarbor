@@ -483,15 +483,73 @@ func olds(raw string) map[string]old {
 // inert escapes each line that would run as a quick action (/merge, /approve) with the bot's rights: a finding's
 // text comes from the PR's untrusted code. Every such line, fenced or not: guessing what GitLab's markdown parser
 // calls a code block is how one slips through. discuss keeps them out of a suggestion, which must stay as written.
+// It also escapes the "$" of prose, see dollars.
 func inert(body string) string {
 	lines := strings.Split(body, "\n")
+	fence := ""
 	for i, l := range lines {
-		if command(l) {
-			lines[i] = `\` + l
+		t := strings.TrimSpace(l)
+		switch {
+		case fence != "":
+			if len(t) >= len(fence) && strings.Trim(t, fence[:1]) == "" {
+				fence = ""
+			}
+		case strings.HasPrefix(t, "```"), strings.HasPrefix(t, "~~~"):
+			fence = t[:run(t)]
+		default:
+			l = dollars(l)
 		}
+		if command(l) {
+			l = `\` + l
+		}
+		lines[i] = l
 	}
 	return strings.Join(lines, "\n")
 }
+
+// dollars escapes each "$" of a line outside its code spans: GitLab sets what stands between two as a formula,
+// and a path like routes/legal.$page.tsx named twice has two. One already escaped stays. Code keeps its "$": a
+// line inert takes for fenced, rightly or not, isn't touched, so a suggestion stays as written.
+func dollars(l string) string {
+	if !strings.Contains(l, "$") {
+		return l
+	}
+	var b strings.Builder
+	for i := 0; i < len(l); {
+		switch l[i] {
+		case '\\':
+			n := min(2, len(l)-i)
+			b.WriteString(l[i : i+n])
+			i += n
+		case '`':
+			n := run(l[i:])
+			end := i + n
+			for j := end; j < len(l); { // the span closes at a run as long as the one that opened it
+				if l[j] != '`' {
+					j++
+					continue
+				}
+				m := run(l[j:])
+				if j += m; m == n {
+					end = j
+					break
+				}
+			}
+			b.WriteString(l[i:end])
+			i = end
+		case '$':
+			b.WriteString(`\$`)
+			i++
+		default:
+			b.WriteByte(l[i])
+			i++
+		}
+	}
+	return b.String()
+}
+
+// run is how often s repeats its first byte at its start.
+func run(s string) int { return len(s) - len(strings.TrimLeft(s, s[:1])) }
 
 // command is a line GitLab could read as a quick action: "/" and a name at its start, once it drops "\r".
 // "//" and "/*" start no command, they are code comments.
