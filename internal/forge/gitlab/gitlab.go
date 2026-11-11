@@ -519,7 +519,7 @@ func inert(body string) string {
 	return strings.Join(lines, "\n")
 }
 
-// content is l after its blockquote ">"s and a list item's marker, and how far that is indented, a tab as 4: a
+// content is l after its blockquote ">"s and a list item's marker ("-", "1."), and how far that is indented, a tab as 4: a
 // fence opens or closes only under 4, and 4 make indented code. A list nested twice reads as code: its "$" stay.
 func content(l string) (string, int) {
 	for {
@@ -529,6 +529,8 @@ func content(l string) (string, int) {
 			l = strings.TrimPrefix(t[1:], " ")
 		case len(l)-len(t) < 4 && len(t) > 1 && strings.Contains("-*+", t[:1]) && t[1] == ' ':
 			l = t[2:]
+		case len(l)-len(t) < 4 && ordered(t) > 0:
+			l = t[ordered(t):]
 		default:
 			if strings.HasPrefix(t, "\t") || len(l)-len(t) >= 4 {
 				return t, 4
@@ -536,6 +538,15 @@ func content(l string) (string, int) {
 			return t, len(l) - len(t)
 		}
 	}
+}
+
+// ordered is the length of an ordered list item's marker at the start of t ("1. ", "12) "), 0 for none.
+func ordered(t string) int {
+	n := len(t) - len(strings.TrimLeft(t, "0123456789"))
+	if n == 0 || n > 9 || len(t) < n+2 || !strings.Contains(".)", t[n:n+1]) || t[n+1] != ' ' {
+		return 0
+	}
+	return n + 2
 }
 
 // dollars escapes each "$" of prose outside its code spans and HTML tags: GitLab sets what stands between two as a

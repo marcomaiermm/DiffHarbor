@@ -505,6 +505,9 @@ func TestInert(t *testing.T) {
 		"`a\n\n$b":                               "`a\n\n\\$b",
 		`<a href="https://x/$page">$a</a>`:       `<a href="https://x/$page">\$a</a>`,
 		"see <https://x/legal.$page.tsx> $a":     `see <https://x/legal.$page.tsx> \$a`,
+		"1. ```sh\n   echo $HOME\n   ```\n2. $a": "1. ```sh\n   echo $HOME\n   ```\n2. \\$a",
+		"12) ```\n$x\n```\n$a":                   "12) ```\n$x\n```\n\\$a",
+		"2024. $a and 1.$b":                      `2024. \$a and 1.\$b`,
 		"1 < 2 $a":                               `1 < 2 \$a`,
 	} {
 		if got := inert(in); got != want || inert(got) != want {
