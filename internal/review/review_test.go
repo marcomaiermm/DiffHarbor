@@ -467,6 +467,90 @@ func TestCapped(t *testing.T) {
 	}
 }
 
+// A run posts at most 5 inline findings, the blocking ones never folded past that; the rest fold,
+// the most severe stay inline.
+func TestCapInline(t *testing.T) {
+	count := func(cs []Comment) (inline, folded int) {
+		for _, c := range cs {
+			if c.Fold {
+				folded++
+			} else {
+				inline++
+			}
+		}
+		return
+	}
+	cs := []Comment{{Severity: "major"}, {Severity: "minor"}, {Severity: "nit"}}
+	CapInline(cs)
+	CapInline(nil)
+	if in, f := count(cs); in != 3 || f != 0 {
+		t.Fatalf("under the cap: %d inline, %d folded", in, f)
+	}
+
+	cs = nil
+	for range 8 {
+		cs = append(cs, Comment{Severity: "nit"})
+	}
+	cs = append(cs, Comment{Severity: "minor"}, Comment{Severity: "minor"})
+	CapInline(cs)
+	if in, f := count(cs); in != 5 || f != 5 || cs[8].Fold || cs[9].Fold {
+		t.Fatalf("most severe first: %d inline, %d folded", in, f)
+	}
+
+	cs = nil
+	for range 8 {
+		cs = append(cs, Comment{Severity: "minor"})
+	}
+	CapInline(cs)
+	if in, f := count(cs); in != 5 || f != 3 || cs[4].Fold || !cs[5].Fold {
+		t.Fatalf("8 minor: %d inline, %d folded", in, f)
+	}
+
+	cs = nil
+	for range 3 {
+		cs = append(cs, Comment{Severity: "minor"})
+	}
+	for range 6 {
+		cs = append(cs, Comment{Severity: "major"})
+	}
+	CapInline(cs)
+	if in, f := count(cs); in != 6 || f != 3 {
+		t.Fatalf("6 major + 3 minor: %d inline, %d folded", in, f)
+	}
+
+	cs = nil
+	for range 4 { // already folded by the profile, or a push: no slot, though first and as severe
+		cs = append(cs, Comment{Severity: "minor", Fold: true})
+	}
+	for range 5 {
+		cs = append(cs, Comment{Severity: "minor"})
+	}
+	CapInline(cs)
+	if in, f := count(cs); in != 5 || f != 4 {
+		t.Fatalf("already folded: %d inline, %d folded", in, f)
+	}
+
+	// a push: the same limit, after FoldPush
+	cfg, err := LoadSettings(`{"packages":{"web":{"profile":"assertive"}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs = nil
+	for range 4 { // FoldPush folds these under chill
+		cs = append(cs, Comment{Path: "a.go", Severity: "minor"})
+	}
+	for range 8 {
+		cs = append(cs, Comment{Path: "web/a.ts", Severity: "minor"})
+	}
+	for i := range cs {
+		cs[i].Fold = cfg.FoldPush(cs[i])
+	}
+	CapInline(cs)
+	if in, f := count(cs); in != 5 || f != 7 || cs[4].Fold || cs[8].Fold || !cs[9].Fold {
+		t.Fatalf("push: %d inline, %d folded", in, f)
+	}
+}
+
 func TestKnowledgeSettings(t *testing.T) {
 	cfg, err := LoadSettings(`{"knowledge":{"**":["docs"],"internal/refund/**":["wiki","linear:abc-1","docs"]}}`)
 	if err != nil {
