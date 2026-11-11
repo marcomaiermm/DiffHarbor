@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 var (
@@ -483,8 +484,33 @@ func olds(raw string) map[string]old {
 // inert escapes each line that would run as a quick action (/merge, /approve) with the bot's rights: a finding's
 // text comes from the PR's untrusted code. Every such line, fenced or not: guessing what GitLab's markdown parser
 // calls a code block is how one slips through. discuss keeps them out of a suggestion, which must stay as written.
+// It also escapes the "$" of prose, see dollars.
 func inert(body string) string {
 	lines := strings.Split(body, "\n")
+	fence, para := "", -1    // para: the first line of the prose paragraph dollars hasn't seen yet
+	prose := func(end int) { // dollars sees a paragraph at once: a code span can cross its lines
+		if para >= 0 {
+			copy(lines[para:], strings.Split(dollars(strings.Join(lines[para:end], "\n")), "\n"))
+			para = -1
+		}
+	}
+	for i, l := range lines {
+		t, indent := content(l)
+		switch {
+		case fence != "":
+			if indent < 4 && len(t) >= len(fence) && strings.Trim(strings.TrimRight(t, " \r"), fence[:1]) == "" {
+				fence = ""
+			}
+		case indent < 4 && (strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~")):
+			prose(i)
+			fence = t[:run(t)]
+		case indent >= 4 || strings.TrimSpace(t) == "": // indented code, or the blank line ending a paragraph
+			prose(i)
+		case para < 0:
+			para = i
+		}
+	}
+	prose(len(lines))
 	for i, l := range lines {
 		if command(l) {
 			lines[i] = `\` + l
@@ -492,6 +518,97 @@ func inert(body string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// content is l after its blockquote ">"s and a list item's marker ("-", "1."), and how far that is indented, a tab as 4: a
+// fence opens or closes only under 4, and 4 make indented code. A list nested twice reads as code: its "$" stay.
+func content(l string) (string, int) {
+	for {
+		t := strings.TrimLeft(l, " ")
+		switch {
+		case len(l)-len(t) < 4 && strings.HasPrefix(t, ">"):
+			l = strings.TrimPrefix(t[1:], " ")
+		case len(l)-len(t) < 4 && len(t) > 1 && strings.Contains("-*+", t[:1]) && t[1] == ' ':
+			l = t[2:]
+		case len(l)-len(t) < 4 && ordered(t) > 0:
+			l = t[ordered(t):]
+		default:
+			if strings.HasPrefix(t, "\t") || len(l)-len(t) >= 4 {
+				return t, 4
+			}
+			return t, len(l) - len(t)
+		}
+	}
+}
+
+// tag is where the HTML tag starting at l[i] ends, past its ">": one in a quoted attribute doesn't end it. i+1 for
+// a "<" no ">" closes, which is text.
+func tag(l string, i int) int {
+	var quote byte
+	for j := i + 1; j < len(l); j++ {
+		switch c := l[j]; {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '>':
+			return j + 1
+		}
+	}
+	return i + 1
+}
+
+// ordered is the length of an ordered list item's marker at the start of t ("1. ", "12) "), 0 for none.
+func ordered(t string) int {
+	n := len(t) - len(strings.TrimLeft(t, "0123456789"))
+	if n == 0 || n > 9 || len(t) < n+2 || !strings.Contains(".)", t[n:n+1]) || t[n+1] != ' ' {
+		return 0
+	}
+	return n + 2
+}
+
+// dollars escapes each "$" of prose outside its code spans and HTML tags: GitLab sets what stands between two as a
+// formula, and a path like routes/legal.$page.tsx named twice has two. One already escaped stays. A "\" in a tag
+// would land in its attribute, a link's URL. Code keeps its "$": what inert takes for code, rightly or not, isn't
+// passed, so a suggestion stays as written.
+func dollars(l string) string {
+	if !strings.Contains(l, "$") {
+		return l
+	}
+	var b strings.Builder
+	for i := 0; i < len(l); {
+		end := i + 1
+		switch c := l[i]; {
+		case c == '\\':
+			end = min(i+2, len(l))
+		case c == '`':
+			n := run(l[i:])
+			end = i + n
+			for j := end; j < len(l); { // the span closes at a run as long as the one that opened it
+				if l[j] != '`' {
+					j++
+					continue
+				}
+				m := run(l[j:])
+				if j += m; m == n {
+					end = j
+					break
+				}
+			}
+		case c == '<' && i+1 < len(l) && (l[i+1] == '/' || l[i+1] == '!' || unicode.IsLetter(rune(l[i+1]))):
+			end = tag(l, i)
+		case c == '$':
+			b.WriteByte('\\')
+		}
+		b.WriteString(l[i:end])
+		i = end
+	}
+	return b.String()
+}
+
+// run is how often s repeats its first byte at its start.
+func run(s string) int { return len(s) - len(strings.TrimLeft(s, s[:1])) }
 
 // command is a line GitLab could read as a quick action: "/" and a name at its start, once it drops "\r".
 // "//" and "/*" start no command, they are code comments.
