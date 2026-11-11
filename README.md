@@ -44,12 +44,14 @@ A small Go server takes the webhook and runs your checks on the changed lines. A
 cp compose.example.yml compose.yml
 ```
 
-```sh
-# .env, next to compose.yml
+Create `.env` next to it:
+
+```ini
 GITHUB_APP_ID=123456
 GITHUB_APP_PRIVATE_KEY_B64=...
 GITHUB_WEBHOOK_SECRET=...
-OPENAI_API_KEY=...          # or ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, ...
+# or ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, ...
+OPENAI_API_KEY=...
 ```
 
 ```sh
@@ -64,7 +66,7 @@ Point your GitHub App's webhook at `https://<host>/webhook/github`. Nothing else
 
 ## Usage
 
-Reviews run when a PR opens and on every push. Or ask in a comment:
+Reviews run when a PR opens and on every push. Drafts, bot PRs and PRs into other base branches are [skipped](https://marcomaiermm.github.io/DiffHarbor/how-it-works/#drafts-and-skipped-prs). Or ask in a comment:
 
 ```text
 @<bot> review               # full review
@@ -104,7 +106,8 @@ Reply in one of the bot's threads to discuss a finding. It answers, checks your 
 > [!WARNING]
 > The checks and the agent run the PR's code, also for PRs from forks. Install the bot only on repos whose PR authors you trust.
 
-- Keys stay with root. git, checks and the agent run as an unprivileged user per repo.
+- Forge and model keys stay with root. git, checks and the agent run as an unprivileged user per repo.
+- [Exceptions](https://marcomaiermm.github.io/DiffHarbor/security/#what-the-prs-code-can-reach): Bedrock with IAM keys, a ChatGPT login and providers outside the models table. The PR's code can read those during a run.
 - Model calls and git fetches go through a local proxy with tokens that expire with the job.
 - No lifecycle scripts on install by default.
 

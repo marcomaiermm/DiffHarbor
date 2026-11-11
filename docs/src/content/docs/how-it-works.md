@@ -39,9 +39,9 @@ Your own go in [`.review/checks.sh`](../per-repo/).
 - A defect with no trigger folds into the summary under every profile, unless it is major or critical.
 - A verify pass that gives no such answer folds nothing.
 
-**Proof test.** The test the report names as proof runs against the base versions of the PR's code files. If it still passes there, the finding is minor.
+**Proof test.** The test the review names as proof of the change runs against the base versions of the PR's code files. If it still passes there, it doesn't prove the change, and the test gets a minor finding of its own: "Test passes without the change". Not run when [`tests`](../per-repo/#reviewjson-reference) is `false`.
 
-**Repro.** For up to 3 major or critical findings per review the verifier writes a minimal test that fails if the finding is right. It runs once, one at a time, in the sandbox and is deleted after.
+**Repro.** For up to 3 major or critical findings per review the verifier writes a minimal test that fails if the finding is right. It runs once, one at a time, in the sandbox and is deleted after. Only where the repo's tests run, see [`tests`](../per-repo/#reviewjson-reference).
 
 | The test | The finding |
 |---|---|
@@ -51,8 +51,9 @@ Your own go in [`.review/checks.sh`](../per-repo/).
 
 Runners for both:
 
-- Go, with `-timeout=30s` inside a 60 s limit.
-- JS and TS with the package's vitest, jest, `bun test` or `node --test`, 60 s limit. `bun test` needs bun on the server, the image has none.
+- Go, or JS and TS with the package's vitest, jest, `bun test` or `node --test`. `bun test` needs bun on the server, the image has none.
+- A repro gets 60 s, in Go with `-timeout=30s`.
+- A proof test gets 2 minutes, in Go with `-timeout=1m30s`.
 - A test the file does not define is not run.
 
 ## Drafts and skipped PRs

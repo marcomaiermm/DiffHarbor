@@ -7,12 +7,14 @@ description: Run DiffHarbor with Docker Compose.
 cp compose.example.yml compose.yml
 ```
 
-```sh
-# .env, next to compose.yml
+Create `.env` next to it:
+
+```ini
 GITHUB_APP_ID=123456
 GITHUB_APP_PRIVATE_KEY_B64=...
 GITHUB_WEBHOOK_SECRET=...
-OPENAI_API_KEY=...          # or ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, ...
+# or ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, ...
+OPENAI_API_KEY=...
 ```
 
 ```sh
