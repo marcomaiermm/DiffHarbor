@@ -495,7 +495,16 @@ func TestInert(t *testing.T) {
 		"(routes/legal.$page.tsx:16, routes/legal.$page.tsx:24)": `(routes/legal.\$page.tsx:16, routes/legal.\$page.tsx:24)`,
 		"`a.$b` costs $5, ``c`$d`` and \\$e":                     "`a.$b` costs \\$5, ``c`$d`` and \\$e",
 		"$a\n```suggestion:-0+0\nx := `$y`\n$z\n```\n$b":         "\\$a\n```suggestion:-0+0\nx := `$y`\n$z\n```\n\\$b",
-		"open `$a": "open `\\$a",
+		"open `$a":                               "open `\\$a",
+		"> ```sh\n> echo $HOME\n> ```\n> $a":     "> ```sh\n> echo $HOME\n> ```\n> \\$a",
+		"- ```\n  $x\n  ```\n- $a":               "- ```\n  $x\n  ```\n- \\$a",
+		"$a\n\n    echo $HOME\n\n$b":             "\\$a\n\n    echo $HOME\n\n\\$b",
+		"text\n\n    ```\n\nsee $page and $page": "text\n\n    ```\n\nsee \\$page and \\$page",
+		"```\n    ```\necho $HOME\n```\n$a":      "```\n    ```\necho $HOME\n```\n\\$a",
+		"`echo\n$HOME` costs $5":                 "`echo\n$HOME` costs \\$5",
+		"`a\n\n$b":                               "`a\n\n\\$b",
+		`<a href="https://x/$page">$a</a>`:       `<a href="https://x/$page">\$a</a>`,
+		"1 < 2 $a":                               `1 < 2 \$a`,
 	} {
 		if got := inert(in); got != want || inert(got) != want {
 			t.Errorf("%q: %q, want %q", in, got, want)

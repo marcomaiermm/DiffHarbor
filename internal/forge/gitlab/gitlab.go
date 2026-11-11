@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 var (
@@ -486,44 +487,74 @@ func olds(raw string) map[string]old {
 // It also escapes the "$" of prose, see dollars.
 func inert(body string) string {
 	lines := strings.Split(body, "\n")
-	fence := ""
+	fence, para := "", -1    // para: the first line of the prose paragraph dollars hasn't seen yet
+	prose := func(end int) { // dollars sees a paragraph at once: a code span can cross its lines
+		if para >= 0 {
+			copy(lines[para:], strings.Split(dollars(strings.Join(lines[para:end], "\n")), "\n"))
+			para = -1
+		}
+	}
 	for i, l := range lines {
-		t := strings.TrimSpace(l)
+		t, indent := content(l)
 		switch {
 		case fence != "":
-			if len(t) >= len(fence) && strings.Trim(t, fence[:1]) == "" {
+			if indent < 4 && len(t) >= len(fence) && strings.Trim(strings.TrimRight(t, " \r"), fence[:1]) == "" {
 				fence = ""
 			}
-		case strings.HasPrefix(t, "```"), strings.HasPrefix(t, "~~~"):
+		case indent < 4 && (strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~")):
+			prose(i)
 			fence = t[:run(t)]
-		default:
-			l = dollars(l)
+		case indent >= 4 || strings.TrimSpace(t) == "": // indented code, or the blank line ending a paragraph
+			prose(i)
+		case para < 0:
+			para = i
 		}
+	}
+	prose(len(lines))
+	for i, l := range lines {
 		if command(l) {
-			l = `\` + l
+			lines[i] = `\` + l
 		}
-		lines[i] = l
 	}
 	return strings.Join(lines, "\n")
 }
 
-// dollars escapes each "$" of a line outside its code spans: GitLab sets what stands between two as a formula,
-// and a path like routes/legal.$page.tsx named twice has two. One already escaped stays. Code keeps its "$": a
-// line inert takes for fenced, rightly or not, isn't touched, so a suggestion stays as written.
+// content is l after its blockquote ">"s and a list item's marker, and how far that is indented, a tab as 4: a
+// fence opens or closes only under 4, and 4 make indented code. A list nested twice reads as code: its "$" stay.
+func content(l string) (string, int) {
+	for {
+		t := strings.TrimLeft(l, " ")
+		switch {
+		case len(l)-len(t) < 4 && strings.HasPrefix(t, ">"):
+			l = strings.TrimPrefix(t[1:], " ")
+		case len(l)-len(t) < 4 && len(t) > 1 && strings.Contains("-*+", t[:1]) && t[1] == ' ':
+			l = t[2:]
+		default:
+			if strings.HasPrefix(t, "\t") || len(l)-len(t) >= 4 {
+				return t, 4
+			}
+			return t, len(l) - len(t)
+		}
+	}
+}
+
+// dollars escapes each "$" of prose outside its code spans and HTML tags: GitLab sets what stands between two as a
+// formula, and a path like routes/legal.$page.tsx named twice has two. One already escaped stays. A "\" in a tag
+// would land in its attribute, a link's URL. Code keeps its "$": what inert takes for code, rightly or not, isn't
+// passed, so a suggestion stays as written.
 func dollars(l string) string {
 	if !strings.Contains(l, "$") {
 		return l
 	}
 	var b strings.Builder
 	for i := 0; i < len(l); {
-		switch l[i] {
-		case '\\':
-			n := min(2, len(l)-i)
-			b.WriteString(l[i : i+n])
-			i += n
-		case '`':
+		end := i + 1
+		switch c := l[i]; {
+		case c == '\\':
+			end = min(i+2, len(l))
+		case c == '`':
 			n := run(l[i:])
-			end := i + n
+			end = i + n
 			for j := end; j < len(l); { // the span closes at a run as long as the one that opened it
 				if l[j] != '`' {
 					j++
@@ -535,15 +566,15 @@ func dollars(l string) string {
 					break
 				}
 			}
-			b.WriteString(l[i:end])
-			i = end
-		case '$':
-			b.WriteString(`\$`)
-			i++
-		default:
-			b.WriteByte(l[i])
-			i++
+		case c == '<' && i+1 < len(l) && (l[i+1] == '/' || l[i+1] == '!' || unicode.IsLetter(rune(l[i+1]))):
+			if j := strings.IndexByte(l[i:], '>'); j > 0 {
+				end = i + j + 1
+			}
+		case c == '$':
+			b.WriteByte('\\')
 		}
+		b.WriteString(l[i:end])
+		i = end
 	}
 	return b.String()
 }
