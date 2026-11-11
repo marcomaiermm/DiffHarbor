@@ -33,7 +33,7 @@ A small Go server takes the webhook and runs your checks on the changed lines. A
 
 ## Highlights
 
-- **Verified findings.** A second, cheaper model checks each finding in the code and drops what it can't back up. A finding nothing in the codebase triggers today folds into the summary.
+- **Verified findings.** A second, cheaper model checks each finding in the code and drops what it can't back up. A minor finding nothing in the codebase triggers today folds into the summary; a major or critical one stays inline.
 - **Your own checks as context.** gitleaks, tsc, biome, eslint, oxlint, gofmt, vet, staticcheck, golangci-lint, deadcode, fallow, squawk, shellcheck, luacheck, actionlint, zizmor, osv-scanner and the tests of changed packages, on the changed lines.
 - **Incremental.** A push reviews only files whose changed lines changed. A rebase or a merge of main reviews nothing.
 - **Committable fixes.** A local fix becomes a suggestion block. Fixed findings get their threads resolved.
