@@ -540,6 +540,25 @@ func content(l string) (string, int) {
 	}
 }
 
+// tag is where the HTML tag starting at l[i] ends, past its ">": one in a quoted attribute doesn't end it. i+1 for
+// a "<" no ">" closes, which is text.
+func tag(l string, i int) int {
+	var quote byte
+	for j := i + 1; j < len(l); j++ {
+		switch c := l[j]; {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '>':
+			return j + 1
+		}
+	}
+	return i + 1
+}
+
 // ordered is the length of an ordered list item's marker at the start of t ("1. ", "12) "), 0 for none.
 func ordered(t string) int {
 	n := len(t) - len(strings.TrimLeft(t, "0123456789"))
@@ -578,9 +597,7 @@ func dollars(l string) string {
 				}
 			}
 		case c == '<' && i+1 < len(l) && (l[i+1] == '/' || l[i+1] == '!' || unicode.IsLetter(rune(l[i+1]))):
-			if j := strings.IndexByte(l[i:], '>'); j > 0 {
-				end = i + j + 1
-			}
+			end = tag(l, i)
 		case c == '$':
 			b.WriteByte('\\')
 		}
