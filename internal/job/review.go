@@ -188,7 +188,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	// the newest 100: about 150 KB at most, as each is cut to its first comment and three short replies
 	for _, t := range threads[max(0, len(threads)-100):] {
 		// with the replies: a point declined there would come back as a new finding
-		c := review.Comment{Path: t.Path, Line: cmp.Or(t.Line, t.Original), Body: text.Truncate(strings.ReplaceAll(forge.Redact(t.Body), forge.Mark, ""), 600) + t.Replies}
+		c := review.Comment{Path: t.Path, Line: cmp.Or(t.Line, t.Original), Body: text.Truncate(forge.Unseal(forge.Redact(t.Body)), 600) + t.Replies}
 		switch {
 		case t.Resolved && t.Addressed:
 			gone, addressed = append(gone, t), append(addressed, c)
@@ -261,6 +261,10 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		p.Resolve(open[i], sha)
 	}
 	post := r
+	rm, vm := cfg.Models()
+	// ponytail: a run is stamped with the configured models: after a fallback, or for a finding of a later review.json
+	// pass, they are not its own; per-pass models would need the agent to report them.
+	post.Run = forge.Stamp(forge.Run{Version: cmp.Or(Version, "dev"), Review: rm, Verify: vm, SHA: sha[:min(len(sha), 12)]})
 	var reopened int
 	var free map[string]bool
 	post.Comments, reopened, free = reopen(p, gone, sha, r.Comments)
@@ -272,7 +276,6 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		kind = "incremental"
 	}
 	if agent.FallbackUntil.Load() > started.UnixMilli() { // some passes may have run on the fallback
-		rm, _ := cfg.Models()
 		kind += " · fallback " + agent.FallbackFor(rm, "review")
 	}
 	if len(omitted) > 0 { // the rest only by name: findings cover part of the PR
@@ -344,7 +347,6 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		}
 		// what the new code is for, where no doc comment or commit says: one call, the provider's small model
 		if keys, texts := report.Asks(d); len(keys) > 0 {
-			rm, vm := cfg.Models()
 			d.Whys = map[string]string{}
 			for i, w := range review.Explain(ctx, agent.Pi{}, sb, cmp.Or(agent.VerifyFor(rm), vm, rm), forge.Redact(pr.Title), texts) {
 				d.Whys[keys[i]] = w

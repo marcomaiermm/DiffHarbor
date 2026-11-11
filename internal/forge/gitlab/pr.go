@@ -186,7 +186,7 @@ func (p *pr) Threads() ([]forge.Thread, error) {
 		}
 		ts = append(ts, forge.Thread{
 			ID: d.ID, Comment: n.ID, Resolved: n.Resolved, Path: n.Position.NewPath,
-			Line: n.Position.NewLine, Original: n.Position.NewLine, Body: n.Body, Replies: forge.Answers(rs),
+			Line: n.Position.NewLine, Original: n.Position.NewLine, Body: n.Body, Replies: forge.Answers(rs), Notes: rs,
 			Addressed: forge.Addressed(rs),
 		})
 	}
@@ -500,7 +500,7 @@ func (p *pr) place(c forge.Finding, lines map[string]old) (int, string, map[stri
 	if o.line > 0 {
 		pos["old_line"] = o.line
 	}
-	return line, inert(forge.Format(c, tag) + "\n\n" + forge.Mark), pos
+	return line, inert(forge.Format(c, tag) + forge.Seal(c)), pos
 }
 
 // discuss starts the discussion of one finding.

@@ -153,7 +153,14 @@ func TestSuggestion(t *testing.T) {
 	e := &forge.Event{}
 	e.PullRequest.Number = 1
 	p := &pr{e: e, api: "/repos/o/r", token: "t"}
-	n, err := p.Post("abc", review.Result{Comments: []review.Comment{c}}, nil, src, "f")
+	stamp := forge.Stamp(forge.Run{Version: "v1.0.0", Review: "lab/big", Verify: "lab/small", SHA: "abcdef1"})
+	n, err := p.Post("abc", review.Result{Comments: []review.Comment{c}, Run: stamp}, nil, src, "f")
+	if err != nil || len(sent) == 0 {
+		t.Fatalf("post: %v %v", err, sent)
+	}
+	if body, _ := sent[len(sent)-1]["body"].(string); !strings.HasSuffix(body, stamp+forge.Mark) || forge.ParseRun(body).Review != "lab/big" {
+		t.Fatalf("stamp: %q", body)
+	}
 	if err != nil || n != 1 || len(sent) != 2 || sent[0]["start_line"] != 11.0 || sent[0]["line"] != 12.0 ||
 		sent[1]["start_line"] != nil || sent[1]["line"] != 11.0 || !strings.Contains(sent[1]["body"].(string), "Suggested fix") {
 		t.Fatalf("post: %d %v %v", n, err, sent)

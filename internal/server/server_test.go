@@ -124,7 +124,7 @@ func TestDrop(t *testing.T) {
 		t.Fatal("retries a done delete")
 	}
 	job.Reports().Put(dir+"/versions.json", []byte(`[{"sha":"a"}]`)) // reopened, reviewed again
-	if err := drop(r); err != nil {
+	if err := drop(t.Context(), r); err != nil {
 		t.Fatal(err)
 	}
 	if vs, _ := job.Versions(dir); len(vs) != 1 {
@@ -164,7 +164,7 @@ func TestLateCloseRecreatedRepo(t *testing.T) {
 		t.Fatal("deletes queued:", len(q))
 	}
 	for range 2 {
-		if err := drop(<-q); err != nil {
+		if err := drop(t.Context(), <-q); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -749,7 +749,7 @@ func TestDropNoID(t *testing.T) {
 	latest.Lock()
 	save(deletingFile(e.Key()), e)
 	latest.Unlock()
-	if err := drop(e); err != nil || proc.Exists(deletingFile(e.Key())) {
+	if err := drop(t.Context(), e); err != nil || proc.Exists(deletingFile(e.Key())) {
 		t.Fatal(err, "or retried")
 	}
 	if vs, err := job.Versions(dir); err != nil || len(vs) != 0 {

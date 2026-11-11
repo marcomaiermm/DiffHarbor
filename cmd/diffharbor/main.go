@@ -110,6 +110,7 @@ func configure() server.Config {
 
 func main() {
 	log.Printf("diffharbor %s", version)
+	job.Version = version
 	cfg := configure()
 	if len(os.Args) > 1 && os.Args[1] == "stats" {
 		if len(os.Args) > 3 {

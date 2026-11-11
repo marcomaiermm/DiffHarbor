@@ -5,6 +5,7 @@ import (
 	"diffharbor/internal/review"
 	"fmt"
 	"html"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -17,6 +18,7 @@ type Finding struct {
 	review.Comment
 	Start, End int
 	OnDiff     bool
+	Run        string // forge.Stamp of the review that found it
 }
 
 // Format renders one finding: severity, title, explanation, a folded prompt for an AI agent. suggestion opens
@@ -54,6 +56,37 @@ func trim(s string) string { return strings.TrimSuffix(s, "\n") }
 // prefixed puts p before each of s's lines.
 func prefixed(p, s string) string {
 	return p + strings.ReplaceAll(s, "\n", "\n"+p)
+}
+
+// Run is what ran the review that posted a finding, read back from its stamp.
+type Run struct{ Version, Review, Verify, SHA string }
+
+// runTag is a finding's stamp, the last thing before Mark: a forged one a model quoted from the PR sits earlier in
+// the body. Fixed charset and lengths, so a stamp stays small; v= fits edge builds ("edge-" and a SHA).
+var runTag = regexp.MustCompile(`<!-- diffharbor:run v=([\w.+-]{1,64}) r=([\w./:@+-]{0,80}) x=([\w./:@+-]{0,80}) s=([0-9a-f]{7,40}) -->\r?\n` + Mark + `\s*$`)
+
+// Stamp is the run's hidden marker for Seal, "" when a value doesn't fit what ParseRun reads: a finding with none
+// counts with the fields empty.
+func Stamp(v Run) string {
+	s := fmt.Sprintf("<!-- diffharbor:run v=%s r=%s x=%s s=%s -->\n", v.Version, v.Review, v.Verify, v.SHA)
+	if r := ParseRun(s + Mark); r != v {
+		return ""
+	}
+	return s
+}
+
+// Seal is what ends a finding's comment: its run's stamp and Mark.
+func Seal(c Finding) string { return "\n\n" + c.Run + Mark }
+
+// Unseal is s without its stamp and Mark, for text that goes into a prompt or a page.
+func Unseal(s string) string { return strings.ReplaceAll(runTag.ReplaceAllString(s, ""), Mark, "") }
+
+// ParseRun reads the stamp off a comment of ours, the zero Run for none or a malformed one.
+func ParseRun(body string) Run {
+	if m := runTag.FindStringSubmatch(body); m != nil {
+		return Run{m[1], m[2], m[3], m[4]}
+	}
+	return Run{}
 }
 
 // Parse reads severity, title and the verifier's evidence back from a finding Format posted. A body Format
@@ -108,7 +141,7 @@ func Place(c *Finding, lines map[string]string) {
 // ponytail: by position only, a different finding next to a thread goes too; compare titles if that bites.
 func Split(r review.Result, threads []Thread, lines map[string]string) (inline, outside, folded []Finding) {
 	for _, rc := range r.Comments { // review.Analyze caps them: 10 and 5 nits per pass
-		c := Finding{Comment: rc}
+		c := Finding{Comment: rc, Run: r.Run}
 		near := 6 // distance to the closest thread on c's file
 		for _, t := range threads {
 			if t.Line > 0 && t.Path == c.Path {

@@ -76,7 +76,7 @@ func runJob(ctx context.Context, e *forge.Event) error {
 	f := forges[e.Forge]
 	switch {
 	case closing(e):
-		return drop(e)
+		return drop(ctx, e)
 	case e.Kind != "pull_request":
 		return job.Chat(ctx, f, mentions[e.Forge], e)
 	}
@@ -188,7 +188,7 @@ func closing(e *forge.Event) bool {
 
 // drop deletes a closed PR's reports while its deletingFile is there: none means it was reopened or done since.
 // The file stays until the delete worked, for retryDrops.
-func drop(e *forge.Event) error {
+func drop(ctx context.Context, e *forge.Event) error {
 	f := deletingFile(prKey(e))
 	if !proc.Exists(f) {
 		return nil
@@ -199,7 +199,7 @@ func drop(e *forge.Event) error {
 	_ = os.Remove(f)
 	// after the cleanup, best effort: what the PR's findings came to, counted once however often it closes
 	if fg := forges[e.Forge]; fg != nil {
-		if err := job.Outcomes(fg, e); err != nil {
+		if err := job.Outcomes(ctx, fg, e); err != nil {
 			log.Println(e.Key(), "outcomes:", err)
 		}
 	}

@@ -422,6 +422,18 @@ func (Pi) Run(ctx context.Context, sb *proc.Sandbox, name, system, prompt, task,
 	return runPi(ctx, sb, name, system, m, true, "", "@"+file, task) // task is ours, the same for every PR
 }
 
+// Ask runs one pass without tools and without a checkout: it answers from prompt alone.
+func (Pi) Ask(ctx context.Context, sb *proc.Sandbox, name, system, prompt, task, m string) (string, error) {
+	file := filepath.Join(sb.Dir, name+".md")
+	if err := sb.WriteFile(ctx, file, []byte(prompt)); err != nil {
+		return "", err
+	}
+	if _, err := proc.Run(sb.Command(ctx, sb.Dir, nil, "mkdir", "-p", sb.Repo())); err != nil { // pi's working dir
+		return "", err
+	}
+	return runPi(ctx, sb, name, system, m, false, "", "@"+file, task)
+}
+
 // Continue resumes the pass's session without tools, so a model that ended
 // without JSON has to answer with text/JSON.
 func (Pi) Continue(ctx context.Context, sb *proc.Sandbox, name, system, task, m string) (string, error) {

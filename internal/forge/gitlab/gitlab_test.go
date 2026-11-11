@@ -358,7 +358,14 @@ func TestPostDiscussions(t *testing.T) {
 	fix := review.Comment{Path: "a.go", Line: 11, Severity: "major", Body: "b", Existing: "\tif x {\n\t\treturn\n", Fix: "\tif x != nil {\n\t\treturn\n"}
 	ctx := review.Comment{Path: "a.go", Line: 13, Body: "context line"}
 	out := review.Comment{Path: "b.go", Line: 1, Body: "elsewhere"}
-	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{fix, ctx, out}}, nil, src, "f")
+	stamp := forge.Stamp(forge.Run{Version: "v1.0.0", Review: "lab/big", Verify: "lab/small", SHA: "abcdef1"})
+	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{fix, ctx, out}, Run: stamp}, nil, src, "f")
+	if err != nil || len(discussions) == 0 {
+		t.Fatalf("post: %v %v", err, discussions)
+	}
+	if body, _ := discussions[0]["body"].(string); !strings.HasSuffix(body, stamp+forge.Mark) || forge.ParseRun(body).Verify != "lab/small" {
+		t.Fatalf("stamp: %q", body)
+	}
 	pos := func(i int) map[string]any { return discussions[i]["position"].(map[string]any) }
 	if err != nil || n != 3 || len(discussions) != 3 || !first ||
 		!strings.Contains(discussions[0]["body"].(string), "```suggestion:-1+0\n") || pos(0)["new_line"] != 12.0 ||
