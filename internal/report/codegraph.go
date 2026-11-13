@@ -32,7 +32,7 @@ for (const { db: file, prefix } of dbs) {
     n.path = prefix + n.path;
     if (!other(n.path, prefix)) out.nodes.push(n);
   }
-  for (const e of db.prepare("select e.line, s.name sname, s.kind skind, s.file_path spath, s.start_line sline," +
+  for (const e of db.prepare("select e.line, e.kind, s.name sname, s.kind skind, s.file_path spath, s.start_line sline," +
     " s.end_line send, t.name tname, t.file_path tpath, t.start_line tline from edges e join nodes s on s.id = e.source" +
     " join nodes t on t.id = e.target where e.kind in ('calls', 'references', 'instantiates', 'extends', 'implements')" +
     " and t.kind not in " + skip + " and (t.name in (select value from json_each(?1)) or s.name in (select value from json_each(?1)))").all(list)) {
@@ -50,13 +50,7 @@ type cgIndex struct {
 		Name, Path string
 		Line, End  int
 	}
-	Edges []struct {
-		Line                int // 0: unknown, the source's first line that names it
-		SName, SKind, SPath string
-		SLine, SEnd         int
-		TName, TPath        string
-		TLine               int
-	}
+	Edges []cgEdge
 }
 
 // codegraph is the indexes of the checkout at repo, the root's and those of the directories above paths, for the
@@ -81,9 +75,12 @@ func codegraph(sb *proc.Sandbox, repo string, wanted map[string]bool, paths []st
 		return nil
 	}
 	idx := cgIndex{dbs: dbs}
-	if !runNode(sb, cgQuery, map[string]any{"names": slices.Collect(maps.Keys(wanted)), "dbs": dbs}, &idx) {
+	names := slices.Collect(maps.Keys(wanted))
+	if !runNode(sb, cgQuery, map[string]any{"names": names, "dbs": dbs}, &idx) {
 		return nil
 	}
+	idx.vtaEdges(sb, repo, names)
+	idx.tsEdges(sb, repo, names)
 	return &idx
 }
 
@@ -145,6 +142,9 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 		if e.SKind == "file" {
 			in = ""
 		}
+		if e.TPath == "" { // a store only named (a string, SQL's table): no declaration to point at
+			continue
+		}
 		if from := find(e.SPath, e.SName, e.SLine); from != nil && known[from] != nil {
 			if c := e.TPath + "\x00" + e.TName; !slices.Contains(from.Calls, c) && len(from.Calls) < maxCalls {
 				from.Calls = append(from.Calls, c)
@@ -188,8 +188,19 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 
 func abs(n int) int { return max(n, -n) }
 
+// added is the edges VTA and the checker add that point at a declaration: cgTests walks them with the index's.
+func (idx *cgIndex) added() []cgEdge {
+	var es []cgEdge
+	for _, e := range idx.Edges {
+		if e.By != "" && e.TPath != "" {
+			es = append(es, e)
+		}
+	}
+	return es
+}
+
 // cgTests is which tests reach each of the starts, the diff's declarations an index knows. tests: by the index's
-// resolved uses, its callers' and theirs, nearest first, test code nothing calls: the runner does; partial past maxNodes. untested: not even a guess reaches a
+// resolved uses and those VTA and the checker add (extra: their routes start ways), its callers' and theirs, nearest first, test code nothing calls: the runner does; partial past maxNodes. untested: not even a guess reaches a
 // test. That guess is every line of the checkout that names it (git grep), what declaration that line is in, the
 // lines that name that one and so on: a call in a macro, through an interface, by reflection is one the index
 // misses. A line in a file no index read, or at a file's top level, may run anything: no claim, as past maxNames
@@ -200,19 +211,40 @@ const cgTests = `
 const { DatabaseSync } = require("node:sqlite");
 const { execFileSync } = require("child_process");
 const fs = require("fs"), base = require("path").basename;
-const { repo, dbs, starts } = JSON.parse(fs.readFileSync(0, "utf8"));
+const { repo, dbs, starts, extra } = JSON.parse(fs.readFileSync(0, "utf8"));
+const byTarget = new Map(); // "path NUL name": the edges VTA and the checker add into it, the index doesn't have
+for (const e of extra || []) { const k = e.TPath + "\0" + e.TName; byTarget.set(k, [...(byTarget.get(k) || []), e]) }
 const maxNodes = 5000, maxNames = 2000, maxMentions = 1000, maxLines = 50000;
 const open = dbs.map(d => {
   const db = new DatabaseSync(d.db, { readOnly: true });
   return { prefix: d.prefix, files: new Set(db.prepare("select path from files").all().map(r => r.path)),
-    named: db.prepare("select id, start_line line from nodes where file_path = ? and name = ? and kind not in ('file', 'import')"),
+    named: db.prepare("select id, kind, start_line line from nodes where file_path = ? and name = ? and kind not in ('file', 'import')"),
+    node: db.prepare("select file_path path, name, start_line line, end_line end from nodes where id = ?"),
+    file: db.prepare("select id, start_line line from nodes where file_path = ? and kind = 'file'"),
     into: db.prepare("select s.id, s.kind, s.name, s.file_path path, s.start_line line, e.line at from edges e join nodes s on s.id = e.source" +
       " where e.target = ? and e.kind in ('calls', 'references', 'instantiates')"),
     around: db.prepare("select kind, name, start_line line from nodes where file_path = :f and start_line <= :l and end_line >= :l" +
       " and kind != 'file' order by start_line desc, end_line limit 1") };
 }).sort((a, b) => b.prefix.length - a.prefix.length);
 const owner = p => open.find(d => p.startsWith(d.prefix));
-const into = (d, id) => { d.memo ??= new Map(); if (!d.memo.has(id)) d.memo.set(id, d.into.all(id)); return d.memo.get(id) };
+// into is who names id: the index's edges and the added ones, a route's (SKind "route") as a caller of its own
+const into = (d, id) => {
+  d.memo ??= new Map();
+  if (d.memo.has(id)) return d.memo.get(id);
+  const route = String(id).startsWith("route\0"), rows = route ? [] : d.into.all(id), n = !route && d.node.get(id);
+  for (const e of (n && byTarget.get(d.prefix + n.path + "\0" + n.name)) || []) {
+    if (e.TLine < n.line || e.TLine > n.end || !e.SPath.startsWith(d.prefix)) continue; // another of that name
+    const sp = e.SPath.slice(d.prefix.length);
+    if (e.SKind === "route") {
+      rows.push({ id: "route\0" + e.SPath + "\0" + e.SName, kind: "route", name: e.SName, path: sp, line: e.SLine, at: e.Line, route: e.SName });
+      continue;
+    }
+    const s = e.SKind === "file" ? d.file.get(sp) : d.named.all(sp, e.SName).sort((a, b) => Math.abs(a.line - e.SLine) - Math.abs(b.line - e.SLine))[0];
+    if (s && !rows.some(r => r.id === s.id)) rows.push({ id: s.id, kind: s.kind || "file", name: e.SName, path: sp, line: s.line, at: e.Line });
+  }
+  d.memo.set(id, rows);
+  return rows;
+};
 const src = new Map();
 const lines = p => { if (!src.has(p)) { let t = ""; try { t = fs.readFileSync(repo + "/" + p, "utf8") } catch {} src.set(p, t.split("\n")) } return src.get(p) };
 const testPath = p => { // codegraph's isTestPath
@@ -344,7 +376,8 @@ function ways(d, start, name, path, line) {
     }
     if (depth.get(id) >= maxDepth) continue;
     for (const s of callers) {
-      const p = d.prefix + s.path, r = s.at && routeAt(p, s.line, s.at);
+      const p = d.prefix + s.path, by = s.route && /^(\S+)\s+(.*)$/.exec(s.route); // "get /orders", "query posts"
+      const r = by ? { method: by[1].toUpperCase(), route: by[2], line: s.line } : s.at && routeAt(p, s.line, s.at);
       if (r) {
         const k = r.method + " " + r.route + " " + p;
         if (!seen.has(k) && out.length < maxWays) seen.add(k), out.push({ ...r, path: p, chain: chain(id, p, s.at) });
@@ -394,7 +427,7 @@ func (idx *cgIndex) tests(sb *proc.Sandbox, root *os.Root, changed map[string]bo
 		Partial, Untested bool
 		Ways              []Way
 	}
-	if len(starts) == 0 || !runNode(sb, cgTests, map[string]any{"repo": sb.Repo(), "dbs": idx.dbs, "starts": starts}, &got) {
+	if len(starts) == 0 || !runNode(sb, cgTests, map[string]any{"repo": sb.Repo(), "dbs": idx.dbs, "starts": starts, "extra": idx.added()}, &got) {
 		return
 	}
 	lines := sources(root)

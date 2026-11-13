@@ -32,6 +32,10 @@ RUN apk add --no-cache gcompat libgcc libstdc++ && npm install -g --ignore-scrip
     && P=/usr/local/lib/node_modules/@colbymchenry/codegraph/node_modules/@colbymchenry/codegraph-linux-x64 && rm "$P/node" /usr/local/bin/codegraph \
     && printf '#!/bin/sh\nCODEGRAPH_ALLOW_UNSAFE_NODE=1 exec node --liftoff-only --disable-warning=ExperimentalWarning %s/lib/dist/bin/codegraph.js "$@"\n' "$P" > /usr/local/bin/codegraph \
     && chmod 755 /usr/local/bin/codegraph && DO_NOT_TRACK=1 codegraph version
+# report's tsedges.js: TypeScript's API (7.1+) over its native checker, a static Go binary; the JS client's source maps
+# and types aren't run (-3.4 MB). tsc stays off PATH: a repo's checks run its own.
+RUN npm install -g --ignore-scripts --no-audit --no-fund typescript@7.1.0-beta && npm cache clean --force && rm -f /usr/local/bin/tsc \
+    && find /usr/local/lib/node_modules/typescript/dist \( -name '*.map' -o -name '*.d.ts' \) -delete
 USER node
 RUN pi install npm:@ff-labs/pi-fff@0.11.0 && rm -rf /home/node/.npm
 USER root
