@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"context"
+	"diffharbor/internal/checks"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
 	"encoding/json"
@@ -27,8 +28,11 @@ const out = { nodes: [], edges: [] }, skip = "('file', 'import')", list = JSON.s
 const other = (p, own) => dbs.some(d => d.prefix.length > own.length && p.startsWith(d.prefix)); // a deeper index's
 for (const { db: file, prefix } of dbs) {
   const db = new DatabaseSync(file, { readOnly: true });
-  for (const n of db.prepare("select name, file_path path, start_line line, end_line end from nodes where kind not in " + skip +
-    " and name in (select value from json_each(?))").all(list)) {
+  // owner: the class a method sits in, for the map's {class}.{method}
+  for (const n of db.prepare("select n.name, n.kind, n.file_path path, n.start_line line, n.end_line end," +
+    " case when n.kind = 'method' then (select c.name from nodes c where c.file_path = n.file_path and c.kind in ('class', 'interface', 'struct', 'trait', 'enum', 'component')" +
+    " and c.start_line <= n.start_line and c.end_line >= n.end_line order by c.start_line desc limit 1) end owner from nodes n where n.kind not in " + skip +
+    " and n.name in (select value from json_each(?))").all(list)) {
     n.path = prefix + n.path;
     if (!other(n.path, prefix)) out.nodes.push(n);
   }
@@ -47,8 +51,8 @@ process.stdout.write(JSON.stringify(out));
 type cgIndex struct {
 	dbs   []cgDB
 	Nodes []struct {
-		Name, Path string
-		Line, End  int
+		Name, Path, Kind, Owner string
+		Line, End               int
 	}
 	Edges []cgEdge
 }
@@ -128,11 +132,29 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 		seen      map[Ref]bool
 		files     map[string]bool
 		n, nOut   int
+		nTest     int         // of nOut, in test files
+		here      map[Ref]int // a site's place in Here
+	}
+	// a class's methods, named {class}.{method}: the scan of other languages reads only the lines that start a
+	// declaration. The map's calls into the methods the PR changes.
+	fresh, seen := map[string][]Symbol{}, map[key]bool{}
+	for _, n := range idx.Nodes {
+		if k := (key{n.Path, n.Owner + "." + n.Name}); n.Kind == "method" && n.Owner != "" && changed[n.Path] && path.Ext(n.Path) != ".go" && !seen[k] && find(n.Path, n.Name, n.Line) == nil {
+			seen[k] = true
+			fresh[k.name] = append(fresh[k.name], Symbol{Kind: "method", Path: n.Path, Line: n.Line})
+		}
+	}
+	for qn, ss := range fresh {
+		syms[qn] = append(syms[qn], ss...)
+		plain := qn[strings.LastIndex(qn, ".")+1:]
+		for i := range syms[qn] {
+			at[key{syms[qn][i].Path, plain}] = append(at[key{syms[qn][i].Path, plain}], &syms[qn][i])
+		}
 	}
 	known := map[*Symbol]*uses{}
 	for _, n := range idx.Nodes {
 		if s := find(n.Path, n.Name, n.Line); s != nil && known[s] == nil {
-			known[s] = &uses{seen: map[Ref]bool{}, files: map[string]bool{}}
+			known[s] = &uses{seen: map[Ref]bool{}, files: map[string]bool{}, here: map[Ref]int{}}
 			s.From, s.To = n.Line, n.End
 		}
 	}
@@ -161,10 +183,14 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 			}
 		}
 		u, r := known[to], Ref{Path: e.SPath, Line: line, In: in, Text: cut(strings.TrimSpace(lines.text(e.SPath, line)), maxText)}
-		if u.seen[Ref{Path: r.Path, Line: r.Line}] {
+		site := Ref{Path: r.Path, Line: r.Line}
+		if u.seen[site] {
+			if i, ok := u.here[site]; ok && e.Kind == "calls" { // VTA's and the checker's edges come after the index's: a call beats a name
+				to.HereKind[i] = "calls"
+			}
 			continue
 		}
-		u.seen[Ref{Path: r.Path, Line: r.Line}] = true
+		u.seen[site] = true
 		u.n++
 		u.files[r.Path] = true
 		if len(u.refs) < maxRefs {
@@ -172,17 +198,21 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 		}
 		switch {
 		case changed[r.Path]:
-			to.Here = append(to.Here, r.Path+":"+strconv.Itoa(r.Line))
+			u.here[site] = len(to.Here)
+			to.Here, to.HereKind = append(to.Here, r.Path+":"+strconv.Itoa(r.Line)), append(to.HereKind, e.Kind)
 		case len(u.out) < maxRefs:
 			u.out = append(u.out, r)
 			fallthrough
 		default:
 			u.nOut++
+			if checks.IsTest(r.Path) {
+				u.nTest++
+			}
 		}
 	}
 	for s, u := range known {
 		s.Refs, s.Uses, s.Files, s.Exact = u.refs, u.n, len(u.files), true
-		s.Outside, s.NOutside = u.out, u.nOut
+		s.Outside, s.NOutside, s.NOutsideTests = u.out, u.nOut, u.nTest
 	}
 }
 

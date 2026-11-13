@@ -165,9 +165,11 @@ func vtaCalls(dir string, names []string) ([]cgEdge, error) {
 			if s.Signature.Recv() != nil {
 				kind = "method"
 			}
-			out = append(out, cgEdge{Line: at.Line, Kind: "calls", By: "vta", SName: s.Name(), SKind: kind,
+			out = append(out, cgEdge{
+				Line: at.Line, Kind: "calls", By: "vta", SName: s.Name(), SKind: kind,
 				SPath: rel(sp), SLine: sp.Line, SEnd: prog.Fset.Position(s.Syntax().End()).Line,
-				TName: t.Name(), TPath: rel(tp), TLine: tp.Line})
+				TName: t.Name(), TPath: rel(tp), TLine: tp.Line,
+			})
 		}
 	}
 	return out, nil

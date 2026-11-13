@@ -216,8 +216,10 @@ func TestSettings(t *testing.T) {
 	if _, err := LoadSettings(`{"review_model":"--tools=bash"}`); err == nil {
 		t.Error("flag as model accepted")
 	}
-	for _, bad := range []string{`{"passes":[{},{},{},{}]}`, `{"passes":[{"max_lines":10}]}`, `{"passes":[{"model":"x/y"}]}`,
-		`{"passes":[{},{"model":"--tools=bash"}]}`, `{"passes":[{},{"min_lines":10,"max_lines":5}]}`} {
+	for _, bad := range []string{
+		`{"passes":[{},{},{},{}]}`, `{"passes":[{"max_lines":10}]}`, `{"passes":[{"model":"x/y"}]}`,
+		`{"passes":[{},{"model":"--tools=bash"}]}`, `{"passes":[{},{"min_lines":10,"max_lines":5}]}`,
+	} {
 		if _, err := LoadSettings(bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
@@ -407,8 +409,11 @@ func TestProfile(t *testing.T) {
 		path, sev string
 		fold      bool
 	}{
-		{"a.go", "major", false}, {"a.go", "minor", true}, {"a.go", "nit", true},
-		{"web/a.ts", "minor", false}, {"web/a.ts", "nit", false},
+		{"a.go", "major", false},
+		{"a.go", "minor", true},
+		{"a.go", "nit", true},
+		{"web/a.ts", "minor", false},
+		{"web/a.ts", "nit", false},
 		{"api/a.go", "minor", true}, // the package sets no profile: the top's
 	} {
 		if got := cfg.Fold(Comment{Path: tc.path, Severity: tc.sev}); got != tc.fold {

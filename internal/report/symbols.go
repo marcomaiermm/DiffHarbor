@@ -35,8 +35,10 @@ type Symbol struct {
 	Sev   string   `json:"sev,omitempty"`   // the heaviest finding on it that matters: "critical", "major"
 	Calls []string `json:"-"`               // exact: the declarations it names, path NUL name: the page's graphs
 	// exact: the first maxRefs places outside the diff's files that name it, and how many: what the change reaches
-	Outside  []Ref `json:"-"`
-	NOutside int   `json:"-"`
+	Outside       []Ref    `json:"-"`
+	NOutside      int      `json:"-"`
+	NOutsideTests int      `json:"-"` // of NOutside, the places in test files, also past the maxRefs kept
+	HereKind      []string `json:"-"` // exact: the index's kind of each Here entry: calls, references, renders, reads …
 	// exact, in the diff's files: the tests that reach it through the index's uses, nearest first: "a_test.go
 	// TestSave"; Partial, past what a walk reads. Untested: no test reaches it, not even by name: see cgTests.
 	Tests             []string `json:"-"`

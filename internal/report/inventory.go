@@ -433,8 +433,10 @@ type arow struct {
 
 // API is the inventory by directory, each in the order new, changed, moved, removed.
 func (v view) API() []apkg {
-	marks := map[string][2]string{"new": {"+", "new"}, "signature": {"~", "changed"}, "body": {"~", "changed"},
-		"reworked": {"→", "moved"}, "moved": {"→", "moved"}, "removed": {"−", "removed"}}
+	marks := map[string][2]string{
+		"new": {"+", "new"}, "signature": {"~", "changed"}, "body": {"~", "changed"},
+		"reworked": {"→", "moved"}, "moved": {"→", "moved"}, "removed": {"−", "removed"},
+	}
 	var ps []apkg
 	at := map[string]int{}
 	for _, g := range v.Inventory {

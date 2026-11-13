@@ -345,6 +345,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			Conflicts: pr.Mergeable != nil && !*pr.Mergeable, Forge: p.Links(),
 			Docs: docs, Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(sb, raw),
 		}
+		d.Map = report.BuildMap(sb, d, nil) // the review's outside calls go in when it names them
 		// what the new code is for, where no doc comment or commit says: one call, the provider's small model
 		if keys, texts := report.Asks(d); len(keys) > 0 {
 			d.Whys = map[string]string{}
