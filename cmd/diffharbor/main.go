@@ -1,9 +1,10 @@
-// GitHub/GitLab webhook -> checks + Pi review + Pi verification -> one PR review with inline comments. Stdlib only.
+// GitHub/GitLab webhook -> checks + Pi review + Pi verification -> one PR review with inline comments. Stdlib and golang.org/x/tools (VTA).
 //
 //	diffharbor       serve on :3000
 //	diffharbor login log in to a model subscription (ChatGPT/Codex) in Pi, stored in $DATA_DIR/pi
 //	diffharbor dry   review `git diff HEAD` of cwd, print JSON
 //	diffharbor stats [repo] print what became of the findings of closed PRs, per repo: owner/repo, gitlab/group/project
+//	diffharbor vta   the calls VTA resolves in the Go module of cwd (report runs it)
 //	go test         self-check
 package main
 
@@ -109,6 +110,13 @@ func configure() server.Config {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "vta" { // report's, in a job's sandbox: stdout is its answer
+		if err := report.VTA(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	log.Printf("diffharbor %s", version)
 	job.Version = version
 	cfg := configure()
