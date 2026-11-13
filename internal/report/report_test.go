@@ -608,7 +608,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 	s := Symbols(sb, "+++ b/a.go\n+\tSave()\n+\t_ = Max\n+func Handle() {\n")
 	want := Symbol{
 		Kind: "function", Pkg: "a", Unit: "package", Sig: "func Save()", Path: "a.go", Line: 5, From: 5, To: 5, Uses: 2, Files: 2, Exact: true,
-		Refs: []Ref{{Path: "a.go", Line: 8, In: "Handle", Text: "Save()"}, use}, Here: []string{"a.go:8"},
+		Refs: []Ref{{Path: "a.go", Line: 8, In: "Handle", Text: "Save()"}, use}, Here: []string{"a.go:8"}, HereKind: []string{"calls"},
 		Outside: []Ref{use}, NOutside: 1, // b.go isn't in the diff
 	}
 	if !reflect.DeepEqual(s["Save"], []Symbol{want}) {

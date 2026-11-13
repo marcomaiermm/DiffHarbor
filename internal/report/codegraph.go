@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"context"
+	"diffharbor/internal/checks"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
 	"encoding/json"
@@ -22,20 +23,26 @@ import (
 // go.mod: its files are that one's, their paths prefixed with its directory.
 const cgQuery = `
 const { DatabaseSync } = require("node:sqlite");
-const { names, dbs } = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const { names, dbs, paths } = JSON.parse(require("fs").readFileSync(0, "utf8"));
 const out = { nodes: [], edges: [] }, skip = "('file', 'import')", list = JSON.stringify(names);
 const other = (p, own) => dbs.some(d => d.prefix.length > own.length && p.startsWith(d.prefix)); // a deeper index's
 for (const { db: file, prefix } of dbs) {
   const db = new DatabaseSync(file, { readOnly: true });
-  for (const n of db.prepare("select name, file_path path, start_line line, end_line end from nodes where kind not in " + skip +
-    " and name in (select value from json_each(?))").all(list)) {
+  // a changed file's methods too: git's hunk header names the class, not a method changed below its first lines
+  const own = JSON.stringify(paths.filter(p => p.startsWith(prefix)).map(p => p.slice(prefix.length)));
+  // owner: the class a method sits in, for the map's {class}.{method}
+  for (const n of db.prepare("select n.name, n.kind, n.file_path path, n.start_line line, n.end_line end," +
+    " case when n.kind = 'method' then (select c.name from nodes c where c.file_path = n.file_path and c.kind in ('class', 'interface', 'struct', 'trait', 'enum', 'component')" +
+    " and c.start_line <= n.start_line and c.end_line >= n.end_line order by c.start_line desc limit 1) end owner from nodes n where n.kind not in " + skip +
+    " and (n.name in (select value from json_each(?1)) or (n.kind = 'method' and n.file_path in (select value from json_each(?2))))").all(list, own)) {
     n.path = prefix + n.path;
     if (!other(n.path, prefix)) out.nodes.push(n);
   }
   for (const e of db.prepare("select e.line, e.kind, s.name sname, s.kind skind, s.file_path spath, s.start_line sline," +
     " s.end_line send, t.name tname, t.file_path tpath, t.start_line tline from edges e join nodes s on s.id = e.source" +
     " join nodes t on t.id = e.target where e.kind in ('calls', 'references', 'instantiates', 'extends', 'implements')" +
-    " and t.kind not in " + skip + " and (t.name in (select value from json_each(?1)) or s.name in (select value from json_each(?1)))").all(list)) {
+    " and t.kind not in " + skip + " and (t.name in (select value from json_each(?1)) or s.name in (select value from json_each(?1))" +
+    " or (t.kind = 'method' and t.file_path in (select value from json_each(?2))))").all(list, own)) {
     e.spath = prefix + e.spath;
     e.tpath = prefix + e.tpath;
     if (!other(e.spath, prefix) && !other(e.tpath, prefix)) out.edges.push(e);
@@ -46,11 +53,13 @@ process.stdout.write(JSON.stringify(out));
 
 type cgIndex struct {
 	dbs   []cgDB
-	Nodes []struct {
-		Name, Path string
-		Line, End  int
-	}
+	Nodes []cgNode
 	Edges []cgEdge
+}
+
+type cgNode struct {
+	Name, Path, Kind, Owner string
+	Line, End               int
 }
 
 // codegraph is the indexes of the checkout at repo, the root's and those of the directories above paths, for the
@@ -76,7 +85,7 @@ func codegraph(sb *proc.Sandbox, repo string, wanted map[string]bool, paths []st
 	}
 	idx := cgIndex{dbs: dbs}
 	names := slices.Collect(maps.Keys(wanted))
-	if !runNode(sb, cgQuery, map[string]any{"names": names, "dbs": dbs}, &idx) {
+	if !runNode(sb, cgQuery, map[string]any{"names": names, "dbs": dbs, "paths": paths}, &idx) {
 		return nil
 	}
 	idx.vtaEdges(sb, repo, names)
@@ -102,10 +111,45 @@ func runNode(sb *proc.Sandbox, script string, in, out any) bool {
 	return err == nil && json.Unmarshal(got, out) == nil
 }
 
+// addedIn is whether the diff adds a line of path between from and to.
+func addedIn(added map[string]bool, p string, from, to int) bool {
+	for l := from; l <= to; l++ {
+		if added[p+":"+strconv.Itoa(l)] {
+			return true
+		}
+	}
+	return false
+}
+
+// freshMethods are a class's methods, named {class}.{method}: the scan of other languages reads only the lines that
+// start a declaration. The map's calls into the methods the PR changes: those with an added line, up to maxSymbols
+// in all. known: the scan has it.
+func (idx *cgIndex) freshMethods(changed, added map[string]bool, syms map[string][]Symbol, known func(cgNode) bool) map[string][]Symbol {
+	total := 0
+	for _, ss := range syms {
+		total += len(ss)
+	}
+	fresh, seen := map[string][]Symbol{}, map[string]bool{}
+	for _, n := range idx.Nodes {
+		qn := n.Owner + "." + n.Name
+		if n.Kind != "method" || n.Owner == "" || !changed[n.Path] || path.Ext(n.Path) == ".go" || seen[n.Path+"\x00"+qn] || total >= maxSymbols {
+			continue
+		}
+		if !addedIn(added, n.Path, n.Line, n.End) || known(n) {
+			continue
+		}
+		seen[n.Path+"\x00"+qn], total = true, total+1
+		fresh[qn] = append(fresh[qn], Symbol{Kind: "method", Path: n.Path, Line: n.Line})
+	}
+	return fresh
+}
+
 // exact replaces what the name scan guessed with the index's resolved edges, for the declarations the index knows:
 // its lines (From, To), who names one (Refs, Uses, Files; Here, the lines of the diff's files; Outside, those of
 // the others), what it names (Calls). Those it doesn't know, a Go struct's fields, keep the scan's.
-func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[string][]Symbol) {
+//
+//nolint:gocognit // the index's edges step by step, each step a few lines
+func (idx *cgIndex) exact(root *os.Root, changed, added map[string]bool, syms map[string][]Symbol) {
 	type key struct{ path, name string }
 	at := map[key][]*Symbol{}
 	for name, ss := range syms {
@@ -128,11 +172,21 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 		seen      map[Ref]bool
 		files     map[string]bool
 		n, nOut   int
+		nTest     int         // of nOut, in test files
+		here      map[Ref]int // a site's place in Here
+	}
+	fresh := idx.freshMethods(changed, added, syms, func(n cgNode) bool { return find(n.Path, n.Name, n.Line) != nil })
+	for qn, ss := range fresh {
+		syms[qn] = append(syms[qn], ss...)
+		plain := qn[strings.LastIndex(qn, ".")+1:]
+		for i := range syms[qn] {
+			at[key{syms[qn][i].Path, plain}] = append(at[key{syms[qn][i].Path, plain}], &syms[qn][i])
+		}
 	}
 	known := map[*Symbol]*uses{}
 	for _, n := range idx.Nodes {
 		if s := find(n.Path, n.Name, n.Line); s != nil && known[s] == nil {
-			known[s] = &uses{seen: map[Ref]bool{}, files: map[string]bool{}}
+			known[s] = &uses{seen: map[Ref]bool{}, files: map[string]bool{}, here: map[Ref]int{}}
 			s.From, s.To = n.Line, n.End
 		}
 	}
@@ -161,10 +215,14 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 			}
 		}
 		u, r := known[to], Ref{Path: e.SPath, Line: line, In: in, Text: cut(strings.TrimSpace(lines.text(e.SPath, line)), maxText)}
-		if u.seen[Ref{Path: r.Path, Line: r.Line}] {
+		site := Ref{Path: r.Path, Line: r.Line}
+		if u.seen[site] {
+			if i, ok := u.here[site]; ok && (e.Kind == "calls" || e.Kind == "renders") { // VTA's and the checker's edges come after the index's: a call beats a name
+				to.HereKind[i] = e.Kind
+			}
 			continue
 		}
-		u.seen[Ref{Path: r.Path, Line: r.Line}] = true
+		u.seen[site] = true
 		u.n++
 		u.files[r.Path] = true
 		if len(u.refs) < maxRefs {
@@ -172,17 +230,21 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 		}
 		switch {
 		case changed[r.Path]:
-			to.Here = append(to.Here, r.Path+":"+strconv.Itoa(r.Line))
+			u.here[site] = len(to.Here)
+			to.Here, to.HereKind = append(to.Here, r.Path+":"+strconv.Itoa(r.Line)), append(to.HereKind, e.Kind)
 		case len(u.out) < maxRefs:
 			u.out = append(u.out, r)
 			fallthrough
 		default:
 			u.nOut++
+			if checks.IsTest(r.Path) {
+				u.nTest++
+			}
 		}
 	}
 	for s, u := range known {
 		s.Refs, s.Uses, s.Files, s.Exact = u.refs, u.n, len(u.files), true
-		s.Outside, s.NOutside = u.out, u.nOut
+		s.Outside, s.NOutside, s.NOutsideTests = u.out, u.nOut, u.nTest
 	}
 }
 

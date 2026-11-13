@@ -63,6 +63,7 @@ type Data struct {
 	Docs        []review.Doc      // the reference docs the review read: listed by title and link, never their text
 	Tests       checks.Tests      // what the checks' test runs report at SHA; empty when none ran
 	Sources     map[string]string // the head's text of changed files, for the lines between hunks (see Sources)
+	Map         *Map              // the map of the change (BuildMap); nil when there is none to draw
 }
 
 // Forge is how the forge hosting the repository names and links what a report points to.

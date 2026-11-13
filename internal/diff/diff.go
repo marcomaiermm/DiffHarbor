@@ -210,6 +210,10 @@ func Filter(diff, root string, only map[string]bool, ignore func(string) bool, n
 	return parts, left
 }
 
+// Generated tells whether the file p, whose diff is f, says it is generated: in its diff, or in its first lines in
+// root ("" reads no file).
+func Generated(root, p, f string) bool { return generated.MatchString(f) || generatedAt(root, p) }
+
 // generatedAt tells whether the file p in root starts with a generated header, its diff aside: a change lower in
 // the file has no hunk at its first lines.
 func generatedAt(root, p string) bool {
