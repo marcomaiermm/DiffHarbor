@@ -352,7 +352,6 @@ func (p *pr) discussions(inline, rest, folded []forge.Finding, raw, footer strin
 	}
 	lines := olds(raw)
 	var posted []forge.Finding
-	p.posted = nil
 	defer func() { // a refused or failed discussion: the note says what was posted
 		if len(posted) < len(inline) {
 			if _, e := p.Note(id, forge.Summary(posted, rest, folded, footer)); err == nil {
@@ -515,7 +514,8 @@ func (p *pr) discuss(c forge.Finding, lines map[string]old) (int64, error) {
 	var d struct {
 		Notes []struct{ ID int64 }
 	}
-	err := call("POST", p.mr+"/discussions", map[string]any{"body": body, "position": pos}, &d)
+	b, _, err := do("POST", p.mr+"/discussions", map[string]any{"body": body, "position": pos})
+	_ = json.Unmarshal(b, &d) // best effort: the discussion is posted, only the link needs its note id
 	if len(d.Notes) == 0 {
 		return 0, err
 	}

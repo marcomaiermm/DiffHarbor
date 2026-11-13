@@ -744,6 +744,23 @@ func TestFailing(t *testing.T) {
 	}
 }
 
+// The thread ids carry the keys the report looks findings up by: the open threads' and the posted ones, not a resolved one's.
+func TestThreadIDs(t *testing.T) {
+	open := forge.Thread{ID: "a", Comment: 11, Path: "a.go", Line: 5, Body: "_🟠 Major_ · **x**"}
+	resolved := forge.Thread{ID: "b", Comment: 12, Path: "b.go", Line: 5, Body: "_🟠 Major_ · **y**", Resolved: true}
+	fresh := review.Comment{Path: "c.go", Line: 1, Severity: "major", Title: "z"}
+	threads := []forge.Thread{open, resolved}
+	ids := threadIDs(threads, map[string]int64{report.ThreadKey(fresh): 5})
+	for _, c := range openFindings(threads, nil, review.Result{Comments: []review.Comment{fresh}}) {
+		if id := ids[report.ThreadKey(c)]; id != 11 && id != 5 {
+			t.Errorf("%v: id %d", c, id)
+		}
+	}
+	if len(ids) != 2 {
+		t.Errorf("ids %v", ids)
+	}
+}
+
 func TestStillOpen(t *testing.T) {
 	major := forge.Thread{ID: "a", Path: "a.go", Line: 5, Body: "_🟠 Major_ · **x**"}
 	resolved := forge.Thread{ID: "b", Path: "b.go", Line: 5, Resolved: true}

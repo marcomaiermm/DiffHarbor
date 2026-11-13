@@ -7,7 +7,7 @@ import (
 	"strconv"
 )
 
-// ThreadKey names a finding for Data.Threads and Forge.Posted: where and what, as the model wrote it.
+// ThreadKey names a finding for Data.Threads and forge.PR.Posted: where and what, as the model wrote it.
 func ThreadKey(c review.Comment) string { return fmt.Sprintf("%s:%d:%s", c.Path, c.Line, c.Title) }
 
 // anchor is GitHub's id of a file's section in the files view: the SHA-256 of its path.
@@ -28,6 +28,9 @@ func (f Forge) File(path string, changed bool) string {
 // Line links a line of path: in the files view when it is in one of the PR's hunks (lines is diff.NewLines of the
 // diff), else the file at the head.
 func (f Forge) Line(path string, line int, lines map[string]string) string {
+	if line <= 0 { // an outdated earlier thread has none
+		return f.File(path, false)
+	}
 	if _, ok := lines[path+":"+strconv.Itoa(line)]; ok && f.Files != "" {
 		return f.Files + "#" + anchor(path) + "R" + strconv.Itoa(line)
 	}

@@ -5,6 +5,7 @@ import (
 	"diffharbor/internal/forge"
 	"diffharbor/internal/report"
 	"diffharbor/internal/review"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -17,19 +18,17 @@ func (*pr) Configure(review.Settings) {}
 // Publish has nothing to send: Resolve answers at once.
 func (*pr) Publish() {}
 
-type posted struct {
-	ID   int64
-	Path string
-	Line int
-}
-
 // readBack keeps the comment id of each finding of cs the review posted, matched by file and line. The ids only
 // link the report: a failed read costs the links, not the review.
 func (p *pr) readBack(review int64, cs []forge.Finding) {
 	if review == 0 {
 		return
 	}
-	got, err := All[posted](fmt.Sprintf("%s/pulls/%d/reviews/%d/comments?per_page=100", p.api, p.e.PullRequest.Number, review), p.token)
+	got, err := All[struct {
+		ID           int64
+		Path         string
+		OriginalLine int `json:"original_line"` // the line at the commit posted to: "line" is null once a push outdates it
+	}](fmt.Sprintf("%s/pulls/%d/reviews/%d/comments?per_page=100", p.api, p.e.PullRequest.Number, review), p.token)
 	if err != nil {
 		log.Println(p.e.Key(), "review comments:", err)
 		return
@@ -40,9 +39,12 @@ func (p *pr) readBack(review int64, cs []forge.Finding) {
 		if c.Start > 0 { // a range comment sits on its last line
 			line = c.End
 		}
-		if i := slices.IndexFunc(got, func(g posted) bool { return g.Path == c.Path && g.Line == line }); i >= 0 {
-			p.posted[report.ThreadKey(c.Comment)] = got[i].ID
-			got = slices.Delete(got, i, i+1)
+		for i, g := range got {
+			if g.Path == c.Path && g.OriginalLine == line {
+				p.posted[report.ThreadKey(c.Comment)] = g.ID
+				got = slices.Delete(got, i, i+1)
+				break
+			}
 		}
 	}
 }
@@ -66,11 +68,12 @@ func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, foot
 			}
 			body = append(body, at)
 		}
-		var rev struct{ ID int64 }
-		err := Call("POST", fmt.Sprintf("%s/pulls/%d/reviews", p.api, p.e.PullRequest.Number), p.token, map[string]any{
+		b, err := ghDo("POST", fmt.Sprintf("%s/pulls/%d/reviews", p.api, p.e.PullRequest.Number), p.token, "application/vnd.github+json", map[string]any{
 			"commit_id": sha, "event": "COMMENT", "body": forge.Summary(cs, rest, folded, footer), "comments": body,
-		}, &rev)
+		})
 		if err == nil && len(cs) > 0 {
+			var rev struct{ ID int64 }
+			_ = json.Unmarshal(b, &rev) // best effort: the review is posted, only the links need its id
 			p.readBack(rev.ID, cs)
 		}
 		return err

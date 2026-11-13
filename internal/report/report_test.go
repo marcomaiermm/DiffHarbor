@@ -1203,6 +1203,7 @@ func TestWaysNit(t *testing.T) {
 	}
 }
 
+// The forge links: files view for what the PR changes, the head for the rest, thread ids.
 func TestLinks(t *testing.T) {
 	f := Forge{Blob: "https://h/o/r/blob/abc/", Files: "https://h/o/r/pull/7/files", Thread: "https://h/o/r/pull/7#discussion_r"}
 	lines := map[string]string{"a.go:5": "x"}

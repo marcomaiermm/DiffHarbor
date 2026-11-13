@@ -684,10 +684,8 @@ func openFindings(threads, open []forge.Thread, r review.Result) []review.Commen
 
 // threadIDs is the comment id of each finding's thread: the ids Post read back, and the open threads' of earlier reviews.
 func threadIDs(threads []forge.Thread, posted map[string]int64) map[string]int64 {
-	ids := maps.Clone(posted)
-	if ids == nil {
-		ids = map[string]int64{}
-	}
+	ids := map[string]int64{}
+	maps.Copy(ids, posted)
 	for _, t := range threads {
 		if !t.Resolved && t.Comment > 0 {
 			c := forge.Parse(forge.Clean(t.Body))

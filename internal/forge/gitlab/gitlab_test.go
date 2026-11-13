@@ -228,7 +228,7 @@ func TestPost(t *testing.T) {
 
 // Without batching, each discussion's response gives its first note's id.
 func TestPostedDiscussions(t *testing.T) {
-	f := &fakeMR{t: t, stale: "", drop: nil}
+	f := &fakeMR{t: t}
 	p := f.serve()
 	p.findings, p.checked = "discussions", true
 	if _, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postFix}}, nil, postDiff, "f"); err != nil {
