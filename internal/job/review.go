@@ -340,7 +340,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		d := report.Data{
 			Repo: e.Repository.FullName, Number: pr.Number, Title: pr.Title, URL: pr.HTMLURL, SHA: pr.Head.SHA,
 			Summary: st.Summary, Diagram: st.Diagram, Effort: st.Effort, Decisions: st.Decisions, Story: st.Story, Flow: st.Flow,
-			Outside: st.Outside, Brief: st.Brief,
+			Brief:       st.Brief,
 			Walkthrough: st.Files, Commits: review.Commits(ctx, sb), Outline: outline, Findings: openFindings(threads, open, r),
 			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(sb, raw), Themes: cfg.SyntaxTheme,
 			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, sb),
@@ -350,11 +350,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		}
 		d.PR = report.Header(ctx, sb, report.PR{Created: pr.CreatedAt, Author: pr.User.Login, Head: pr.Head.Ref, Base: pr.Base.Ref, Body: forge.Redact(pr.Body)})
 		d.Knowledge = report.Learn(ctx, sb, raw, pr.CreatedAt)
-		calls := make([]report.OutsideCall, len(d.Outside))
-		for i, o := range d.Outside {
-			calls[i] = report.OutsideCall(o)
-		}
-		d.Map = report.BuildMap(sb, d, calls)
+		d.Outside = report.Outside(d.Symbols)
+		d.Map = report.BuildMap(sb, d, d.Outside)
 		// what the new code is for, where no doc comment or commit says: one call, the provider's small model
 		if keys, texts := report.Asks(d); len(keys) > 0 {
 			d.Whys = map[string]string{}

@@ -5,10 +5,14 @@ import (
 	"diffharbor/internal/proc"
 	"encoding/json"
 	"errors"
+	"go/ast"
+	"go/constant"
 	"go/token"
+	"go/types"
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,11 +30,15 @@ type cgEdge struct {
 	Kind string
 	By   string // "vta": from VTA below, "ts": from tsEdges; "": codegraph's
 	// Kind: codegraph's (calls, references, instantiates, extends, implements), and tsEdges' renders, handles (a
-	// route, SKind "route", to its handler), reads and writes (to a store; TPath "" for one only named: a string, SQL)
+	// route, SKind "route", to its handler), reads and writes (to a store; TPath "" for one only named: a string, SQL),
+	// requests and url (see below)
 	SName, SKind, SPath string
 	SLine, SEnd         int
 	TName, TPath        string
 	TLine               int
+	// requests: a call that sends a network request, its TName the callee (TPath ""); url: a call that passes a URL
+	// on. The URL's text or the environment variable it is read from, and where that stands (path:line); see outside.go.
+	URL, Env, URLAt string
 }
 
 // vtaTimeout bounds VTA on one module: loading and type-checking a large repo takes long and much memory.
@@ -144,12 +152,33 @@ func vtaCalls(dir string, names []string) ([]cgEdge, error) {
 	}
 	seen := map[key]bool{}
 	out := []cgEdge{}
+	decl := func(s *ssa.Function, at token.Position) (cgEdge, bool) { // the declaration s, an edge's source
+		sp := prog.Fset.Position(s.Syntax().Pos())
+		kind := "function"
+		if s.Signature.Recv() != nil {
+			kind = "method"
+		}
+		return cgEdge{
+			Line: at.Line, By: "vta", SName: s.Name(), SKind: kind, SPath: rel(sp), SLine: sp.Line,
+			SEnd: prog.Fset.Position(s.Syntax().End()).Line,
+		}, rel(sp) != "" && rel(at) == rel(sp)
+	}
 	for f, n := range cg.Nodes {
 		s := own(f)
 		if s == nil {
 			continue
 		}
 		for _, e := range n.Out {
+			if senders[e.Callee.Func.String()] { // net/http's, also through an interface VTA resolves to it
+				at := prog.Fset.Position(e.Pos())
+				k := key{s, e.Callee.Func, at.Line}
+				if c, ok := decl(s, at); ok && !seen[k] {
+					seen[k] = true
+					c.Kind, c.TName = "requests", e.Callee.Func.Name()
+					out = append(out, c)
+				}
+				continue
+			}
 			t := own(e.Callee.Func)
 			if e.Callee.Func.Parent() != nil || t == nil || (!wanted[s.Name()] && !wanted[t.Name()] && static(e)) {
 				continue
@@ -161,14 +190,165 @@ func vtaCalls(dir string, names []string) ([]cgEdge, error) {
 				continue
 			}
 			seen[k] = true
-			kind := "function"
-			if s.Signature.Recv() != nil {
-				kind = "method"
-			}
-			out = append(out, cgEdge{Line: at.Line, Kind: "calls", By: "vta", SName: s.Name(), SKind: kind,
-				SPath: rel(sp), SLine: sp.Line, SEnd: prog.Fset.Position(s.Syntax().End()).Line,
-				TName: t.Name(), TPath: rel(tp), TLine: tp.Line})
+			c, _ := decl(s, at)
+			c.Kind, c.TName, c.TPath, c.TLine = "calls", t.Name(), rel(tp), tp.Line
+			out = append(out, c)
 		}
 	}
-	return out, nil
+	return append(out, urlEdges(pkgs, rel)...), nil
+}
+
+// senders are the functions that send a request over the network: net/http's client and its package functions.
+var senders = func() map[string]bool {
+	m := map[string]bool{}
+	for _, n := range []string{"Get", "Post", "PostForm", "Head"} {
+		m["net/http."+n], m["(*net/http.Client)."+n] = true, true
+	}
+	m["(*net/http.Client).Do"] = true
+	return m
+}()
+
+// urlEdges are the calls in the module that pass a URL on: an argument that is a string constant starting with
+// http:// or https:// (written there, or through a const), or read from the environment (os.Getenv, also through a
+// variable). One per call, Kind "url"; a call that sends it is a "requests" edge, the walk in outside.go joins them.
+func urlEdges(pkgs []*packages.Package, rel func(token.Position) string) []cgEdge {
+	var out []cgEdge
+	for _, pkg := range pkgs {
+		u := urlFinder{pkg: pkg, rel: rel, src: map[types.Object]ast.Expr{}}
+		for _, f := range pkg.Syntax {
+			ast.Inspect(f, u.record)
+		}
+		for _, f := range pkg.Syntax {
+			for _, d := range f.Decls {
+				if fd, ok := d.(*ast.FuncDecl); ok && fd.Body != nil {
+					out = append(out, u.calls(fd)...)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// urlFinder reads one package's arguments. src is a variable's one initializer: `u := os.Getenv("X")`.
+type urlFinder struct {
+	pkg *packages.Package
+	rel func(token.Position) string
+	src map[types.Object]ast.Expr
+}
+
+func (u urlFinder) record(n ast.Node) bool {
+	var lhs, rhs []ast.Expr
+	switch n := n.(type) {
+	case *ast.AssignStmt:
+		lhs, rhs = n.Lhs, n.Rhs
+	case *ast.ValueSpec:
+		for _, id := range n.Names {
+			lhs = append(lhs, id)
+		}
+		rhs = n.Values
+	}
+	if len(lhs) == len(rhs) {
+		for i, l := range lhs {
+			if id, ok := l.(*ast.Ident); ok && u.pkg.TypesInfo.ObjectOf(id) != nil {
+				u.src[u.pkg.TypesInfo.ObjectOf(id)] = rhs[i]
+			}
+		}
+	}
+	return true
+}
+
+// at is "path:line" of p, "" outside the module.
+func (u urlFinder) at(p token.Pos) string {
+	pos := u.pkg.Fset.Position(p)
+	if r := u.rel(pos); r != "" {
+		return r + ":" + strconv.Itoa(pos.Line)
+	}
+	return ""
+}
+
+// find is the URL e passes: the constant's text and the line it is declared on, or the environment variable and the
+// line it is read on; none of either when e is neither.
+func (u urlFinder) find(e ast.Expr, depth int) (url, env, where string) {
+	info := u.pkg.TypesInfo
+	if depth > 3 {
+		return
+	}
+	if tv := info.Types[e]; tv.Value != nil && tv.Value.Kind() == constant.String {
+		v := constant.StringVal(tv.Value)
+		if !strings.HasPrefix(v, "http://") && !strings.HasPrefix(v, "https://") {
+			return
+		}
+		pos := e.Pos()
+		switch x := e.(type) { // a const's own line, not the place that names it
+		case *ast.Ident:
+			if c, ok := info.Uses[x].(*types.Const); ok {
+				pos = c.Pos()
+			}
+		case *ast.SelectorExpr:
+			if c, ok := info.Uses[x.Sel].(*types.Const); ok {
+				pos = c.Pos()
+			}
+		}
+		return v, "", u.at(pos)
+	}
+	switch x := e.(type) {
+	case *ast.ParenExpr:
+		return u.find(x.X, depth)
+	case *ast.Ident:
+		if i, ok := u.src[info.Uses[x]]; ok {
+			return u.find(i, depth+1)
+		}
+	case *ast.BinaryExpr: // base + "/path": the left names the host
+		if x.Op == token.ADD {
+			if url, env, where = u.find(x.X, depth); url == "" && env == "" {
+				return u.find(x.Y, depth)
+			}
+		}
+	case *ast.CallExpr:
+		if f, ok := calleeOf(info, x).(*types.Func); ok && f.FullName() == "os.Getenv" && len(x.Args) == 1 {
+			if tv := info.Types[x.Args[0]]; tv.Value != nil && tv.Value.Kind() == constant.String {
+				return "", constant.StringVal(tv.Value), u.at(x.Pos())
+			}
+		}
+	}
+	return
+}
+
+// calls are the url edges of the calls in fd, a closure's counted as fd's.
+func (u urlFinder) calls(fd *ast.FuncDecl) []cgEdge {
+	fset := u.pkg.Fset
+	sp, ep := fset.Position(fd.Pos()), fset.Position(fd.End())
+	if u.rel(sp) == "" {
+		return nil
+	}
+	kind := "function"
+	if fd.Recv != nil {
+		kind = "method"
+	}
+	var out []cgEdge
+	ast.Inspect(fd.Body, func(n ast.Node) bool {
+		c, ok := n.(*ast.CallExpr)
+		for i := 0; ok && i < len(c.Args); i++ {
+			if url, env, where := u.find(c.Args[i], 0); url != "" || env != "" {
+				out = append(out, cgEdge{
+					Line: fset.Position(c.Lparen).Line, Kind: "url", By: "vta", SName: fd.Name.Name,
+					SKind: kind, SPath: u.rel(sp), SLine: sp.Line, SEnd: ep.Line, URL: url, Env: env, URLAt: where,
+				})
+				break
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// calleeOf is the object a call names: a function or a method, nil for a value.
+func calleeOf(info *types.Info, c *ast.CallExpr) types.Object {
+	switch f := ast.Unparen(c.Fun).(type) {
+	case *ast.Ident:
+		return info.Uses[f]
+	case *ast.SelectorExpr:
+		return info.Uses[f.Sel]
+	}
+	return nil
 }

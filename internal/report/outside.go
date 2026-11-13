@@ -1,0 +1,193 @@
+package report
+
+import (
+	"cmp"
+	"diffharbor/internal/proc"
+	"maps"
+	"net/url"
+	"slices"
+	"strings"
+)
+
+// The outside calls (6.4): where the PR's changed code sends a request to a system outside the repo, by the code
+// graph and the types, not the review's say. A "requests" edge is a call that sends one (vta.go: net/http; tsedges.js:
+// fetch, node:http, a package given a URL); a walk from each declaration the PR adds or changes follows call edges
+// at most maxHops down, through unchanged code too, to one. The outside call is the line in the changed declaration
+// where the walk starts.
+const (
+	maxHops    = 3
+	maxStarts  = 300 // changed declarations walked
+	maxWalk    = 400 // declarations whose calls the index is asked for
+	maxPer     = 5   // outside calls from one declaration
+	maxOutside = 40  // in all
+)
+
+// declKey is a declaration as the edges name it. Two of one name in a file are one: the index's name is no more.
+type declKey struct{ Path, Name string }
+
+// cgOut is the index's calls out of the declarations in "from" ({Path, Name}): the one hop a walk takes.
+const cgOut = `
+const { DatabaseSync } = require("node:sqlite");
+const { dbs, from } = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const out = [];
+const other = (p, own) => dbs.some(d => d.prefix.length > own.length && p.startsWith(d.prefix));
+for (const { db: file, prefix } of dbs) {
+  const db = new DatabaseSync(file, { readOnly: true });
+  const mine = JSON.stringify(from.filter(f => f.Path.startsWith(prefix) && !other(f.Path, prefix)).map(f => ({ p: f.Path.slice(prefix.length), n: f.Name })));
+  for (const e of db.prepare("select e.line, s.name sname, s.kind skind, s.file_path spath, s.start_line sline, s.end_line send," +
+    " t.name tname, t.file_path tpath, t.start_line tline from edges e join nodes s on s.id = e.source join nodes t on t.id = e.target" +
+    " where e.kind = 'calls' and t.kind not in ('file', 'import') and (s.file_path, s.name) in" +
+    " (select json_extract(value, '$.p'), json_extract(value, '$.n') from json_each(?1))").all(mine)) {
+    e.spath = prefix + e.spath;
+    e.tpath = prefix + e.tpath;
+    e.kind = "calls";
+    if (!other(e.tpath, prefix)) out.push(e);
+  }
+}
+process.stdout.write(JSON.stringify(out));
+`
+
+// callGraph is the calls out of the starts and of what they reach, up to maxHops down: the index's, asked for one hop
+// at a time, and the added ones (VTA's, the checker's). Past maxWalk declarations the walk stops growing.
+func (idx *cgIndex) callGraph(sb *proc.Sandbox, starts []declKey) map[declKey][]cgEdge {
+	g := map[declKey][]cgEdge{}
+	for _, e := range idx.Edges {
+		k := declKey{e.SPath, e.SName}
+		g[k] = append(g[k], e)
+	}
+	asked := map[declKey]bool{}
+	front := starts
+	for range maxHops {
+		var ask []map[string]string
+		var fresh []declKey
+		for _, k := range front {
+			if !asked[k] && len(asked) < maxWalk {
+				asked[k] = true
+				ask, fresh = append(ask, map[string]string{"Path": k.Path, "Name": k.Name}), append(fresh, k)
+			}
+		}
+		if len(ask) == 0 {
+			break
+		}
+		var got []cgEdge
+		if runNode(sb, cgOut, map[string]any{"dbs": idx.dbs, "from": ask}, &got) {
+			for _, e := range got {
+				k := declKey{e.SPath, e.SName}
+				g[k] = append(g[k], e)
+			}
+		}
+		front = nil
+		for _, k := range fresh {
+			for _, e := range g[k] {
+				if e.Kind == "calls" && e.TPath != "" {
+					front = append(front, declKey{e.TPath, e.TName})
+				}
+			}
+		}
+	}
+	return g
+}
+
+// sendersFrom are the requests start's code sends, itself or through the calls it makes, at most maxHops down: each an
+// OutsideCall at the line of start where that path begins.
+func sendersFrom(g map[declKey][]cgEdge, start declKey) []OutsideCall {
+	type step struct {
+		k  declKey
+		at int // the line of start that began the path
+	}
+	var out []OutsideCall
+	seen := map[declKey]bool{start: true}
+	level := []step{{start, 0}}
+	for hop := 0; hop <= maxHops && len(level) > 0 && len(out) < maxPer; hop++ {
+		var next []step
+		for _, s := range level {
+			for _, e := range g[s.k] {
+				at := s.at
+				if hop == 0 {
+					at = e.Line
+				}
+				switch {
+				case at == 0:
+				case e.Kind == "requests":
+					c := outsideCall(g, start, at, s.k, e)
+					if !slices.Contains(out, c) {
+						out = append(out, c)
+					}
+				case e.Kind == "calls" && hop < maxHops && e.TPath != "" && !seen[declKey{e.TPath, e.TName}]:
+					seen[declKey{e.TPath, e.TName}] = true
+					next = append(next, step{declKey{e.TPath, e.TName}, at})
+				}
+			}
+		}
+		level = next
+	}
+	return out[:min(len(out), maxPer)]
+}
+
+// outsideCall names the system a request edge e, in the declaration sender, sends to from the call at line at of
+// start: its URL is what the call at start passes on, else what the sender's own call, else any URL the sender
+// names.
+func outsideCall(g map[declKey][]cgEdge, start declKey, at int, sender declKey, e cgEdge) OutsideCall {
+	var u cgEdge
+	pick := func(k declKey, line int) bool { // line 0: any
+		i := slices.IndexFunc(g[k], func(x cgEdge) bool { return x.Kind == "url" && (line == 0 || x.Line == line) })
+		if i >= 0 {
+			u = g[k][i]
+		}
+		return i >= 0
+	}
+	_ = pick(start, at) || pick(sender, e.Line) || pick(sender, 0)
+	return OutsideCall{System: systemName(u.URL, u.Env, sender.Name), Path: start.Path, Line: at, URL: cmp.Or(u.URL, u.Env), URLAt: u.URLAt}
+}
+
+// systemName is what the code names the system: the URL's host, else the environment variable the URL is read from,
+// else the declaration that sends the request.
+func systemName(rawURL, env, sender string) string {
+	if u, err := url.Parse(rawURL); err == nil && u.Hostname() != "" {
+		return strings.ToLower(u.Hostname())
+	}
+	return cmp.Or(env, sender)
+}
+
+// outside sets Requests on the declarations the PR adds or changes (an added line between their lines) that send a
+// request, themselves or within maxHops calls.
+func (idx *cgIndex) outside(sb *proc.Sandbox, changed, added map[string]bool, syms map[string][]Symbol) {
+	at := map[declKey][]*Symbol{}
+	for name, ss := range syms {
+		for i := range ss {
+			s := &ss[i]
+			k := declKey{s.Path, name[strings.LastIndex(name, ".")+1:]}
+			if s.Exact && changed[s.Path] && addedIn(added, s.Path, s.From, s.To) && (len(at) < maxStarts || at[k] != nil) {
+				at[k] = append(at[k], s)
+			}
+		}
+	}
+	if len(at) == 0 {
+		return
+	}
+	starts := slices.SortedFunc(maps.Keys(at), func(a, b declKey) int { return cmp.Or(cmp.Compare(a.Path, b.Path), cmp.Compare(a.Name, b.Name)) })
+	g := idx.callGraph(sb, starts)
+	for k, ss := range at {
+		for _, s := range ss {
+			s.Requests = sendersFrom(g, k)
+		}
+	}
+}
+
+// Outside is the outside calls of the changed declarations: one per place and system, by place, the first maxCalls.
+func Outside(syms map[string][]Symbol) []OutsideCall {
+	var out []OutsideCall
+	for _, ss := range syms {
+		for _, s := range ss {
+			for _, c := range s.Requests {
+				if !slices.Contains(out, c) {
+					out = append(out, c)
+				}
+			}
+		}
+	}
+	slices.SortFunc(out, func(a, b OutsideCall) int {
+		return cmp.Or(cmp.Compare(a.Path, b.Path), cmp.Compare(a.Line, b.Line), cmp.Compare(a.System, b.System))
+	})
+	return out[:min(len(out), maxOutside)]
+}

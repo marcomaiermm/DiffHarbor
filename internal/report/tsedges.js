@@ -9,6 +9,11 @@
 //            the chain names: an argument of the project (a table), a string ("users", SQL's FROM), a property between
 //            client and method (`prisma.user`), the receiver's type argument (`Repository<User>`); none: no edge.
 //            A bare string only in a chain of calls: `_.get(o, "a.b")`, `createElement("div")` name no store
+//   requests  a call that sends a network request, to no declaration: the global fetch, node:http's and node:https's
+//            request and get, a package's call given a URL constant (below)
+//   url      a call with an argument that is a URL: a string, `new URL(…)` or a template starting with http:// or
+//            https://, or a const that holds one, or an environment variable (`process.env.X`, `import.meta.env.X`, a
+//            member read of a module-level object made from one). With the URL's text or the variable, and where it stands
 // All of the project's: a walk goes on from any of them. Test files aside. One checker round trip per file and kind.
 const fs = require("fs");
 const { dir, ts } = JSON.parse(fs.readFileSync(0, "utf8"));
@@ -69,7 +74,7 @@ const declOf = (s, h, path) => {
     (is.isPropertyAssignment(n) && (is.isArrowFunction(n.initializer) || is.isFunctionExpression(n.initializer)));
   const up = k => { let p = n; for (let i = 0; i < k && p; i++) p = p.parent; return !!p && is.isSourceFile(p) };
   const top = up(1) || up(3); // a store: the module's, not a parameter
-  return { name: s.name, path, line: lineOf(n, sf), fn, top };
+  return { name: s.name, path, line: lineOf(n, sf), fn, top, node: n, sf };
 };
 const text = n => (n && (is.isIdentifier(n) || is.isStringLiteral(n) || is.isNoSubstitutionTemplateLiteral(n)) ? n.text : "");
 function calleeName(c) { // the name a call calls: `m` of `a.m()` and `m()`
@@ -85,13 +90,45 @@ function declKind(n) {
 const isFn = n => n && (is.isArrowFunction(n) || is.isFunctionExpression(n));
 
 const out = [], seen = new Set();
-const emit = (kind, s, line, t) => {
+const emit = (kind, s, line, t, url) => {
   if (!s || !t) return;
   const k = [kind, s.path, s.name, s.line, line, t.name, t.path, t.line].join("\0");
   if (seen.has(k)) return;
   seen.add(k);
   out.push({ Line: line, Kind: kind, By: "ts", SName: s.name, SKind: s.kind, SPath: s.path, SLine: s.line, SEnd: s.end,
-    TName: t.name, TPath: t.path || "", TLine: t.line || 0 });
+    TName: t.name, TPath: t.path || "", TLine: t.line || 0, URL: url?.url, Env: url?.env, URLAt: url?.at });
+};
+const isUrl = s => /^https?:\/\//.test(s);
+const envObj = s => s === "process.env" || s === "import.meta.env";
+// urlOf is the URL an expression passes: {url, at}, or {env, at} for an environment variable, null for neither
+const urlOf = (n, sf, p, refSym, depth = 0) => {
+  if (!n || depth > 3) return null;
+  const at = x => (p ? p + ":" + lineOf(x, sf) : "");
+  const src = x => sf.text.slice(x.getStart(sf), x.end);
+  const sub = x => urlOf(x, sf, p, refSym, depth);
+  if (is.isParenthesizedExpression(n) || is.isAsExpression(n) || is.isNonNullExpression(n) || is.isSatisfiesExpression(n)) return sub(n.expression);
+  if (is.isStringLiteral(n) || is.isNoSubstitutionTemplateLiteral(n)) return isUrl(n.text) ? { url: n.text, at: at(n) } : null;
+  if (is.isTemplateExpression(n)) // `${base}/x`: the template's static prefix, else what its first span is
+    return isUrl(n.head.text) ? { url: n.head.text, at: at(n) } : n.head.text ? null : sub(n.templateSpans[0]?.expression);
+  if (is.isNewExpression(n)) return n.expression.text === "URL" ? sub(n.arguments?.[0]) : null;
+  if (is.isBinaryExpression(n)) return src(n.operatorToken) === "+" ? sub(n.left) || sub(n.right) : null; // base + "/x"
+  const via = x => { // the declaration an identifier names, its initializer's URL
+    const d = decl(refSym.get(x) || resolve([x])[0]);
+    return d && d.node.initializer ? { d, init: d.node.initializer } : null;
+  };
+  if (is.isPropertyAccessExpression(n) || is.isElementAccessExpression(n)) {
+    const name = is.isPropertyAccessExpression(n) ? n.name.text : text(n.argumentExpression);
+    if (!name) return null;
+    if (envObj(src(n.expression))) return { env: name, at: at(n) };
+    // a member read of a module-level object made from the environment: `env.API_URL`
+    const v = /^[A-Z][A-Z0-9_]*$/.test(name) && is.isIdentifier(n.expression) && via(n.expression);
+    return v && v.d.top && /\b(process|import\.meta)\.env\b/.test(v.d.sf.text.slice(v.init.getStart(v.d.sf), v.init.end)) ? { env: name, at: at(n) } : null;
+  }
+  if (is.isIdentifier(n)) {
+    const v = via(n);
+    return v && urlOf(v.init, v.d.sf, v.d.path, refSym, depth + 1);
+  }
+  return null;
 };
 
 const done = new Set(); // a file in two projects: once
@@ -175,6 +212,17 @@ for (const file of program.getSourceFileNames()) {
       const c = r.call, l = line(c);
       emit("handles", { name: routeName(c), kind: "route", path, line: l, end: endOf(c, sf) }, l, t);
     } else emit("calls", eff(r.scope), line(r.n), t);
+  }
+  // requests: platform senders by where they are declared; urls: whatever call passes one on
+  const refSym = new Map(refs.map(r => [r.n, syms[r.at]]));
+  for (const c of calls) {
+    if (c.jsx || !c.n.arguments) continue;
+    const name = calleeName(c.n).text, dp = syms[c.at]?.declarations?.[0]?.path;
+    let u = null;
+    for (const a of c.n.arguments) if ((u = urlOf(a, sf, path, refSym))) break;
+    const sender = dp && !rel(dp) && ((name === "fetch" && !pkg(dp)) || (/\/@types\/node\/https?\.d\.ts$/.test(dp) && /^(request|get)$/.test(name)));
+    if (sender || (u?.url && ext(c.at))) emit("requests", eff(c.scope), line(c.n), { name });
+    if (u) emit("url", eff(c.scope), line(c.n), { name }, u);
   }
   // reads and writes: one per chain, to the first store it names
   const chains = new Map();

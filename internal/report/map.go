@@ -101,8 +101,8 @@ type MapName struct {
 	N                   int
 }
 
-// OutsideCall is a call out of the repo the review names: the system, the line that sends the request and the
-// URL's name or literal with its place.
+// OutsideCall is a call out of the repo that code names (Outside): the system, the line of changed code that sends
+// the request or calls what does, and the URL's literal or the environment variable it is read from, with its place.
 type OutsideCall struct {
 	System, Path string
 	Line         int
@@ -207,7 +207,7 @@ type mapper struct {
 	added map[string]bool
 }
 
-// BuildMap is the map of d's change, with the outside calls the review named (none yet). sb is the checkout: its
+// BuildMap is the map of d's change, with the outside calls (Outside). sb is the checkout: its
 // generated headers, and git for the tables a migration drops; nil reads neither. Symbol.State is set as Render's
 // page does, by prepare.
 func BuildMap(sb *proc.Sandbox, d Data, outside []OutsideCall) *Map {
@@ -972,7 +972,7 @@ var (
 // maxTableFiles is the files a search of the base or the head reads; maxNamed the places it keeps per table.
 const (
 	maxTableFiles, maxNamed = 300, 20
-	maxDrops                = 50 // tables a PR's migrations add; each costs git calls within tableTime
+	maxDrops                = 50 // tables a PR's migrations drop; each costs git calls within tableTime
 	tableTime               = time.Minute
 )
 
@@ -1092,7 +1092,7 @@ func sqlNames(git func(args ...string) []byte, ts []MapTable, names []string) {
 
 // tables is Map.Tables (6.11): the tables the diff's migrations drop, who imported their declaration at the base,
 // and what the head still has. Git calls, bounded by the minute tableTime gives them and, per table, at most
-// eight (two greps and one blob read per round, two rounds, base and head); without sb none.
+// twelve (two greps and one blob read per round, two rounds, base and head); without sb none.
 func (b *mapper) tables(sb *proc.Sandbox) {
 	ts := b.drops()
 	if sb == nil || len(ts) == 0 {

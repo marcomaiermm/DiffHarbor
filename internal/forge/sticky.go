@@ -29,7 +29,6 @@ type State struct {
 	Flow      []review.Step     `json:"flow,omitempty"`
 	Decisions []review.Decision `json:"decisions,omitempty"`
 	Story     review.Story      `json:"story,omitzero"`
-	Outside   []review.Outside  `json:"outside,omitempty"`
 	Brief     []review.Sentence `json:"brief,omitempty"`
 	Report    string            `json:"report,omitempty"` // the report's URL, "" = none
 	// The report folder's secret in its URL. Here, as only who can read the PR sees this comment; kept across pushes,
@@ -297,7 +296,7 @@ func (st State) Update(r review.Result, sha string, prFiles []string, full bool)
 		st.Flow, st.Decisions, st.Story = r.Flow, r.Decisions, r.Story
 	}
 	if full {
-		st.Outside, st.Brief = r.Outside, r.Brief
+		st.Brief = r.Brief
 	}
 	st.SHA, st.Files = sha, files
 	return st

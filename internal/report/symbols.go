@@ -45,6 +45,9 @@ type Symbol struct {
 	Partial, Untested bool     `json:"-"`
 	From, To          int      `json:"-"` // exact: its lines by the index, from a decorator or a doc maybe
 	Ways              []Way    `json:"-"` // exact, in the diff's files: how the code reaches it, see cgTests
+	// exact, a declaration the diff adds or changes: the requests it sends to systems outside the repo, itself or
+	// within a few calls, see outside.go
+	Requests []OutsideCall `json:"-"`
 }
 
 // Way is how the code reaches a declaration: from a route it registers ("GET", "/x/{id}", where), or from a
@@ -177,8 +180,10 @@ func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
 		for _, p := range paths {
 			changed[p] = true
 		}
-		idx.exact(root, changed, diff.RightLines(diffText, false), syms)
+		added := diff.RightLines(diffText, false)
+		idx.exact(root, changed, added, syms)
 		idx.tests(sb, root, changed, syms)
+		idx.outside(sb, changed, added, syms)
 	}
 	return syms
 }
