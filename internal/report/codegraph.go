@@ -147,6 +147,7 @@ func (idx *cgIndex) freshMethods(changed, added map[string]bool, syms map[string
 // exact replaces what the name scan guessed with the index's resolved edges, for the declarations the index knows:
 // its lines (From, To), who names one (Refs, Uses, Files; Here, the lines of the diff's files; Outside, those of
 // the others), what it names (Calls). Those it doesn't know, a Go struct's fields, keep the scan's.
+//
 //nolint:gocognit // the index's edges step by step, each step a few lines
 func (idx *cgIndex) exact(root *os.Root, changed, added map[string]bool, syms map[string][]Symbol) {
 	type key struct{ path, name string }
