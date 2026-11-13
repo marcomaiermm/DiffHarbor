@@ -411,7 +411,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	}
 	r, tag, err := merge(ps, m, vm, ci)
 	if err == nil && in.Guide {
-		outsideBrief(ctx, in, ps, &r, cmp.Or(agent.VerifyFor(rm), vm))
+		outsideBrief(ctx, in, files, ps, &r, cmp.Or(agent.VerifyFor(rm), vm))
 	}
 	if why := in.Settings.Inversion(); why != "" {
 		tag += " · " + why // the reviewer isn't the default's: say why

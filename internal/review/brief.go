@@ -3,11 +3,11 @@ package review
 import (
 	"context"
 	"diffharbor/internal/agent"
-	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
 	"diffharbor/internal/text"
 	"fmt"
 	"log"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -19,10 +19,10 @@ import (
 // brief of its own: briefPass writes one for all.
 const outsideSchema = `
 "outside":[{"system":"<the system as the code names it>","path":"<changed file>","line":<the line that sends the request, or hands a URL written in changed code to code that sends it>,"url":"<only if the URL is a constant>","urlAt":"<path:line of that constant>"}]
- every system outside this repo that the changed code calls over the network (an API, a queue); [] if none.`
+ every system outside this repo that the changed code calls over the network (an API, a queue; the app's own database is none); [] if none.`
 
 const briefSchema = `
-"brief":[{"text":"<one sentence: what the change does and how; where data enters, what it passes, what a migration or config changes>","at":"<path:line it is about>"}] 2-3 sentences, at most 60 words in all.`
+"brief":[{"text":"<one sentence, no place in it: what the change does and how; where data enters, what it passes, what a migration or config changes>","at":"<path:line it is about>"}] 2-3 sentences, at most 60 words in all.`
 
 const briefSystem = `You write the brief of a pull request from what its reviewers wrote: summaries, one line per file, the outside systems it calls.
 Write like a senior engineer's notes: the code, what it does, what follows. No hedges, no "ensure", no "consequently", no "X, not Y".
@@ -46,6 +46,9 @@ type Sentence struct {
 
 // maxOutside bounds what a review keeps: a model listing every call of a big diff.
 const maxOutside = 20
+
+// maxBriefPrompt bounds the brief pass input, about 1500 tokens.
+const maxBriefPrompt = 6000
 
 // place splits "path:line".
 func place(at string) (string, int, bool) {
@@ -80,8 +83,11 @@ func headLines(ctx context.Context, sb *proc.Sandbox, repo string) func(path str
 // line its urlAt names.
 func checkOutside(line func(string, int) (string, bool), files []string, out []Outside) []Outside {
 	return slices.DeleteFunc(out, func(o Outside) bool {
-		_, ok := line(o.Path, o.Line)
-		if ok = ok && o.System != "" && slices.Contains(files, o.Path); ok && o.URL != "" {
+		ok := o.System != "" && slices.Contains(files, o.Path)
+		if ok {
+			_, ok = line(o.Path, o.Line)
+		}
+		if ok && o.URL != "" {
 			p, n, found := place(o.URLAt)
 			l, there := line(p, n)
 			ok = found && there && strings.Contains(l, o.URL)
@@ -132,13 +138,7 @@ func briefPrompt(ps []part, walk map[string]string, outs []Outside) string {
 		}
 	}
 	b.WriteString("## Files\n\n")
-	for _, f := range slices.Sorted(func(yield func(string) bool) {
-		for f := range walk {
-			if !yield(f) {
-				return
-			}
-		}
-	}) {
+	for _, f := range slices.Sorted(maps.Keys(walk)) {
 		fmt.Fprintf(&b, "%s: %s\n", f, text.OneLine(walk[f], 150))
 	}
 	if len(outs) > 0 {
@@ -147,16 +147,16 @@ func briefPrompt(ps []part, walk map[string]string, outs []Outside) string {
 			fmt.Fprintf(&b, "%s: %s:%d\n", o.System, o.Path, o.Line)
 		}
 	}
-	return b.String()
+	return text.Truncate(b.String(), maxBriefPrompt) // a huge PR: hundreds of file lines
 }
 
 // outsideBrief checks the first finder's outside systems and brief against the head, and for a large PR writes the
 // brief in one more pass, model's.
-func outsideBrief(ctx context.Context, in Input, ps []part, r *Result, model string) {
+func outsideBrief(ctx context.Context, in Input, files []string, ps []part, r *Result, model string) {
 	line := headLines(ctx, in.Sandbox, in.Sandbox.Repo())
-	r.Outside = checkOutside(line, diff.Paths(strings.Join(in.Parts, "")), r.Outside)
+	r.Outside = checkOutside(line, files, r.Outside)
 	r.Outside = r.Outside[:min(len(r.Outside), maxOutside)]
-	if len(in.Parts) > 1 && in.Guide {
+	if len(in.Parts) > 1 {
 		r.Brief = briefPass(ctx, in.Agent, in.Sandbox, model, briefPrompt(ps, r.Walkthrough, r.Outside))
 	}
 	r.Brief = checkBrief(line, r.Brief)

@@ -19,9 +19,13 @@ func TestOutsideBrief(t *testing.T) {
 	run := func(replies map[string][]string, parts ...string) (Result, *fakeAgent) {
 		t.Helper()
 		dir := t.TempDir()
-		os.MkdirAll(filepath.Join(dir, "repo"), 0o755)
+		if err := os.MkdirAll(filepath.Join(dir, "repo"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		for _, f := range []string{"a.go", "b.go", "old.go"} {
-			os.WriteFile(filepath.Join(dir, "repo", f), []byte(code), 0o644)
+			if err := os.WriteFile(filepath.Join(dir, "repo", f), []byte(code), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 		f := &fakeAgent{replies: replies}
 		r, _, err := Analyze(context.Background(), Input{Agent: f, Sandbox: &proc.Sandbox{Dir: dir}, Title: "t", Guide: true, Parts: parts})

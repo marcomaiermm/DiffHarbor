@@ -295,6 +295,8 @@ func (st State) Update(r review.Result, sha string, prFiles []string, full bool)
 	}
 	if full || st.Flow == nil {
 		st.Flow, st.Decisions, st.Story = r.Flow, r.Decisions, r.Story
+	}
+	if full {
 		st.Outside, st.Brief = r.Outside, r.Brief
 	}
 	st.SHA, st.Files = sha, files

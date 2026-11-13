@@ -338,7 +338,7 @@ func FallbackFor(model, name string) string {
 			fm = r.Review
 		}
 	}
-	if (strings.HasPrefix(name, "verify") || name == "explain") && fm != "" {
+	if (strings.HasPrefix(name, "verify") || name == "explain" || name == "brief") && fm != "" {
 		return cmp.Or(FallbackVerifyModel, VerifyFor(fm), fm)
 	}
 	return fm
