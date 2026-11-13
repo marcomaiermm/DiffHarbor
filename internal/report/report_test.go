@@ -1202,3 +1202,31 @@ func TestWaysNit(t *testing.T) {
 		}
 	}
 }
+
+// The forge links: files view for what the PR changes, the head for the rest, thread ids.
+func TestLinks(t *testing.T) {
+	f := Forge{Blob: "https://h/o/r/blob/abc/", Files: "https://h/o/r/pull/7/files", Thread: "https://h/o/r/pull/7#discussion_r"}
+	lines := map[string]string{"a.go:5": "x"}
+	const h = "diff-ffc4fd9bc24722ba464194a85b255d4b50945f3e68a120122e11f6cdae4a8c19" // sha256("a.go")
+	if anchor("a.go") != h {
+		t.Fatalf("anchor: %s", anchor("a.go"))
+	}
+	if got := f.Line("a.go", 5, lines); got != f.Files+"#"+h+"R5" {
+		t.Fatalf("line in a hunk: %s", got)
+	}
+	if got := f.Line("a.go", 9, lines); got != f.Blob+"a.go#L9" {
+		t.Fatalf("line outside the hunks: %s", got)
+	}
+	if got := f.File("a.go", true); got != f.Files+"#"+h {
+		t.Fatalf("file the PR changes: %s", got)
+	}
+	if got := f.File("b.go", false); got != f.Blob+"b.go" {
+		t.Fatalf("file it doesn't: %s", got)
+	}
+	if got := (Forge{Blob: f.Blob}).Line("a.go", 5, lines); got != f.Blob+"a.go#L5" { // GitLab
+		t.Fatalf("no files view: %s", got)
+	}
+	if f.ThreadURL(42) != "https://h/o/r/pull/7#discussion_r42" || f.ThreadURL(0) != "" {
+		t.Fatal("thread url")
+	}
+}

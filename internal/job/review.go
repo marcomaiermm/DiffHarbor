@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -344,6 +345,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(sb, raw), Themes: cfg.SyntaxTheme,
 			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, sb),
 			Conflicts: pr.Mergeable != nil && !*pr.Mergeable, Forge: p.Links(),
+			Bot: f.Bot(), Threads: threadIDs(threads, p.Posted()),
 			Docs: docs, Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(sb, raw),
 		}
 		d.PR = report.Header(ctx, sb, report.PR{Created: pr.CreatedAt, Author: pr.User.Login, Head: pr.Head.Ref, Base: pr.Base.Ref, Body: forge.Redact(pr.Body)})
@@ -686,6 +688,20 @@ func openFindings(threads, open []forge.Thread, r review.Result) []review.Commen
 		}
 	}
 	return append(cs, r.Comments...)
+}
+
+// threadIDs is the comment id of each finding's thread: the ids Post read back, and the open threads' of earlier reviews.
+func threadIDs(threads []forge.Thread, posted map[string]int64) map[string]int64 {
+	ids := map[string]int64{}
+	maps.Copy(ids, posted)
+	for _, t := range threads {
+		if !t.Resolved && t.Comment > 0 {
+			c := forge.Parse(forge.Clean(t.Body))
+			c.Path, c.Line = t.Path, t.Line
+			ids[report.ThreadKey(c)] = t.Comment
+		}
+	}
+	return ids
 }
 
 // stillOpen is what is open after the post: the threads left open, the findings reopen brought back (r's not in

@@ -90,6 +90,7 @@ type pr struct {
 	e          *forge.Event
 	api, token string
 	statuses   bool // the App has "Commit statuses: write"
+	posted     map[string]int64
 }
 
 // Open mints the token the jobs use.
@@ -98,7 +99,7 @@ func (*Hub) Open(e *forge.Event) (forge.PR, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &pr{e, "/repos/" + e.Repository.FullName, token, statuses}, nil
+	return &pr{e: e, api: "/repos/" + e.Repository.FullName, token: token, statuses: statuses}, nil
 }
 
 func (p *pr) Refresh() error {
@@ -271,7 +272,7 @@ func (p *pr) Links() report.Forge {
 	web, _, _ := strings.Cut(pr.HTMLURL, "/pull/") // GitHub Enterprise has its own host
 	host, _, _ := strings.Cut(strings.TrimPrefix(web, "https://"), "/")
 	return report.Forge{
-		Name: "GitHub", Ref: "#", Blob: web + "/blob/" + pr.Head.SHA + "/", Commit: web + "/commit/", PRCommit: pr.HTMLURL + "/commits/",
+		Name: "GitHub", Ref: "#", Blob: web + "/blob/" + pr.Head.SHA + "/", Files: pr.HTMLURL + "/files", Thread: pr.HTMLURL + "#discussion_r", Commit: web + "/commit/", PRCommit: pr.HTMLURL + "/commits/",
 		Search: "https://" + host + "/search?type=code&q=" + url.QueryEscape("repo:"+p.e.Repository.FullName+" "),
 	}
 }

@@ -31,6 +31,7 @@ type pr struct {
 	findings string
 	checked  bool
 	answers  []answer // the answers Resolve drafted, published with the review
+	posted   map[string]int64
 }
 
 // Open needs no token per repo: GitLab's is one bot user's.
@@ -331,6 +332,7 @@ func (p *pr) Publish() {
 // Post sends the summary, then the findings on diff lines with the answers Resolve drafted. A position GitLab
 // refuses (outdated diff, a line it doesn't show) moves the finding into the summary.
 func (p *pr) Post(sha string, r review.Result, threads []forge.Thread, raw, footer string) (int, error) {
+	p.posted = nil
 	inline, rest, folded := forge.Split(r, threads, diff.NewLines(raw))
 	if p.refs[2] != sha { // GitLab hasn't built the diff of this push yet: no positions on it
 		log.Println(p.e.Key(), "diff of", sha[:7], "not ready, findings go in the note")
@@ -358,10 +360,10 @@ func (p *pr) discussions(inline, rest, folded []forge.Finding, raw, footer strin
 		}
 	}()
 	for i, c := range inline {
-		err := p.discuss(c, lines)
+		note, err := p.discuss(c, lines)
 		if c.Start > 0 && rejected(err) { // the suggestion's range: the finding on its own line, the fix as plain code
 			c.Start = 0
-			err = p.discuss(c, lines)
+			note, err = p.discuss(c, lines)
 		}
 		switch {
 		case rejected(err):
@@ -371,6 +373,7 @@ func (p *pr) discussions(inline, rest, folded []forge.Finding, raw, footer strin
 			return len(posted), err
 		default:
 			posted = append(posted, c)
+			p.keep(c, note)
 		}
 	}
 	return len(posted) + len(rest), nil
@@ -445,15 +448,17 @@ func (p *pr) published(drafted []forge.Finding, keys []string, old []forge.Threa
 	for _, t := range old {
 		known[t.ID] = true
 	}
-	got := map[string]int{}
+	got := map[string][]int64{}
 	for _, t := range ts {
 		if !known[t.ID] {
-			got[key(t.Path, t.Line, t.Body)]++
+			k := key(t.Path, t.Line, t.Body)
+			got[k] = append(got[k], t.Comment)
 		}
 	}
 	for i, c := range drafted {
-		if got[keys[i]] > 0 {
-			got[keys[i]]--
+		if len(got[keys[i]]) > 0 {
+			p.keep(c, got[keys[i]][0])
+			got[keys[i]] = got[keys[i]][1:]
 			posted = append(posted, c)
 		} else {
 			lost = append(lost, c)
@@ -504,10 +509,32 @@ func (p *pr) place(c forge.Finding, lines map[string]old) (int, string, map[stri
 }
 
 // discuss starts the discussion of one finding.
-func (p *pr) discuss(c forge.Finding, lines map[string]old) error {
+func (p *pr) discuss(c forge.Finding, lines map[string]old) (int64, error) {
 	_, body, pos := p.place(c, lines)
-	return call("POST", p.mr+"/discussions", map[string]any{"body": body, "position": pos}, nil)
+	var d struct {
+		Notes []struct{ ID int64 }
+	}
+	b, _, err := do("POST", p.mr+"/discussions", map[string]any{"body": body, "position": pos})
+	_ = json.Unmarshal(b, &d) // best effort: the discussion is posted, only the link needs its note id
+	if len(d.Notes) == 0 {
+		return 0, err
+	}
+	return d.Notes[0].ID, err
 }
+
+// keep notes the id of a finding's first note, for the report's link to it.
+func (p *pr) keep(c forge.Finding, note int64) {
+	if note == 0 {
+		return
+	}
+	if p.posted == nil {
+		p.posted = map[string]int64{}
+	}
+	p.posted[report.ThreadKey(c.Comment)] = note
+}
+
+// Posted is the note ids Post kept.
+func (p *pr) Posted() map[string]int64 { return p.posted }
 
 func (p *pr) Discussion() (forge.Discussion, error) {
 	var d forge.Discussion
@@ -613,7 +640,7 @@ func (p *pr) Links() report.Forge {
 	pr := p.e.PullRequest
 	web, _, _ := strings.Cut(pr.HTMLURL, "/-/merge_requests/")
 	return report.Forge{
-		Name: "GitLab", Ref: "!", Blob: web + "/-/blob/" + pr.Head.SHA + "/", Commit: web + "/-/commit/", PRCommit: pr.HTMLURL + "/diffs?commit_id=",
+		Name: "GitLab", Ref: "!", Blob: web + "/-/blob/" + pr.Head.SHA + "/", Thread: pr.HTMLURL + "#note_", Commit: web + "/-/commit/", PRCommit: pr.HTMLURL + "/diffs?commit_id=",
 		Search: fmt.Sprintf("%s/search?scope=blobs&project_id=%d&search=", strings.TrimSuffix(APIURL, "/api/v4"), p.e.Repository.ID),
 	}
 }

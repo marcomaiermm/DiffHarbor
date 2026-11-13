@@ -98,6 +98,9 @@ type PR interface {
 	Others() ([]report.Other, error)
 	// Patches is PR n's diff by file: hunks only, none for binary or huge files.
 	Patches(n int) (map[string]string, error)
+	// Posted is the comment id of each finding Post sent inline, by report.ThreadKey; none for one the forge didn't
+	// place, or when it couldn't read the ids back.
+	Posted() map[string]int64
 	// Links is how the forge links what a report points to.
 	Links() report.Forge
 }
