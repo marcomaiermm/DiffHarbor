@@ -2,8 +2,9 @@ package report
 
 import (
 	"context"
+	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
-	"maps"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -11,74 +12,65 @@ import (
 	"time"
 )
 
-// PR is what the header says of the pull request: from the forge's payload, the commits from git.
-type PR struct {
-	Created    time.Time
-	Author     string
-	Head, Base string // branch names
-	Body       string // the description, uncut
-	Commits    int    // without merges
-	Merges     bool   // the branch holds merges: the header says "without merges" only then
-}
-
-// Header sets pr's commit count and whether merges were left out, from a Checkout's history: refs/base..HEAD.
-// Both stay zero when git fails.
-func Header(ctx context.Context, sb *proc.Sandbox, pr PR) PR {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "log", "--format=%P", "refs/base..HEAD"))
-	if err != nil {
-		return pr
-	}
-	for l := range strings.Lines(string(out)) {
-		if strings.Contains(strings.TrimSpace(l), " ") { // two parents
-			pr.Merges = true
-		} else {
-			pr.Commits++
-		}
-	}
-	return pr
-}
-
 // Know is what git says of a file at the base: how long ago it last changed and who changed it lately.
 type Know struct {
 	Days   int      // since its last change, counted to the PR's creation
 	People []string // who committed to it in the 12 months before, alphabetical; never counted or ranked
 }
 
-// bulk is the files a commit touches from which on it isn't a change to any of them: a mass format, a move, an import.
+// bulk is the files a commit touches or more: it is no change to any of them, a mass format, a move, an import.
 const bulk = 150
 
 // bots: a [bot] account, or GitLab's project and group tokens (project_12_bot_ab12).
 var bots = regexp.MustCompile(`(?i)\[bot\]|^(project|group)_\d+_bot`)
 
-// Learn reads, for each of paths (as the base has them), what Know says, from one pass of git log over the history
-// Checkout fetched, up to created. Renames are followed, exact ones only: the checkout has no blobs, and a
-// similarity check would fetch them one by one. A file with no change in that history, and every file when git fails
-// or created is unknown, has no entry. Names go through the repo's mailmap; commits of bulk files or more and bots
-// don't count.
-func Learn(ctx context.Context, sb *proc.Sandbox, paths []string, created time.Time) map[string]Know {
+// Learn reads, for each file of the diff raw (by its path in the PR), what Know says, from one pass of git log over
+// the history Checkout fetched, up to created. A file the PR renames has the history of its old name. Renames in the
+// history are followed, exact ones only: the checkout has no blobs, and a similarity check would fetch them one by one.
+// A file with no change in that history, and every file when git fails or created is unknown, has no entry. Names go
+// through the base's mailmap; commits of bulk files or more and bots don't count. The first commit of the history
+// reads as no change: in a shallow checkout it is only where the fetch stopped, and it would add every file.
+func Learn(ctx context.Context, sb *proc.Sandbox, raw string, created time.Time) map[string]Know {
+	paths := diff.Paths(raw)
 	if created.IsZero() || len(paths) == 0 {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	// quotepath off: a name with a tab, quote or backslash still comes quoted and finds no file; ponytail: no -z
-	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "-c", "core.quotepath=off", "log", "--no-merges",
-		"--find-renames=100%", "--name-status", "--until="+created.Format(time.RFC3339), "--format=%x01%ct%x01%aN%x01%aE", "refs/base"))
+	// From the git dir, with the mailmap of the base: the worktree is the PR's, and a PR doesn't decide who is who. No lazy
+	// fetch: a base without .mailmap in the partial clone only warns. ponytail: no -z, quotepath off keeps most names whole
+	out, err := proc.Run(sb.Command(ctx, filepath.Join(sb.Repo(), ".git"), []string{"GIT_NO_LAZY_FETCH=1"}, "git", "-c", "core.quotepath=off",
+		"-c", "log.showRoot=false", "-c", "mailmap.blob=refs/base:.mailmap", "log", "--no-merges", "--find-renames=100%", "--name-status",
+		"--until="+created.Format(time.RFC3339), "--format=%x01%ct%x01%aN%x01%aE", "refs/base"))
 	if err != nil {
 		return nil
 	}
-	return learn(string(out), paths, created)
+	return learn(string(out), paths, renamed(raw), created)
+}
+
+var renameOf = regexp.MustCompile(`(?m)^rename from (.+)\nrename to (.+)$`)
+
+// renamed maps the old name of each file the diff renames to its new one.
+func renamed(raw string) map[string]string {
+	m := map[string]string{}
+	for _, r := range renameOf.FindAllStringSubmatch(raw, -1) {
+		m[r[1]] = r[2]
+	}
+	return m
 }
 
 // learn walks the log newest first, keeping for each name the file it is at the base as it reads back through renames.
-func learn(log string, paths []string, created time.Time) map[string]Know {
-	at := map[string]string{} // a path at this point of the history -> the path at the base
+// prs maps what the PR renamed to its new path, which keys the result.
+func learn(log string, paths []string, prs map[string]string, created time.Time) map[string]Know {
+	at := map[string]string{} // a path at this point of the history -> the path in the PR
 	for _, p := range paths {
 		at[p] = p
 	}
-	who := map[string]map[string]string{} // path at the base -> email -> name
+	for old, cur := range prs {
+		at[old] = cur
+	}
+	who := map[string]map[string]bool{} // path in the PR -> emails
+	names := map[string]string{}        // email -> its newest name, so one person is one name in every file
 	ks := map[string]Know{}
 	since := created.AddDate(-1, 0, 0)
 	var when time.Time
@@ -97,10 +89,14 @@ func learn(log string, paths []string, created time.Time) map[string]Know {
 				if bot || when.Before(since) {
 					continue
 				}
+				e := strings.ToLower(email)
 				if who[o] == nil {
-					who[o] = map[string]string{}
+					who[o] = map[string]bool{}
 				}
-				who[o][strings.ToLower(email)] = name
+				who[o][e] = true
+				if _, ok := names[e]; !ok {
+					names[e] = name
+				}
 			}
 		}
 		for _, r := range renames { // older commits know the file by its old name
@@ -137,7 +133,11 @@ func learn(log string, paths []string, created time.Time) map[string]Know {
 	flush()
 	for o, m := range who {
 		k := ks[o]
-		k.People = slices.Compact(slices.Sorted(maps.Values(m)))
+		for e := range m {
+			k.People = append(k.People, names[e])
+		}
+		slices.Sort(k.People)
+		k.People = slices.Compact(k.People)
 		ks[o] = k
 	}
 	return ks

@@ -32,7 +32,7 @@ type Event struct {
 		Title   string `json:"title"`
 		Body    string `json:"body"`
 		Draft   bool   `json:"draft"`
-		// "" or unparsable: zero; GitLab's API and GitHub send RFC 3339, GitLab's webhooks "2006-01-02 15:04:05 UTC"
+		// GitLab's fill leaves it zero when it is "" or unparsable; its API and GitHub send RFC 3339, its webhooks "2006-01-02 15:04:05 UTC"
 		CreatedAt time.Time `json:"created_at"`
 		State     string    `json:"state"`
 		// false: it conflicts with the base; nil until GitHub has worked it out, and in webhook payloads

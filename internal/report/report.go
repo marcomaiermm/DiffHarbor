@@ -63,7 +63,7 @@ type Data struct {
 	Docs        []review.Doc      // the reference docs the review read: listed by title and link, never their text
 	Tests       checks.Tests      // what the checks' test runs report at SHA; empty when none ran
 	PR          PR                // the header
-	Knowledge   map[string]Know   // by path at the base: Learn; Aggregate sums up a part
+	Knowledge   map[string]Know   // by path in the PR: Learn; Aggregate sums up a part
 	Sources     map[string]string // the head's text of changed files, for the lines between hunks (see Sources)
 }
 
