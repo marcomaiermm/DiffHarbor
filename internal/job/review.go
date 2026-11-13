@@ -339,6 +339,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		d := report.Data{
 			Repo: e.Repository.FullName, Number: pr.Number, Title: pr.Title, URL: pr.HTMLURL, SHA: pr.Head.SHA,
 			Summary: st.Summary, Diagram: st.Diagram, Effort: st.Effort, Decisions: st.Decisions, Story: st.Story, Flow: st.Flow,
+			Outside: st.Outside, Brief: st.Brief,
 			Walkthrough: st.Files, Commits: review.Commits(ctx, sb), Outline: outline, Findings: openFindings(threads, open, r),
 			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(sb, raw), Themes: cfg.SyntaxTheme,
 			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, sb),
