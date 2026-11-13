@@ -170,12 +170,12 @@ func TestSplitCap(t *testing.T) {
 }
 
 func TestFormat(t *testing.T) {
-	c := Finding{Comment: review.Comment{Severity: "major", Title: "t", Body: "b", Prompt: "In a.go around line 3, use ````x````"}}
+	c := Finding{Comment: review.Comment{Path: "a.go", Line: 3, Severity: "major", Title: "t", Body: "b", Fix: "use ````x````"}}
 	got := Format(c, "suggestion")
-	if !strings.HasPrefix(got, "_🟠 Major_ · **t**\n\nb") || !strings.Contains(got, "`````\nIn a.go around line 3, use ````x````\n`````") {
+	if !strings.HasPrefix(got, "_🟠 Major_ · **t**\n\nb") || !strings.Contains(got, "`````\nIn a.go around line 3: t\n\nb\n\nSuggested fix:\n`````") {
 		t.Fatalf("format: %q", got)
 	}
-	if allPrompts([]Finding{{Comment: review.Comment{Body: "x"}}}) != "" || !strings.Contains(allPrompts([]Finding{c, c}), "use ````x````\nIn a.go") {
+	if !strings.Contains(allPrompts([]Finding{c, c}), "use ````x````\n`````\n\nIn a.go") {
 		t.Fatalf("allPrompts: %q", allPrompts([]Finding{c, c}))
 	}
 	c.Body += "\n\n" + review.Verified + "the map is nil on line 3\n"
@@ -319,14 +319,14 @@ func TestSummaryFolded(t *testing.T) {
 	lines := diff.NewLines("diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n x\n+y\n")
 	r := review.Result{Comments: []review.Comment{
 		{Path: "a.go", Line: 2, Severity: "major", Title: "inline", Body: "b"},
-		{Path: "a.go", Line: 2, Severity: "nit", Title: "name", Body: "b", Fold: true, Prompt: "rename"},
+		{Path: "a.go", Line: 2, Severity: "nit", Title: "name", Body: "b", Fold: true},
 		{Path: "b.go", Line: 9, Severity: "minor", Title: "far", Body: "b"},
 	}}
 	inline, outside, folded := Split(r, nil, lines)
 	s := Summary(inline, outside, folded, "f")
 	if len(inline) != 1 || len(outside) != 1 || len(folded) != 1 || !strings.Contains(s, "Actionable comments posted: 2") ||
 		!strings.Contains(s, "Outside diff range comments (1)") || !strings.Contains(s, "<details>\n<summary><b>🧹 Nitpicks (1)</b></summary>") ||
-		!strings.Contains(s, "_🔵 Nit_ · **name**") || !strings.Contains(s, "rename") {
+		!strings.Contains(s, "_🔵 Nit_ · **name**") || !strings.Contains(s, "In a.go around line 2: name") {
 		t.Fatalf("%d inline, %d outside, %d folded:\n%s", len(inline), len(outside), len(folded), s)
 	}
 	if p := Parse(Format(Finding{Comment: r.Comments[1]}, "")); p.Severity != "nit" || p.Title != "name" {

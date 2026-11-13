@@ -83,9 +83,9 @@ func TestStack(t *testing.T) {
 }
 
 func TestVerdicts(t *testing.T) {
-	cs := []Comment{{Path: "a.go", Line: 3, Body: "b", Prompt: "In a.go around line 3, fix"}, {Path: "b.go", Line: 9}}
+	cs := []Comment{{Path: "a.go", Line: 3, Title: "t", Body: "b"}, {Path: "b.go", Line: 9}}
 	kept, dropped, fixed, ok := verdicts(cs, []int{2, 4}, `{"verdicts":[{"i":0,"keep":true,"path":"c.go","line":5,"evidence":"e"},{"i":0,"keep":true},{"i":1,"keep":false,"evidence":"handled in b.go:3"},{"i":7,"keep":true}],"fixed":[4,4,3]}`, nil)
-	if !ok || len(kept) != 1 || kept[0].Path != "c.go" || kept[0].Line != 5 || kept[0].Prompt != "In c.go around line 5, fix" || kept[0].Body != "b\n\n_Verified:_ e" {
+	if !ok || len(kept) != 1 || kept[0].Path != "c.go" || kept[0].Line != 5 || kept[0].Prompt() != "In c.go around line 5: t\n\nb\n\n_Verified:_ e" || kept[0].Body != "b\n\n_Verified:_ e" {
 		t.Fatalf("%+v", kept)
 	}
 	if !slices.Equal(fixed, []int{4}) {
@@ -109,10 +109,9 @@ func TestVerdicts(t *testing.T) {
 		t.Fatalf("fix=false kept the fix: %+v", kept)
 	}
 	// the deploy order rules out a new frontend on an old backend, an old tab on the new backend remains
-	both := []Comment{{Body: "old tabs and old backends", Prompt: "add an adapter", Existing: "a", Fix: "b"}}
+	both := []Comment{{Body: "old tabs and old backends", Existing: "a", Fix: "b"}}
 	if kept, _, _, _ := verdicts(both, nil, `{"verdicts":[{"i":0,"keep":true,"only":"old tabs until a reload","evidence":"deploy.sh:14 rolls the backend out first","fix":true}]}`, nil); kept[0].Fix != "" ||
-		kept[0].Body != "old tabs and old backends\n\n_Only this part holds:_ old tabs until a reload\n\n_Verified:_ deploy.sh:14 rolls the backend out first" ||
-		kept[0].Prompt != "add an adapter\nOnly this part holds, fix just that: old tabs until a reload" {
+		kept[0].Body != "old tabs and old backends\n\n_Only this part holds:_ old tabs until a reload\n\n_Verified:_ deploy.sh:14 rolls the backend out first" {
 		t.Fatalf("partial: %+v", kept)
 	}
 	two := []Comment{{Severity: "major"}, {Severity: "minor"}}

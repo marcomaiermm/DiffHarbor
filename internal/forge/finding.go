@@ -44,8 +44,8 @@ func Format(c Finding, suggestion string) string {
 	} else if c.Fix != "" {
 		s += "\n\n**Suggested fix:**\n\n" + review.Fence(f)
 	}
-	if c.Prompt != "" {
-		s += "\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n" + review.Fence(c.Prompt) + "\n\n</details>"
+	if p := c.Prompt(); p != "" {
+		s += "\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n" + review.Fence(p) + "\n\n</details>"
 	}
 	return s
 }
@@ -273,8 +273,8 @@ func foldedTitle(cs []Finding) string {
 func allPrompts(cs []Finding) string {
 	var ps []string
 	for _, c := range cs {
-		if c.Prompt != "" {
-			ps = append(ps, c.Prompt)
+		if p := c.Prompt(); p != "" {
+			ps = append(ps, p)
 		}
 	}
 	if len(ps) == 0 {
