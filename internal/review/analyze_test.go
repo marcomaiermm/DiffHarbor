@@ -97,7 +97,7 @@ func TestAnalyzePanic(t *testing.T) {
 
 func TestAnalyze(t *testing.T) {
 	const (
-		finding = `{"summary":"s","comments":[{"path":"a.md","line":1,"severity":"major","title":"t","body":"b","prompt":"fix line 1"}]}`
+		finding = `{"summary":"s","comments":[{"path":"a.md","line":1,"severity":"major","title":"t","body":"b"}]}`
 		keep    = `{"verdicts":[{"i":0,"keep":true,"line":2,"evidence":"seen"}]}`
 		drop    = `{"verdicts":[{"i":0,"keep":false,"evidence":"handled"}]}`
 	)
@@ -128,7 +128,7 @@ func TestAnalyze(t *testing.T) {
 	}
 
 	r, stats, calls := run(map[string][]string{"review": {finding}, "verify": {keep}}, Settings{})
-	if len(r.Comments) != 1 || r.Comments[0].Line != 2 || r.Comments[0].Prompt != "fix line 2" ||
+	if len(r.Comments) != 1 || r.Comments[0].Line != 2 || !strings.HasPrefix(r.Comments[0].Prompt(), "In a.md around line 2: t") ||
 		!strings.Contains(r.Comments[0].Body, "_Verified:_ seen") || r.Comments[0].Evidence != "seen" || !strings.HasSuffix(stats, "1/1 verified") ||
 		strings.Join(calls, ",") != "review,review again,verify" {
 		t.Fatalf("kept: %+v %q %v", r.Comments, stats, calls)
