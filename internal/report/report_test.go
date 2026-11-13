@@ -414,10 +414,8 @@ func TestGraph(t *testing.T) {
 
 // a way in runs the PR's declarations as a tree below it: routes first, the finding on it, the step it shows in
 func TestWays(t *testing.T) {
-	store := &file{
-		Path: "store.go", Changes: []change{{Name: "Save", State: "new", Sev: "major"}},
-		Findings: []*finding{{Comment: review.Comment{Severity: "major"}, Href: "#store.go:9"}},
-	}
+	store := &file{Path: "store.go", Changes: []change{{Name: "Save", State: "new", Sev: "major"}},
+		Findings: []*finding{{Comment: review.Comment{Severity: "major"}, Href: "#store.go:9"}}}
 	api := &file{Path: "api.go", Changes: []change{{Name: "Handle", sig: true}}}
 	v := view{Steps: []step{{Files: []*file{store}}, {Files: []*file{api}}}, files: map[string]*file{"store.go": store, "api.go": api}}
 	syms := map[string][]Symbol{
@@ -472,10 +470,8 @@ func TestSignature(t *testing.T) {
 		n         int
 	}{
 		{"export async function resolveItemByName(input: {\n\tname: string;\n\texpansionId?: number;\n}) {\n\tconst n = 1;", "export async function resolveItemByName(input: { name: string; expansionId?: number }) {", 4},
-		{
-			"export async function getItemsByInstance({\n\tinstanceId,\n\tminQuality,\n}: {\n\tinstanceId?: number;\n}): Promise<\n\tArray<Item & { id: number | null }>\n> {\n\treturn [];",
-			"export async function getItemsByInstance({ instanceId, minQuality }: { instanceId?: number }): Promise<Array<Item & { id: number | null }>> {", 8,
-		},
+		{"export async function getItemsByInstance({\n\tinstanceId,\n\tminQuality,\n}: {\n\tinstanceId?: number;\n}): Promise<\n\tArray<Item & { id: number | null }>\n> {\n\treturn [];",
+			"export async function getItemsByInstance({ instanceId, minQuality }: { instanceId?: number }): Promise<Array<Item & { id: number | null }>> {", 8},
 		{"export const protectedProcedure = t.procedure\n\t.use(a)\n\t.use(b);", "export const protectedProcedure", 1},
 		{"export const getItemById = db\n\t.select()", "export const getItemById", 1},
 		{"const env: Env = createEnv({", "const env: Env", 1},
@@ -832,16 +828,14 @@ func TestReproProof(t *testing.T) {
 
 func TestJudge(t *testing.T) {
 	const d = "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n x\n+y\n"
-	v := prepare(Data{
-		SHA: "0123456789", Diff: d, Decisions: []review.Decision{{Text: "Retry?"}}, Flow: []review.Step{{Title: "s", Files: []string{"a.go"}}},
+	v := prepare(Data{SHA: "0123456789", Diff: d, Decisions: []review.Decision{{Text: "Retry?"}}, Flow: []review.Step{{Title: "s", Files: []string{"a.go"}}},
 		Outline: diff.Outline{Weakened: []diff.Flag{{At: "a_test.go:4", What: "skip/only: `t.Skip()`"}}},
 		Findings: []review.Comment{
 			{Path: "a.go", Line: 9, Severity: "minor", Title: "naming"},
 			{Path: "a.go", Line: 5, Severity: "nit", Title: "name it n"},
 			{Path: "a.go", Line: 2, Severity: "critical", Title: "nil map", Body: "m is nil. It panics.\n\n_Verified:_ seen", Evidence: "seen"},
 			{Path: "a.go", Line: 2, Severity: "major", Title: "leak", Body: "The file stays open.\n\nClose it."},
-		},
-	})
+		}})
 	var got []string
 	for _, g := range v.Groups {
 		for _, f := range g.Items {
@@ -887,14 +881,8 @@ func TestJudge(t *testing.T) {
 // A step names the tests that call what it changes; it says none does only when codegraph knows every use.
 func TestTested(t *testing.T) {
 	// a.go: Save on lines 3-5, Load on 7-9; the diff adds line 4 and, after line 8, removes one
-	diff := []line{
-		{Class: "hunk", Text: "@@ -1,9 +1,9 @@"},
-		{Class: "ctx", No: "3"},
-		{Class: "add", No: "4", Text: "\tx++"},
-		{Class: "ctx", No: "8"},
-		{Class: "del", Text: "\ty--"},
-		{Class: "ctx", No: "9"},
-	}
+	diff := []line{{Class: "hunk", Text: "@@ -1,9 +1,9 @@"}, {Class: "ctx", No: "3"}, {Class: "add", No: "4", Text: "\tx++"},
+		{Class: "ctx", No: "8"}, {Class: "del", Text: "\ty--"}, {Class: "ctx", No: "9"}}
 	code := func(ls ...line) *file {
 		return &file{Path: "a.go", Kind: "code", Lines: append(slices.Clone(diff), ls...), Changes: []change{{Name: "Save"}}}
 	}
@@ -917,17 +905,13 @@ func TestTested(t *testing.T) {
 		{"a test reaches it", code(), save(Symbol{Tests: []string{"a_test.go TestSave"}}), []string{"a_test.go TestSave"}, 0, false},
 		{"none is found", code(), save(Symbol{Untested: true}), nil, 0, true},
 		{"a guess finds one", code(), save(Symbol{}), nil, 0, false},
-		{"the line removed in Load: Load's tests", code(), map[string][]Symbol{
-			"Save": {{Path: "a.go", Exact: true, From: 3, To: 5, Untested: true}},
-			"Load": {{Path: "a.go", Exact: true, From: 7, To: 9, Tests: []string{"a_test.go TestLoad"}}},
-		}, []string{"a_test.go TestLoad"}, 0, false},
+		{"the line removed in Load: Load's tests", code(), map[string][]Symbol{"Save": {{Path: "a.go", Exact: true, From: 3, To: 5, Untested: true}},
+			"Load": {{Path: "a.go", Exact: true, From: 7, To: 9, Tests: []string{"a_test.go TestLoad"}}}}, []string{"a_test.go TestLoad"}, 0, false},
 		{"a line in no declaration", code(line{Class: "add", No: "11", Text: "register(Save)"}), save(Symbol{Untested: true}), nil, 0, false},
 		{"a comment in none", code(line{Class: "add", No: "11", Text: "// Save saves."}), save(Symbol{Untested: true}), nil, 0, true},
 		{"one the index doesn't know", code(), map[string][]Symbol{"Save": {{Path: "a.go", Untested: true}}}, nil, 0, false},
-		{
-			"a removed one", &file{Path: "a.go", Kind: "code", Lines: diff, Changes: []change{{Name: "Save"}, {Name: "Old", State: "gone"}}},
-			save(Symbol{Untested: true}), nil, 0, false,
-		},
+		{"a removed one", &file{Path: "a.go", Kind: "code", Lines: diff, Changes: []change{{Name: "Save"}, {Name: "Old", State: "gone"}}},
+			save(Symbol{Untested: true}), nil, 0, false},
 		{"cut short", &file{Path: "a.go", Kind: "code", Lines: diff, Cut: 9}, save(Symbol{Untested: true}), nil, 0, false},
 		{"not code", &file{Path: "a.go", Kind: "config", Lines: diff}, save(Symbol{Untested: true}), nil, 0, false},
 		{"nothing changed", &file{Path: "a.go", Kind: "code"}, save(Symbol{Untested: true}), nil, 0, false},
@@ -1002,14 +986,8 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 
 // an imports hunk says what it brings in and drops; a line that only moved is neither
 func TestImported(t *testing.T) {
-	ls := []line{
-		{Class: "ctx", Text: "import ("},
-		{Class: "del", Text: `	"fmt"`},
-		{Class: "del", Text: `	"os"`},
-		{Class: "add", Text: `	x "a/b"`},
-		{Class: "add", Text: `	"os"`},
-		{Class: "ctx", Text: ")"},
-	}
+	ls := []line{{Class: "ctx", Text: "import ("}, {Class: "del", Text: `	"fmt"`}, {Class: "del", Text: `	"os"`},
+		{Class: "add", Text: `	x "a/b"`}, {Class: "add", Text: `	"os"`}, {Class: "ctx", Text: ")"}}
 	if got := imported(ls); got != "a/b in · fmt out" {
 		t.Errorf("imported %q", got)
 	}
@@ -1050,10 +1028,8 @@ func TestPlaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, w := range []string{
-		`<p class="meta"><span>Kim</span>`, `href="#pkg/a.go:42"`, `title="other.go:7, not in the diff"`,
-		`TestTotal/with discount · not run on 1111111, passed on 2222222`, `href="#pkg/a.go:3"`, ">does not build<", "1 by Kim",
-	} {
+	for _, w := range []string{`<p class="meta"><span>Kim</span>`, `href="#pkg/a.go:42"`, `title="other.go:7, not in the diff"`,
+		`TestTotal/with discount · not run on 1111111, passed on 2222222`, `href="#pkg/a.go:3"`, ">does not build<", "1 by Kim"} {
 		if !strings.Contains(string(b), w) {
 			t.Errorf("%q missing", w)
 		}

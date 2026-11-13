@@ -104,12 +104,8 @@ func TestPick(t *testing.T) {
 		}, []string{"p#a", "q#b"}},
 		{"dedupe by adapter and ID", []cand{{adapter: "a", Section: sec("s1", "RefundOrder")}, {adapter: "a", Section: sec("s1", "RefundOrder")}, {adapter: "b", Section: sec("s1", "RefundOrder")}}, []string{"s1", "s1"}},
 		{"whole sections up to 8000", []cand{
-			{adapter: "a", Section: sec("1", big)},
-			{adapter: "a", Section: sec("2", big)},
-			{adapter: "a", Section: sec("3", big)},
-			{adapter: "a", Section: sec("4", big)},
-			{adapter: "a", Section: sec("5", big)},
-			{adapter: "a", Section: sec("6", big)},
+			{adapter: "a", Section: sec("1", big)}, {adapter: "a", Section: sec("2", big)}, {adapter: "a", Section: sec("3", big)},
+			{adapter: "a", Section: sec("4", big)}, {adapter: "a", Section: sec("5", big)}, {adapter: "a", Section: sec("6", big)},
 		}, []string{"1", "2", "3", "4", "5"}},
 	} {
 		docs, chars := pick(tc.cs, ents)
@@ -280,17 +276,12 @@ func TestLinear(t *testing.T) {
 		// next search failed
 		{"a section's link", []string{"linear"}, []string{"T uuid-9 › Window", "T uuid-9 › Policy", "T uuid-2 › Window"}},
 		// review.json names the whole document by id and slug id: all its sections are explicit, and it's read once
-		{
-			"the document's id and slug id too",
-			[]string{"linear:uuid-9", "linear:3f2a1b9c8d7e"},
-			[]string{"T uuid-9 › Policy", "T uuid-9 › Other", "T uuid-9 › Window", "T uuid-2 › Window"},
-		},
+		{"the document's id and slug id too", []string{"linear:uuid-9", "linear:3f2a1b9c8d7e"},
+			[]string{"T uuid-9 › Policy", "T uuid-9 › Other", "T uuid-9 › Window", "T uuid-2 › Window"}},
 	} {
 		searches, reads = 0, 0
-		docs := Lookup(context.Background(), Env{
-			Key: "t", Owner: "acme", Repo: "acme/api", Diff: testDiff, Texts: []string{"See " + link + "."},
-			Redact: func(s string) string { return s },
-		}, tc.picks)
+		docs := Lookup(context.Background(), Env{Key: "t", Owner: "acme", Repo: "acme/api", Diff: testDiff, Texts: []string{"See " + link + "."},
+			Redact: func(s string) string { return s }}, tc.picks)
 		var got []string
 		for _, d := range docs {
 			got = append(got, d.Title)

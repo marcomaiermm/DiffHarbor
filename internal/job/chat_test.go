@@ -21,7 +21,6 @@ func (f *chatFake) Run(_ context.Context, _ *proc.Sandbox, _, _, prompt, _, _ st
 	f.prompt = prompt
 	return f.reply, nil
 }
-
 func (f *chatFake) Continue(context.Context, *proc.Sandbox, string, string, string, string) (string, error) {
 	return f.reply, nil
 }
@@ -51,7 +50,6 @@ func (p *chatPR) Reply(b string) error {
 	p.log = append(p.log, "reply "+b)
 	return nil
 }
-
 func (p *chatPR) ResolveDiscussion() error {
 	if p.resolveErr != nil {
 		return p.resolveErr

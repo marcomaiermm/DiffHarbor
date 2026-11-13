@@ -100,10 +100,8 @@ func TestSchedulerAnswersFirst(t *testing.T) {
 		got = append(got, e.Kind+" "+e.Key())
 		s.free("a")
 	}
-	want := []string{
-		"issue_comment a#1", "pull_request a#1", "pull_request a#3", "pull_request_review_comment a#2",
-		"issue_comment a#4", "pull_request a#5",
-	}
+	want := []string{"issue_comment a#1", "pull_request a#1", "pull_request a#3", "pull_request_review_comment a#2",
+		"issue_comment a#4", "pull_request a#5"}
 	if !slices.Equal(got, want) {
 		t.Fatal(got)
 	}

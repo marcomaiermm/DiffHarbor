@@ -23,23 +23,26 @@ import (
 // go.mod: its files are that one's, their paths prefixed with its directory.
 const cgQuery = `
 const { DatabaseSync } = require("node:sqlite");
-const { names, dbs } = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const { names, dbs, paths } = JSON.parse(require("fs").readFileSync(0, "utf8"));
 const out = { nodes: [], edges: [] }, skip = "('file', 'import')", list = JSON.stringify(names);
 const other = (p, own) => dbs.some(d => d.prefix.length > own.length && p.startsWith(d.prefix)); // a deeper index's
 for (const { db: file, prefix } of dbs) {
   const db = new DatabaseSync(file, { readOnly: true });
+  // a changed file's methods too: git's hunk header names the class, not a method changed below its first lines
+  const own = JSON.stringify(paths.filter(p => p.startsWith(prefix)).map(p => p.slice(prefix.length)));
   // owner: the class a method sits in, for the map's {class}.{method}
   for (const n of db.prepare("select n.name, n.kind, n.file_path path, n.start_line line, n.end_line end," +
     " case when n.kind = 'method' then (select c.name from nodes c where c.file_path = n.file_path and c.kind in ('class', 'interface', 'struct', 'trait', 'enum', 'component')" +
     " and c.start_line <= n.start_line and c.end_line >= n.end_line order by c.start_line desc limit 1) end owner from nodes n where n.kind not in " + skip +
-    " and n.name in (select value from json_each(?))").all(list)) {
+    " and (n.name in (select value from json_each(?1)) or (n.kind = 'method' and n.file_path in (select value from json_each(?2))))").all(list, own)) {
     n.path = prefix + n.path;
     if (!other(n.path, prefix)) out.nodes.push(n);
   }
   for (const e of db.prepare("select e.line, e.kind, s.name sname, s.kind skind, s.file_path spath, s.start_line sline," +
     " s.end_line send, t.name tname, t.file_path tpath, t.start_line tline from edges e join nodes s on s.id = e.source" +
     " join nodes t on t.id = e.target where e.kind in ('calls', 'references', 'instantiates', 'extends', 'implements')" +
-    " and t.kind not in " + skip + " and (t.name in (select value from json_each(?1)) or s.name in (select value from json_each(?1)))").all(list)) {
+    " and t.kind not in " + skip + " and (t.name in (select value from json_each(?1)) or s.name in (select value from json_each(?1))" +
+    " or (t.kind = 'method' and t.file_path in (select value from json_each(?2))))").all(list, own)) {
     e.spath = prefix + e.spath;
     e.tpath = prefix + e.tpath;
     if (!other(e.spath, prefix) && !other(e.tpath, prefix)) out.edges.push(e);
@@ -80,7 +83,7 @@ func codegraph(sb *proc.Sandbox, repo string, wanted map[string]bool, paths []st
 	}
 	idx := cgIndex{dbs: dbs}
 	names := slices.Collect(maps.Keys(wanted))
-	if !runNode(sb, cgQuery, map[string]any{"names": names, "dbs": dbs}, &idx) {
+	if !runNode(sb, cgQuery, map[string]any{"names": names, "dbs": dbs, "paths": paths}, &idx) {
 		return nil
 	}
 	idx.vtaEdges(sb, repo, names)
@@ -185,8 +188,8 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 		u, r := known[to], Ref{Path: e.SPath, Line: line, In: in, Text: cut(strings.TrimSpace(lines.text(e.SPath, line)), maxText)}
 		site := Ref{Path: r.Path, Line: r.Line}
 		if u.seen[site] {
-			if i, ok := u.here[site]; ok && e.Kind == "calls" { // VTA's and the checker's edges come after the index's: a call beats a name
-				to.HereKind[i] = "calls"
+			if i, ok := u.here[site]; ok && (e.Kind == "calls" || e.Kind == "renders") { // VTA's and the checker's edges come after the index's: a call beats a name
+				to.HereKind[i] = e.Kind
 			}
 			continue
 		}

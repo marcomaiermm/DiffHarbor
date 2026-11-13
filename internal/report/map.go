@@ -149,6 +149,7 @@ type MapTable struct {
 	Parts            []MapTablePart
 	Tests, Elsewhere int
 	Imports, Named   []string
+	Cut              bool // a search of the importers stopped at its file cap: the counts are partial
 }
 
 // MapTablePart is the files of a part that imported a dropped table.
@@ -315,13 +316,14 @@ func (b *mapper) parts(root string) {
 	if len(b.gen) > 0 {
 		b.m.Generated = &MapBox{Files: slices.Sorted(maps.Keys(b.gen)), N: len(b.gen)}
 	}
+	unread := map[string]bool{}
+	for _, u := range slices.Concat(b.d.Failed, b.d.Omitted) {
+		unread[u] = true
+	}
 	for i := range b.m.Parts {
 		for _, f := range b.m.Parts[i].Files {
-			for _, u := range slices.Concat(b.d.Failed, b.d.Omitted) {
-				if u == f {
-					b.m.Parts[i].Unread++
-					break
-				}
+			if unread[f] {
+				b.m.Parts[i].Unread++
 			}
 		}
 	}
@@ -401,10 +403,17 @@ type nameKey struct{ name, kind, via string }
 // through the interface, dashed.
 func (b *mapper) lines() {
 	syms := b.d.Symbols
-	if len(syms) == 0 {
+	exact := false // the name scan alone says nothing of who uses what: it needs the index's edges
+	for _, ss := range syms {
+		exact = exact || slices.ContainsFunc(ss, func(s Symbol) bool { return s.Exact })
+	}
+	if !exact {
 		b.m.NoGraph = true
 		for i := range b.m.Parts {
 			b.m.Parts[i].Col = i + 1
+		}
+		for i := range b.m.Systems {
+			b.m.Systems[i].Row = i
 		}
 		b.m.Cols = len(b.m.Parts)
 		b.m.Order = b.ids(nil)
@@ -429,11 +438,8 @@ func (b *mapper) lines() {
 			continue
 		}
 		done[u], done[use{u.user, u.decl}] = true, true
-		back := used[use{u.user, u.decl}]
-		l := MapLine{From: b.m.Parts[u.decl].ID, To: b.m.Parts[u.user].ID, Names: sortNames(used[u]), Back: sortNames(back), TwoWay: len(back) > 0 && len(used[u]) > 0}
-		if len(used[u]) == 0 { // only the other way: it runs from there
-			l.From, l.To, l.Names, l.Back = l.To, l.From, l.Back, nil
-		}
+		l := MapLine{From: b.m.Parts[u.decl].ID, To: b.m.Parts[u.user].ID, Names: sortNames(used[u]), Back: sortNames(used[use{u.user, u.decl}])}
+		l.TwoWay = drawn(l.Names) && drawn(l.Back) // reads and writes alone back are no use the layout sees
 		l.count()
 		b.m.Lines = append(b.m.Lines, l)
 	}
@@ -530,10 +536,11 @@ func (l *MapLine) count() {
 	}
 	l.Via = slices.Sorted(maps.Keys(vias))
 	l.Weight = l.Calls + l.Through
-	l.Width = 1 + map[bool]int{true: 1}[l.Weight >= 3] + map[bool]int{true: 1}[l.Weight >= 10]
+	l.Width = 1
 	switch {
 	case l.Calls > 0:
 		l.Style = "solid"
+		l.Width += map[bool]int{true: 1}[l.Weight >= 3] + map[bool]int{true: 1}[l.Weight >= 10] // dashed lines stay at 1px
 	case l.Through+l.Named > 0:
 		l.Style = "dashed"
 	}
@@ -657,12 +664,14 @@ func rows(node []string, cols []int, adj [][]mapEdge) (top int, row []int) {
 	return top, row
 }
 
+// drawn is whether a direction has a use the map draws: reads and writes are only carried.
+func drawn(ns []MapName) bool {
+	return slices.ContainsFunc(ns, func(x MapName) bool { return x.Kind == "calls" || x.Kind == "through" || x.Kind == "named" })
+}
+
 // weights is the matrix of the drawn lines: w[i][j] is how much part i uses part j, at least 1 when it does.
 func (b *mapper) weights(at map[string]int) [][]int {
 	n := len(b.m.Parts)
-	drawn := func(ns []MapName) bool {
-		return slices.ContainsFunc(ns, func(x MapName) bool { return x.Kind == "calls" || x.Kind == "through" || x.Kind == "named" })
-	}
 	w := make([][]int, n) // w[i][j]: i uses j, by the weight of the line, at least 1
 	for i := range w {
 		w[i] = make([]int, n)
@@ -831,15 +840,17 @@ func (b *mapper) reach() {
 func (b *mapper) deploy() {
 	boxes := map[string]*MapDeploy{}
 	box := func(kind, label, p string) *MapDeploy {
-		if boxes[label] == nil {
-			boxes[label] = &MapDeploy{Kind: kind, Label: label, Path: p}
+		k := label // a migration is its file, whatever its label
+		if kind == "migration" {
+			k = p
 		}
-		return boxes[label]
-	}
-	label := func(kind string) string {
-		return map[string]string{"ci": "CI"}[kind] + map[bool]string{true: strings.ToUpper(kind[:1]) + kind[1:]}[kind != "ci"]
+		if boxes[k] == nil {
+			boxes[k] = &MapDeploy{Kind: kind, Label: label, Path: p}
+		}
+		return boxes[k]
 	}
 	kinds := map[string]string{"Environment": "environment", "Dependencies": "dependencies", "Build, deploy and CI": "ci", "Configuration": "configuration"}
+	label := map[string]string{"environment": "Environment", "dependencies": "Dependencies", "ci": "CI", "configuration": "Configuration"}
 	for _, r := range b.v.Risks {
 		var bx *MapDeploy
 		for _, it := range r.Items {
@@ -848,7 +859,7 @@ func (b *mapper) deploy() {
 				mi.Path = it.What
 				bx = box("migration", migrationLabel(it.What), it.What)
 			} else {
-				bx = box(kinds[r.Title], label(kinds[r.Title]), "")
+				bx = box(kinds[r.Title], label[kinds[r.Title]], "")
 				if r.Title != "Environment" && r.Title != "Dependencies" {
 					mi.Path = it.What
 				}
@@ -889,16 +900,20 @@ func (b *mapper) deploy() {
 	}
 	rank := map[string]int{"migration": 0, "environment": 1, "dependencies": 2, "ci": 3, "configuration": 4, "prs": 5, "docs": 6}
 	for _, bx := range slices.SortedFunc(maps.Values(boxes), func(x, y *MapDeploy) int {
-		return cmp.Or(cmp.Compare(rank[x.Kind], rank[y.Kind]), strings.Compare(x.Label, y.Label))
+		return cmp.Or(cmp.Compare(rank[x.Kind], rank[y.Kind]), strings.Compare(x.Label, y.Label), strings.Compare(x.Path, y.Path))
 	}) {
 		b.m.Deploy = append(b.m.Deploy, *bx)
 	}
 }
 
-// migrationLabel is "Migration 0059" for drizzle/0059_drop_x.sql, the file's name without its extension otherwise.
+// migrationLabel is "Migration 0059" for drizzle/0059_drop_x.sql, the file's name without its extension otherwise; a
+// Prisma migration.sql is named by its folder, 20240101120000_init.
 func migrationLabel(p string) string {
 	base := path.Base(p)
 	base = strings.TrimSuffix(base, path.Ext(base))
+	if base == "migration" {
+		base = path.Base(path.Dir(p))
+	}
 	if n := strings.IndexFunc(base, func(r rune) bool { return r < '0' || r > '9' }); n > 0 {
 		base = base[:n]
 	}
@@ -1067,7 +1082,8 @@ func sqlNames(git func(args ...string) []byte, ts []MapTable, names []string) {
 }
 
 // tables is Map.Tables (6.11): the tables the diff's migrations drop, who imported their declaration at the base,
-// and what the head still has. Six git calls at most, in the minute tableTime gives them; without sb the first only.
+// and what the head still has. Git calls, bounded by the minute tableTime gives them and, per table, five (two
+// searches of the base, two of the head, their blobs in one process each); without sb none.
 func (b *mapper) tables(sb *proc.Sandbox) {
 	ts := b.drops()
 	if sb == nil || len(ts) == 0 {
@@ -1085,65 +1101,91 @@ func (b *mapper) tables(sb *proc.Sandbox) {
 		names[i] = t.Name
 	}
 	decls := declarations(git, names)
-	ids := map[string]bool{}
-	for i := range ts {
-		if d, ok := decls[ts[i].Name]; ok {
-			ts[i].Decl, ids[d.id] = d.file, true
-		}
+	find := func(ref string, d tableSite, seed map[string]bool) (importing, bool) {
+		return findImporters(git, func(specs []string) map[string]string { return catFiles(ctx, sb, specs) }, ref, d, seed, maxTableFiles)
 	}
-	if len(ids) > 0 {
-		in := func(ref string) map[string]string { // the files that name an id, by path
-			args := []string{"grep", "-l", "-z", "-I", "-w", "-F"}
-			for id := range ids {
-				args = append(args, "-e", id)
-			}
-			if ref != "" {
-				args = append(args, ref)
-			}
-			var specs []string
-			for _, p := range strings.Split(string(git(append(args, append([]string{"--"}, jsSpecs...)...)...)), "\x00") {
-				if p = strings.TrimPrefix(p, ref+":"); p != "" && len(specs) < maxTableFiles {
-					specs = append(specs, cmp.Or(ref, "HEAD")+":"+p)
-				}
-			}
-			return catFiles(ctx, sb, specs)
+	for i := range ts {
+		d, ok := decls[ts[i].Name]
+		if !ok {
+			continue
 		}
-		base, head := in("refs/base"), in("")
-		for i := range ts {
-			d, ok := decls[ts[i].Name]
-			if !ok {
-				continue
-			}
-			mods := importers(base, d.file, d.id, "refs/base:")
-			at := map[int][]string{} // the part -> files
-			for _, p := range slices.Sorted(maps.Keys(mods.files)) {
-				pi, ok := b.part[p]
-				switch {
-				case diff.Kind(p) == "test":
-					ts[i].Tests++
-				case ok:
-					at[pi] = append(at[pi], p)
-				default: // a deleted file: its folder's part
-					if pj, ok := b.byFolder(folder(p, b.depth)); ok {
-						at[pj] = append(at[pj], p)
-					} else {
-						ts[i].Elsewhere++
-					}
-				}
-			}
-			for _, pi := range slices.Sorted(maps.Keys(at)) {
-				ts[i].Parts = append(ts[i].Parts, MapTablePart{b.m.Parts[pi].ID, at[pi]})
-				b.m.Parts[pi].DB = true
-			}
-			for _, p := range slices.Sorted(maps.Keys(importers(head, d.file, d.id, "HEAD:", mods.mods).files)) {
-				if diff.Kind(p) != "test" && len(ts[i].Imports) < maxNamed {
-					ts[i].Imports = append(ts[i].Imports, p)
+		ts[i].Decl = d.file
+		mods, cut := find("refs/base", d, nil)
+		at := map[int][]string{} // the part -> files
+		for _, p := range slices.Sorted(maps.Keys(mods.files)) {
+			pi, ok := b.part[p]
+			switch {
+			case diff.Kind(p) == "test":
+				ts[i].Tests++
+			case ok:
+				at[pi] = append(at[pi], p)
+			default: // a deleted file: its folder's part
+				if pj, ok := b.byFolder(folder(p, b.depth)); ok {
+					at[pj] = append(at[pj], p)
+				} else {
+					ts[i].Elsewhere++
 				}
 			}
 		}
+		for _, pi := range slices.Sorted(maps.Keys(at)) {
+			ts[i].Parts = append(ts[i].Parts, MapTablePart{b.m.Parts[pi].ID, at[pi]})
+			b.m.Parts[pi].DB = true
+		}
+		head, cutHead := find("", d, mods.mods)
+		for _, p := range slices.Sorted(maps.Keys(head.files)) {
+			if diff.Kind(p) != "test" && len(ts[i].Imports) < maxNamed {
+				ts[i].Imports = append(ts[i].Imports, p)
+			}
+		}
+		ts[i].Cut = cut || cutHead
 	}
 	sqlNames(git, ts, names)
 	b.m.Tables = ts
+}
+
+// findImporters is the files of ref ("" the head) that import the declaration d, and whether a search was cut at limit
+// files. A search reads the files that name its id and one of the modules that hold it (the file, the barrels that
+// re-export it): the first round the declaring file's, a second the barrels the first found. seed: the modules the
+// base found, for the head.
+func findImporters(git func(args ...string) []byte, read func(specs []string) map[string]string, ref string, d tableSite, seed map[string]bool, limit int) (importing, bool) {
+	tag := cmp.Or(ref, "HEAD") + ":"
+	mods := map[string]bool{strings.TrimSuffix(d.file, path.Ext(d.file)): true}
+	maps.Copy(mods, seed)
+	texts, cut := map[string]string{}, false
+	var im importing
+	for range 2 {
+		var names []string
+		for m := range mods {
+			n := path.Base(m)
+			if n == "index" {
+				n = path.Base(path.Dir(m))
+			}
+			names = append(names, regexp.QuoteMeta(n))
+		}
+		slices.Sort(names)
+		args := []string{"grep", "-l", "-z", "-I", "-w", "-E", "--all-match", "-e", d.id, "-e", "(" + strings.Join(slices.Compact(names), "|") + ")"}
+		if ref != "" {
+			args = append(args, ref)
+		}
+		var specs []string
+		for _, p := range strings.Split(string(git(append(args, append([]string{"--"}, jsSpecs...)...)...)), "\x00") {
+			if p = strings.TrimPrefix(p, ref+":"); p == "" {
+				continue
+			}
+			if len(specs) == limit {
+				cut = true
+				break
+			}
+			specs = append(specs, tag+p)
+		}
+		maps.Copy(texts, read(specs))
+		im = importers(texts, d.file, d.id, tag, seed)
+		if len(im.mods) == len(mods) {
+			break
+		}
+		mods = im.mods
+	}
+	return im, cut
 }
 
 // byFolder is the part that holds folder k, "Other" when it joins it.
@@ -1240,15 +1282,21 @@ func catFiles(ctx context.Context, sb *proc.Sandbox, specs []string) map[string]
 			break
 		}
 		f := strings.Fields(head)
-		if len(f) != 3 { // "<spec> missing"
+		n, err := strconv.Atoi(f[len(f)-1]) // the size is the last field: a path may hold spaces; "<spec> missing" has none
+		if len(f) < 3 || err != nil {
 			continue
 		}
-		n, _ := strconv.Atoi(f[2])
+		if n > maxSize { // skip it unread: its size is git's word, not a bound on memory
+			if _, err := io.CopyN(io.Discard, r, int64(n)+1); err != nil {
+				break
+			}
+			continue
+		}
 		blob := make([]byte, n+1) // and the newline after it
 		if _, err := io.ReadFull(r, blob); err != nil {
 			break
 		}
-		if n <= maxSize && !bytes.Contains(blob, []byte{0}) {
+		if !bytes.Contains(blob, []byte{0}) {
 			out[spec] = string(blob[:n])
 		}
 	}

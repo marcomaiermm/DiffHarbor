@@ -1,6 +1,8 @@
 package report
 
 import (
+	"context"
+	"diffharbor/internal/review"
 	"fmt"
 	"os"
 	"os/exec"
@@ -112,6 +114,10 @@ func TestMapLines(t *testing.T) {
 			"users": {changedSym("e/e.go", 3, "new", "f/f.go:3=reads", "f/f.go:4=writes")},
 			// an index of g without kinds counts a call
 			"Run": {changedSym("g/g.go", 3, "new", "d/d.go:20")},
+			// a JSX element is a call
+			"Rend": {changedSym("g/g.go", 9, "new", "d/d.go:30=renders")},
+			// f's Back is only read by e: no use either layout or arrowhead sees, so not a two-way pair
+			"Back2": {changedSym("f/f.go", 9, "new", "e/e.go:7=reads")},
 		},
 	}
 	m := BuildMap(nil, d, nil)
@@ -129,10 +135,10 @@ func TestMapLines(t *testing.T) {
 	if cd == nil || cd.Style != "dashed" || cd.Chevron != "" || cd.Named != 2 || cd.Weight != 0 || cd.Width != 1 || len(m.Lines) != 4 {
 		t.Errorf("c-d %+v, %d lines", cd, len(m.Lines))
 	}
-	if ef := mapLine(m, "e", "f"); ef == nil || ef.Reads != 1 || ef.Writes != 1 || ef.Style != "" || ef.Chevron != "" || !mapPart(m, "e").Alone || !mapPart(m, "f").Alone {
+	if ef := mapLine(m, "e", "f"); ef == nil || ef.Reads != 2 || ef.Writes != 1 || ef.TwoWay || ef.Style != "" || ef.Chevron != "" || !mapPart(m, "e").Alone || !mapPart(m, "f").Alone {
 		t.Errorf("e-f %+v", ef)
 	}
-	if gd := mapLine(m, "g", "d"); gd == nil || gd.Calls != 1 || gd.Style != "solid" {
+	if gd := mapLine(m, "g", "d"); gd == nil || gd.Calls != 2 || gd.Style != "solid" {
 		t.Errorf("g-d %+v", gd)
 	}
 	if m.NoKinds {
@@ -165,10 +171,11 @@ func TestMapInterface(t *testing.T) {
 	if want := []MapName{{"Save", "calls", "", "app/app.go:21", 1}, {"Save", "through", "Saver", "app/app.go:20", 1}, {"Save", "named", "", "app/app.go:7", 1}}; !reflect.DeepEqual(l.Names, want) {
 		t.Errorf("names %+v", l.Names)
 	}
-	// without VTA's edge the call is through the interface alone: dashed, with an arrowhead
+	// without VTA's edge the call is through the interface alone: dashed, with an arrowhead, and 1px however many
 	save.Here, save.HereKind = save.Here[:1], save.HereKind[:1]
+	iface.Here, iface.HereKind = append(iface.Here, "app/app.go:22"), append(iface.HereKind, "calls")
 	d.Symbols = map[string][]Symbol{"Save": {iface, save}}
-	if l := mapLine(BuildMap(nil, d, nil), "pg", "app"); l == nil || l.Calls != 0 || l.Through != 2 || l.Style != "dashed" || l.Chevron != "to" || l.Weight != 2 {
+	if l := mapLine(BuildMap(nil, d, nil), "pg", "app"); l == nil || l.Calls != 0 || l.Through != 3 || l.Style != "dashed" || l.Chevron != "to" || l.Weight != 3 || l.Width != 1 {
 		t.Errorf("through %+v", l)
 	}
 }
@@ -341,12 +348,16 @@ func TestMapTables(t *testing.T) {
 
 func TestMapTrace(t *testing.T) {
 	d := Data{
-		Diff: newFile("a/a.go", "package a\nfunc Entry() { Fetch() }\n") + newFile("b/b.go", "package b\n\nfunc Fetch() {\n\thttp.Get(u)\n}\n"),
+		Diff: newFile("a/a.go", "package a\nfunc Entry() { Fetch() }\n") + newFile("b/b.go", "package b\n\nfunc Fetch() {\n\thttp.Get(u)\n}\n\nfunc Other() {\n\tx()\n}\n"),
 		Symbols: map[string][]Symbol{
 			"Fetch": {{Kind: "function", Path: "b/b.go", Line: 3, From: 3, To: 5, Exact: true, State: "new", Ways: []Way{
 				{Method: "CALL", Route: "Entry", Path: "a/a.go", Line: 2, Chain: []Hop{{Name: "Fetch", Path: "b/b.go", Line: 3, In: "a/a.go", At: 2}}},
 			}}},
 			"Entry": {changedSym("a/a.go", 2, "new")},
+			// a route's way ends in a declaration of the same file that holds no call: it comes first and must not take it
+			"Other": {{Kind: "function", Path: "b/b.go", Line: 7, From: 7, To: 9, Exact: true, State: "new", Ways: []Way{
+				{Method: "GET", Route: "/o", Path: "a/a.go", Line: 2, Chain: []Hop{{Name: "Other", Path: "b/b.go", Line: 7, In: "a/a.go", At: 2}}},
+			}}},
 		},
 	}
 	if m := BuildMap(nil, d, nil); m != nil && m.Trace != nil {
@@ -367,6 +378,11 @@ func TestMapTrace(t *testing.T) {
 }
 
 func TestMapLeftOut(t *testing.T) {
+	// the name scan alone (nothing Exact) tells nothing of who uses what: no code graph, not "no line"
+	scan := map[string][]Symbol{"X": {{Kind: "function", Path: "a/a.go", Line: 3, Refs: []Ref{{Path: "b/b.go", Line: 3}}}}}
+	if m := BuildMap(nil, Data{Diff: newFile("a/a.go", "package a\n") + newFile("b/b.go", "package b\n"), Symbols: scan}, nil); m == nil || !m.NoGraph {
+		t.Errorf("scan-only symbols: %+v", m)
+	}
 	one := newFile("a/a.go", "package a\n") + newFile("a/b.go", "package a\n")
 	if m := BuildMap(nil, Data{Diff: one}, nil); m != nil {
 		t.Errorf("one part, no system: a map %+v", m)
@@ -384,7 +400,7 @@ func TestMapMethods(t *testing.T) {
 		t.Skip("no node")
 	}
 	sb, dir := sandbox(t)
-	for p, src := range map[string]string{"client.ts": "export class Client {\n  fetch() {\n    return 1\n  }\n}\n", "use.ts": "import { Client } from \"./client\"\n\nnew Client().fetch()\nnew Client().fetch()\n"} {
+	for p, src := range map[string]string{"client.ts": "export class Client {\n  fetch() {\n    return 1\n  }\n}\n", "use.ts": "import { Client } from \"./client\"\n\nnew Client().fetch()\nnew Client().fetch()\n", "use.test.ts": "x\nnew Client().fetch()\n"} {
 		if err := os.WriteFile(filepath.Join(dir, p), []byte(src), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -392,8 +408,8 @@ func TestMapMethods(t *testing.T) {
 	db := `const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(process.argv[1]);
 db.exec("create table nodes (id text, kind text, name text, file_path text, start_line int, end_line int);" +
   "create table edges (source text, target text, kind text, line int);" +
-  "insert into nodes values ('c', 'class', 'Client', 'client.ts', 1, 5), ('m', 'method', 'fetch', 'client.ts', 2, 4), ('u', 'file', 'use.ts', 'use.ts', 1, 4);" +
-  "insert into edges values ('u', 'm', 'references', 3), ('u', 'm', 'calls', 3), ('u', 'm', 'calls', 4);")`
+  "insert into nodes values ('c', 'class', 'Client', 'client.ts', 1, 5), ('m', 'method', 'fetch', 'client.ts', 2, 4), ('u', 'file', 'use.ts', 'use.ts', 1, 4), ('t', 'file', 'use.test.ts', 'use.test.ts', 1, 2);" +
+  "insert into edges values ('u', 'm', 'references', 3), ('u', 'm', 'calls', 3), ('u', 'm', 'calls', 4), ('t', 'm', 'calls', 2);")`
 	if err := os.MkdirAll(filepath.Join(dir, ".codegraph"), 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -406,9 +422,129 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 		!slices.Equal(got[0].Here, []string{"use.ts:3", "use.ts:4"}) || !slices.Equal(got[0].HereKind, []string{"calls", "calls"}) {
 		t.Fatalf("Client.fetch %+v", got)
 	}
+	if got[0].NOutside != 1 || got[0].NOutsideTests != 1 { // a test beyond the diff
+		t.Errorf("outside %d, in tests %d", got[0].NOutside, got[0].NOutsideTests)
+	}
+	// a change below the method's first lines: git's hunk header names the class, so the name scan never sees "fetch"
+	s = Symbols(sb, "+++ b/client.ts\n@@ -1,5 +1,5 @@ export class Client {\n+    return 2\n")
+	if got := s["Client.fetch"]; len(got) != 1 || got[0].From != 2 || got[0].To != 4 || !got[0].Exact || got[0].NOutside != 3 {
+		t.Errorf("a method changed in its body: %+v", got)
+	}
 	// the diff adds to its lines, so it is a declaration the PR changed
 	b := &mapper{added: map[string]bool{"client.ts:3": true}}
 	if !b.stated(&got[0]) || (&mapper{}).stated(&got[0]) {
 		t.Error("a method with an added line is changed, one without isn't")
+	}
+}
+
+func TestMapItems(t *testing.T) {
+	files := []string{"a/a.go", "b/b.go", "gen/zz_gen.go", "docs/guide.md", "db/migrations/0001_x.sql", "vite.config.ts", ".env.example", "a/a_test.go", "x/data.json"}
+	var diffs strings.Builder
+	for _, p := range files {
+		diffs.WriteString(newFile(p, "x\n"))
+	}
+	var fs []review.Comment
+	for _, p := range files {
+		fs = append(fs, review.Comment{Path: p, Line: 1, Severity: "major", Title: "t " + p})
+	}
+	d := Data{Diff: diffs.String(), Findings: fs, Failed: []string{"a/a.go"}, Omitted: []string{"b/b.go", "gen/zz_gen.go"}}
+	m := BuildMap(nil, d, nil)
+	on := func(its []MapItem) []string {
+		var out []string
+		for _, i := range its {
+			if i.Kind == "finding" { // the risks' own items sit on the same boxes
+				out = append(out, i.Path)
+			}
+		}
+		return out
+	}
+	if got := on(mapPart(m, "a").Items); !slices.Equal(got, []string{"a/a.go"}) {
+		t.Errorf("part a: %v", got)
+	}
+	if got := on(m.Off); !slices.Equal(got, []string{"a/a_test.go", "x/data.json"}) {
+		t.Errorf("off: %v", got)
+	}
+	if mapPart(m, "a").Unread != 1 || mapPart(m, "b").Unread != 1 {
+		t.Errorf("unread a %d, b %d", mapPart(m, "a").Unread, mapPart(m, "b").Unread)
+	}
+	boxes := map[string][]string{}
+	for _, bx := range m.Deploy {
+		boxes[bx.Kind+" "+bx.Label] = on(bx.Items)
+	}
+	want := map[string][]string{
+		"docs Docs": {"docs/guide.md"}, "migration Migration 0001": {"db/migrations/0001_x.sql"},
+		"ci CI": {"vite.config.ts"}, "configuration Configuration": {".env.example"},
+	}
+	if !reflect.DeepEqual(boxes, want) {
+		t.Errorf("deploy %v", boxes)
+	}
+	if g := m.Generated; g == nil || len(g.Items) != 1 {
+		t.Errorf("generated %+v", g)
+	}
+
+	// one box for each migration file: Prisma's all are migration.sql, and numbers repeat across folders
+	d = Data{Diff: newFile("a/a.go", "x\n") + newFile("b/b.go", "x\n")}
+	for _, p := range []string{"prisma/migrations/20240101120000_init/migration.sql", "prisma/migrations/20240202_two/migration.sql", "apps/a/drizzle/0001_x.sql", "apps/b/drizzle/0001_y.sql"} {
+		d.Findings = append(d.Findings, review.Comment{Path: p, Line: 1, Title: "t"})
+	}
+	var labels []string
+	for _, bx := range BuildMap(nil, d, nil).Deploy {
+		labels = append(labels, bx.Label+" "+bx.Path)
+	}
+	if want := []string{"Migration 0001 apps/a/drizzle/0001_x.sql", "Migration 0001 apps/b/drizzle/0001_y.sql", "Migration 20240101120000 prisma/migrations/20240101120000_init/migration.sql", "Migration 20240202 prisma/migrations/20240202_two/migration.sql"}; !slices.Equal(labels, want) {
+		t.Errorf("migrations %q", labels)
+	}
+}
+
+// TestFindImporters: a search that reaches its cap says so, and names the module beside the id.
+func TestFindImporters(t *testing.T) {
+	var args []string
+	git := func(a ...string) []byte {
+		args = a
+		return []byte("a.ts\x00b.ts\x00c.ts\x00")
+	}
+	var read []string
+	got := func(specs []string) map[string]string {
+		read = specs
+		return map[string]string{}
+	}
+	_, cut := findImporters(git, got, "", tableSite{"src/db/items.ts", "itemsTable"}, nil, 2)
+	if !cut || !slices.Equal(read, []string{"HEAD:a.ts", "HEAD:b.ts"}) {
+		t.Errorf("cut %v, read %v", cut, read)
+	}
+	if !slices.Contains(args, "--all-match") || !slices.Contains(args, "itemsTable") || !slices.Contains(args, "(items)") {
+		t.Errorf("args %q", args)
+	}
+	if _, cut := findImporters(git, got, "", tableSite{"src/db/items.ts", "itemsTable"}, nil, 3); cut {
+		t.Error("cut at exactly the cap")
+	}
+}
+
+// TestCatFiles: a blob past maxSize is skipped without being read into memory, a path with spaces keeps the stream in step.
+func TestCatFiles(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	sb, dir := sandbox(t)
+	for p, src := range map[string]string{"a b/c d.ts": "one\n", "big.js": strings.Repeat("x", maxSize+10), "z.ts": "two\n"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, p)), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, p), []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "."}, {"commit", "-qm", "x"}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.email=a@b", "-c", "user.name=n"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatal(err, string(out))
+		}
+	}
+	got := catFiles(context.Background(), sb, []string{"HEAD:a b/c d.ts", "HEAD:gone.ts", "HEAD:big.js", "HEAD:z.ts"})
+	if want := map[string]string{"HEAD:a b/c d.ts": "one\n", "HEAD:z.ts": "two\n"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %d files: %v", len(got), slices.Collect(func(y func(string) bool) {
+			for k := range got {
+				y(k)
+			}
+		}))
 	}
 }

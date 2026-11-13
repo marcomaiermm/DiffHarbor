@@ -458,23 +458,11 @@ func TestOtherMention(t *testing.T) {
 
 func TestNewer(t *testing.T) {
 	bot := regexp.MustCompile(`@bot\b`)
-	ours := []forge.Note{
-		{ID: 1, Login: "bot", Ours: true},
-		{ID: 2, Login: "ann", Body: "why?"},
-		{ID: 3, Login: "bob", Body: "hm"},
-		{ID: 4, Login: "ann", Body: "and line 9?"},
-		{ID: 5, Login: "ann", Body: "@bob what do you think?"},
-		{ID: 6, Login: "ann", Body: "thanks"},
-	}
+	ours := []forge.Note{{ID: 1, Login: "bot", Ours: true}, {ID: 2, Login: "ann", Body: "why?"}, {ID: 3, Login: "bob", Body: "hm"},
+		{ID: 4, Login: "ann", Body: "and line 9?"}, {ID: 5, Login: "ann", Body: "@bob what do you think?"}, {ID: 6, Login: "ann", Body: "thanks"}}
 	humans := []forge.Note{{ID: 1, Login: "bob"}, {ID: 2, Login: "ann", Body: "@bot why?"}, {ID: 3, Login: "ann", Body: "also line 9?"}}
-	capped := []forge.Note{
-		{ID: 1, Login: "bot", Ours: true},
-		{ID: 2, Login: "ann", Body: "why?"},
-		{ID: 3, Ours: true},
-		{ID: 4, Ours: true},
-		{ID: 5, Ours: true},
-		{ID: 6, Login: "ann", Body: "and now?"},
-	}
+	capped := []forge.Note{{ID: 1, Login: "bot", Ours: true}, {ID: 2, Login: "ann", Body: "why?"},
+		{ID: 3, Ours: true}, {ID: 4, Ours: true}, {ID: 5, Ours: true}, {ID: 6, Login: "ann", Body: "and now?"}}
 	edited := []forge.Note{{ID: 1, Login: "bot", Ours: true}, {ID: 2, Login: "ann", Body: "why?"}, {ID: 3, Login: "ann", Body: "also why?", Edited: true}}
 	for _, c := range []struct {
 		d     forge.Discussion
@@ -500,10 +488,8 @@ func TestNewer(t *testing.T) {
 
 func TestCommand(t *testing.T) {
 	bot := regexp.MustCompile(`(?i)(^|[^\w.+-])@(bot)\.*([^\w.-]|$)`)
-	for body, want := range map[string]string{
-		"@bot review": "review", "(@bot) review": "review", "(@bot review)": "review)",
-		"@bot, Review all!": "review all!", "@bot thanks": "thanks", "@bot forget foo.": "forget foo.", "@bot agreed?": "agreed?",
-	} {
+	for body, want := range map[string]string{"@bot review": "review", "(@bot) review": "review", "(@bot review)": "review)",
+		"@bot, Review all!": "review all!", "@bot thanks": "thanks", "@bot forget foo.": "forget foo.", "@bot agreed?": "agreed?"} {
 		if got := command(bot, body); got != want {
 			t.Errorf("%q: got %q, want %q", body, got, want)
 		}

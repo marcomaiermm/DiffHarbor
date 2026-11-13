@@ -52,14 +52,10 @@ func main() { backfill(store.DB{}); each(store.DB{}) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := cgEdge{
-		Line: 6, Kind: "calls", By: "vta", SName: "backfill", SKind: "function", SPath: "main.go", SLine: 5, SEnd: 7,
-		TName: "Record", TPath: "store/store.go", TLine: 7,
-	}
-	generic := cgEdge{
-		Line: 9, Kind: "calls", By: "vta", SName: "each", SKind: "function", SPath: "main.go", SLine: 9, SEnd: 9,
-		TName: "Record", TPath: "store/store.go", TLine: 7,
-	} // through its instance
+	want := cgEdge{Line: 6, Kind: "calls", By: "vta", SName: "backfill", SKind: "function", SPath: "main.go", SLine: 5, SEnd: 7,
+		TName: "Record", TPath: "store/store.go", TLine: 7}
+	generic := cgEdge{Line: 9, Kind: "calls", By: "vta", SName: "each", SKind: "function", SPath: "main.go", SLine: 9, SEnd: 9,
+		TName: "Record", TPath: "store/store.go", TLine: 7} // through its instance
 	if len(got) != 2 || !slices.Contains(got, want) || !slices.Contains(got, generic) {
 		t.Fatalf("got %+v, want only %+v and %+v", got, want, generic)
 	}
