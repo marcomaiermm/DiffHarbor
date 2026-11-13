@@ -191,7 +191,7 @@ for (const file of program.getSourceFileNames()) {
   for (const ch of chains.values()) {
     for (let c = ch.top; c && (is.isCallExpression(c) || is.isPropertyAccessExpression(c)); c = c.expression) {
       if (is.isCallExpression(c)) for (const a of c.arguments) {
-        let r = a;
+        let r = is.isPropertyAccessExpression(a) && is.isIdentifier(a.expression) ? a.name : a; // schema.users: users
         while (is.isPropertyAccessExpression(r) || is.isCallExpression(r)) r = r.expression;
         if (is.isIdentifier(r)) ch.cands.push({ sym: ask2.push(r) - 1 });
         else if (is.isStringLiteral(a) || is.isNoSubstitutionTemplateLiteral(a)) ch.cands.push({ str: a.text });

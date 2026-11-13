@@ -103,6 +103,7 @@ func TestTSEdges(t *testing.T) {
 		"writes addUser src/data.ts:7 -> users src/schema.ts",      // in a transaction's callback
 		"writes renameUser src/data.ts:9 -> users src/schema.ts",   // update(t).set(…)
 		"writes txCount src/data.ts:13 -> users src/schema.ts",     // const n = db.transaction(…): no route "n"
+		"writes nsWrite src/data.ts:15 -> users src/schema.ts",     // insert(schema.users)
 		"reads findPosts src/data.ts:10 -> post ",                  // client.post.findMany()
 		"reads rawCount src/data.ts:11 -> audit_log ",              // SQL
 		"reads allOrders src/data.ts:12 -> Order src/schema.ts",    // Repository<Order>
