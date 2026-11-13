@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func serve(t *testing.T, h http.HandlerFunc) {
@@ -714,5 +715,31 @@ func TestReopen(t *testing.T) {
 	sent, fail = nil, true
 	if err := o.Reopen(forge.Thread{ID: "d7"}, "abcdef1", c); err == nil || len(sent) != 1 {
 		t.Fatalf("%q %v", sent, err)
+	}
+}
+
+// A merge request's creation date and author: the webhook has its own date format and no username, the API fills both.
+func TestHeader(t *testing.T) {
+	serve(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/projects/5/merge_requests/3":
+			fmt.Fprint(w, `{"iid":3,"state":"opened","created_at":"2026-11-02T10:00:00.000Z","author":{"id":7,"username":"marco"},"source_branch":"f","target_branch":"main"}`)
+		case "/users/7":
+			fmt.Fprint(w, `{"bot":false}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	want := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
+	hook := `{"object_kind":"merge_request","project":{"id":5,"path_with_namespace":"g/p"},
+"object_attributes":{"iid":3,"state":"opened","action":"open","created_at":"2026-11-02 10:00:00 UTC","source_branch":"f","target_branch":"main"}}`
+	e, err := (&Hub{"s"}).Parse(http.Header{"X-Gitlab-Token": {"s"}}, []byte(hook))
+	if err != nil || !e.PullRequest.CreatedAt.Equal(want) {
+		t.Fatalf("webhook: %v %v", e.PullRequest.CreatedAt, err)
+	}
+	e.PullRequest.CreatedAt = time.Time{}
+	p, _ := (&Hub{}).Open(e)
+	if err := p.Refresh(); err != nil || e.PullRequest.User.Login != "marco" || !e.PullRequest.CreatedAt.Equal(want) || e.PullRequest.Head.Ref != "f" || e.PullRequest.Base.Ref != "main" {
+		t.Fatalf("api: %+v %v", e.PullRequest, err)
 	}
 }

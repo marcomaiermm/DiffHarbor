@@ -256,8 +256,10 @@ type mr struct {
 	TargetBranch    string              `json:"target_branch"`
 	SourceProjectID int64               `json:"source_project_id"`
 	HasConflicts    bool                `json:"has_conflicts"`
+	Created         string              `json:"created_at"`
 	Author          struct {
-		ID int64 `json:"id"`
+		ID       int64  `json:"id"`
+		Username string `json:"username"` // the API's: webhooks have the id only
 	} `json:"author"`
 	DiffRefs *struct {
 		Base  string `json:"base_sha"`
@@ -277,6 +279,12 @@ func (m *mr) fill(e *forge.Event) {
 	p.HTMLURL = cmp.Or(m.WebURL, m.URL)
 	p.Head.SHA, p.Head.Ref, p.Head.Repo.ID = cmp.Or(m.SHA, m.LastCommit.ID), m.SourceBranch, m.SourceProjectID
 	p.Base.Ref = m.TargetBranch
+	p.User.Login = cmp.Or(m.Author.Username, p.User.Login)
+	if t, err := time.Parse(time.RFC3339, m.Created); err == nil {
+		p.CreatedAt = t
+	} else if t, err := time.Parse("2006-01-02 15:04:05 MST", m.Created); err == nil {
+		p.CreatedAt = t
+	}
 	if m.DiffRefs != nil {
 		p.Base.SHA = m.DiffRefs.Start // the target branch the diff is against
 	}

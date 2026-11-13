@@ -3,10 +3,12 @@ package forge
 import (
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPlace(t *testing.T) {
@@ -385,5 +387,16 @@ func TestRisked(t *testing.T) {
 	}
 	if old := (State{SHA: "a"}).render("", "", "", nil); strings.Contains(old, "Merge risk") || parseState(old).Risk != nil {
 		t.Fatal("old sticky shows a risk")
+	}
+}
+
+// The PR's creation date and author come from GitHub's payload as it is.
+func TestEventHeader(t *testing.T) {
+	var e Event
+	if err := json.Unmarshal([]byte(`{"pull_request":{"number":1,"created_at":"2026-11-02T10:00:00Z","user":{"login":"marco","type":"User"}}}`), &e); err != nil {
+		t.Fatal(err)
+	}
+	if p := e.PullRequest; p.User.Login != "marco" || !p.CreatedAt.Equal(time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)) {
+		t.Fatalf("%+v", p)
 	}
 }
