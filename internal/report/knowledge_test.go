@@ -3,6 +3,7 @@ package report
 import (
 	"context"
 	"diffharbor/internal/proc"
+	"diffharbor/internal/review"
 	"fmt"
 	"os"
 	"os/exec"
@@ -57,6 +58,8 @@ git add .`)
 	git("Zed Old|zed@x", "2026-03-10", "commit", "-qm", "g")
 	sh(`echo 2 >> c.txt`)
 	git("Zed|zed@x", "2026-03-15", "commit", "-qam", "zed")
+	sh(`echo 4 >> c.txt`)
+	git("Zed|Zed@X", "2026-03-20", "commit", "-qam", "same email, other case")
 	sh(`echo 3 >> c.txt`)
 	git("dependabot[bot]|1+dependabot[bot]@users.noreply.github.com", "2026-04-01", "commit", "-qam", "bump")
 	sh(`mkdir gen; i=0; while [ $i -lt 149 ]; do echo $i > gen/f$i; i=$((i+1)); done; echo 9 >> a.txt; git add .`)
@@ -78,9 +81,9 @@ echo 'Zork <zork@x> <zed@x>' > .mailmap`) // the PR's worktree doesn't rename an
 	want := map[string]Know{
 		"a.txt":  {Days: 120, People: []string{"Alice"}},
 		"d.txt":  {Days: 92, People: []string{"Alice", "Yan"}}, // Yan: before the rename
-		"c.txt":  {Days: 61, People: []string{"Zed"}},
-		"g.txt":  {Days: 83, People: []string{"Zed"}},        // one email, two names: the newest
-		"r2.txt": {Days: 52, People: []string{"Rae", "Zed"}}, // renamed by the PR: its old name's history
+		"c.txt":  {Days: 61, People: []string{"Zed"}},          // Zed@X is zed@x
+		"g.txt":  {Days: 83, People: []string{"Zed"}},          // one email, two names: the newest
+		"r2.txt": {Days: 52, People: []string{"Rae", "Zed"}},   // renamed by the PR: its old name's history
 	} // h.txt: only the first commit touched it, which isn't a change
 	if fmt.Sprint(ks) != fmt.Sprint(want) {
 		t.Fatalf("Learn:\n%v\nwant\n%v", ks, want)
@@ -93,5 +96,35 @@ echo 'Zork <zork@x> <zed@x>' > .mailmap`) // the PR's worktree doesn't rename an
 	}
 	if h := Header(context.Background(), sb, PR{Author: "x"}); h.Commits != 3 || !h.Merges || h.Author != "x" {
 		t.Fatalf("Header: %+v", h)
+	}
+}
+
+// In the blob-less checkout of the job, with the origin gone, an inexact rename in the history must not fail the log.
+func TestLearnPartialClone(t *testing.T) {
+	defer func(pi bool) { proc.AsPi = pi }(proc.AsPi)
+	proc.AsPi = false
+	origin := t.TempDir()
+	c := exec.Command("sh", "-c", `set -e
+git init -q -b main
+git config uploadpack.allowFilter true; git config uploadpack.allowAnySHA1InWant true
+git config maintenance.auto false; git config gc.auto 0
+seq 1 20 > s1; git add .; git commit -q -m one
+git mv s1 s2; echo 6 >> s2; git add .; git commit -q -m similar
+git checkout -q -b pr; echo p > p.txt; git add .; git commit -q -m pr
+git rev-parse pr`)
+	c.Dir = origin
+	c.Env = append(c.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	out, err := c.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := strings.TrimSpace(string(out))
+	sb := &proc.Sandbox{Dir: t.TempDir()}
+	if _, err := review.Checkout(context.Background(), sb, "file://"+origin, head, "refs/heads/main", "t"); err != nil {
+		t.Fatal(err)
+	}
+	os.RemoveAll(origin) // a lazy fetch fails now, as it would without auth
+	if ks := Learn(context.Background(), sb, "+++ b/s2\n", time.Now()); len(ks) != 1 {
+		t.Fatalf("Learn: %v", ks)
 	}
 }

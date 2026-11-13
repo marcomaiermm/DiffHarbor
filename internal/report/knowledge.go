@@ -1,9 +1,11 @@
 package report
 
 import (
+	"cmp"
 	"context"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
+	"log"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -25,10 +27,11 @@ const bulk = 150
 var bots = regexp.MustCompile(`(?i)\[bot\]|^(project|group)_\d+_bot`)
 
 // Learn reads, for each file of the diff raw (by its path in the PR), what Know says, from one pass of git log over
-// the history Checkout fetched, up to created. A file the PR renames has the history of its old name. Renames in the
-// history are followed, exact ones only: the checkout has no blobs, and a similarity check would fetch them one by one.
+// the history Checkout fetched, up to created (-n bounds it after an unshallow). A file the PR renames has the history
+// of its old name. Renames in the history are followed, exact ones only: the checkout has no blobs, and a similarity
+// check would need them, which fails the whole log (no lazy fetch).
 // A file with no change in that history, and every file when git fails or created is unknown, has no entry. Names go
-// through the base's mailmap; commits of bulk files or more and bots don't count. The first commit of the history
+// through the base's mailmap; commits of bulk files or more don't count, and a bot's counts for Days but is no person. The first commit of the history
 // reads as no change: in a shallow checkout it is only where the fetch stopped, and it would add every file.
 func Learn(ctx context.Context, sb *proc.Sandbox, raw string, created time.Time) map[string]Know {
 	paths := diff.Paths(raw)
@@ -40,9 +43,10 @@ func Learn(ctx context.Context, sb *proc.Sandbox, raw string, created time.Time)
 	// From the git dir, with the mailmap of the base: the worktree is the PR's, and a PR doesn't decide who is who. No lazy
 	// fetch: a base without .mailmap in the partial clone only warns. ponytail: no -z, quotepath off keeps most names whole
 	out, err := proc.Run(sb.Command(ctx, filepath.Join(sb.Repo(), ".git"), []string{"GIT_NO_LAZY_FETCH=1"}, "git", "-c", "core.quotepath=off",
-		"-c", "log.showRoot=false", "-c", "mailmap.blob=refs/base:.mailmap", "log", "--no-merges", "--find-renames=100%", "--name-status",
+		"-c", "log.showRoot=false", "-c", "mailmap.blob=refs/base:.mailmap", "log", "-n", "3000", "--no-merges", "--find-renames=100%", "--name-status",
 		"--until="+created.Format(time.RFC3339), "--format=%x01%ct%x01%aN%x01%aE", "refs/base"))
 	if err != nil {
+		log.Println("knowledge:", err)
 		return nil
 	}
 	return learn(string(out), paths, renamed(raw), created)
@@ -136,7 +140,7 @@ func learn(log string, paths []string, prs map[string]string, created time.Time)
 		for e := range m {
 			k.People = append(k.People, names[e])
 		}
-		slices.Sort(k.People)
+		sortNames(k.People)
 		k.People = slices.Compact(k.People)
 		ks[o] = k
 	}
@@ -166,9 +170,16 @@ func Aggregate(k map[string]Know, paths []string) (g Group) {
 		}
 	}
 	slices.Sort(days)
-	slices.Sort(g.People)
+	sortNames(g.People)
 	if g.Known = len(days); g.Known > 0 {
 		g.Median, g.Oldest = (days[(g.Known-1)/2]+days[g.Known/2])/2, days[g.Known-1]
 	}
 	return g
+}
+
+// sortNames puts names in the order a person reads: "alice" before "Zed".
+func sortNames(n []string) {
+	slices.SortFunc(n, func(a, b string) int {
+		return cmp.Or(strings.Compare(strings.ToLower(a), strings.ToLower(b)), strings.Compare(a, b))
+	})
 }

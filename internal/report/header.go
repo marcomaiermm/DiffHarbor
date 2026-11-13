@@ -3,6 +3,7 @@ package report
 import (
 	"context"
 	"diffharbor/internal/proc"
+	"log"
 	"strings"
 	"time"
 )
@@ -12,7 +13,7 @@ type PR struct {
 	Created    time.Time
 	Author     string
 	Head, Base string // branch names
-	Body       string // the description, uncut
+	Body       string // the description, uncut (secrets redacted, as for the prompt)
 	Commits    int    // without merges
 	Merges     bool   // the branch holds merges: the header says "without merges" only then
 }
@@ -24,6 +25,7 @@ func Header(ctx context.Context, sb *proc.Sandbox, pr PR) PR {
 	defer cancel()
 	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "log", "--format=%P", "refs/base..HEAD"))
 	if err != nil {
+		log.Println("knowledge:", err)
 		return pr
 	}
 	for l := range strings.Lines(string(out)) {
