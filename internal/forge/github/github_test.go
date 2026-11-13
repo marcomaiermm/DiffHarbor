@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"diffharbor/internal/forge"
 	"diffharbor/internal/proc"
+	"diffharbor/internal/report"
 	"diffharbor/internal/review"
 	"encoding/base64"
 	"encoding/hex"
@@ -247,6 +248,33 @@ func TestThreadsOurs(t *testing.T) {
 }
 
 // A folded finding on a diff line goes into the review's body, not inline, and doesn't count as posted.
+// The review's comments are read back, by file and line (a range's last), and matched to the findings that sent them.
+func TestPostedIDs(t *testing.T) {
+	src := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,3 @@\n x\n+y\n+z\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "POST /repos/o/r/pulls/1/reviews":
+			fmt.Fprint(w, `{"id":77}`)
+		case "GET /repos/o/r/pulls/1/reviews/77/comments":
+			fmt.Fprint(w, `[{"id":501,"path":"a.go","line":3},{"id":500,"path":"a.go","line":2}]`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	APIURL = srv.URL
+	e := &forge.Event{}
+	e.PullRequest.Number = 1
+	p := &pr{e: e, api: "/repos/o/r", token: "t"}
+	a, b := review.Comment{Path: "a.go", Line: 2, Severity: "major", Title: "bug", Body: "b"}, review.Comment{Path: "a.go", Line: 3, Severity: "major", Title: "bug two", Body: "b"}
+	if _, err := p.Post("abc", review.Result{Comments: []review.Comment{a, b}}, nil, src, "f"); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Posted(); len(got) != 2 || got[report.ThreadKey(a)] != 500 || got[report.ThreadKey(b)] != 501 {
+		t.Fatalf("posted: %v", got)
+	}
+}
+
 func TestPostFolded(t *testing.T) {
 	src := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,3 @@\n x\n+y\n+z\n"
 	var sent struct {

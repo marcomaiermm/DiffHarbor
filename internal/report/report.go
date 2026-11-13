@@ -63,6 +63,8 @@ type Data struct {
 	Docs        []review.Doc      // the reference docs the review read: listed by title and link, never their text
 	Tests       checks.Tests      // what the checks' test runs report at SHA; empty when none ran
 	Sources     map[string]string // the head's text of changed files, for the lines between hunks (see Sources)
+	Bot         string            // the bot's handle: @Bot talks to it
+	Threads     map[string]int64  // the comment id of each finding's inline thread, by ThreadKey; none for one not posted inline
 }
 
 // Forge is how the forge hosting the repository names and links what a report points to.
@@ -73,6 +75,8 @@ type Forge struct {
 	Commit   string // a commit of the repository: Commit + SHA
 	PRCommit string // a commit in the PR's own view: PRCommit + SHA
 	Search   string // code search in the repository: Search + the escaped query; "" when the forge has none
+	Files    string // the PR's files view, for Line and File; "" where the forge's anchor isn't built (GitLab)
+	Thread   string // an inline comment: Thread + its id
 }
 
 // tab is a tab of the card over the overview: what needs a person, a kind each.

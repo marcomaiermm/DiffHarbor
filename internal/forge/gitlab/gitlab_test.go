@@ -3,6 +3,7 @@ package gitlab
 import (
 	"diffharbor/internal/forge"
 	"diffharbor/internal/proc"
+	"diffharbor/internal/report"
 	"diffharbor/internal/review"
 	"encoding/json"
 	"errors"
@@ -148,6 +149,7 @@ func (f *fakeMR) serve() *pr {
 			f.states = append(f.states, b["reviewer_state"])
 		case "POST " + mr + "/discussions":
 			f.discussions = append(f.discussions, b)
+			out(map[string]any{"id": "x", "notes": []map[string]any{{"id": 30 + len(f.discussions)}}})
 		case "GET " + mr + "/discussions":
 			if f.failThreads {
 				w.WriteHeader(500)
@@ -217,6 +219,23 @@ func TestPost(t *testing.T) {
 		!strings.Contains(f.edited, "Comments not posted inline (1)") || strings.Contains(f.edited, "Outside diff") || !strings.Contains(f.edited, "fix body") ||
 		!strings.Contains(f.edited, "Suggested fix") || strings.Contains(f.edited, "context line") {
 		t.Fatalf("post: %d %v %v %v\n%s", n, err, f.drafts, f.notes, f.edited)
+	}
+	// the finding GitLab placed keeps its note id; the dropped one has none
+	if got := p.Posted(); len(got) != 1 || got[report.ThreadKey(postCtx)] != 22 {
+		t.Fatalf("posted: %v", got)
+	}
+}
+
+// Without batching, each discussion's response gives its first note's id.
+func TestPostedDiscussions(t *testing.T) {
+	f := &fakeMR{t: t, stale: "", drop: nil}
+	p := f.serve()
+	p.findings, p.checked = "discussions", true
+	if _, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postFix}}, nil, postDiff, "f"); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Posted(); len(got) != 1 || got[report.ThreadKey(postFix)] != 31 {
+		t.Fatalf("posted: %v", got)
 	}
 }
 
@@ -517,10 +536,11 @@ func TestInert(t *testing.T) {
 		}
 	}
 	var bodies []string
-	serve(t, func(_ http.ResponseWriter, r *http.Request) {
+	serve(t, func(w http.ResponseWriter, r *http.Request) {
 		var b map[string]any
 		json.NewDecoder(r.Body).Decode(&b)
 		bodies = append(bodies, b["body"].(string))
+		fmt.Fprint(w, `{"notes":[]}`)
 	})
 	e := &forge.Event{Forge: "gitlab"}
 	e.Repository.ID, e.PullRequest.Number = 5, 3
@@ -528,7 +548,7 @@ func TestInert(t *testing.T) {
 	p := f.(*pr)
 	for _, fix := range []string{"// keep\nx := 1", "x := 1\n/approve"} {
 		c := forge.Finding{Comment: review.Comment{Path: "a.go", Line: 2, Body: "```x```\n/merge", Fix: fix}, Start: 1, End: 2}
-		if err := p.discuss(c, nil); err != nil {
+		if _, err := p.discuss(c, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
