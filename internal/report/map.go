@@ -175,9 +175,14 @@ const (
 
 var mapExt = map[string]bool{".go": true, ".ts": true, ".tsx": true, ".js": true, ".jsx": true, ".mjs": true}
 
+// toolConfig is vite.config.ts and the like: CI's, not the Configuration box's.
+func toolConfig(p string) bool {
+	return strings.Contains(path.Base(p), ".config.") && mapExt[path.Ext(p)]
+}
+
 // mapCode is a code file the map groups: tests, tool config (vite.config.ts goes to CI) and the rest aren't.
 func mapCode(p string) bool {
-	return mapExt[path.Ext(p)] && diff.Kind(p) == "code" && !strings.Contains(path.Base(p), ".config.")
+	return mapExt[path.Ext(p)] && diff.Kind(p) == "code" && !toolConfig(p)
 }
 
 // folder is p's first n directories, "." at the top.
@@ -860,6 +865,9 @@ func (b *mapper) deploy() {
 				bx = box("migration", migrationLabel(it.What), it.What)
 			} else {
 				bx = box(kinds[r.Title], label[kinds[r.Title]], "")
+				if r.Title == "Configuration" && toolConfig(it.What) {
+					bx = box("ci", "CI", "")
+				}
 				if r.Title != "Environment" && r.Title != "Dependencies" {
 					mi.Path = it.What
 				}
@@ -890,7 +898,7 @@ func (b *mapper) deploy() {
 			on(box("docs", "Docs", ""))
 		case migration.MatchString(f.Path):
 			on(box("migration", migrationLabel(f.Path), f.Path))
-		case deploy.MatchString(f.Path) || strings.Contains(path.Base(f.Path), ".config.") && mapExt[path.Ext(f.Path)]:
+		case deploy.MatchString(f.Path) || toolConfig(f.Path):
 			on(box("ci", "CI", ""))
 		case config.MatchString(f.Path) && diff.Kind(f.Path) != "test":
 			on(box("configuration", "Configuration", ""))
@@ -964,6 +972,7 @@ var (
 // maxTableFiles is the files a search of the base or the head reads; maxNamed the places it keeps per table.
 const (
 	maxTableFiles, maxNamed = 300, 20
+	maxDrops                = 50 // tables a PR's migrations add; each costs git calls within tableTime
 	tableTime               = time.Minute
 )
 
@@ -1014,7 +1023,7 @@ func (b *mapper) drops() []MapTable {
 				}
 				name := fs[0][strings.LastIndexByte(fs[0], '.')+1:]
 				name = strings.Trim(name, "\"`'[]")
-				if tableName.MatchString(name) && !seen[name] {
+				if tableName.MatchString(name) && !seen[name] && len(out) < maxDrops {
 					seen[name] = true
 					out = append(out, MapTable{Name: name, Path: p, Line: l.no})
 				}
@@ -1082,8 +1091,8 @@ func sqlNames(git func(args ...string) []byte, ts []MapTable, names []string) {
 }
 
 // tables is Map.Tables (6.11): the tables the diff's migrations drop, who imported their declaration at the base,
-// and what the head still has. Git calls, bounded by the minute tableTime gives them and, per table, five (two
-// searches of the base, two of the head, their blobs in one process each); without sb none.
+// and what the head still has. Git calls, bounded by the minute tableTime gives them and, per table, at most
+// eight (two greps and one blob read per round, two rounds, base and head); without sb none.
 func (b *mapper) tables(sb *proc.Sandbox) {
 	ts := b.drops()
 	if sb == nil || len(ts) == 0 {
@@ -1106,7 +1115,10 @@ func (b *mapper) tables(sb *proc.Sandbox) {
 	}
 	for i := range ts {
 		d, ok := decls[ts[i].Name]
-		if !ok {
+		if ctx.Err() != nil { // out of time: the rest of the tables were not searched
+			ts[i].Cut = true
+		}
+		if !ok || ctx.Err() != nil {
 			continue
 		}
 		ts[i].Decl = d.file
@@ -1137,7 +1149,7 @@ func (b *mapper) tables(sb *proc.Sandbox) {
 				ts[i].Imports = append(ts[i].Imports, p)
 			}
 		}
-		ts[i].Cut = cut || cutHead
+		ts[i].Cut = cut || cutHead || ctx.Err() != nil
 	}
 	sqlNames(git, ts, names)
 	b.m.Tables = ts
@@ -1163,20 +1175,29 @@ func findImporters(git func(args ...string) []byte, read func(specs []string) ma
 			names = append(names, regexp.QuoteMeta(n))
 		}
 		slices.Sort(names)
-		args := []string{"grep", "-l", "-z", "-I", "-w", "-E", "--all-match", "-e", d.id, "-e", "(" + strings.Join(slices.Compact(names), "|") + ")"}
-		if ref != "" {
-			args = append(args, ref)
-		}
+		alt := strings.Join(slices.Compact(names), "|")
+		// the files that name the id and a module, and the files that re-export a module whole (export * names no id)
 		var specs []string
-		for _, p := range strings.Split(string(git(append(args, append([]string{"--"}, jsSpecs...)...)...)), "\x00") {
-			if p = strings.TrimPrefix(p, ref+":"); p == "" {
-				continue
+		seen := map[string]bool{}
+		for _, a := range [][]string{
+			{"-w", "-E", "--all-match", "-e", d.id, "-e", "(" + alt + ")"},
+			{"-E", "-e", `export[[:space:]]*\*[^;]*from[[:space:]]*["'](([^"']*/)?(` + alt + `)(\.[cm]?[jt]sx?)?|[^"']*/(` + alt + `)/index)["']`},
+		} {
+			args := append([]string{"grep", "-l", "-z", "-I"}, a...)
+			if ref != "" {
+				args = append(args, ref)
 			}
-			if len(specs) == limit {
-				cut = true
-				break
+			for _, p := range strings.Split(string(git(append(args, append([]string{"--"}, jsSpecs...)...)...)), "\x00") {
+				if p = strings.TrimPrefix(p, ref+":"); p == "" || seen[p] {
+					continue
+				}
+				if len(specs) == limit {
+					cut = true
+					break
+				}
+				seen[p] = true
+				specs = append(specs, tag+p)
 			}
-			specs = append(specs, tag+p)
 		}
 		maps.Copy(texts, read(specs))
 		im = importers(texts, d.file, d.id, tag, seed)

@@ -177,7 +177,7 @@ func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
 		for _, p := range paths {
 			changed[p] = true
 		}
-		idx.exact(root, changed, syms)
+		idx.exact(root, changed, diff.RightLines(diffText, false), syms)
 		idx.tests(sb, root, changed, syms)
 	}
 	return syms

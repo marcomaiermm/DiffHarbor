@@ -53,11 +53,13 @@ process.stdout.write(JSON.stringify(out));
 
 type cgIndex struct {
 	dbs   []cgDB
-	Nodes []struct {
-		Name, Path, Kind, Owner string
-		Line, End               int
-	}
+	Nodes []cgNode
 	Edges []cgEdge
+}
+
+type cgNode struct {
+	Name, Path, Kind, Owner string
+	Line, End               int
 }
 
 // codegraph is the indexes of the checkout at repo, the root's and those of the directories above paths, for the
@@ -109,10 +111,44 @@ func runNode(sb *proc.Sandbox, script string, in, out any) bool {
 	return err == nil && json.Unmarshal(got, out) == nil
 }
 
+// addedIn is whether the diff adds a line of path between from and to.
+func addedIn(added map[string]bool, p string, from, to int) bool {
+	for l := from; l <= to; l++ {
+		if added[p+":"+strconv.Itoa(l)] {
+			return true
+		}
+	}
+	return false
+}
+
+// freshMethods are a class's methods, named {class}.{method}: the scan of other languages reads only the lines that
+// start a declaration. The map's calls into the methods the PR changes: those with an added line, up to maxSymbols
+// in all. known: the scan has it.
+func (idx *cgIndex) freshMethods(changed, added map[string]bool, syms map[string][]Symbol, known func(cgNode) bool) map[string][]Symbol {
+	total := 0
+	for _, ss := range syms {
+		total += len(ss)
+	}
+	fresh, seen := map[string][]Symbol{}, map[string]bool{}
+	for _, n := range idx.Nodes {
+		qn := n.Owner + "." + n.Name
+		if n.Kind != "method" || n.Owner == "" || !changed[n.Path] || path.Ext(n.Path) == ".go" || seen[n.Path+"\x00"+qn] || total >= maxSymbols {
+			continue
+		}
+		if !addedIn(added, n.Path, n.Line, n.End) || known(n) {
+			continue
+		}
+		seen[n.Path+"\x00"+qn], total = true, total+1
+		fresh[qn] = append(fresh[qn], Symbol{Kind: "method", Path: n.Path, Line: n.Line})
+	}
+	return fresh
+}
+
 // exact replaces what the name scan guessed with the index's resolved edges, for the declarations the index knows:
 // its lines (From, To), who names one (Refs, Uses, Files; Here, the lines of the diff's files; Outside, those of
 // the others), what it names (Calls). Those it doesn't know, a Go struct's fields, keep the scan's.
-func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[string][]Symbol) {
+//nolint:gocognit // the index's edges step by step, each step a few lines
+func (idx *cgIndex) exact(root *os.Root, changed, added map[string]bool, syms map[string][]Symbol) {
 	type key struct{ path, name string }
 	at := map[key][]*Symbol{}
 	for name, ss := range syms {
@@ -138,15 +174,7 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 		nTest     int         // of nOut, in test files
 		here      map[Ref]int // a site's place in Here
 	}
-	// a class's methods, named {class}.{method}: the scan of other languages reads only the lines that start a
-	// declaration. The map's calls into the methods the PR changes.
-	fresh, seen := map[string][]Symbol{}, map[key]bool{}
-	for _, n := range idx.Nodes {
-		if k := (key{n.Path, n.Owner + "." + n.Name}); n.Kind == "method" && n.Owner != "" && changed[n.Path] && path.Ext(n.Path) != ".go" && !seen[k] && find(n.Path, n.Name, n.Line) == nil {
-			seen[k] = true
-			fresh[k.name] = append(fresh[k.name], Symbol{Kind: "method", Path: n.Path, Line: n.Line})
-		}
-	}
+	fresh := idx.freshMethods(changed, added, syms, func(n cgNode) bool { return find(n.Path, n.Name, n.Line) != nil })
 	for qn, ss := range fresh {
 		syms[qn] = append(syms[qn], ss...)
 		plain := qn[strings.LastIndex(qn, ".")+1:]

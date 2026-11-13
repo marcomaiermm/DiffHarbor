@@ -305,14 +305,15 @@ func TestMapTables(t *testing.T) {
 		}
 	}
 	write(map[string]string{
-		"src/db/items-schema.ts":      "export const items = pgTable(\n  \"items\",\n  {},\n)\n",
+		"src/db/items-schema.ts":      "export const items = pgTable(\n  \"items\",\n  {},\n)\nexport const expansions = pgTable(\"expansions\", {})\n",
+		"src/other/b.ts":              "import { expansions } from \"#/db/schema\"\n", // only the barrel's `export *` leads to it
 		"src/db/schema.ts":            "export * from \"./items-schema\"\n",
 		"src/feature/a.ts":            "import {\n  other,\n  items,\n} from \"~/db/schema\"\n",
 		"src/feature/a.test.ts":       "import { items } from \"~/db/schema\"\n",
 		"src/feature/gone.ts":         "import { items } from \"../db/items-schema\"\n",
 		"src/feature/unrelated.ts":    "import { users } from \"~/db/schema\"\nconst items = []\n",
 		"src/lib/direct.ts":           "import { items } from \"~/db/items-schema.js\"\n",
-		"drizzle/0059_drop_items.sql": "DROP TABLE \"items\";\n",
+		"drizzle/0059_drop_items.sql": "DROP TABLE \"items\";\nDROP TABLE \"expansions\";\n",
 	})
 	git("init", "-q")
 	git("add", ".")
@@ -328,12 +329,15 @@ func TestMapTables(t *testing.T) {
 	git("add", ".")
 	git("commit", "-qm", "head")
 	d := Data{Diff: newFile("src/db/schema.ts", "x\n") + newFile("src/feature/a.ts", "x\n") + newFile("src/lib/direct.ts", "x\n") + goneFile("src/feature/gone.ts") +
-		newFile("drizzle/0059_drop_items.sql", "DROP TABLE \"items\";\n")}
+		newFile("src/other/b.ts", "x\n") + newFile("drizzle/0059_drop_items.sql", "DROP TABLE \"items\";\nDROP TABLE \"expansions\";\n")}
 	m := BuildMap(sb, d, nil)
-	if len(m.Tables) != 1 {
+	if len(m.Tables) != 2 {
 		t.Fatalf("tables %+v", m.Tables)
 	}
-	tb := m.Tables[0]
+	tb := m.Tables[slices.IndexFunc(m.Tables, func(t MapTable) bool { return t.Name == "items" })]
+	if ex := m.Tables[slices.IndexFunc(m.Tables, func(t MapTable) bool { return t.Name == "expansions" })]; len(ex.Parts) != 2 || ex.Parts[1].Part != "src/other" {
+		t.Errorf("expansions: %+v", ex.Parts)
+	}
 	want := []MapTablePart{{"src/db", []string{"src/db/schema.ts"}}, {"src/feature", []string{"src/feature/a.ts", "src/feature/gone.ts"}}, {"src/lib", []string{"src/lib/direct.ts"}}}
 	if tb.Decl != "src/db/items-schema.ts" || !reflect.DeepEqual(tb.Parts, want) || tb.Tests != 1 || tb.Elsewhere != 0 {
 		t.Errorf("table %+v", tb)
@@ -400,7 +404,7 @@ func TestMapMethods(t *testing.T) {
 		t.Skip("no node")
 	}
 	sb, dir := sandbox(t)
-	for p, src := range map[string]string{"client.ts": "export class Client {\n  fetch() {\n    return 1\n  }\n}\n", "use.ts": "import { Client } from \"./client\"\n\nnew Client().fetch()\nnew Client().fetch()\n", "use.test.ts": "x\nnew Client().fetch()\n"} {
+	for p, src := range map[string]string{"client.ts": "export class Client {\n  fetch() {\n    return 1\n  }\n  idle() {\n    return 0\n  }\n}\n", "use.ts": "import { Client } from \"./client\"\n\nnew Client().fetch()\nnew Client().fetch()\n", "use.test.ts": "x\nnew Client().fetch()\n"} {
 		if err := os.WriteFile(filepath.Join(dir, p), []byte(src), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -408,7 +412,7 @@ func TestMapMethods(t *testing.T) {
 	db := `const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(process.argv[1]);
 db.exec("create table nodes (id text, kind text, name text, file_path text, start_line int, end_line int);" +
   "create table edges (source text, target text, kind text, line int);" +
-  "insert into nodes values ('c', 'class', 'Client', 'client.ts', 1, 5), ('m', 'method', 'fetch', 'client.ts', 2, 4), ('u', 'file', 'use.ts', 'use.ts', 1, 4), ('t', 'file', 'use.test.ts', 'use.test.ts', 1, 2);" +
+  "insert into nodes values ('c', 'class', 'Client', 'client.ts', 1, 8), ('m', 'method', 'fetch', 'client.ts', 2, 4), ('i', 'method', 'idle', 'client.ts', 5, 7), ('u', 'file', 'use.ts', 'use.ts', 1, 4), ('t', 'file', 'use.test.ts', 'use.test.ts', 1, 2);" +
   "insert into edges values ('u', 'm', 'references', 3), ('u', 'm', 'calls', 3), ('u', 'm', 'calls', 4), ('t', 'm', 'calls', 2);")`
 	if err := os.MkdirAll(filepath.Join(dir, ".codegraph"), 0o750); err != nil {
 		t.Fatal(err)
@@ -416,7 +420,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 	if out, err := exec.Command("node", "-e", db, filepath.Join(dir, ".codegraph", "codegraph.db")).CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
 	}
-	s := Symbols(sb, "+++ b/client.ts\n+  fetch() {\n+++ b/use.ts\n+new Client().fetch()\n")
+	s := Symbols(sb, "+++ b/client.ts\n@@ -1,0 +2 @@\n+  fetch() {\n+++ b/use.ts\n@@ -2,0 +3 @@\n+new Client().fetch()\n")
 	got := s["Client.fetch"]
 	if len(got) != 1 || got[0].Kind != "method" || got[0].From != 2 || got[0].To != 4 || !got[0].Exact ||
 		!slices.Equal(got[0].Here, []string{"use.ts:3", "use.ts:4"}) || !slices.Equal(got[0].HereKind, []string{"calls", "calls"}) {
@@ -425,8 +429,11 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 	if got[0].NOutside != 1 || got[0].NOutsideTests != 1 { // a test beyond the diff
 		t.Errorf("outside %d, in tests %d", got[0].NOutside, got[0].NOutsideTests)
 	}
+	if _, ok := s["Client.idle"]; ok { // no added line in it: no symbol, or the page grows with every class a PR touches
+		t.Error("Client.idle has no added line")
+	}
 	// a change below the method's first lines: git's hunk header names the class, so the name scan never sees "fetch"
-	s = Symbols(sb, "+++ b/client.ts\n@@ -1,5 +1,5 @@ export class Client {\n+    return 2\n")
+	s = Symbols(sb, "+++ b/client.ts\n@@ -3 +3 @@ export class Client {\n+    return 2\n")
 	if got := s["Client.fetch"]; len(got) != 1 || got[0].From != 2 || got[0].To != 4 || !got[0].Exact || got[0].NOutside != 3 {
 		t.Errorf("a method changed in its body: %+v", got)
 	}
@@ -478,6 +485,13 @@ func TestMapItems(t *testing.T) {
 	if !reflect.DeepEqual(boxes, want) {
 		t.Errorf("deploy %v", boxes)
 	}
+	for _, bx := range m.Deploy { // tool config is CI's, for its risk as for its finding
+		for _, it := range bx.Items {
+			if it.Kind == "risk" && it.Path == "vite.config.ts" && bx.Kind != "ci" {
+				t.Errorf("vite.config.ts risk on %s", bx.Label)
+			}
+		}
+	}
 	if g := m.Generated; g == nil || len(g.Items) != 1 {
 		t.Errorf("generated %+v", g)
 	}
@@ -500,7 +514,9 @@ func TestMapItems(t *testing.T) {
 func TestFindImporters(t *testing.T) {
 	var args []string
 	git := func(a ...string) []byte {
-		args = a
+		if slices.Contains(a, "--all-match") {
+			args = a
+		}
 		return []byte("a.ts\x00b.ts\x00c.ts\x00")
 	}
 	var read []string
