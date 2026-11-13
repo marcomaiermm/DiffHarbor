@@ -219,6 +219,8 @@ type Result struct {
 	Split       []string          `json:"split,omitempty"`       // changes that could each merge on their own, with Input.Guide
 	Story       Story             `json:"story,omitzero"`        // the problem and one case before and after, with Input.Guide
 	Routine     []Routine         `json:"routine,omitempty"`     // hunks a person can skip, with Input.Guide
+	Outside     []Outside         `json:"outside,omitempty"`     // systems outside the repo the code calls, checked at the head, with Input.Guide
+	Brief       []Sentence        `json:"brief,omitempty"`       // 2-3 sentences, each with a place that exists at the head, with Input.Guide
 	Fixed       []int             `json:"fixed,omitempty"`       // indexes into input.prior
 	Comments    []Comment         `json:"comments"`
 	Failed      []string          `json:"-"` // files of parts whose review failed: not reviewed
@@ -408,6 +410,9 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 		wg.Wait()
 	}
 	r, tag, err := merge(ps, m, vm, ci)
+	if err == nil && in.Guide {
+		outsideBrief(ctx, in, files, ps, &r, cmp.Or(agent.VerifyFor(rm), vm))
+	}
 	if why := in.Settings.Inversion(); why != "" {
 		tag += " · " + why // the reviewer isn't the default's: say why
 	}
@@ -692,6 +697,8 @@ func merge(ps []part, m, vm, ci string) (Result, string, error) {
 		r.Split = append(r.Split, p.r.Split...)
 		r.Story = cmp.Or(r.Story, p.r.Story) // the first part that tells one: a second case would only repeat it
 		r.Routine = append(r.Routine, p.r.Routine...)
+		r.Outside = append(r.Outside, p.r.Outside...)
+		r.Brief = append(r.Brief, p.r.Brief...) // a single part's only
 		r.Effort = max(r.Effort, p.r.Effort)
 		r.Fixed = append(r.Fixed, p.r.Fixed...)
 		r.Comments = append(r.Comments, p.r.Comments...)
@@ -747,7 +754,10 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string, again boo
 	}
 	system := reviewSystem + sch + in.Trusted
 	if in.Guide {
-		prompt += guideSchema
+		prompt += guideSchema + outsideSchema
+		if len(in.Parts) == 1 {
+			prompt += briefSchema
+		}
 	}
 	if in.Guide && in.split {
 		prompt += splitSchema

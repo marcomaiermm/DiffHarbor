@@ -43,6 +43,8 @@ type Data struct {
 	Decisions   []review.Decision
 	Story       review.Story
 	Flow        []review.Step
+	Outside     []review.Outside  // systems outside the repo the changed code calls
+	Brief       []review.Sentence // the change in brief: 2-3 sentences, each with a place
 	Walkthrough map[string]string // path -> one line
 	Commits     []review.Commit
 	Outline     diff.Outline
