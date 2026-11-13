@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/callgraph/cha"
 	"golang.org/x/tools/go/callgraph/vta"
 	"golang.org/x/tools/go/packages"
@@ -35,9 +36,10 @@ type cgEdge struct {
 // vtaTimeout bounds VTA on one module: loading and type-checking a large repo takes long and much memory.
 const vtaTimeout = 2 * time.Minute
 
-// vtaEdges adds the calls VTA resolves in the Go modules of the indexes, calls through an interface or a function
-// value the index leaves unresolved, for the wanted names. Run as `diffharbor vta` in sb, the PR's go list as the
-// repo's user. A module that doesn't type-check, or past vtaTimeout, adds none: the index's alone, and a log line why.
+// vtaEdges adds the calls VTA resolves in the Go modules of the indexes: all through an interface or a function
+// value, which the index leaves unresolved and a walk goes on from, and the static ones of the wanted names. Run as
+// `diffharbor vta` in sb, the PR's go list as the repo's user. A module that doesn't type-check, or past vtaTimeout,
+// adds none: the index's alone, and a log line why.
 func (idx *cgIndex) vtaEdges(sb *proc.Sandbox, repo string, wanted []string) {
 	self, err := os.Executable()
 	if err != nil {
@@ -74,9 +76,9 @@ func (idx *cgIndex) vtaEdges(sb *proc.Sandbox, repo string, wanted []string) {
 }
 
 // VTA is `diffharbor vta`: the calls of the Go module in the working directory, by VTA on its SSA, whose caller or
-// callee is one of the names on stdin (a JSON list), as JSON cgEdges with paths relative to the module. Both ends in
-// the module, test files aside; a closure counts as the declaration it is in. It fails when a package doesn't
-// type-check: a partial program resolves calls wrongly.
+// callee is one of the names on stdin (a JSON list) or that go through an interface or a function value, as JSON
+// cgEdges with paths relative to the module. Both ends in the module, test files aside; a closure counts as the
+// declaration it is in. It fails when a package doesn't type-check: a partial program resolves calls wrongly.
 func VTA() error {
 	var names []string
 	if err := json.NewDecoder(os.Stdin).Decode(&names); err != nil {
@@ -135,6 +137,7 @@ func vtaCalls(dir string, names []string) ([]cgEdge, error) {
 		}
 		return filepath.ToSlash(r)
 	}
+	static := func(e *callgraph.Edge) bool { return e.Site != nil && e.Site.Common().StaticCallee() != nil } // the index has those
 	type key struct {
 		s, t *ssa.Function
 		line int
@@ -148,7 +151,7 @@ func vtaCalls(dir string, names []string) ([]cgEdge, error) {
 		}
 		for _, e := range n.Out {
 			t := own(e.Callee.Func)
-			if e.Callee.Func.Parent() != nil || t == nil || (!wanted[s.Name()] && !wanted[t.Name()]) {
+			if e.Callee.Func.Parent() != nil || t == nil || (!wanted[s.Name()] && !wanted[t.Name()] && static(e)) {
 				continue
 			}
 			at := prog.Fset.Position(e.Pos())

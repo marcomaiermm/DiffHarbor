@@ -3,19 +3,18 @@
 //   calls    a call or a callback passed on (`xs.map(f)`) to a declaration of the project, by its type: `a.b().c()`
 //   renders  a JSX element of a component of the project
 //   handles  a function of the project passed to a package's call: a route, a procedure, a listener; an inline one
-//            is a "route" itself, named by the call's string (`get("/x", …)`) or the key it's under (`list: q(…)`);
-//            without either (`db.transaction(tx => …)`) it's part of the function it's in
+//            is a "route" itself, named by the call's string (`get("/x", …)`) or, at a module's top level, the key
+//            it's under (`list: q(…)`); without either (`db.transaction(tx => …)`) it's part of the function it's in
 //   reads, writes  a call to a package's method named like a read or a write (`findMany`, `insert`, …), to the store
 //            the chain names: an argument of the project (a table), a string ("users", SQL's FROM), a property between
 //            client and method (`prisma.user`), the receiver's type argument (`Repository<User>`); none: no edge.
 //            A bare string only in a chain of calls: `_.get(o, "a.b")`, `createElement("div")` name no store
-// Only edges whose either end is one of names. Test files aside. One checker round trip per file and one per kind.
+// All of the project's: a walk goes on from any of them. Test files aside. One checker round trip per file and kind.
 const fs = require("fs");
-const { dir, ts, names } = JSON.parse(fs.readFileSync(0, "utf8"));
+const { dir, ts } = JSON.parse(fs.readFileSync(0, "utf8"));
 const { API } = require(ts + "/dist/api/sync/api.js");
 const is = require(ts + "/dist/ast/is.js");
 
-const wanted = new Set(names);
 const read = /^(find\w*|get\w*|select\w*|query\w*|count\w*|aggregate|exists|load\w*|fetch\w*|scan|search)$/;
 const write = /^(insert\w*|create\w*|update\w*|upsert\w*|delete\w*|remove\w*|save\w*|set|put\w*|destroy|increment|decrement|truncate|bulk\w*|replace\w*|merge|persist|execute|exec|run)$/;
 const test = /(^|\/)(__tests__|__mocks__|tests?|e2e|spec|fixtures?)\/|\.(test|spec|stories)\.[cm]?[jt]sx?$/;
@@ -87,8 +86,8 @@ const isFn = n => n && (is.isArrowFunction(n) || is.isFunctionExpression(n));
 
 const out = [], seen = new Set();
 const emit = (kind, s, line, t) => {
-  if (!s || !t || (!wanted.has(s.name) && !wanted.has(t.name))) return;
-  const k = [kind, s.name, s.line, line, t.name, t.path, t.line].join("\0");
+  if (!s || !t) return;
+  const k = [kind, s.path, s.name, s.line, line, t.name, t.path, t.line].join("\0");
   if (seen.has(k)) return;
   seen.add(k);
   out.push({ Line: line, Kind: kind, By: "ts", SName: s.name, SKind: s.kind, SPath: s.path, SLine: s.line, SEnd: s.end,
@@ -111,12 +110,16 @@ for (const file of program.getSourceFileNames()) {
   // own until we know whether the call is a package's (a route) or not (it's its parent's)
   const named = (n, name, kind, parent) => ({ name, kind, path, line: lineOf(n, sf), end: endOf(n, sf), parent });
   const eff = s => (s && s.inline && !s.route ? eff(s.parent) : s);
-  const label = c => { // a route's name: the call's string, else the key it's under
+  const label = c => { // a route's name: the call's string, else the key it's under at the module's top level
     const lit = c.arguments.find(a => is.isStringLiteral(a) || is.isNoSubstitutionTemplateLiteral(a));
-    if (lit) return lit.text;
+    if (lit && /^\S+$/.test(lit.text)) return lit.text; // "/orders", "click"; not a message
     for (let p = c.parent; p && !is.isSourceFile(p) && !is.isBlock(p); p = p.parent)
-      if (is.isPropertyAssignment(p) || (is.isVariableDeclaration(p) && is.isIdentifier(p.name))) return text(p.name);
+      if (is.isPropertyAssignment(p) || (is.isVariableDeclaration(p) && is.isIdentifier(p.name))) return atTop(p) ? text(p.name) : "";
     return "";
+  };
+  const atTop = n => { // in no function: `const r = db.transaction(…)` in one names a result, not a route
+    for (let p = n.parent; p; p = p.parent) if (isFn(p) || is.isFunctionDeclaration(p) || is.isMethodDeclaration(p)) return false;
+    return true;
   };
   const routeName = c => ((calleeName(c)?.text || "") + " " + label(c)).trim(); // "get /orders", "query posts"
   const walk = (n, scope) => {
@@ -136,12 +139,9 @@ for (const file of program.getSourceFileNames()) {
     if (is.isCallExpression(n) || is.isNewExpression(n)) {
       const name = calleeName(n);
       const args = n.arguments || [];
-      const viaPkg = args.some(isFn) || (args.some(a => is.isIdentifier(a)) && args.some(a => is.isStringLiteral(a)));
-      if (name && (viaPkg || wanted.has(name.text) || wanted.has(eff(s)?.name))) calls.push({ n, at: need(name), scope: s });
-      for (const a of args) if (is.isIdentifier(a) || is.isPropertyAccessExpression(a)) {
-        const r = is.isIdentifier(a) ? a : a.name;
-        if (viaPkg || wanted.has(r.text) || wanted.has(eff(s)?.name)) refs.push({ call: n, n: a, at: need(r), scope: s });
-      }
+      if (name) calls.push({ n, at: need(name), scope: s });
+      for (const a of args) if (is.isIdentifier(a) || is.isPropertyAccessExpression(a))
+        refs.push({ call: n, n: a, at: need(is.isIdentifier(a) ? a : a.name), scope: s });
       if (name && is.isPropertyAccessExpression(n.expression) && (read.test(name.text) || write.test(name.text)) && eff(s))
         verbs.push({ n, scope: s, at: need(name) });
     }
@@ -171,7 +171,7 @@ for (const file of program.getSourceFileNames()) {
     const t = decl(syms[r.at]);
     if (!t || !t.fn) continue;
     const at = callAt.get(r.call);
-    if (at !== undefined && ext(at)) { // a handler: from the route the call registers
+    if (at !== undefined && ext(at) && label(r.call)) { // a handler: from the route the call registers
       const c = r.call, l = line(c);
       emit("handles", { name: routeName(c), kind: "route", path, line: l, end: endOf(c, sf) }, l, t);
     } else emit("calls", eff(r.scope), line(r.n), t);

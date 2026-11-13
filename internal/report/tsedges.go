@@ -17,9 +17,9 @@ var tsEdgesJS string
 var tsAPI = cmp.Or(os.Getenv("DIFFHARBOR_TS"), "/usr/local/lib/node_modules/typescript")
 
 // tsEdges adds what the TypeScript checker resolves in the TS projects of the indexes (a tsconfig.json beside the
-// index) for the wanted names: calls by type and callbacks, JSX renders, routes and their handlers, reads and writes
-// of stores; see tsedges.js. A project the checker can't load, or past runNode's minute, adds none: codegraph's alone.
-func (idx *cgIndex) tsEdges(sb *proc.Sandbox, repo string, wanted []string) {
+// index), all of it, a walk goes on from any: calls by type and callbacks, JSX renders, routes and their handlers,
+// reads and writes of stores; see tsedges.js. A project the checker can't load, or past runNode's minute, adds none: codegraph's alone.
+func (idx *cgIndex) tsEdges(sb *proc.Sandbox, repo string) {
 	if _, err := os.Stat(filepath.Join(tsAPI, "dist", "api", "sync", "api.js")); err != nil {
 		return
 	}
@@ -30,7 +30,7 @@ func (idx *cgIndex) tsEdges(sb *proc.Sandbox, repo string, wanted []string) {
 		}
 		start := time.Now()
 		var got []cgEdge
-		if !runNode(sb, tsEdgesJS, map[string]any{"dir": dir, "ts": tsAPI, "names": wanted}, &got) {
+		if !runNode(sb, tsEdgesJS, map[string]any{"dir": dir, "ts": tsAPI}, &got) {
 			log.Printf("ts %s: codegraph alone: the checker failed or took past a minute", d.Prefix)
 			continue
 		}

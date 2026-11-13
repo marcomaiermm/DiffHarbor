@@ -80,7 +80,7 @@ func codegraph(sb *proc.Sandbox, repo string, wanted map[string]bool, paths []st
 		return nil
 	}
 	idx.vtaEdges(sb, repo, names)
-	idx.tsEdges(sb, repo, names)
+	idx.tsEdges(sb, repo)
 	return &idx
 }
 

@@ -59,6 +59,13 @@ func main() { backfill(store.DB{}); each(store.DB{}) }
 	if len(got) != 2 || !slices.Contains(got, want) || !slices.Contains(got, generic) {
 		t.Fatalf("got %+v, want only %+v and %+v", got, want, generic)
 	}
+	got, err = vtaCalls(dir, nil) // none wanted: still the interface's, a walk goes on through it; not main's static ones
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(got, want) || slices.ContainsFunc(got, func(e cgEdge) bool { return e.SName == "main" }) {
+		t.Fatalf("no names: got %+v, want %+v and none from main", got, want)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "bad.go"), []byte("package main\nvar x int = \"\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -78,8 +85,7 @@ func TestTSEdges(t *testing.T) {
 	}
 	sb, _ := sandbox(t)
 	idx := &cgIndex{dbs: []cgDB{{Prefix: ""}}}
-	idx.tsEdges(sb, repo, []string{"listOrders", "addUser", "renameUser", "findPosts", "rawCount", "allOrders",
-		"getOrders", "send", "toLabel", "Row", "view"})
+	idx.tsEdges(sb, repo)
 	var got []string
 	for _, e := range idx.Edges {
 		got = append(got, fmt.Sprintf("%s %s %s:%d -> %s %s", e.Kind, e.SName, e.SPath, e.Line, e.TName, e.TPath))
@@ -88,11 +94,15 @@ func TestTSEdges(t *testing.T) {
 		if e.SName == "view" {
 			t.Errorf("createElement(\"div\") names no store: %+v", e)
 		}
+		if strings.HasPrefix(e.SName, "transaction") {
+			t.Errorf("a callback in a function is that function's, not a route: %+v", e)
+		}
 	}
 	for _, w := range []string{ // the root tsconfig only references tsconfig.app.json
 		"reads listOrders src/data.ts:5 -> orders src/schema.ts",   // the table in the chain
 		"writes addUser src/data.ts:7 -> users src/schema.ts",      // in a transaction's callback
 		"writes renameUser src/data.ts:9 -> users src/schema.ts",   // update(t).set(…)
+		"writes txCount src/data.ts:13 -> users src/schema.ts",     // const n = db.transaction(…): no route "n"
 		"reads findPosts src/data.ts:10 -> post ",                  // client.post.findMany()
 		"reads rawCount src/data.ts:11 -> audit_log ",              // SQL
 		"reads allOrders src/data.ts:12 -> Order src/schema.ts",    // Repository<Order>
