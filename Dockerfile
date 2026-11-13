@@ -12,7 +12,7 @@ RUN apk add --no-cache libstdc++ libgcc && wget -qO /usr/local/bin/tailwindcss h
     && echo "2a5456987c41ce3311e423b603842af425ea5ac44505162dd348d43ed3b909fd  /usr/local/bin/tailwindcss" | sha256sum -c - && chmod 755 /usr/local/bin/tailwindcss
 USER node
 WORKDIR /home/node/src
-COPY --chown=node go.mod ./
+COPY --chown=node go.mod go.sum ./
 COPY --chown=node cmd cmd
 COPY --chown=node internal internal
 # assets_test checks the docs site serves the same lighthouse.
