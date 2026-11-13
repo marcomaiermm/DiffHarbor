@@ -122,7 +122,7 @@ Output JSON only, one verdict per finding:
 // A tool pass can end without JSON (e.g. still exploring at the deadline). The repair pass
 // resumes the same session with tools off.
 const (
-	reviewRepair = "Your last message ended without the required JSON. Do not call tools. Output the JSON object now, exactly in the schema from the system prompt, using the evidence you already gathered. No prose outside the JSON."
+	reviewRepair = "Your last message ended without the required JSON. Do not call tools. Output the JSON object now, exactly in the schema from the system prompt with the fields the first message adds, using the evidence you already gathered. No prose outside the JSON."
 	verifyRepair = "Your last message ended without the required JSON. Do not call tools. Output the JSON verdicts now, using the evidence you already gathered. No prose outside the JSON."
 )
 
