@@ -371,8 +371,8 @@ func TestPostDiscussions(t *testing.T) {
 		!strings.Contains(discussions[0]["body"].(string), "```suggestion:-1+0\n") || pos(0)["new_line"] != 12.0 ||
 		strings.Contains(discussions[1]["body"].(string), "suggestion") || pos(1)["new_line"] != 11.0 || pos(1)["old_line"] != nil ||
 		pos(2)["old_line"] != 3.0 || pos(2)["head_sha"] != "abcdef1" ||
-		!strings.Contains(summary, "Actionable comments posted: 3") || !strings.Contains(summary, "<summary><b>⚠️ Outside diff range comments (1)</b></summary>") ||
-		!strings.Contains(summary, "<summary><b>💬 Comments not posted inline (1)</b></summary>") ||
+		!strings.Contains(summary, "Actionable comments posted: 3") || !strings.Contains(summary, "> **⚠️ Outside diff range comments (1)**") ||
+		!strings.Contains(summary, "> **💬 Comments not posted inline (1)**") ||
 		strings.Index(summary, "elsewhere") > strings.Index(summary, "Comments not posted inline") || !strings.Contains(summary, "context line") {
 		t.Fatalf("post: %d %v %v\n%s", n, err, discussions, summary)
 	}
@@ -544,7 +544,7 @@ func TestPostFolded(t *testing.T) {
 	p := f.serve()
 	nit := review.Comment{Path: "a.go", Line: 13, Severity: "nit", Title: "name", Body: "b", Fold: true}
 	n, err := p.Post("abcdef1", review.Result{Comments: []review.Comment{postFix, nit}}, nil, postDiff, "f")
-	if err != nil || n != 1 || len(f.drafts) != 1 || !strings.Contains(f.summary(), "🧹 Nitpicks (1)") ||
+	if err != nil || n != 1 || len(f.drafts) != 1 || !strings.Contains(f.summary(), "🧹 Nitpick comments: 1") ||
 		!strings.Contains(f.summary(), "Actionable comments posted: 1") {
 		t.Fatalf("post: %d %v %v\n%s", n, err, f.drafts, f.summary())
 	}

@@ -146,11 +146,11 @@ func Risked(cs []review.Comment, failing int) Risk {
 	return r
 }
 
-// String is the score with its band's colour, 🟢 0-1, 🟡 2-3, 🔴 4-5, and why.
+// String is the score with its band's colour, 🟢 0-1, 🟡 2-3, 🔴 4-5, and what is open.
 func (r Risk) String() string {
 	s := fmt.Sprintf("%s %d/5", []string{"🟢", "🟡", "🔴"}[min(max(r.Score, 0), 5)/2], r.Score)
 	if r.Why != "" {
-		s += " (" + r.Why + ")"
+		s += " · " + r.Why + " open"
 	}
 	return s
 }
@@ -187,10 +187,10 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 			b.WriteString("\n")
 		}
 		if len(o.Weakened) > 0 {
-			b.WriteString("**⚠️ Tests to check**\n")
-			list(&b, o.Weakened, func(f diff.Flag) string { return "`" + f.At + "` " + f.What })
+			b.WriteString("**⚠️ Tests to check**\n" + list(o.Weakened, func(f diff.Flag) string { return "`" + f.At + "` " + f.What }) + "\n\n")
 		}
-		b.WriteString("<details open>\n<summary><b>Walkthrough</b></summary>\n\n" + st.Summary + "\n\n")
+		var w strings.Builder // the walkthrough
+		w.WriteString(st.Summary + "\n\n")
 		skip := o.Skippable()
 		kinds := map[string][]string{}
 		for _, f := range slices.Sorted(maps.Keys(st.Files)) {
@@ -198,15 +198,15 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 				kinds[diff.Kind(f)] = append(kinds[diff.Kind(f)], f)
 			}
 		}
-		if code := kinds["code"]; len(code) > 0 { // open on the PR: as many rows as a list shows
-			b.WriteString("| File | Change |\n|---|---|\n")
+		if code := kinds["code"]; len(code) > 0 { // folded like the sections below: as many rows as a list shows
+			t := "| File | Change |\n|---|---|"
 			for _, f := range code[:min(len(code), shown)] {
-				fmt.Fprintf(&b, "| `%s` | %s |\n", f, strings.ReplaceAll(st.Files[f], "|", `\|`))
+				t += fmt.Sprintf("\n| `%s` | %s |", f, strings.ReplaceAll(st.Files[f], "|", `\|`))
 			}
-			b.WriteString("\n")
 			if len(code) > shown {
-				fmt.Fprintf(&b, "… %d more files\n\n", len(code)-shown)
+				t += fmt.Sprintf("\n\n… %d more files", len(code)-shown)
 			}
+			w.WriteString(fold("📂 <strong>Changes: "+text.Count(len(code), "file")+"</strong>", t, false, false) + "\n\n")
 		}
 		if tests := kinds["test"]; len(tests) > 0 || len(o.Added) > 0 {
 			var sum []string
@@ -217,38 +217,33 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 			if len(o.Removed) > 0 {
 				sum = append(sum, fmt.Sprintf("%d deleted", len(o.Removed)))
 			}
-			b.WriteString("<details>\n<summary>🧪 Tests: " + strings.Join(sum, ", ") + "</summary>\n\n")
-			if len(o.Added) > 0 { // the case, not its file: diff.Outline writes "path: case"
-				list(&b, o.Added, func(c string) string { _, n, _ := strings.Cut(c, ": "); return n })
-			}
-			b.WriteString("</details>\n\n")
+			// the case, not its file: diff.Outline writes "path: case"
+			cases := list(o.Added, func(c string) string { _, n, _ := strings.Cut(c, ": "); return n })
+			w.WriteString(fold("🧪 <strong>Tests: "+strings.Join(sum, ", ")+"</strong>", cases, false, false) + "\n\n")
 		}
 		if other := slices.Concat(kinds["data"], kinds["doc"]); len(other) > 0 {
-			b.WriteString("<details>\n<summary>📄 Data and docs: " + text.Count(len(other), "file") + "</summary>\n\n")
-			list(&b, other, func(f string) string { return "`" + f + "`" })
-			b.WriteString("</details>\n\n")
+			w.WriteString(fold("📄 <strong>Data and docs: "+text.Count(len(other), "file")+"</strong>",
+				list(other, func(f string) string { return "`" + f + "`" }), false, false) + "\n\n")
 		}
 		if len(o.Mechanical) > 0 {
-			b.WriteString("<details>\n<summary>🔁 Mechanical: " + text.Count(len(skip), "file") + " to skim</summary>\n\n")
-			list(&b, o.Mechanical, func(g diff.Group) string {
+			w.WriteString(fold("🔁 <strong>Mechanical: "+text.Count(len(skip), "file")+" to skim</strong>", list(o.Mechanical, func(g diff.Group) string {
 				s := fmt.Sprintf("%s (%d): `%s`", g.What, len(g.Files), strings.Join(g.Files[:min(len(g.Files), 5)], "`, `"))
 				if len(g.Files) > 5 {
 					s += ", …"
 				}
 				return s
-			})
-			b.WriteString("</details>\n\n")
+			}), false, false) + "\n\n")
 		}
 		if st.Diagram != "" {
-			b.WriteString("<details>\n<summary>Sequence diagram</summary>\n\n```mermaid\n" + st.Diagram + "\n```\n\n</details>\n\n")
+			w.WriteString(fold("🔀 <strong>Sequence diagram</strong>", "```mermaid\n"+st.Diagram+"\n```", false, false) + "\n\n")
 		}
 		if st.Effort > 0 && st.Effort < len(effort) {
-			b.WriteString("**Estimated review effort:** 🎯 " + effort[st.Effort] + "\n\n")
+			w.WriteString("**Estimated code review effort:** " + effort[st.Effort] + "\n\n")
 		}
+		b.WriteString(fold("<strong>Walkthrough</strong>", strings.TrimSpace(w.String()), true, false) + "\n\n")
 		if st.Risk != nil {
-			b.WriteString("**Merge risk:** " + st.Risk.String() + "\n\n")
+			fmt.Fprintf(&b, "**Merge Risk:** %s · up to `%s`\n\n", st.Risk, st.SHA[:min(len(st.SHA), 7)])
 		}
-		b.WriteString("</details>\n\n")
 	}
 	if footer != "" {
 		b.WriteString("<sub>" + footer + "</sub>\n")
@@ -258,15 +253,16 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 	return b.String()
 }
 
-// list writes up to shown items as a markdown list, then how many more.
-func list[T any](b *strings.Builder, items []T, line func(T) string) {
+// list is up to shown items as a markdown list, then how many more.
+func list[T any](items []T, line func(T) string) string {
+	var out []string
 	for _, it := range items[:min(len(items), shown)] {
-		b.WriteString("- " + line(it) + "\n")
+		out = append(out, "- "+line(it))
 	}
 	if len(items) > shown {
-		fmt.Fprintf(b, "- … %d more\n", len(items)-shown)
+		out = append(out, fmt.Sprintf("- … %d more", len(items)-shown))
 	}
-	b.WriteString("\n")
+	return strings.Join(out, "\n")
 }
 
 // Update folds a review into the state. Incremental reviews only see some files: the rest of the walkthrough stays.
