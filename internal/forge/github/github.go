@@ -76,7 +76,7 @@ func ghDoNext(method, url, token, accept string, body any) ([]byte, string, erro
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "diffharbor")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	res, err := client.Do(req)
+	res, err := forge.Send(client, req)
 	if err != nil {
 		return nil, "", err
 	}

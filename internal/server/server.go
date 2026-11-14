@@ -271,6 +271,7 @@ func Serve(cfg Config) {
 		log.Fatal(err)
 	}
 	jobs := newPool(cfg.MaxJobs, runJob)
+	http.HandleFunc("GET /healthz", func(http.ResponseWriter, *http.Request) {}) // up: the image's HEALTHCHECK
 	http.HandleFunc("POST /webhook/{forge}", func(w http.ResponseWriter, r *http.Request) {
 		f := forges[r.PathValue("forge")]
 		if f == nil {

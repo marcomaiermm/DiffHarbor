@@ -671,6 +671,7 @@ func TestRefreshVisibility(t *testing.T) {
 				fmt.Fprint(w, `{"bot":false}`)
 			case "/projects/5":
 				if vis == "" { // unavailable: not private
+					w.Header().Set("Retry-After", "0") // retried at once
 					http.Error(w, "boom", 500)
 					return
 				}
