@@ -30,7 +30,7 @@ func Items() { _, _ = http.Get(itemsURL) }
 
 func Roster() { loadRoster(rosterURL) }
 
-func Token() { send(os.Getenv("TOKEN_URL")) }
+func Token() { u := os.Getenv("TOKEN_URL"); send(u + "/token") }
 
 func Quiet() { local() }
 

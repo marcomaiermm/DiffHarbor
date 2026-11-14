@@ -192,7 +192,7 @@ func (idx *cgIndex) outside(sb *proc.Sandbox, changed, added map[string]bool, sy
 	}
 }
 
-// Outside is the outside calls of the changed declarations: one per place and system, by place, the first maxOutside.
+// Outside is the outside calls of the changed declarations: one per place, system and URL, by place, the first maxOutside.
 func Outside(syms map[string][]Symbol) []OutsideCall {
 	var out []OutsideCall
 	for _, ss := range syms {
@@ -205,7 +205,8 @@ func Outside(syms map[string][]Symbol) []OutsideCall {
 		}
 	}
 	slices.SortFunc(out, func(a, b OutsideCall) int {
-		return cmp.Or(cmp.Compare(a.Path, b.Path), cmp.Compare(a.Line, b.Line), cmp.Compare(a.System, b.System))
+		return cmp.Or(cmp.Compare(a.Path, b.Path), cmp.Compare(a.Line, b.Line), cmp.Compare(a.System, b.System),
+			cmp.Compare(a.URL, b.URL), cmp.Compare(a.URLAt, b.URLAt))
 	})
 	return out[:min(len(out), maxOutside)]
 }

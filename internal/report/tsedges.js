@@ -12,8 +12,9 @@
 //   requests  a call that sends a network request, to no declaration: the global fetch, node:http's and node:https's
 //            request and get, a package's call given a URL constant (below)
 //   url      a call with an argument that is a URL: a string, `new URL(…)` or a template starting with http:// or
-//            https://, or a const that holds one, or an environment variable (`process.env.X`, `import.meta.env.X`, a
-//            member read of a module-level object made from one). With the URL's text or the variable, and where it stands
+//            https://, or a const that holds one, or an environment variable (`process.env.X`,
+//            `import.meta.env.X`, a member read of a module-level object made from one). With the URL's text or the
+//            variable, and where it stands
 // All of the project's: a walk goes on from any of them. Test files aside. One checker round trip per file and kind:
 // what a URL needs (urlOf) is asked in the same batch as the calls.
 const fs = require("fs");
@@ -119,8 +120,9 @@ const wanted = (n, fn, sf, depth = 0) => {
 };
 const plus = (n, sf) => sf.text.slice(n.operatorToken.getStart(sf), n.operatorToken.end) === "+" && (isStr(n.left) || isStr(n.right)); // base + "/x", not a + b
 // urlOf is the URL an expression passes: {url, at}, or {env, at} for an environment variable, null for neither.
-// sym(x, p) is the symbol of an identifier of file p that wanted() named; a const is followed only at a module's top level, holding
-// what a URL is made of: a string, a template, new URL(…), an environment read.
+// sym(x, p) is the symbol of an identifier of file p that wanted() named; a const is followed only at a module's top
+// level. Followed to a URL it must hold what a URL is made of: a string, a template, new URL(…), an environment read;
+// followed to an env object (any), whatever it holds, as its text is checked for the environment.
 const urlOf = (n, sf, p, sym, depth = 0) => {
   if (!n || depth > 3) return null;
   const at = x => (p ? p + ":" + lineOf(x, sf) : "");
@@ -132,18 +134,18 @@ const urlOf = (n, sf, p, sym, depth = 0) => {
     return isUrl(n.head.text) ? { url: n.head.text, at: at(n) } : n.head.text ? null : sub(n.templateSpans[0]?.expression);
   if (is.isNewExpression(n)) return n.expression.text === "URL" ? sub(n.arguments?.[0]) || sub(n.arguments?.[1]) : null; // new URL("/x", base)
   if (is.isBinaryExpression(n)) return plus(n, sf) ? sub(n.left) || sub(n.right) : null;
-  const via = x => { // the const an identifier names, with its initializer
+  const via = (x, any) => { // the const an identifier names, with its initializer
     const d = decl(sym(x, p));
     const init = d && d.top && d.node.initializer;
     const v = init && wrapped(init) ? init.expression : init;
-    return v && (isStr(v) || is.isNewExpression(v) || isMember(v)) ? { d, init } : null;
+    return v && (any || isStr(v) || is.isNewExpression(v) || isMember(v)) ? { d, init } : null;
   };
   if (isMember(n)) {
     const name = memberName(n);
     if (!name) return null;
     if (envObj(src(n.expression))) return { env: name, at: at(n) };
     // a member read of a module-level object made from the environment: `env.API_URL`
-    const v = upper.test(name) && is.isIdentifier(n.expression) && via(n.expression);
+    const v = upper.test(name) && is.isIdentifier(n.expression) && via(n.expression, true);
     return v && /\b(process|import\.meta)\.env\b/.test(v.d.sf.text.slice(v.init.getStart(v.d.sf), v.init.end)) ? { env: name, at: at(n) } : null;
   }
   if (is.isIdentifier(n)) {
@@ -155,7 +157,13 @@ const urlOf = (n, sf, p, sym, depth = 0) => {
 
 // ambient: a declaration the platform gives every file, not a module's export: the DOM's fetch, Node's, a worker
 // runtime's, Bun's, in a script's .d.ts or in `declare global`
-const ambient = h => safe(() => {
+const ambients = new Map();
+const ambient = h => {
+  const k = h.path + ":" + h.index;
+  if (!ambients.has(k)) ambients.set(k, ambientOf(h));
+  return ambients.get(k);
+};
+const ambientOf = h => safe(() => {
   const n = /\.d\.[cm]?ts$/.test(h.path) && h.resolve(project);
   if (!n || (!is.isFunctionDeclaration(n) && !is.isVariableDeclaration(n))) return false;
   const st = is.isVariableDeclaration(n) ? n.parent?.parent : n, sf = n.getSourceFile();
@@ -167,7 +175,7 @@ const ambient = h => safe(() => {
 const done = new Set(); // a file in two projects: once
 for (project of projects()) {
 program = project.program, checker = project.checker;
-decls.clear();
+decls.clear(), ambients.clear();
 for (const file of program.getSourceFileNames()) {
   const path = rel(file);
   if (!path || test.test(path) || done.has(path)) continue;
