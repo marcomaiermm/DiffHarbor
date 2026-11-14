@@ -41,9 +41,16 @@ var (
 	mentions = map[string]*regexp.Regexp{}
 	latest   = struct {
 		sync.Mutex
-		m map[string]string
-	}{m: map[string]string{}}
+		m map[string]push
+	}{m: map[string]push{}}
 )
+
+// push is a PR's review to run, in latest: a same-head event (retarget, ready) is a new one, its stopped run's cleanup
+// leaves it. sha is read here: the job changes e (Refresh).
+type push struct {
+	sha string
+	e   *forge.Event
+}
 
 // task is a running job: review spares a chat answer from a push's stop (pool.add).
 type task struct {
@@ -55,7 +62,7 @@ type task struct {
 // before it started stays pending: the next push or a restart retries it. A head whose last maxStarts runs all stopped
 // the server runs giveUp instead; one that failed stays pending too, its notice still owed.
 func review(e *forge.Event, giveUp, reviewJob func() error) (err error) {
-	key, queued := prKey(e), e.PullRequest.Head.SHA
+	key, queued := prKey(e), push{e.PullRequest.Head.SHA, e}
 	latest.Lock()
 	current := latest.m[key] == queued
 	n := 0
@@ -147,9 +154,9 @@ func (p *pool) add(e *forge.Event) bool {
 		// Under mu: a newer push's handler that queued first is neither replaced (scheduler.add) nor stopped by an
 		// older one's. This one would skip (review).
 		latest.Lock()
-		sha, known := latest.m[key]
+		cur, known := latest.m[key]
 		latest.Unlock()
-		if known && sha != e.PullRequest.Head.SHA {
+		if known && cur.sha != e.PullRequest.Head.SHA {
 			return true
 		}
 		if t := p.running[key]; t != nil && t.review {
@@ -405,7 +412,7 @@ func pushed(e *forge.Event) error {
 	key := prKey(e)
 	latest.Lock()
 	defer latest.Unlock()
-	latest.m[key] = e.PullRequest.Head.SHA
+	latest.m[key] = push{e.PullRequest.Head.SHA, e}
 	if e.Action == "reopened" || e.Action == "ready_for_review" { // not a late push: its close still deletes
 		_ = os.Remove(deletingFile(key)) //nolint:gosec // no retry deletes its next reports; eventFile escapes
 		// one by the repo's name too: retryDrops' rename of it fails, it queues no stale close
@@ -645,7 +652,7 @@ func resume(add func(*forge.Event) bool) {
 	for _, e := range es {
 		log.Println(e.Key(), "resuming the review a restart cut off")
 		latest.Lock()
-		latest.m[prKey(e)] = e.PullRequest.Head.SHA
+		latest.m[prKey(e)] = push{e.PullRequest.Head.SHA, e}
 		latest.Unlock()
 		if !add(e) { // stays on disk for the next start
 			log.Println(e.Key(), "queue full")

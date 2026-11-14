@@ -65,13 +65,13 @@ func TestPendingResume(t *testing.T) {
 	latest.Unlock()
 	q := make(chan *forge.Event, 2)
 	resume(queue(q))
-	if e := <-q; e.Kind != "pull_request" || e.Key() != key || e.Action != "synchronize" || e.Forge != "github" || latest.m[key] != "abc" || len(q) != 0 {
+	if e := <-q; e.Kind != "pull_request" || e.Key() != key || e.Action != "synchronize" || e.Forge != "github" || latest.m[key].sha != "abc" || len(q) != 0 {
 		t.Fatalf("%+v", e)
 	}
 	if _, err := os.Stat(pendingFile("gitlab/g/s/p#1")); err != nil {
 		t.Fatal(err)
 	}
-	latest.m[key] = "def" // a newer push waits
+	latest.m[key] = push{sha: "def"} // a newer push waits
 	done(key)
 	if _, err := os.Stat(pendingFile(key)); err != nil {
 		t.Fatal("dropped a waiting push:", err)
@@ -154,7 +154,7 @@ func TestLateCloseRecreatedRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	latest.Lock()
-	sha := latest.m[prKey(recreated)]
+	sha := latest.m[prKey(recreated)].sha
 	latest.Unlock()
 	if sha != "abc" || !proc.Exists(pendingFile(prKey(recreated))) {
 		t.Fatal("the old close dropped the new PR's queued review:", sha)
@@ -577,7 +577,7 @@ func TestReviewCleanupKeepsPending(t *testing.T) {
 	e := ev("o/r", 9, "")
 	e.PullRequest.Head.SHA = "abc"
 	latest.Lock()
-	latest.m[e.Key()] = "abc"
+	latest.m[e.Key()] = push{"abc", e}
 	save(pendingFile(e.Key()), e)
 	latest.Unlock()
 	if err := review(e, nil, func() error { return fmt.Errorf("uid 10001: %w: busy", proc.ErrCleanup) }); err == nil {
@@ -648,7 +648,7 @@ func TestPoolOlderPush(t *testing.T) {
 	older, newer := ev("a", 1, ""), ev("a", 1, "")
 	older.PullRequest.Head.SHA, newer.PullRequest.Head.SHA = "old", "new"
 	latest.Lock()
-	latest.m["a#1"] = "new"
+	latest.m["a#1"] = push{"new", newer}
 	latest.Unlock()
 	t.Cleanup(func() { latest.Lock(); delete(latest.m, "a#1"); latest.Unlock() })
 	if !f.p.add(newer) || !f.p.add(older) {
@@ -684,11 +684,11 @@ func TestPoolPushStops(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	f := newFakeJobs(1)
 	push := func(sha string) *forge.Event {
-		latest.Lock()
-		latest.m["a#1"] = sha
-		latest.Unlock()
 		e := ev("a", 1, "")
 		e.PullRequest.Head.SHA = sha
+		latest.Lock()
+		latest.m["a#1"] = push{sha, e}
+		latest.Unlock()
 		return e
 	}
 	t.Cleanup(func() { latest.Lock(); delete(latest.m, "a#1"); latest.Unlock() })
@@ -707,6 +707,31 @@ func TestPoolPushStops(t *testing.T) {
 	f.p.add(push("y"))
 	if f.next() != "a#1" { // x's review ended on its ctx, y's started
 		t.Fatal("not stopped")
+	}
+	f.end(t)
+	f.idle(t)
+}
+
+// An event for the head under review (a retarget, ready for review) stops its run and reviews again: the stopped
+// run's cleanup leaves the new one queued.
+func TestPoolSameHeadStops(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	f := newFakeJobs(1)
+	f.p.run = func(ctx context.Context, e *forge.Event) error {
+		return review(e, nil, func() error { return f.run(ctx, e) })
+	}
+	t.Cleanup(func() { latest.Lock(); delete(latest.m, "a#1"); latest.Unlock() })
+	sync := ev("a", 1, "")
+	sync.Action, sync.PullRequest.Head.SHA = "synchronize", "abc"
+	pushed(sync)
+	f.p.add(sync)
+	f.next()
+	retarget := *sync
+	retarget.Action, retarget.Changes.Base.Ref.From = "edited", "dev"
+	pushed(&retarget)
+	f.p.add(&retarget)
+	if f.next() != "a#1" {
+		t.Fatal("the retarget's review skipped")
 	}
 	f.end(t)
 	f.idle(t)
@@ -789,7 +814,7 @@ func TestReviewGivesUp(t *testing.T) {
 	var giveErr error
 	run := func(job func() error) (ran, gave bool) {
 		latest.Lock()
-		latest.m[key] = e.PullRequest.Head.SHA // as resume does after each restart
+		latest.m[key] = push{e.PullRequest.Head.SHA, e} // as resume does after each restart
 		latest.Unlock()
 		review(e, func() error { gave = true; return giveErr }, func() error { ran = true; return job() })
 		return ran, gave
