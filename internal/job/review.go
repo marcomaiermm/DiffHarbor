@@ -334,6 +334,16 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	s.State.Patches = reviewedPatches(s.State.Patches, patches, slices.DeleteFunc(diff.Paths(d), func(f string) bool {
 		return slices.Contains(r.Failed, f) || slices.Contains(omitted, f)
 	}))
+	banner := ""
+	switch {
+	case n == 0 && still > 0:
+		banner = fmt.Sprintf("No actionable comments were generated in the latest review; %s from earlier reviews still open.", text.Count(still, "finding"))
+	case n == 0:
+		banner = "No actionable comments were generated in the latest review."
+	}
+	reviewed := footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc))
+	// Right after posting: a restart from here on finds this head reviewed, rather than posting its findings again.
+	s.Write(banner, reviewed)
 	if guide {
 		st := s.State
 		d := report.Data{
@@ -354,15 +364,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		}
 		s.State.Secret = reportSecret(s.State.Secret)
 		s.State.Report = writeReport(e, s.State.Secret, s.State.Report, d)
+		s.Write(banner, reviewed) // again, with the report's link
 	}
-	banner := ""
-	switch {
-	case n == 0 && still > 0:
-		banner = fmt.Sprintf("No actionable comments were generated in the latest review; %s from earlier reviews still open.", text.Count(still, "finding"))
-	case n == 0:
-		banner = "No actionable comments were generated in the latest review."
-	}
-	s.Write(banner, footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc)))
 	if w := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); len(w) <= 140 { // GitHub's limit
 		desc = w
 	}
