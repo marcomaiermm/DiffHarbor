@@ -266,7 +266,7 @@ func TestPostFolded(t *testing.T) {
 		{Path: "a.go", Line: 2, Severity: "major", Title: "bug", Body: "b"},
 		{Path: "a.go", Line: 3, Severity: "nit", Title: "name", Body: "b", Fold: true},
 	}}, nil, src, "f")
-	if err != nil || n != 1 || len(sent.Comments) != 1 || sent.Comments[0]["line"] != 2.0 || !strings.Contains(sent.Body, "🧹 Nitpicks (1)") {
+	if err != nil || n != 1 || len(sent.Comments) != 1 || sent.Comments[0]["line"] != 2.0 || !strings.Contains(sent.Body, "🧹 Nitpick comments: 1") {
 		t.Fatalf("post: %d %v %+v", n, err, sent)
 	}
 }
@@ -356,7 +356,7 @@ func TestReopen(t *testing.T) {
 	p := &pr{e: e, api: "/repos/o/r", token: "t"}
 	c := forge.Finding{Comment: review.Comment{Path: "a.go", Line: 42, Severity: "major", Title: "race", Body: "back"}}
 	if err := p.Reopen(forge.Thread{ID: "T", Comment: 9}, "abcdef1", c); err != nil || len(sent) != 3 ||
-		!strings.HasPrefix(sent[0], `/repos/o/r/pulls/1/comments/9/replies {"body":"🔁 Back in `+"`abcdef1`, at `a.go:42`"+`\n\n_🟠 Major_ · **race**`) ||
+		!strings.HasPrefix(sent[0], `/repos/o/r/pulls/1/comments/9/replies {"body":"🔁 Back in `+"`abcdef1`, at `a.go:42`"+`\n\n**🟠 Major**\n\n**race**`) ||
 		!strings.Contains(sent[1], `"contents":"write"`) || !strings.Contains(sent[2], `unresolveReviewThread(input:{threadId:$id})`) {
 		t.Fatalf("%q %v", sent, err)
 	}

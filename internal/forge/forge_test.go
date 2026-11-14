@@ -17,7 +17,7 @@ func TestPlace(t *testing.T) {
 		t.Fatalf("placed %d-%d: %q", c.Start, c.End, Format(c, "suggestion"))
 	}
 	far := Finding{Comment: review.Comment{Path: "a.go", Line: 40, Existing: "ctx\nz\n", Fix: "y"}}
-	if Place(&far, lines); far.Start != 0 || !strings.Contains(Format(far, "suggestion"), "**Suggested fix:**\n\n````diff\n-ctx\n-z\n+y\n````") {
+	if Place(&far, lines); far.Start != 0 || !strings.Contains(Format(far, "suggestion"), "<summary>Suggested fix</summary>\n<dl>\n<dd>\n<br>\n\n````diff\n-ctx\n-z\n+y\n````") {
 		t.Fatalf("far: %+v", far)
 	}
 	blank := Finding{Comment: review.Comment{Path: "a.go", Line: 13, Existing: "ctx2\n\n", Fix: "y\n\n"}}
@@ -25,7 +25,7 @@ func TestPlace(t *testing.T) {
 		!strings.Contains(Format(blank, "suggestion"), "```suggestion\ny\n\n```") {
 		t.Fatalf("blank: %+v %q", blank, Format(blank, "suggestion"))
 	}
-	if got := Format(Finding{Comment: review.Comment{Existing: "a ````", Fix: "b"}}, ""); !strings.HasSuffix(got, "`````diff\n-a ````\n+b\n`````") {
+	if got := Format(Finding{Comment: review.Comment{Existing: "a ````", Fix: "b"}}, ""); !strings.Contains(got, "`````diff\n-a ````\n+b\n`````\n\n</dd>") {
 		t.Fatalf("diff fence: %q", got)
 	}
 	// Trimmed once, placed or not, inline or outside the diff: a fix's last blank line stays.
@@ -37,12 +37,12 @@ func TestPlace(t *testing.T) {
 		t.Fatalf("split: %d inline, %d rest", len(inline), len(rest))
 	}
 	want := "````diff\n-nope\n-\n+y\n+\n````"
-	if !strings.Contains(Format(inline[0], "suggestion"), want) || !strings.Contains(Format(rest[0], ""), want) || !strings.HasSuffix(Format(rest[1], ""), "**Suggested fix:**\n\n````\nx\n````") ||
+	if !strings.Contains(Format(inline[0], "suggestion"), want) || !strings.Contains(Format(rest[0], ""), want) || !strings.HasSuffix(Format(rest[1], ""), "<br>\n\n````\nx\n````\n\n</dd>\n</dl>\n</details>") ||
 		!strings.Contains(Format(rest[2], ""), "````diff\n-x\n+\n````") || !strings.HasSuffix(Format(inline[1], "suggestion"), "```suggestion\n\n```") {
 		t.Fatalf("split: %q %q %q %q %q", Format(inline[0], "suggestion"), Format(rest[0], ""), Format(rest[1], ""), Format(rest[2], ""), Format(inline[1], "suggestion"))
 	}
 	// A placed finding moved into the summary (GitLab's diff not ready yet) shows what it replaces.
-	if got := Summary(nil, inline[1:], nil, ""); !strings.Contains(got, "````diff\n-\tif x {\n+\n````") {
+	if got := Summary(nil, inline[1:], nil, ""); !strings.Contains(got, "````diff\n> -\tif x {\n> +\n> ````") {
 		t.Fatalf("moved: %q", got)
 	}
 }
@@ -172,15 +172,23 @@ func TestSplitCap(t *testing.T) {
 func TestFormat(t *testing.T) {
 	c := Finding{Comment: review.Comment{Path: "a.go", Line: 3, Severity: "major", Title: "t", Body: "b", Fix: "use ````x````"}}
 	got := Format(c, "suggestion")
-	if !strings.HasPrefix(got, "_🟠 Major_ · **t**\n\nb") || !strings.Contains(got, "`````\nIn a.go around line 3: t\n\nb\n\nSuggested fix:\n`````") {
+	if !strings.HasPrefix(got, "**🟠 Major**\n\n**t**\n\nb\n\n<details>\n<summary>Suggested fix</summary>") || !strings.Contains(got, "`````\nIn a.go around line 3: t\n\nb\n\nSuggested fix:\n`````") {
 		t.Fatalf("format: %q", got)
 	}
-	if !strings.Contains(allPrompts([]Finding{c, c}), "use ````x````\n`````\n\nIn a.go") {
-		t.Fatalf("allPrompts: %q", allPrompts([]Finding{c, c}))
+	if p := allPrompts([]Finding{c, c}, nil, []Finding{c}); !strings.Contains(p, "Prompt to fix all issues") ||
+		!strings.Contains(p, "\n\nInline comments:\n\nIn a.go") || !strings.Contains(p, "use ````x````\n`````\n\nIn a.go") ||
+		!strings.Contains(p, "`````\n\n---\n\nNitpick comments:\n\nIn a.go") || strings.Contains(p, "Outside diff") {
+		t.Fatalf("allPrompts: %q", p)
 	}
 	c.Body += "\n\n" + review.Verified + "the map is nil on line 3\n"
 	if p := Parse(Format(c, "suggestion")); p.Severity != "major" || p.Title != "t" || !strings.HasPrefix(p.Body, "b\n") || p.Evidence != "the map is nil on line 3" {
 		t.Fatalf("parse: %+v", p)
+	}
+	// Threads still open from before keep their severity and title.
+	for _, old := range []string{"_🟠 Major_ · **t**\n\nb", "_🔵 Nit_ · **t**\n\nb"} {
+		if p := Parse(old); p.Severity == "" || p.Title != "t" || p.Body != "b" {
+			t.Fatalf("parse old %q: %+v", old, p)
+		}
 	}
 	if p := Parse("by hand"); p.Severity != "" || p.Body != "by hand" || p.Evidence != "" {
 		t.Fatalf("parse plain: %+v", p)
@@ -209,7 +217,8 @@ func TestSticky(t *testing.T) {
 		t.Fatalf("ask: %s", body)
 	}
 	if !strings.HasPrefix(body, stickyMark+"\n> [!NOTE]\n> ⏳ busy") || !strings.Contains(body, "| `a.go` | x \\| y |") ||
-		!strings.Contains(body, "```mermaid\nsequenceDiagram\n```") || !strings.Contains(body, "🎯 5 (Very complex)") {
+		!strings.Contains(body, "```mermaid\nsequenceDiagram\n```") || !strings.Contains(body, "**Estimated code review effort:** 5 (Very complex)") ||
+		!strings.Contains(body, "<details open>\n<summary><strong>Walkthrough</strong></summary>\n<dl>\n<dd>\n<br>\n\ns\n\n|") {
 		t.Fatalf("render: %s", body)
 	}
 	if got := parseState(body); got.SHA != "bbbbbbb" || got.Files["b.go"] != "new" {
@@ -247,7 +256,7 @@ func TestStickyOutline(t *testing.T) {
 		Mechanical: []diff.Group{{What: "Same edit in 3 files", Files: []string{"p1/x.go", "p2/x.go", "p3/x.go"}}},
 	}
 	body := st.render("", "", "foot", o)
-	top, walk, ok := strings.Cut(body, "<summary><b>Walkthrough")
+	top, walk, ok := strings.Cut(body, "<summary><strong>Walkthrough")
 	if !ok {
 		t.Fatalf("no walkthrough:\n%s", body)
 	}
@@ -260,7 +269,7 @@ func TestStickyOutline(t *testing.T) {
 	if !strings.Contains(code, "`api/a.go`") || strings.Contains(code, "a_test.go") || strings.Contains(code, "p1/x.go") || strings.Contains(code, "README") {
 		t.Errorf("code table: %s", code)
 	}
-	for _, w := range []string{"🧪 Tests: 1 file, 1 new case</summary>", "</summary>\n\n- TestA\n", "📄 Data and docs: 1 file</summary>\n\n- `README.md`", "🔁 Mechanical: 3 files to skim", "- Same edit in 3 files (3)"} {
+	for _, w := range []string{"<strong>Tests: 1 file, 1 new case</strong></summary>", "<br>\n\n- TestA\n\n</dd>", "Data and docs: 1 file</strong></summary>\n<dl>\n<dd>\n<br>\n\n- `README.md`", "<strong>Mechanical: 3 files to skim", "- Same edit in 3 files (3)"} {
 		if !strings.Contains(walk, w) {
 			t.Errorf("folded sections lack %q:\n%s", w, walk)
 		}
@@ -325,15 +334,17 @@ func TestSummaryFolded(t *testing.T) {
 	inline, outside, folded := Split(r, nil, lines)
 	s := Summary(inline, outside, folded, "f")
 	if len(inline) != 1 || len(outside) != 1 || len(folded) != 1 || !strings.Contains(s, "Actionable comments posted: 2") ||
-		!strings.Contains(s, "Outside diff range comments (1)") || !strings.Contains(s, "<details>\n<summary><b>🧹 Nitpicks (1)</b></summary>") ||
-		!strings.Contains(s, "_🔵 Nit_ · **name**") || !strings.Contains(s, "In a.go around line 2: name") {
+		!strings.Contains(s, "Outside diff range comments (1)") || !strings.Contains(s, "<details>\n<summary>🧹 Nitpick comments: 1</summary><blockquote>") ||
+		!strings.Contains(s, "<summary>a.go: 1</summary><blockquote>") || !strings.Contains(s, "`2`: **⚪ Trivial**\n\n**name**") ||
+		!strings.Contains(s, "> [!CAUTION]\n> Some comments") || !strings.Contains(s, "> <summary><strong>🟡 Minor</strong> · far · <code>b.go:9</code></summary><blockquote>") ||
+		!strings.Contains(s, "<h6>\n<details>\n<summary>ℹ️ Review info</summary>") || !strings.Contains(s, "In a.go around line 2: name") {
 		t.Fatalf("%d inline, %d outside, %d folded:\n%s", len(inline), len(outside), len(folded), s)
 	}
 	if p := Parse(Format(Finding{Comment: r.Comments[1]}, "")); p.Severity != "nit" || p.Title != "name" {
 		t.Fatalf("parse nit: %+v", p)
 	}
 	minor := []Finding{{Comment: review.Comment{Severity: "minor", Fold: true}}}
-	if s := Summary(nil, nil, minor, "f"); !strings.Contains(s, "No actionable comments") || !strings.Contains(s, "🧹 Minor comments (1)") {
+	if s := Summary(nil, nil, minor, "f"); !strings.Contains(s, "No actionable comments") || !strings.Contains(s, "🧹 Minor comments: 1") {
 		t.Fatal(s)
 	}
 }
@@ -375,15 +386,15 @@ func TestRisked(t *testing.T) {
 	}
 	st := State{SHA: "a", Risk: &Risk{Score: 3, Why: "1 major"}}
 	body := st.render("", "", "", nil)
-	if !strings.Contains(body, "**Merge risk:** 🟡 3/5 (1 major)") || parseState(body).Risk.Score != 3 {
+	if !strings.Contains(body, "</details>\n\n**Merge Risk:** **🟡 3/5 (1 major)** · up to `a`") || parseState(body).Risk.Score != 3 {
 		t.Fatalf("render: %s", body)
 	}
 	for _, score := range []int{-1, 6, 99} { // an edited sticky mustn't panic the render
-		if body := (State{SHA: "a", Risk: &Risk{Score: score}}).render("", "", "", nil); !strings.Contains(body, "Merge risk") {
+		if body := (State{SHA: "a", Risk: &Risk{Score: score}}).render("", "", "", nil); !strings.Contains(body, "Merge Risk") {
 			t.Fatalf("score %d: %s", score, body)
 		}
 	}
-	if old := (State{SHA: "a"}).render("", "", "", nil); strings.Contains(old, "Merge risk") || parseState(old).Risk != nil {
+	if old := (State{SHA: "a"}).render("", "", "", nil); strings.Contains(old, "Merge Risk") || parseState(old).Risk != nil {
 		t.Fatal("old sticky shows a risk")
 	}
 }
