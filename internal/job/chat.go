@@ -147,14 +147,7 @@ const maxDeclined = 20
 var learningsMu sync.Mutex
 
 func writeLines(f string, lines []string) error {
-	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
-		return err
-	}
-	// Through a rename: a review reading them never sees half a file.
-	if err := os.WriteFile(f+".tmp", []byte(strings.Join(append(lines, ""), "\n")), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(f+".tmp", f)
+	return proc.WriteAtomic(f, []byte(strings.Join(append(lines, ""), "\n"))) // a review never reads half a file
 }
 
 func writeLearnings(key string, lines []string) error { return writeLines(learningsFile(key), lines) }

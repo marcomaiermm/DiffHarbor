@@ -144,14 +144,7 @@ func bump(m map[string]counts, k, o string) {
 func writeTally(key string, t tally) error {
 	t.Repo = key
 	b, _ := json.Marshal(t)
-	f := tallyFile(key)
-	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
-		return err
-	}
-	if err := os.WriteFile(f+".tmp", b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(f+".tmp", f)
+	return proc.WriteAtomic(tallyFile(key), b)
 }
 
 // record adds a closed PR's findings to key's tally, each with the decision filed for it. It reports false when

@@ -539,14 +539,7 @@ func save(f string, e *forge.Event) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil { //nolint:gosec // eventFile escapes the key
-		return err
-	}
-	// Through a rename: resume and retryDrops never read half a file.
-	if err := os.WriteFile(f+".tmp", b, 0o600); err != nil { //nolint:gosec // eventFile escapes the key: no / left
-		return err
-	}
-	return os.Rename(f+".tmp", f) //nolint:gosec // as above
+	return proc.WriteAtomic(f, b) // resume and retryDrops never read half a file
 }
 
 // done drops key's stored review once no newer push for it waits.

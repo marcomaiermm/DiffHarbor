@@ -297,13 +297,32 @@ func uidOf(f, repo string) (uint32, error) {
 	}
 	m[repo] = uid
 	b, _ := json.Marshal(m)
-	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
-		return 0, err
+	return uid, WriteAtomic(f, b)
+}
+
+// WriteAtomic writes b to f (0600, its dir made 0700) through a rename, synced: a reader never sees half a file, and
+// a host crash leaves the old one or the new one, never an empty one.
+func WriteAtomic(f string, b []byte) error {
+	dir := filepath.Dir(f)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
 	}
-	if err := os.WriteFile(f+".tmp", b, 0o600); err != nil { // through a rename: never half a file
-		return 0, err
+	t, err := os.OpenFile(f+".tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // the server's own files, not a PR's path
+	if err != nil {
+		return err
 	}
-	return uid, os.Rename(f+".tmp", f)
+	_, err = t.Write(b)
+	if err = errors.Join(err, t.Sync(), t.Close()); err != nil {
+		return err
+	}
+	if err := os.Rename(f+".tmp", f); err != nil {
+		return err
+	}
+	d, err := os.Open(dir) //nolint:gosec // as above; syncs the rename itself
+	if err != nil {
+		return err
+	}
+	return errors.Join(d.Sync(), d.Close())
 }
 
 // Capped keeps the first and the last N bytes written to it: PR code can print without end, and a check's
