@@ -74,6 +74,133 @@ func main() { backfill(store.DB{}); each(store.DB{}) }
 	}
 }
 
+// A SQL statement's table, sqlc's generated form too: a write unless it selects; not a message that reads like one.
+func TestVTAStores(t *testing.T) {
+	dir := t.TempDir()
+	for name, src := range map[string]string{
+		"go.mod": "module fix\n\ngo 1.26\n",
+		"db.go": `package fix
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+)
+
+const createUser = "-- name: CreateUser :one\nINSERT INTO users (name) VALUES ($1) RETURNING id"
+
+func CreateUser(ctx context.Context, db *sql.DB) { db.QueryRowContext(ctx, createUser, "a") }
+
+func listOrders(db *sql.DB) { db.Query("SELECT id FROM \"orders\" WHERE n > 1") }
+
+func bump(db *sql.Tx) error {
+	q := "UPDATE accounts SET n = n + 1"
+	db.Exec(q)
+	db.Exec("update failed")
+	return fmt.Errorf("select a file from disk")
+}
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := vtaCalls(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stores []string
+	for _, e := range got {
+		if e.Kind == "reads" || e.Kind == "writes" {
+			stores = append(stores, fmt.Sprintf("%s %s %d -> %s %q", e.Kind, e.SName, e.Line, e.TName, e.TPath))
+		}
+	}
+	want := []string{`writes CreateUser 11 -> users ""`, `reads listOrders 13 -> orders ""`, `writes bump 17 -> accounts ""`}
+	if !slices.Equal(stores, want) {
+		t.Errorf("got %q, want %q", stores, want)
+	}
+}
+
+// An ORM's chain, gorm's and bun's shapes: its verbs say read or write, its arguments the store. A package's only:
+// the module's own Create (a dotted path like a package's) names none, nor a chain without a verb.
+func TestVTAORM(t *testing.T) {
+	dir := t.TempDir()
+	for name, src := range map[string]string{
+		"go.mod":     "module example.com/app\n\ngo 1.26\n\nrequire example.com/orm v0.0.0\n\nreplace example.com/orm => ./orm\n",
+		"orm/go.mod": "module example.com/orm\n\ngo 1.26\n",
+		"orm/orm.go": `package orm
+
+type DB struct{}
+
+func (d *DB) Model(v any) *DB              { return d }
+func (d *DB) Table(name string) *DB        { return d }
+func (d *DB) Where(q string, a ...any) *DB { return d }
+func (d *DB) Create(v any) *DB             { return d }
+func (d *DB) Find(v any) *DB               { return d }
+func (d *DB) Update(c string, v any) *DB   { return d }
+func (d *DB) NewInsert() *DB               { return d }
+func (d *DB) Exec(ctx any) error           { return nil }
+func (d *DB) AutoMigrate(v ...any) error   { return nil }
+`,
+		"db.go": `package fix
+
+import "example.com/orm"
+
+type User struct{ Name string }
+
+type Order struct{ ID int }
+
+func add(db *orm.DB, u *User) { db.Create(u) }
+
+func list(db *orm.DB) {
+	var os []Order
+	db.Where("id > ?", 1).
+		Find(&os)
+}
+
+func rename(db *orm.DB) { db.Table("accounts").Where("id = ?", 1).Update("name", "x") }
+
+func insert(db *orm.DB) { db.NewInsert().Model(&User{}).Exec(nil) }
+
+func migrate(db *orm.DB) { db.AutoMigrate(&User{}) }
+
+func Create(u *User) {}
+
+func local(u *User) { Create(u) }
+
+func archive(db *orm.DB) { db.Table("archive").Create(&User{}) }
+`,
+	} {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := vtaCalls(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stores []string
+	for _, e := range got {
+		if e.Kind == "reads" || e.Kind == "writes" {
+			stores = append(stores, fmt.Sprintf("%s %s %d -> %s %s:%d", e.Kind, e.SName, e.Line, e.TName, e.TPath, e.TLine))
+		}
+	}
+	want := []string{
+		"writes add 9 -> User db.go:5",
+		"reads list 13 -> Order db.go:7", // the chain's first line
+		"writes rename 17 -> accounts :0",
+		"writes insert 19 -> User db.go:5",
+		"writes archive 27 -> archive :0", // the store nearest the client
+	}
+	if !slices.Equal(stores, want) {
+		t.Errorf("got %q, want %q", stores, want)
+	}
+}
+
 // The checker's edges in testdata/ts, two made-up packages: an ORM and a web framework. No rule names either.
 func TestTSEdges(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(tsAPI, "dist", "api", "sync", "api.js")); err != nil {
