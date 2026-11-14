@@ -224,7 +224,11 @@ func Send(c *http.Client, req *http.Request) (*http.Response, error) {
 			}
 			res.Body.Close()
 		}
-		time.Sleep(wait)
+		select {
+		case <-req.Context().Done(): // a stopped job doesn't wait out the forge
+			return nil, req.Context().Err()
+		case <-time.After(wait):
+		}
 	}
 }
 

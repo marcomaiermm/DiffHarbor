@@ -1,13 +1,16 @@
 package forge
 
 import (
+	"context"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPlace(t *testing.T) {
@@ -460,5 +463,15 @@ func TestSendRetries(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != http.StatusTooManyRequests || calls != 1 {
 		t.Fatalf("an hour's limit: %d after %d calls", res.StatusCode, calls)
+	}
+	calls, after = 0, "30"
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond) // the job stops while Send waits
+	defer cancel()
+	get, _ = http.NewRequestWithContext(ctx, http.MethodGet, s.URL, nil)
+	if res, err = Send(s.Client(), get); err == nil {
+		res.Body.Close()
+	}
+	if !errors.Is(err, context.DeadlineExceeded) || calls != 1 {
+		t.Fatalf("stopped while waiting: %v after %d calls", err, calls)
 	}
 }
