@@ -92,7 +92,7 @@ Folded under every profile:
 
 ### Merge risk
 
-The walkthrough shows a score from 0 to 5, computed from what is still open, not by the model.
+Below the walkthrough, its comment shows a score from 0 to 5, computed from what is still open, not by the model.
 
 | Score | Open | Colour |
 |---|---|---|

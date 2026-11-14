@@ -125,7 +125,8 @@ found:
 			}
 			c.Severity, c.Body = sev, rest
 			if t, ok := strings.CutPrefix(rest, m[1]); ok {
-				if title, after, ok := strings.Cut(t, "**"); ok {
+				// a title is its whole paragraph: a body that opens in bold ("**Cause:** …") keeps it
+				if title, after, ok := strings.Cut(t, "**"); ok && (after == "" || strings.HasPrefix(after, "\n\n")) {
 					c.Title, c.Body = title, after
 				}
 			}
@@ -319,13 +320,13 @@ func foldedTitle(cs []Finding) string {
 }
 
 // allPrompts folds every finding's prompt into one block to paste into an agent, under where the finding is: on
-// the diff (inline or not taken inline), outside it, folded.
+// the diff (inline or not taken inline), outside it, folded (named as in the summary).
 func allPrompts(onDiff, outside, folded []Finding) string {
 	var parts []string
 	for _, g := range []struct {
 		name string
 		cs   []Finding
-	}{{"Inline comments", onDiff}, {"Outside diff comments", outside}, {"Nitpick comments", folded}} {
+	}{{"Inline comments", onDiff}, {"Outside diff comments", outside}, {foldedTitle(folded), folded}} {
 		ps := []string{g.name + ":"}
 		for _, c := range g.cs {
 			if p := c.Prompt(); p != "" {

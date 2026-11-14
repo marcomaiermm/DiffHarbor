@@ -175,7 +175,9 @@ func TestFormat(t *testing.T) {
 	if !strings.HasPrefix(got, "**🟠 Major**\n\n**t**\n\nb\n\n<details>\n<summary>Suggested fix</summary>") || !strings.Contains(got, "`````\nIn a.go around line 3: t\n\nb\n\nSuggested fix:\n`````") {
 		t.Fatalf("format: %q", got)
 	}
-	if p := allPrompts([]Finding{c, c}, nil, []Finding{c}); !strings.Contains(p, "Prompt to fix all issues") ||
+	nit := c
+	nit.Severity = "nit"
+	if p := allPrompts([]Finding{c, c}, nil, []Finding{nit}); !strings.Contains(p, "Prompt to fix all issues") ||
 		!strings.Contains(p, "\n\nInline comments:\n\nIn a.go") || !strings.Contains(p, "use ````x````\n`````\n\nIn a.go") ||
 		!strings.Contains(p, "`````\n\n---\n\nNitpick comments:\n\nIn a.go") || strings.Contains(p, "Outside diff") {
 		t.Fatalf("allPrompts: %q", p)
@@ -189,6 +191,11 @@ func TestFormat(t *testing.T) {
 		if p := Parse(old); p.Severity == "" || p.Title != "t" || p.Body != "b" {
 			t.Fatalf("parse old %q: %+v", old, p)
 		}
+	}
+	// No title, a body that opens in bold: the bold stays in the body.
+	bold := Finding{Comment: review.Comment{Severity: "major", Body: "**Cause:** the map is nil"}}
+	if p := Parse(Format(bold, "")); p.Severity != "major" || p.Title != "" || p.Body != "**Cause:** the map is nil" {
+		t.Fatalf("parse bold body: %+v", p)
 	}
 	if p := Parse("by hand"); p.Severity != "" || p.Body != "by hand" || p.Evidence != "" {
 		t.Fatalf("parse plain: %+v", p)
@@ -345,7 +352,9 @@ func TestSummaryFolded(t *testing.T) {
 		t.Fatalf("parse nit: %+v", p)
 	}
 	minor := []Finding{{Comment: review.Comment{Severity: "minor", Fold: true}}}
-	if s := Summary(nil, nil, minor, "f"); !strings.Contains(s, "No actionable comments") || !strings.Contains(s, "🧹 Minor comments: 1") {
+	minor[0].Title, minor[0].Body = "slow", "b" // its prompt goes under its own name, not under nitpicks
+	if s := Summary(nil, nil, minor, "f"); !strings.Contains(s, "No actionable comments") || !strings.Contains(s, "🧹 Minor comments: 1") ||
+		!strings.Contains(s, "\n\nMinor comments:\n\nIn  around line 0: slow") || strings.Contains(s, "Nitpick") {
 		t.Fatal(s)
 	}
 }
