@@ -34,6 +34,7 @@ type Map struct {
 	Off       []MapItem   // items with no box: a test, a data file
 	Reach     MapReach
 	Tables    []MapTable // the tables a migration drops
+	Stores    []MapStore // the tables the change writes and reads, writers first (spec 6.13)
 	Trace     *MapTrace  // one path from an entry to an outside call; nil without one
 	Cols      int        // the highest column; the parts start at 1 when there are systems at 0
 	NoGraph   bool       // no code graph: the parts sit in one row, without lines
@@ -99,6 +100,7 @@ type MapLine struct {
 type MapName struct {
 	Name, Kind, Via, At string
 	N                   int
+	Writes              []string // the tables its code writes, itself or within 3 calls: the line's chevron sits at its callee
 }
 
 // OutsideCall is a call out of the repo that code names (Outside): the system, the line of changed code that sends
@@ -150,6 +152,44 @@ type MapTable struct {
 	Tests, Elsewhere int
 	Imports, Named   []string
 	Cut              bool // a search of the importers stopped at its file cap: the counts are partial
+}
+
+// MapStore is a table the changed code writes or reads, one box however many names the code gives it. Path and
+// Line are its declaration, "" when the code only names it (SQL, Table("…")); Names its other names, each with
+// its place. Subquery: the declaration is a subquery, whose own tables the scan doesn't follow. Migrations are the
+// PR's migrations that create, change or drop it.
+type MapStore struct {
+	Name, Path string
+	Line       int
+	Names      []MapStoreName
+	Subquery   bool
+	Parts      []MapStorePart // in map order
+	Migrations []MapStoreMigration
+}
+
+// MapStoreName is another name of a table: an alias, the name SQL gives it.
+type MapStoreName struct{ Name, At string }
+
+// MapStorePart is how a part uses a table: each use is a declaration that holds the query, or a call whose
+// callee reaches one.
+type MapStorePart struct {
+	Part string
+	Uses []MapStoreUse
+}
+
+// MapStoreUse is one use: Kind "reads" or "writes"; Decl the declaration that holds the query, or the callee of a
+// call that reaches it (Through); At its first place (path:line), N how many.
+type MapStoreUse struct {
+	Kind, Decl, At string
+	Through        bool
+	N              int
+}
+
+// MapStoreMigration is a migration of the PR that names the table: Kind "created", "changed" or "dropped", Lines
+// its statements' lines.
+type MapStoreMigration struct {
+	Path, Label, Kind string
+	Lines             []int
 }
 
 // MapTablePart is the files of a part that imported a dropped table.
