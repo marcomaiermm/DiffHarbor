@@ -143,7 +143,8 @@ func (p *pool) add(e *forge.Event) bool {
 // push stops it also before it ran. A finished job frees its repo and starts the next.
 func (p *pool) start() {
 	for repo, e, ok := p.s.next(); ok; repo, e, ok = p.s.next() {
-		ctx, cancel := context.WithCancel(context.Background())
+		// ponytail: one deadline for any job, a backstop for a hung call; a review in many parts takes well under it
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 		t := &task{review: e.Kind == "pull_request", cancel: cancel}
 		p.running[prKey(e)] = t
 		go func() {

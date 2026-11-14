@@ -358,3 +358,25 @@ func TestCleanTmpKeepsCache(t *testing.T) {
 		t.Fatal(err, Exists(left), Exists(CacheDir))
 	}
 }
+
+// A command that times out takes its children with it: a test's server doesn't outlive the check.
+func TestCommandKillsGroup(t *testing.T) {
+	defer func(pi bool) { AsPi = pi }(AsPi)
+	AsPi = false
+	pid := filepath.Join(t.TempDir(), "pid")
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	_, _ = Run((&Sandbox{}).Command(ctx, "", nil, "sh", "-c", "sleep 30 & echo $! > "+pid+"; wait"))
+	b, err := os.ReadFile(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	for range 50 { // the kernel reaps it a moment later
+		if syscall.Kill(n, 0) != nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("child %d still running", n)
+}

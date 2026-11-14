@@ -91,6 +91,9 @@ func (s *Sandbox) ToolEnv() []string {
 func (s *Sandbox) Command(ctx context.Context, dir string, extra []string, name string, args ...string) *exec.Cmd {
 	c := exec.CommandContext(ctx, name, args...)
 	c.Dir, c.WaitDelay = dir, 5*time.Second
+	// In a process group of its own, killed whole when ctx ends: a test's children don't outlive a timed-out check.
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Cancel = func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
 	c.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "GIT_TERMINAL_PROMPT=0"}
 	if AsPi {
 		if !jobUser(int(s.uid)) { // a Sandbox not from Workspace: uid 0 would run PR code as root
@@ -100,7 +103,7 @@ func (s *Sandbox) Command(ctx context.Context, dir string, extra []string, name 
 		if s.tmp != "" {
 			c.Env = append(c.Env, "TMPDIR="+s.tmp)
 		}
-		c.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: s.uid, Gid: s.uid}}
+		c.SysProcAttr.Credential = &syscall.Credential{Uid: s.uid, Gid: s.uid}
 	}
 	c.Env = append(c.Env, extra...)
 	return c
