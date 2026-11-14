@@ -607,10 +607,12 @@ func asked(e *forge.Event) error {
 	return nil
 }
 
-// unask drops e's chat file: its job isn't queued.
+// unask drops e's chat file: its job isn't queued. Synced: a crash doesn't bring it back beside the redelivery's.
 func unask(e *forge.Event) {
 	if f, ok := chats.LoadAndDelete(e); ok {
-		_ = os.Remove(f.(string)) //nolint:forcetypeassert,gosec // asked's own file in chats/
+		if err := proc.Remove(f.(string)); err != nil { //nolint:forcetypeassert // asked's own file in chats/
+			log.Println(e.Key(), "chat:", err)
+		}
 	}
 }
 
