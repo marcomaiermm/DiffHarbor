@@ -93,7 +93,12 @@ func (s *Sandbox) Command(ctx context.Context, dir string, extra []string, name 
 	c.Dir, c.WaitDelay = dir, 5*time.Second
 	// In a process group of its own, killed whole when ctx ends: a test's children don't outlive a timed-out check.
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	c.Cancel = func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
+	c.Cancel = func() error {
+		if err := syscall.Kill(-c.Process.Pid, syscall.SIGKILL); !errors.Is(err, syscall.ESRCH) {
+			return err
+		}
+		return os.ErrProcessDone // exited on its own: Wait reports its own error, not the kill's
+	}
 	c.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "GIT_TERMINAL_PROMPT=0"}
 	if AsPi {
 		if !jobUser(int(s.uid)) { // a Sandbox not from Workspace: uid 0 would run PR code as root
@@ -304,7 +309,7 @@ func uidOf(f, repo string) (uint32, error) {
 }
 
 // WriteAtomic writes b to f (0600, its dir made 0700) through a rename, synced: a reader never sees half a file, and
-// a host crash leaves the old one or the new one, never an empty one.
+// a host crash leaves the old one or the new one, never an empty one. One f.tmp: callers serialize their writes of f.
 func WriteAtomic(f string, b []byte) error {
 	dir := filepath.Dir(f)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
