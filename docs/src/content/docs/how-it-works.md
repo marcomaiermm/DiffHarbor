@@ -161,7 +161,9 @@ Prints, from `/data/outcomes/`:
 
 - the counts per repo, by severity and by profile (the PR's, else `review.json`'s top-level one),
 - the decisions per outcome,
-- the outcomes per finding version, `-` for findings without one.
+- the outcomes per finding version and per review / verify model, `-` for findings without one.
+
+Each outcome row ends with the share acted on (addressed or accepted) and its 95% interval, `few` under 30 findings: below that a share says little.
 
 A repo's file there also lists its findings one by one:
 
