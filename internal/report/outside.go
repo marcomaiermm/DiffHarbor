@@ -10,7 +10,7 @@ import (
 )
 
 // The outside calls (6.4): where the PR's changed code sends a request to a system outside the repo, by the code
-// graph and the types, not the review's say. A "requests" edge is a call that sends one (vta.go: net/http; tsedges.js:
+// graph and the types, not the review's say. A "requests" edge is a call that sends one (vta.go: net/http; tsedges.cjs:
 // fetch, node:http, a package given a URL); a walk from each declaration the PR adds or changes follows call edges
 // at most maxHops down, through unchanged code too, to one. The outside call is the line in the changed declaration
 // where the walk starts.

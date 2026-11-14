@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-//go:embed tsedges.js
+//go:embed tsedges.cjs
 var tsEdgesJS string
 
 // tsAPI is TypeScript's package, 7.1 or newer: its API runs the native checker.
@@ -18,7 +18,7 @@ var tsAPI = cmp.Or(os.Getenv("DIFFHARBOR_TS"), "/usr/local/lib/node_modules/type
 
 // tsEdges adds what the TypeScript checker resolves in the TS projects of the indexes (a tsconfig.json beside the
 // index), all of it, a walk goes on from any: calls by type and callbacks, JSX renders, routes and their handlers,
-// reads and writes of stores; see tsedges.js. A project the checker can't load, or past runNode's minute, adds none: codegraph's alone.
+// reads and writes of stores; see tsedges.cjs. A project the checker can't load, or past runNode's minute, adds none: codegraph's alone.
 func (idx *cgIndex) tsEdges(sb *proc.Sandbox, repo string) {
 	if _, err := os.Stat(filepath.Join(tsAPI, "dist", "api", "sync", "api.js")); err != nil {
 		return
