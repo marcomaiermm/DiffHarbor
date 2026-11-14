@@ -85,6 +85,9 @@ func (idx *cgIndex) callGraph(sb *proc.Sandbox, starts []declKey) map[declKey][]
 			}
 		}
 	}
+	for _, es := range g { // the caps below cut the same ones whatever order the edges came in
+		slices.SortStableFunc(es, func(a, b cgEdge) int { return cmp.Compare(a.Line, b.Line) })
+	}
 	return g
 }
 
@@ -129,15 +132,29 @@ func sendersFrom(g map[declKey][]cgEdge, start declKey) []OutsideCall {
 // names.
 func outsideCall(g map[declKey][]cgEdge, start declKey, at int, sender declKey, e cgEdge) OutsideCall {
 	var u cgEdge
-	pick := func(k declKey, line int) bool { // line 0: any
-		i := slices.IndexFunc(g[k], func(x cgEdge) bool { return x.Kind == "url" && (line == 0 || x.Line == line) })
+	pick := func(k declKey, line int, urlOnly bool) bool { // line 0: any
+		i := slices.IndexFunc(g[k], func(x cgEdge) bool {
+			return x.Kind == "url" && (line == 0 || x.Line == line) && (!urlOnly || x.URL != "")
+		})
 		if i >= 0 {
 			u = g[k][i]
 		}
 		return i >= 0
 	}
-	_ = pick(start, at) || pick(sender, e.Line) || pick(sender, 0)
-	return OutsideCall{System: systemName(u.URL, u.Env, sender.Name), Path: start.Path, Line: at, URL: cmp.Or(u.URL, u.Env), URLAt: u.URLAt}
+	// a header's token read from the environment is no system: a URL anywhere in the sender goes before an env
+	if !pick(start, at, false) && !pick(sender, e.Line, false) && !pick(sender, 0, true) {
+		pick(sender, 0, false)
+	}
+	return OutsideCall{System: systemName(u.URL, u.Env, sender.Name), Path: start.Path, Line: at, URL: cmp.Or(noUser(u.URL), u.Env), URLAt: u.URLAt}
+}
+
+// noUser is rawURL without a user:password@, which is rendered.
+func noUser(rawURL string) string {
+	if u, err := url.Parse(rawURL); err == nil && u.User != nil {
+		u.User = nil
+		return u.String()
+	}
+	return rawURL
 }
 
 // systemName is what the code names the system: the URL's host, else the environment variable the URL is read from,
@@ -153,7 +170,8 @@ func systemName(rawURL, env, sender string) string {
 // request, themselves or within maxHops calls.
 func (idx *cgIndex) outside(sb *proc.Sandbox, changed, added map[string]bool, syms map[string][]Symbol) {
 	at := map[declKey][]*Symbol{}
-	for name, ss := range syms {
+	for _, name := range slices.Sorted(maps.Keys(syms)) { // the cap cuts the same ones every run
+		ss := syms[name]
 		for i := range ss {
 			s := &ss[i]
 			k := declKey{s.Path, name[strings.LastIndex(name, ".")+1:]}
@@ -174,7 +192,7 @@ func (idx *cgIndex) outside(sb *proc.Sandbox, changed, added map[string]bool, sy
 	}
 }
 
-// Outside is the outside calls of the changed declarations: one per place and system, by place, the first maxCalls.
+// Outside is the outside calls of the changed declarations: one per place and system, by place, the first maxOutside.
 func Outside(syms map[string][]Symbol) []OutsideCall {
 	var out []OutsideCall
 	for _, ss := range syms {

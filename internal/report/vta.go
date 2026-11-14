@@ -76,7 +76,10 @@ func (idx *cgIndex) vtaEdges(sb *proc.Sandbox, repo string, wanted []string) {
 			continue
 		}
 		for _, e := range got {
-			e.SPath, e.TPath = d.Prefix+e.SPath, d.Prefix+e.TPath
+			e.SPath = d.Prefix + e.SPath
+			if e.TPath != "" { // a request or a url has no target in the module
+				e.TPath = d.Prefix + e.TPath
+			}
 			idx.Edges = append(idx.Edges, e)
 		}
 		log.Printf("vta %s: %d edges in %s", d.Prefix, len(got), time.Since(start).Round(time.Millisecond))

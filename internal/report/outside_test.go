@@ -178,12 +178,28 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 	}
 	idx := &cgIndex{dbs: []cgDB{{DB: filepath.Join(dir, ".codegraph", "codegraph.db")}}, Edges: []cgEdge{
 		{Line: 9, Kind: "requests", By: "ts", SName: "fetchAPI", SPath: "api.go", TName: "fetch"},
+		{Line: 9, Kind: "requests", By: "ts", SName: "other", SPath: "sync.go", TName: "fetch"}, // unchanged: not a start
 		{Line: 5, Kind: "url", By: "ts", SName: "Sync", SPath: "sync.go", URL: "https://blizzard.example.com/roster", URLAt: "sync.go:2"},
 	}}
 	syms := map[string][]Symbol{"Sync": {{Path: "sync.go", Line: 3, From: 3, To: 7, Exact: true}}, "other": {{Path: "sync.go", Line: 9, From: 9, To: 9, Exact: true}}}
 	idx.outside(sb, map[string]bool{"sync.go": true}, map[string]bool{"sync.go:6": true}, syms)
 	want := []OutsideCall{{System: "blizzard.example.com", Path: "sync.go", Line: 5, URL: "https://blizzard.example.com/roster", URLAt: "sync.go:2"}}
 	if got := Outside(syms); !slices.Equal(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+// A token read from the environment before the request names no system; a URL in the sender does, without its user.
+func TestOutsideCallPrefersURL(t *testing.T) {
+	k := declKey{"a.go", "send"}
+	g := map[declKey][]cgEdge{k: {
+		{Line: 3, Kind: "url", Env: "API_TOKEN"},
+		{Line: 4, Kind: "url", URL: "https://u:secret@api.example.com/x", URLAt: "a.go:4"},
+		{Line: 5, Kind: "requests"},
+	}}
+	got := outsideCall(g, declKey{"b.go", "run"}, 9, k, g[k][2])
+	want := OutsideCall{System: "api.example.com", Path: "b.go", Line: 9, URL: "https://api.example.com/x", URLAt: "a.go:4"}
+	if got != want {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }

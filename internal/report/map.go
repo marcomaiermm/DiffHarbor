@@ -589,7 +589,7 @@ func (b *mapper) ids(skip map[string]bool) []string {
 	return out
 }
 
-// systems are the review's outside calls grouped by system, kept when the call sits in a part's code file (6.4).
+// systems are the outside calls (Outside) grouped by system, kept when the call sits in a part's code file (6.4).
 func (b *mapper) systems(calls []OutsideCall) {
 	at := map[string]int{}
 	for _, c := range calls {
