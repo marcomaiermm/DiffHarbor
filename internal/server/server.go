@@ -160,10 +160,11 @@ func (p *pool) start() {
 // exec runs e's job, t in running. A panic ends only this job, as a failed one: done drops its pending review, so a
 // restart doesn't run into it again.
 func (p *pool) exec(ctx context.Context, e *forge.Event, t *task) {
-	key, rk := e.Key(), prKey(e)
+	key, rk, chat := e.Key(), prKey(e), chatFile(e) // before the job changes e
 	defer func() {
 		t.cancel() // revokes the job's vault tokens: git's remote, Pi's keys
 		done(rk)
+		_ = os.Remove(chat)
 		p.mu.Lock()
 		if p.running[rk] == t {
 			delete(p.running, rk)
@@ -320,8 +321,9 @@ func Serve(cfg Config) {
 			return
 		}
 		seen := *e // the job changes e (Refresh, Chat's review): Seen reads its own
-		if !jobs.add(e) {
-			log.Println(e.Key(), "queue full") // GitHub: Redeliver resends it
+		if err := asked(e); err != nil || !jobs.add(e) {
+			log.Println(e.Key(), "not queued:", cmp.Or(err, errFull)) // GitHub: Redeliver resends it
+			_ = os.Remove(chatFile(e))                                // the redelivery saves it again
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
@@ -527,6 +529,24 @@ func resumed(e *forge.Event) int {
 	return n
 }
 
+var errFull = errors.New("queue full")
+
+// asked keeps a comment's job on disk like a review's (pushed): a restart before it ran answers it then.
+func asked(e *forge.Event) error {
+	if e.Kind == "pull_request" {
+		return nil
+	}
+	return save(chatFile(e), e)
+}
+
+// chatFile is a queued comment's job. Resumed once: off disk as it is queued again.
+func chatFile(e *forge.Event) string {
+	if e.Kind == "pull_request" {
+		return ""
+	}
+	return eventFile("chats", fmt.Sprintf("%s-%d", e.Forge, e.Comment.ID))
+}
+
 // deletingFile is a closed PR whose reports aren't deleted yet.
 func deletingFile(key string) string { return eventFile("deleting", key) }
 
@@ -601,6 +621,17 @@ func resume(add func(*forge.Event) bool) {
 		if !add(e) { // stays on disk for the next start
 			log.Println(e.Key(), "queue full")
 		}
+	}
+	cs, _ := filepath.Glob(filepath.Join(proc.DataDir, "chats", "*.json"))
+	for _, f := range cs {
+		e := &forge.Event{}
+		b, err := os.ReadFile(f) //nolint:gosec // the server's chats dir
+		_ = os.Remove(f)         // once: a comment whose job stops the server isn't answered on every start
+		if err != nil || json.Unmarshal(b, e) != nil || forges[e.Forge] == nil {
+			continue
+		}
+		log.Println(e.Key(), "answering the comment a restart cut off")
+		add(e)
 	}
 }
 

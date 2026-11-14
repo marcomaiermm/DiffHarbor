@@ -808,3 +808,24 @@ func TestResumeGivesUp(t *testing.T) {
 		t.Fatalf("tries: %q", b)
 	}
 }
+
+// A comment queued before a restart is answered after it, once.
+func TestResumeChat(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	forges["github"] = &github.Hub{}
+	defer clear(forges)
+	e := &forge.Event{Forge: "github", Kind: "issue_comment", Action: "created"}
+	e.Repository.FullName, e.PullRequest.Number, e.Comment.ID = "o/r", 7, 42
+	if err := save(chatFile(e), e); err != nil {
+		t.Fatal(err)
+	}
+	q := make(chan *forge.Event, 2)
+	resume(queue(q))
+	if len(q) != 1 || (<-q).Comment.ID != 42 || proc.Exists(chatFile(e)) {
+		t.Fatal("not resumed once")
+	}
+	resume(queue(q))
+	if len(q) != 0 {
+		t.Fatal("resumed twice")
+	}
+}
