@@ -29,6 +29,7 @@ var (
 	evGit     = chip{"shown", "Git log"}
 	evBase    = chip{"shown", "Base branch"}
 	evRun     = chip{"shown", "Review run"}
+	evTest    = chip{"run", "Test run"}
 	evAI      = chip{"ai", "AI cross-check"}
 	evNotSeen = chip{"inf", "Not verified"}
 )
@@ -179,8 +180,8 @@ func (v *view) newLines() map[string]string {
 func (v *view) build() {
 	p := &v.Page
 	p.Over, p.Meta = v.over(), v.meta()
-	p.Since = v.sinceLine()
 	v.mapView()
+	p.Since = v.sinceLine() // after the map: it names the boxes
 	p.Brief = v.brief()
 	v.cards()
 	v.blocks()
@@ -312,7 +313,7 @@ func (v *view) brief() []bline {
 		if pt := v.partOf(r.Path); pt != nil && pt.Path != "." {
 			name = pt.Label + "/" + strings.TrimPrefix(r.Path, pt.Path+"/")
 		}
-		out = append(out, bline{Text: strings.TrimSpace(s.Text), Place: name + ":" + strconv.Itoa(r.Line), Href: r.Href, Parts: v.boxOf(r.Path)})
+		out = append(out, bline{Text: strings.TrimSuffix(strings.TrimSpace(s.Text), "."), Place: name + ":" + strconv.Itoa(r.Line), Href: r.Href, Parts: v.boxOf(r.Path)})
 	}
 	return out
 }
@@ -351,7 +352,7 @@ func (v *view) status() mstatus {
 	case len(v.Data.Tests.Broken) > 0:
 		st.Kind, st.Head, st.Short = "blocked", "Blocked: the build failed at "+sha, "Blocked · the build failed"
 	case n > 0:
-		st.Kind, st.Head, st.Short, st.Note = "open", items, items, "Nothing blocks the merge, and nothing says to wait."
+		st.Kind, st.Head, st.Short, st.Note = "open", items, items, "Nothing blocks the merge." // nothing reads a wait yet
 	default:
 		st.Kind, st.Head, st.Short = "none", "No open items", "No open items"
 		st.Note = "Nothing to finish before merging, no major finding and no gap in the review."
@@ -371,6 +372,9 @@ func (v *view) status() mstatus {
 		if m := v.majors(); m > 0 {
 			k = append(k, plural(m, "major finding", "major findings"))
 		}
+		if v.Page.Gap != nil {
+			k = append(k, "1 gap in the review")
+		}
 		open.Second = strings.Join(k, ", ")
 	}
 	st.Stats = append(st.Stats, open)
@@ -379,17 +383,7 @@ func (v *view) status() mstatus {
 	if len(v.Data.Tests.Ran) == 0 {
 		ran.Second = "No test result reached this page"
 	} else {
-		c := map[string]int{}
-		for _, r := range v.Data.Tests.Ran {
-			c[r]++
-		}
-		var k []string
-		for _, s := range []struct{ k, say string }{{"pass", "passed"}, {"fail", "failed"}, {"skip", "skipped"}} {
-			if c[s.k] > 0 {
-				k = append(k, strconv.Itoa(c[s.k])+" "+s.say)
-			}
-		}
-		ran.Second = strings.Join(k, ", ") + " at " + sha
+		ran.Second = v.ranText() + " at " + sha
 	}
 	st.Stats = append(st.Stats, ran)
 	// the files the review didn't read
@@ -409,6 +403,26 @@ func (v *view) status() mstatus {
 	}
 	st.Stats = append(st.Stats, nr)
 	return st
+}
+
+// ranText is how the tests run here ended: "3 passed, 1 failed".
+func (v *view) ranText() string {
+	c := map[string]int{}
+	for _, r := range v.Data.Tests.Ran {
+		c[r]++
+	}
+	var k []string
+	for _, s := range []struct{ k, say string }{{"pass", "passed"}, {"fail", "failed"}, {"skip", "skipped"}} {
+		if c[s.k] > 0 {
+			k = append(k, strconv.Itoa(c[s.k])+" "+s.say)
+		}
+	}
+	return strings.Join(k, ", ")
+}
+
+// runBacked is a finding a test run showed: a proof on the base or a reproducing test.
+func runBacked(c review.Comment) bool {
+	return strings.HasPrefix(c.Evidence, review.Ran) || strings.HasPrefix(c.Evidence, review.Repro)
 }
 
 // unread is the files of the diff the review left out or failed on, and how many of them are code.
@@ -472,8 +486,8 @@ func (v *view) findingCard(i int, c review.Comment) *card {
 		k.Line = lead(k.Body)
 	}
 	switch {
-	case strings.HasPrefix(c.Evidence, review.Ran) || strings.HasPrefix(c.Evidence, review.Repro):
-		k.Chip = evRun
+	case runBacked(c):
+		k.Chip = evTest
 	case c.Evidence != "":
 		k.Chip = evAI
 	default:
@@ -589,7 +603,6 @@ func (v *view) excerpt(p string, from, to, cited int) *excerpt {
 //nolint:gocognit // each finding and risk to its card, step by step
 func (v *view) cards() {
 	p := &v.Page
-	sha := short(v.SHA)
 	mv := p.Map
 	for i, c := range v.Findings {
 		k := v.findingCard(i, c)
@@ -724,7 +737,6 @@ func (v *view) cards() {
 			p.Open--
 		}
 	}
-	_ = sha
 }
 
 // fileHref is a path's link into the page's diff, "" when the page doesn't show it.
@@ -821,7 +833,7 @@ func (v *view) covered() []crow {
 			if slices.Contains(slices.Collect(maps.Values(t.Ran)), "fail") {
 				c = chip{"fail", "Run failed"}
 			}
-			ls = append(ls, mline{c, plural(len(t.Ran), "test", "tests") + " ran at " + sha + ": " + v.Page.Status.Stats[1].Second[:strings.LastIndex(v.Page.Status.Stats[1].Second, " at ")] + "."})
+			ls = append(ls, mline{c, plural(len(t.Ran), "test", "tests") + " ran at " + sha + ": " + v.ranText() + "."})
 		}
 		if len(t.Broken) > 0 {
 			ls = append(ls, mline{chip{"fail", "Run failed"}, join(t.Broken) + map[bool]string{true: " doesn't", false: " don't"}[len(t.Broken) == 1] + " build at " + sha + "."})
@@ -839,23 +851,44 @@ func (v *view) covered() []crow {
 		}
 	}
 	if n := len(v.Findings); n > 0 {
-		m, checked := v.majors(), 0
+		m, ran, checked := v.majors(), 0, 0
 		for _, c := range v.Findings {
-			if c.Evidence != "" {
+			switch {
+			case runBacked(c):
+				ran++
+			case c.Evidence != "":
 				checked++
 			}
 		}
-		s := plural(n, "finding", "findings") + ": " + strconv.Itoa(m) + " major and " + strconv.Itoa(n-m) + " minor."
-		c := evAI
-		switch checked {
-		case n:
-			s += " A second model agreed with each, and neither ran the code."
+		var s string
+		switch m {
 		case 0:
-			c, s = evNotSeen, s+" No second model checked them."
+			s = plural(n, "minor finding", "minor findings") + ", none major."
+		case n:
+			s = plural(n, "major finding", "major findings") + ", none minor."
 		default:
-			s += " A second model agreed with " + strconv.Itoa(checked) + " of them, and neither ran the code."
+			s = plural(n, "finding", "findings") + ": " + strconv.Itoa(m) + " major and " + strconv.Itoa(n-m) + " minor."
+		}
+		// a finding a test run showed is no second model's word: it's counted apart
+		rest, them := n-ran, "them"
+		if ran > 0 {
+			them = "the other " + strconv.Itoa(rest)
+		}
+		c := evAI
+		switch {
+		case rest == 0:
+			c, s = evTest, s+" A test run showed each."
+		case checked == rest:
+			s += " A second model agreed with " + map[bool]string{true: "each", false: them}[ran == 0] + ", and neither ran the code."
+		case checked == 0:
+			c, s = evNotSeen, s+" No second model checked "+them+"."
+		default:
+			s += " A second model agreed with " + strconv.Itoa(checked) + " of " + them + ", and neither ran the code."
 		}
 		ls := []mline{{c, s}}
+		if ran > 0 && rest > 0 {
+			ls = append(ls, mline{evTest, strconv.Itoa(ran) + " shown by a test run."})
+		}
 		if d := len(v.Dropped); d > 0 {
 			ls = append(ls, mline{evAI, plural(d, "finding was", "findings were") + " dropped by the cross-check."})
 		}
@@ -1005,7 +1038,7 @@ func (v *view) rail() []railRow {
 	rs = append(rs, railRow{Label: "Read the change", Href: "#read", N: p.ReadN()})
 	for _, b := range p.Parts {
 		if b.N > 0 {
-			rs = append(rs, railRow{Label: b.Label, Href: "#" + b.Anchor(), N: b.N, Sub: true, Box: b.ID})
+			rs = append(rs, railRow{Label: b.Label, Href: "#" + b.Anchor(), N: b.N, Sub: true, Box: b.Key})
 		}
 	}
 	return append(rs, railRow{Label: "What the review covered", Href: "#covered"}, railRow{Label: "Who changed this code", Href: "#team"})

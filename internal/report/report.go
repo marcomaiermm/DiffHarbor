@@ -52,7 +52,6 @@ type Data struct {
 	Routine     []review.Routine // hunks the review calls routine: folded
 	Symbols     map[string][]Symbol
 	Themes      review.SyntaxTheme // Shiki's, by color mode; unset: Tokyo Night
-	Whys        map[string]string  // path NUL name -> what a declaration Asks named is for: review.Explain's
 	Others      []Other            // open PRs that change files this one does
 	Behind      []review.Commit    // the base's commits since the fork point (review.Behind)
 	Conflicts   bool               // the forge says the PR conflicts with its base
@@ -209,7 +208,9 @@ func Load(dir string) error {
 		img[name] = b
 	}
 	// a template naming a field the page has none of fails here, not at the first review
-	if err := t.ExecuteTemplate(io.Discard, "report.html", prepare(Data{})); err != nil {
+	v := prepare(Data{})
+	v.build()
+	if err := t.ExecuteTemplate(io.Discard, "report.html", v); err != nil {
 		return fmt.Errorf("report: templates in %s: %w", dir, err)
 	}
 	c := css
@@ -300,7 +301,6 @@ type view struct {
 	Code, NTests, NOther int
 	InSteps, NSteps      int             // of Code, the files in the reading order's steps; those steps
 	Added, Moved         int             // added lines, and those of them that only moved
-	Inventory            []bucket        // what the PR did to its declarations
 	Ways                 []way           // how the code reaches the change: routes, declarations nothing calls
 	Graphs               bool            // a graph to draw: the page loads cytoscape
 	Risks                []risk          // what a merge doesn't finish
@@ -331,23 +331,11 @@ func shared(paths []string) string {
 func Render(d Data) ([]byte, Version, error) {
 	var b bytes.Buffer
 	v := prepare(d)
+	v.build() // the page only: BuildMap prepares d too
 	if err := tmpl.ExecuteTemplate(&b, "report.html", v); err != nil {
 		return nil, Version{}, fmt.Errorf("report: %w", err)
 	}
 	return b.Bytes(), v.now, nil
-}
-
-// Asks is the declarations of the report's inventory that neither a doc comment nor a commit explains, new or with
-// a changed signature, for review.Explain: their keys for Data.Whys, and what the model reads of each.
-func Asks(d Data) (keys, texts []string) {
-	for _, g := range prepare(d).Inventory {
-		for _, it := range g.Items {
-			if it.ask != nil && it.Doc == "" && !it.Commit {
-				keys, texts = append(keys, it.key), append(texts, strings.Join(it.ask, "\n"))
-			}
-		}
-	}
-	return keys, texts
 }
 
 // prepare is the page's view of d.
@@ -405,13 +393,11 @@ func prepare(d Data) view {
 	for _, p := range slices.Concat(order, gone) {
 		all = append(all, files[p])
 	}
-	v.Risks, v.BaseMoved = risks(all), baseMoved(d.Behind, files) // before parts, like spans: risks marks the lines it jumps to
+	v.Risks, v.BaseMoved = risks(all), baseMoved(d.Behind, files) // before parts: risks marks the lines it jumps to
 	v.now = stamp(v, ids)
-	var ss []*span
 	for _, p := range slices.Concat(order, gone) {
 		f := files[p]
 		f.Changes, f.Moves = changes(f, runs)
-		ss = append(ss, spans(f, runs)...) // before parts: it marks the lines it jumps to
 		f.Long = len(f.Lines) >= minChanges
 		f.Parts = parts(f.Lines, runs)
 		v.Added += f.Add
@@ -490,7 +476,6 @@ func prepare(d Data) view {
 		st.Cycles = cycles(v.Steps, i, d.Symbols)
 		v.Graphs = v.Graphs || v.Steps[i].Graph != nil
 	}
-	v.Inventory = inventory(ss, d.Symbols, d.Commits, d.Title, d.Whys)
 	judge(&v, found) // adds the weakened tests' findings to v.now
 	v.Since = compare(d.Prev, v.now, files)
 	chs, _ := decls(v.Steps)
@@ -535,7 +520,6 @@ func prepare(d Data) view {
 			}
 		}
 	}
-	v.build()
 	return v
 }
 
@@ -798,6 +782,31 @@ func changes(f *file, runs map[int]run) (cs, moves []change) {
 	}
 	moves = slices.DeleteFunc(moves, func(m change) bool { _, ok := at[m.Name]; return ok }) // moved and changed is a change
 	return cs, moves
+}
+
+// sigs is the signatures the declaring line f.Lines[i] starts, from its hunk's lines: before (context and removed
+// lines) unless the line is added, now (context and added ones) unless it's removed; changed, whether either takes
+// an added or removed line.
+func sigs(f *file, i int) (before, now string, changed bool) {
+	side := func(skip string) string {
+		var ls []string
+		var classes []string
+		for j := i; j < len(f.Lines) && f.Lines[j].Class != "hunk" && len(ls) < maxSigLines; j++ {
+			if c := f.Lines[j].Class; c != skip {
+				ls, classes = append(ls, f.Lines[j].Text), append(classes, c)
+			}
+		}
+		s, n := signature(ls)
+		changed = changed || slices.ContainsFunc(classes[:n], func(c string) bool { return c != "ctx" })
+		return s
+	}
+	if c := f.Lines[i].Class; c != "add" {
+		before = side("add")
+	}
+	if c := f.Lines[i].Class; c != "del" {
+		now = side("del")
+	}
+	return before, now, changed
 }
 
 // rank is 1 for a file with a finding that blocks the merge, 0 for the others.

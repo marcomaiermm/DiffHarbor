@@ -125,7 +125,9 @@
   {{range $p.Subs}}<div class="selsub">{{if .Head}}<div class="bh"><p class="lbl">{{.Head}}</p>{{template "chip" .Chip}}</div>{{range .Lines}}<p class="ln13">{{md .}}</p>{{end}}{{else}}{{$c := .Chip}}{{range .Lines}}<p class="ln13">{{template "chip" $c}}{{md .}}</p>{{end}}{{end}}</div>{{end}}{{end}}
 
 {{/* the rail (component 22) */}}
-{{define "rail"}}<nav class="rail" aria-label="Sections"><ul>{{range .Page.Rail}}<li{{if .Box}} data-rail-box="{{.Box}}"{{end}}><a class="rrow{{if .Sub}} rsub{{end}}" href="{{.Href}}"><span>{{.Label}}</span>{{with .N}}<span class="rc">{{.}}</span>{{end}}</a></li>{{end}}</ul></nav>{{end}}
+{{define "rail"}}<nav class="rail" aria-label="Sections"><ul>{{range .Page.Rail}}{{template "railrow" .}}{{end}}</ul></nav>{{end}}
+{{/* a part's sub-row and Read the change carry the reading mark: the script fills it once every file is viewed */}}
+{{define "railrow"}}<li{{if .Box}} data-rail-box="{{.Box}}"{{end}}><a class="rrow{{if .Sub}} rsub{{end}}" href="{{.Href}}"><span>{{.Label}}</span>{{if or .Sub (eq .Href "#read")}}<span class="rmark" aria-hidden="true"></span><span class="vh" data-rmark>, not read</span>{{end}}{{with .N}}<span class="rc">{{.}}</span>{{end}}</a></li>{{end}}
 
 {{/* component 6: an item card, collapsed */}}
 {{define "card"}}<article class="ic" id="{{.ID}}"{{if ne .Kind "Minor finding"}} data-item{{end}} data-box="{{.Box}}" aria-labelledby="{{.ID}}-tt">
@@ -147,7 +149,7 @@
 {{/* 5.6 Before you merge */}}
 {{define "before"}}<section class="sec" id="before" aria-labelledby="h-before"><h2 class="sh" id="h-before" tabindex="-1">Before you merge{{with .Page.Before}}<span class="chip cnt" data-count>{{len .}}</span>{{end}}</h2>
   {{with .Page.Before}}<div class="sbody8 icards">{{range .}}{{template "card" .}}{{end}}</div><p class="nomatch" data-empty hidden></p>
-  {{else}}<p class="none">Nothing for a merge to finish: no migration, variable, dependency, CI or settings change, no conflict and no other open PR on these files.</p>{{end}}
+  {{else}}<p class="none ln">{{template "chip" (ev "shown" "Diff")}}Nothing found that merging alone doesn't finish.</p>{{end}}
 </section>{{end}}
 
 {{/* 5.7 Read the change */}}
@@ -162,7 +164,7 @@
 
 {{/* component 29: a part block */}}
 {{define "block"}}<section class="pb" id="{{.ID}}" aria-labelledby="{{.ID}}-h"{{with .Key}} data-box="{{.}}"{{end}}>
-<h3 id="{{.ID}}-h"><button class="pbb" type="button" aria-expanded="{{.Open}}" aria-controls="{{.ID}}-x"><span class="pbt"><span class="pb1"><span class="pbl">{{.Label}}</span>{{with .Path}}<span class="pbf">{{wb .}}</span>{{end}}{{if .New}}<span class="pnew">new</span>{{end}}{{with .N}}<span class="pbo">{{.}} open</span>{{end}}</span>{{if not .Others}}<span class="pb2">{{.Second}}</span>{{end}}</span>{{ico "chevron-down" 16}}</button></h3>
+<h3 id="{{.ID}}-h"><button class="pbb" type="button" aria-expanded="{{.Open}}" aria-controls="{{.ID}}-x"><span class="pbt"><span class="pb1"><span class="pbl">{{.Label}}</span>{{with .Path}}<span class="pbf">{{wb .}}</span>{{end}}{{if .New}}<span class="pnew">new</span>{{end}}{{with .N}}<span class="pbo">{{.}} open</span>{{end}}</span>{{if not .Others}}<span class="pb2">{{.Second}}</span>{{end}}</span>{{if not .Others}}<span class="rmark" aria-hidden="true"></span><span class="vh" data-rmark>, not read</span>{{end}}{{ico "chevron-down" 16}}</button></h3>
 <div class="pbx" id="{{.ID}}-x"{{if not .Open}} hidden{{end}}>
   <p class="nomatch" data-empty hidden>Nothing here matches the filter.</p>
   {{if or .Conn .Tables .Outside .Reach .DB}}<div class="pgp"><div class="bh"><h4>How it connects</h4>{{template "chip" (ev "shown" "Call graph")}}</div><div class="hc">
@@ -176,7 +178,7 @@
   </div></div>{{end}}
   {{with .Cards}}<div class="icards">{{range .}}{{template "card" .}}{{end}}</div>{{end}}
   {{with .Paths}}<div class="pgp"><h4>Call paths to a finding</h4>{{range .}}<ol class="cpath"><li class="cin"><span class="cin1">{{.Entry}}</span><span class="path">{{wb .EntryPath}}</span>{{with .EntryPart}}<span class="cpart">{{.}}</span>{{end}}</li>{{range .Rows}}{{template "prow" .}}{{end}}<li><a class="lnk" href="{{.Href}}">{{.Kind}}</a></li></ol>{{end}}</div>{{end}}
-  {{with .Steps}}<div class="pgp"><div class="bh"><h4>Steps</h4>{{template "chip" (ev "inf" "Inferred by the review")}}</div><div class="steps">{{range .}}<div class="step" data-step><button class="sbtn" type="button" aria-expanded="false"><span class="sn">{{.N}}</span><span class="stt">{{.Title}}</span><span class="sf">{{plural (len .Files) "file" "files"}}</span><span></span>{{ico "chevron-down" 16}}{{with .Why}}<span class="sw">{{md .}}</span>{{end}}</button>
+  {{with .Steps}}<div class="pgp"><div class="bh"><h4>Steps</h4>{{template "chip" (ev "inf" "Inferred by the review")}}</div><div class="steps">{{range .}}<div class="step" data-step><button class="sbtn" type="button" aria-expanded="false"><span class="sn">{{.N}}</span><span class="stt">{{.Title}}</span><span class="sf">{{plural (len .Files) "file" "files"}}</span><span class="rmark" aria-hidden="true"></span><span class="vh" data-rmark>, not read</span>{{ico "chevron-down" 16}}{{with .Why}}<span class="sw">{{md .}}</span>{{end}}</button>
     <div class="sexp" hidden>{{with .Check}}<p class="ln13"><strong>Check</strong> · {{md .}}</p>{{end}}{{with .Tests}}<p class="ln13">Tests that reach it: {{range $i, $t := .}}{{sep $i (len $.Tests)}}<code class="cd" translate="no">{{test $t}}</code>{{end}}{{with $.More}} and {{.}} more{{end}}.</p>{{end}}{{with .Graph}}{{template "graph" .}}{{end}}<div class="pfiles">{{range .Files}}{{template "file" .}}{{end}}</div></div></div>{{end}}</div></div>{{end}}
   {{with .Minors}}<div><button class="disc" type="button" aria-expanded="false" data-disc>{{ico "chevron-down" 16}}<span>Minor findings · {{len .}} · not counted</span></button><div class="icards" hidden>{{range .}}{{template "card" .}}{{end}}</div></div>{{end}}
   {{with .Loose}}<div><button class="disc" type="button" aria-expanded="{{if $.Steps}}false{{else}}true{{end}}" data-disc>{{ico "chevron-down" 16}}<span>{{if $.Steps}}Files in no step · {{len .}}{{else}}{{plural (len .) "file" "files"}}{{end}}</span></button><div class="pfiles"{{if $.Steps}} hidden{{end}}>{{range .}}{{template "file" .}}{{end}}</div></div>{{end}}
@@ -215,7 +217,7 @@
 <div class="vsheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden>
   <div class="shead"><h2 id="sheet-title" tabindex="-1"></h2><button class="ibtn" type="button" aria-label="Close" data-close>{{ico "x" 16}}</button></div>
   <div class="sbody2">
-    <div data-sheet-part="sections" hidden><ul class="seclist">{{range .Page.Rail}}<li{{if .Box}} data-rail-box="{{.Box}}"{{end}}><a class="rrow{{if .Sub}} rsub{{end}}" href="{{.Href}}"><span>{{.Label}}</span>{{with .N}}<span class="rc">{{.}}</span>{{end}}</a></li>{{end}}</ul></div>
+    <div data-sheet-part="sections" hidden><ul class="seclist">{{range .Page.Rail}}{{template "railrow" .}}{{end}}</ul></div>
     <div data-sheet-part="key" hidden>{{template "keylist" .}}</div>
     <div data-sheet-part="versions" hidden><div class="verrows">{{template "verrow" .}}</div></div>
   </div>

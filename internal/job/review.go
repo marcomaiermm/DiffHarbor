@@ -373,13 +373,6 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		d.Knowledge = report.Learn(ctx, sb, raw, pr.CreatedAt)
 		d.Outside = report.Outside(d.Symbols)
 		d.Map = report.BuildMap(sb, d, d.Outside)
-		// what the new code is for, where no doc comment or commit says: one call, the provider's small model
-		if keys, texts := report.Asks(d); len(keys) > 0 {
-			d.Whys = map[string]string{}
-			for i, w := range review.Explain(ctx, agent.Pi{}, sb, cmp.Or(agent.VerifyFor(rm), vm, rm), forge.Redact(pr.Title), texts) {
-				d.Whys[keys[i]] = w
-			}
-		}
 		s.State.Secret = reportSecret(s.State.Secret)
 		s.State.Report = writeReport(e, s.State.Secret, s.State.Report, d)
 		s.Write(banner, reviewed) // again, with the report's link

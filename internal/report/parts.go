@@ -566,6 +566,7 @@ func (mv *mapView) items(v *view) {
 			mv.List = append(mv.List, b)
 		}
 	}
+	mv.words(v) // the boxes' names say their open items
 }
 
 // Kinds is a table panel's groups, "writes" then "reads", those it has.

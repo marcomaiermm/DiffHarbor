@@ -30,7 +30,10 @@
     r.hidden = !on;
     const t = b.dataset.on && b.querySelector("span");
     if (t) t.textContent = on ? b.dataset.on : b.dataset.off;
-    if (b.dataset.traceBoxes !== undefined) trace(on, b);
+    if (b.dataset.traceBoxes !== undefined) { // the traced path and a selection exclude each other
+      if (on && sel) select(null);
+      trace(on, b);
+    }
   };
   const discButtons = ".icb, .pbb, .sbtn, button[data-disc]";
   // a region inside closed ones: open each, outermost last, and a closed file too
@@ -46,7 +49,21 @@
 
   // a file's head opens and closes its diff; the Viewed box beside it is not part of the button
   const boxes = $$("input[data-key]");
-  const sync = () => { for (const b of boxes) b.closest(".file").classList.toggle("seen", b.checked); filter(); };
+  // a part or a step is read once all its files are viewed: its header, its step row, its rail rows show the mark
+  const mark = (el, on) => { el.classList.toggle("rd", on); const t = $("[data-rmark]", el); if (t) t.textContent = on ? ", read" : ", not read"; };
+  const done = el => { const fs = $$(".file", el); return fs.length > 0 && fs.every(f => f.classList.contains("seen")); };
+  const sync = () => {
+    for (const b of boxes) b.closest(".file").classList.toggle("seen", b.checked);
+    for (const s of $$("[data-step]")) mark($(".sbtn", s), done(s));
+    for (const p of $$(".pb")) {
+      const on = done(p);
+      mark($(".pbb", p), on);
+      if (p.dataset.box) for (const r of $$(`[data-rail-box="${CSS.escape(p.dataset.box)}"] .rrow`)) mark(r, on);
+    }
+    const all = !!$("#read") && done($("#read"));
+    for (const r of $$('.rrow[href="#read"]')) mark(r, all);
+    filter();
+  };
   for (const b of boxes) {
     b.checked = !!get(prefix + b.dataset.key);
     if (b.checked) fileOpen(b.closest(".file"), false); // read already: a jump to it opens it again
@@ -109,6 +126,8 @@
       return;
     }
     body.dataset.sel = key;
+    const tb = $("#trace-b");
+    if (tb?.getAttribute("aria-expanded") === "true") disclose(tb, false);
     light(b, "nb", true);
     b.classList.add("on");
     for (const m of $$(`.mb[data-box="${CSS.escape(key)}"]`)) m.setAttribute("aria-pressed", true);
@@ -200,6 +219,8 @@
     const on = v => { const b = s.dataset.boxes && fig(s.dataset.boxes); if (b) b.classList.toggle("hl", v); };
     s.addEventListener("pointerenter", () => on(true));
     s.addEventListener("pointerleave", () => on(false));
+    s.addEventListener("focusin", () => on(true));
+    s.addEventListener("focusout", () => on(false));
   }
   // the traced path: while open, its boxes and lines take the ink and the rest fade
   const trace = (on, b) => {
@@ -230,13 +251,32 @@
     for (const p of $$("[data-sheet-part]", sheet)) p.hidden = p.dataset.sheetPart !== what;
     $("#sheet-title").textContent = { sections: "Sections", key: "Evidence key", versions: "Versions" }[what];
     sheet.hidden = scrim.hidden = false;
+    modal(true);
     $("#sheet-title").focus();
   };
-  const closeSheet = () => { if (sheet.hidden) return false; sheet.hidden = scrim.hidden = true; opener?.focus(); return true; };
+  // while the sheet is open the page behind it is inert and doesn't scroll
+  const modal = on => {
+    for (const x of $$("#topbar, .blockw, .lay")) x.inert = on;
+    document.documentElement.style.overflow = on ? "hidden" : "";
+  };
+  // closing gives the focus back to what opened the sheet, or to the heading of the section a row goes to
+  const closeSheet = to => {
+    if (sheet.hidden) return false;
+    sheet.hidden = scrim.hidden = true;
+    modal(false);
+    if (to) setTimeout(() => to.focus()); // after the jump: a jump to an element that takes no focus drops it
+    else opener?.focus();
+    return true;
+  };
   for (const b of $$("[data-sheet]")) b.addEventListener("click", () => openSheet(b.dataset.sheet, b));
-  scrim.addEventListener("click", closeSheet);
-  $("[data-close]", sheet).addEventListener("click", closeSheet);
-  sheet.addEventListener("click", e => { if (e.target.closest("a[href^='#']")) closeSheet(); });
+  scrim.addEventListener("click", () => closeSheet());
+  $("[data-close]", sheet).addEventListener("click", () => closeSheet());
+  sheet.addEventListener("click", e => {
+    const a = e.target.closest("a[href^='#']");
+    if (!a) return;
+    const id = a.getAttribute("href").slice(1), t = document.getElementById(id);
+    closeSheet(id === "top" ? $("#h-what") : t && $("h2[tabindex], h3 .pbb", t));
+  });
   sheet.addEventListener("keydown", e => { // the focus stays in the sheet
     if (e.key !== "Tab") return;
     const f = $$("a[href], button, input", sheet).filter(x => x.getClientRects().length);

@@ -290,17 +290,6 @@ func TestAnalyze(t *testing.T) {
 	}
 }
 
-func TestExplain(t *testing.T) {
-	f := &fakeAgent{replies: map[string][]string{"explain": {`{"1":"parses the flag","3":"ignored"}`}}}
-	got := Explain(context.Background(), f, &proc.Sandbox{Dir: t.TempDir()}, "openai/m:low", "t", []string{"a.go\nfunc A()", "b.go\nfunc B()"})
-	if !slices.Equal(got, []string{"parses the flag", ""}) || !slices.Equal(f.calls, []string{"explain repair"}) {
-		t.Errorf("explain %q, calls %q", got, f.calls)
-	}
-	if got := Explain(context.Background(), f, nil, "m", "t", nil); len(got) != 0 || len(f.calls) != 1 {
-		t.Error("no declarations, still a call")
-	}
-}
-
 // "again" names a fixed earlier finding by its number, after the open ones: it comes back as an index into
 // Addressed. A number of an open or a closed one, or none, names nothing.
 func TestAnalyzeAgain(t *testing.T) {

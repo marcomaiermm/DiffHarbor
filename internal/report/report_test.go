@@ -75,7 +75,7 @@ func TestRender(t *testing.T) {
 	s := string(b)
 	order := []string{
 		"Save &lt;orders&gt;", "2 commits · 5 files", "1 open item", "1 major finding",
-		`id="before"`, "Nothing for a merge to finish", `id="read"`,
+		`id="before"`, "Nothing found that merging alone doesn't finish.", `id="read"`,
 		`id="finding-1"`, "Error dropped", "Major finding", "Step 2", `href="https://gitlab.com/acme/shop/-/blob/0123456789abcdef/api/handler.go#L2"`,
 		"Storage first", "Save is what Handle calls.", `id="store/store.go"`, "Then the handler", `id="api/handler.go"`,
 		`id="note-1"`, `<span class="fnote-t">Error dropped</span>`, `id="gone.go"`,
@@ -498,21 +498,6 @@ func TestSignatures(t *testing.T) {
  	return a + b;
  }
 `}
-	var got []string
-	for _, g := range prepare(d).Inventory {
-		for _, it := range g.Items {
-			got = append(got, fmt.Sprintf("%s %s: %s -> %s +%d -%d", g.Key, it.Name, it.OldHead, it.Head, it.NPlus, it.NMinus))
-		}
-	}
-	want := []string{
-		"signature resolveItemByName: export async function resolveItemByName(input: { name: string; expansionId?: number }) { -> export async function resolveItemByName(input: { name: string }) { +0 -0",
-		"signature search: export function search(opts: { offset: number; limit: number }) { -> export function search(opts: { cursor?: string; limit: number }) { +0 -0",
-		"body protectedProcedure:  ->  +3 -1",
-		"body reflowed:  ->  +3 -1",
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("inventory\n%s", strings.Join(got, "\n"))
-	}
 	f := parse("a.ts", d.Diff, "")
 	sig := map[string]bool{}
 	cs, _ := changes(f, map[int]run{})
@@ -564,83 +549,6 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 	}
 	if c := s["Handle"][0].Calls; !slices.Equal(c, []string{"a.go\x00Save", "a.go\x00Max"}) {
 		t.Errorf("Handle calls %q", c)
-	}
-}
-
-func TestInventory(t *testing.T) {
-	d := Data{
-		Title: "t", Diff: `diff --git a/a.go b/a.go
---- a/a.go
-+++ b/a.go
-@@ -1,20 +1,10 @@
- package a
- 
--func matrix() []string {
--	out := []string{"alpha"}
--	out = append(out, "beta")
--	return out
--}
--
--func shift(n int) int {
--	total := n * 2
--	total += 10
--	return total
--}
--
--func Sig(a int) int {
-+func Sig(a, b int) int {
- 	return a
- }
- 
- func Body() {
--	println("one")
-+	println("two")
- }
--
--func Old() { println("old") }
-diff --git a/b.go b/b.go
-new file mode 100644
---- /dev/null
-+++ b/b.go
-@@ -0,0 +1,14 @@
-+package a
-+
-+func Matrix() []string {
-+	out := []string{"alpha"}
-+	out = append(out, "beta")
-+	return out
-+}
-+
-+func Shift(n int) int {
-+	total := n * 2
-+	total += 20
-+	return total
-+}
-+
-+func Fresh() {}
-`,
-		Commits: []review.Commit{{SHA: "f00dfacecafe", Subject: "feat: add Fresh", Lines: []string{"+func Fresh() {}"}}, {Subject: "wip", Lines: []string{"+func Sig(a, b int) int {"}}},
-		Whys:    map[string]string{"a.go\x00Sig": "takes b too", "a.go\x00Body": "unasked"},
-	}
-	var got []string
-	for _, g := range prepare(d).Inventory {
-		for _, it := range g.Items {
-			got = append(got, fmt.Sprintf("%s %s was=%s from=%s:%d why=%s commit=%v +%v -%v", g.Key, it.Name, it.Was, it.From, it.OldLine, it.Why, it.Commit, it.Plus, it.Minus))
-		}
-	}
-	want := []string{
-		"new Fresh was= from=:0 why=feat: add Fresh commit=true +[] -[]",
-		"signature Sig was= from=:0 why=takes b too commit=false +[] -[]",
-		"body Body was= from=:0 why=unasked commit=false +[] -[]",
-		"reworked Shift was=shift from=a.go:9 why= commit=false +[total += 20] -[total += 10]",
-		"moved Matrix was=matrix from=a.go:3 why= commit=false +[] -[]",
-		"removed Old was= from=:0 why= commit=false +[] -[]",
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("inventory\n%s", strings.Join(got, "\n"))
-	}
-	if keys, texts := Asks(d); !slices.Equal(keys, []string{"a.go\x00Sig"}) || !strings.Contains(texts[0], "func Sig(a, b int) int {") {
-		t.Errorf("asks %q %q", keys, texts)
 	}
 }
 

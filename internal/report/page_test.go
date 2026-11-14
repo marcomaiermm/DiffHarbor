@@ -5,6 +5,7 @@ import (
 	"diffharbor/internal/review"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -159,6 +160,8 @@ func TestPageFixtures(t *testing.T) {
 			`id="before"`, "Migration 0007 drops 1 table", `id="finding-1"`, "A failed charge still saves the order",
 			`id="part-internal-orders"`, "How it connects", "Called from", `Writes <code translate="no">orders</code>`,
 			`id="covered"`, `id="team"`, "2 people committed to these files", "This page posts nothing.",
+			`<h2 id="h-stand" tabindex="-1">7 open items</h2>`, `<li data-rail-box="part:internal/orders">`,
+			`aria-label="orders, 1 open item, 2 files,`, `<span class="says">Calls payments and catalog.`,
 		}},
 		{"tiny", tinyData(), []string{`id="read"`, "No open items", ">test run here<", `id="part-code"`}},
 		{"degraded", degradedData(), []string{
@@ -184,5 +187,144 @@ func TestPageFixtures(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+	}
+}
+
+// The open items count each item once: a major finding on a deploy box is read in Before you merge, not in its part.
+// A table keeps its migration's deploy box when selected (S57).
+func TestPageOpen(t *testing.T) {
+	v := prepare(largeData())
+	v.build()
+	p := v.Page
+	if p.Open != 7 || countKind(p.Before, "Major finding") != 1 {
+		t.Errorf("open %d, %d major findings before merging", p.Open, countKind(p.Before, "Major finding"))
+	}
+	for _, b := range p.Parts {
+		for _, k := range b.Cards {
+			if k.Box == "deploy:db/migrations/0007_orders.sql" {
+				t.Errorf("%s: the migration's finding in a part too", b.Label)
+			}
+		}
+	}
+	mv := p.Map
+	if tb, d := mv.byKey["table:orders"], mv.byKey["deploy:db/migrations/0007_orders.sql"]; !slices.Contains(tb.Sel, d.El) {
+		t.Errorf("table orders keeps %q, not its migration's box %s", tb.Sel, d.El)
+	}
+}
+
+// Arrows point where data goes: Chevron "to" at To's end, "from" at From's; on one edge the line from higher up
+// takes the higher port.
+func TestRouteChevrons(t *testing.T) {
+	v := &view{Data: Data{Map: &Map{
+		Parts: []MapPart{
+			{ID: "a", Label: "a", Col: 1, Row: 0}, {ID: "b", Label: "b", Col: 1, Row: 1}, {ID: "c", Label: "c", Col: 2, Row: 0},
+		},
+		Order: []string{"a", "b", "c"},
+		Lines: []MapLine{
+			{From: "a", To: "c", Calls: 1, Width: 1, Style: "solid", Chevron: "to"},
+			{From: "b", To: "c", Calls: 1, Width: 1, Style: "solid", Chevron: "from"},
+		},
+	}}}
+	v.mapView()
+	mv := v.Page.Map
+	a, b, c := mv.partBox["a"], mv.partBox["b"], mv.partBox["c"]
+	tip := func(r *mroute) float64 { // the chevron's point: "M x y Lx y L x y"
+		f := strings.Fields(strings.Split(r.Chev, " L")[1])
+		x, _ := strconv.ParseFloat(f[0], 64)
+		return x
+	}
+	var ac, bc *mroute
+	for _, r := range mv.Lines {
+		switch r.a {
+		case a:
+			ac = r
+		case b:
+			bc = r
+		}
+	}
+	if got := tip(ac); got != float64(c.X-1) {
+		t.Errorf("a to c: chevron at x %v, want at c's left edge %d", got, c.X-1)
+	}
+	if got := tip(bc); got != float64(b.X+b.W+1) {
+		t.Errorf("b from c: chevron at x %v, want at b's right edge %d", got, b.X+b.W+1)
+	}
+	if ya, yb := ac.pts[len(ac.pts)-1][1], bc.pts[len(bc.pts)-1][1]; ya >= yb {
+		t.Errorf("c's left edge: a's port at %v, b's at %v", ya, yb)
+	}
+}
+
+// A system's name breaks before "." and "_" on the fewest, most even lines, at most 3; a line still too long is cut.
+func TestSysLines(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		want []string
+	}{
+		{"redis", []string{"redis"}},
+		{"PAYMENTS_API_URL", []string{"PAYMENTS", "_API_URL"}},
+		{"api.example.com", []string{"api.example", ".com"}},
+		{"AVERYLONGSYSTEMNAME", []string{"AVERYLONGSYS…"}},
+		{"aaaaaaaaaa.bbbbbbbbbb.cccccccccc.dddddddddd", []string{"aaaaaaaaaa", ".bbbbbbbbbb", ".cccccccccc.…"}},
+	} {
+		if got := sysLines(c.name, 3, 13); !slices.Equal(got, c.want) {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// The brief keeps a sentence only where its place is a line of the diff, without its own period before the place.
+func TestBrief(t *testing.T) {
+	v := prepare(Data{
+		Forge: Forge{Blob: "https://example.com/blob/x/"},
+		Diff:  editFile("a.go", []string{"func A() {}"}, []string{"func A(n int) {}"}),
+		Brief: []review.Sentence{
+			{Text: "A takes a number.", At: "a.go:2"},
+			{Text: "B is outside the diff.", At: "b.go:3"},
+			{Text: "C has no place.", At: ""},
+		},
+	})
+	v.build()
+	if b := v.Page.Brief; len(b) != 1 || b[0].Text != "A takes a number" || b[0].Place != "a.go:2" || b[0].Href != "#a.go:2" {
+		t.Errorf("brief %+v", b)
+	}
+}
+
+// md and wbr escape the PR's text, code spans too, and add only <wbr> after a slash and before a dot.
+func TestMarkdown(t *testing.T) {
+	got := string(md(`a < b & "c" ` + "`x<y>/z.go`"))
+	want := `a &lt; b &amp; &#34;c&#34; <code class="cd" translate="no">x&lt;y&gt;/<wbr>z<wbr>.go</code>`
+	if got != want {
+		t.Errorf("md\n got %s\nwant %s", got, want)
+	}
+	if got := wbr(`a&"b/c.d<`); got != `a&amp;&#34;b/<wbr>c<wbr>.d&lt;` {
+		t.Errorf("wbr %s", got)
+	}
+}
+
+// A finding a test run showed is counted apart from those a second model checked.
+func TestCoveredFindings(t *testing.T) {
+	d := Data{Diff: editFile("a.go", []string{"func A() {}"}, []string{"func A(n int) {}"})}
+	findings := func(cs ...review.Comment) []crow {
+		d.Findings = cs
+		v := prepare(d)
+		v.build()
+		return v.Page.Covered
+	}
+	line := func(rows []crow) []mline {
+		for _, r := range rows {
+			if r.Label == "Findings" {
+				return r.Lines
+			}
+		}
+		return nil
+	}
+	repro := review.Comment{Path: "a.go", Line: 2, Severity: "major", Title: "x", Evidence: review.Repro + "TestA fails"}
+	agreed := review.Comment{Path: "a.go", Line: 2, Severity: "minor", Title: "y", Evidence: "agreed"}
+	if l := line(findings(repro)); len(l) != 1 || l[0].Chip != evTest || l[0].Text != "1 major finding, none minor. A test run showed each." {
+		t.Errorf("one run-backed finding: %+v", l)
+	}
+	l := line(findings(repro, agreed))
+	if len(l) != 2 || l[0].Chip != evAI || l[0].Text != "2 findings: 1 major and 1 minor. A second model agreed with the other 1, and neither ran the code." ||
+		l[1] != (mline{evTest, "1 shown by a test run."}) {
+		t.Errorf("one of each: %+v", l)
 	}
 }

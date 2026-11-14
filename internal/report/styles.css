@@ -371,6 +371,8 @@ button.mrow{width:100%;border:0;background:transparent;text-align:left;cursor:po
 .rrow[aria-current]::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:2px;border-radius:2px;background:var(--acc)}
 .rc{margin-left:auto;font:400 12px/1 var(--mono);color:var(--ink3)}
 .rmark{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--line3);flex:none}
+.rd .rmark{background:var(--ink3);border-color:var(--ink3)}
+.pbb>.rmark{margin-top:4px}
 .main{display:flex;flex-direction:column;gap:64px;min-width:0}
 .sec{min-width:0;scroll-margin-top:80px}
 .sec h2,.sec h1{scroll-margin-top:80px}

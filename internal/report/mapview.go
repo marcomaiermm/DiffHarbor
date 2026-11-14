@@ -247,8 +247,7 @@ func (v *view) mapView() {
 			b.Hide = i >= maxTableBoxes
 		}
 	}
-	mv.route(m, sys)
-	mv.words(v)
+	mv.route(m, sys) // words come once items has counted each box's open items
 }
 
 func (mv *mapView) add(b *mbox) { mv.byKey[b.Key] = b }
@@ -402,7 +401,7 @@ func (mv *mapView) route(m *Map, sys bool) {
 			n++
 			tip := s.Name
 			for _, c := range s.Calls {
-				if mv.src != nil && slices.Contains(s.Parts, p) {
+				if slices.Contains(pb.part.Files, c.Path) {
 					tip += " · sent at " + path.Base(c.Path) + ":" + strconv.Itoa(c.Line)
 					break
 				}

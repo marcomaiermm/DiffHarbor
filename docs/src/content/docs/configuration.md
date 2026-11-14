@@ -81,7 +81,7 @@ Use API keys. Pi can also log in with a ChatGPT subscription: `openai/…` witho
 
 `REPORT_URL` turns on an HTML page per PR, linked in the bot's PR comment.
 
-- **What's on it:** whether it merges (base commits the PR is behind on, conflicts, open PRs changing the same files or lines), a short brief, and a map of the parts the PR changes with the systems, tables and deploys they reach. Then what to fix before merging, the parts in reading order with their diffs and how they connect, what the tests cover, and who knows the code. The page posts nothing.
+- **What's on it:** whether it merges (base commits the PR is behind on, conflicts, open PRs changing the same files or lines), a short brief, and a map of the parts the PR changes with the systems, tables and deploys they reach. Then Before you merge, the parts in reading order with their diffs and how they connect (Read the change), What the review covered, and Who changed this code. The page posts nothing.
 - **Versions:** each reviewed head keeps one, the newest 10 stay. Closing the PR deletes them.
 - **Link:** `/r/<host>/id:<repo id>/<n>/<secret>`, by the repo's ID: a rename keeps it, a new repo under an old name gets its own. Links from before the ID (`/r/<host>/<repo>/<n>/<secret>`) keep working: the PR's next review moves its reports to the ID and redirects them. A PR that closes without one loses those under its current name. Under a name the repo had before a rename they stay. The secret is random per PR (130 bits) and only the PR comment holds it. Any other `/r/` path is a 404.
 - **Older reports:** reports from before the secret no longer open. The next review writes one at the new link, closing the PR deletes the old.
