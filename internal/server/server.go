@@ -6,6 +6,7 @@ import (
 	"cmp"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"diffharbor/internal/agent"
 	"diffharbor/internal/assets"
 	"diffharbor/internal/forge"
@@ -59,7 +60,7 @@ func review(e *forge.Event, giveUp, reviewJob func() error) (err error) {
 	current := latest.m[key] == queued
 	n := 0
 	if current {
-		n = countStart(key, e) // under latest: a close or push meanwhile doesn't get its file back
+		n = countStart(pendingFile(key), e) // under latest: a close or push meanwhile doesn't get its file back
 	}
 	latest.Unlock()
 	if !current {
@@ -79,7 +80,7 @@ func review(e *forge.Event, giveUp, reviewJob func() error) (err error) {
 	if err = reviewJob(); errors.Is(err, proc.ErrCleanup) {
 		latest.Lock()
 		if latest.m[key] == queued { // it never ran
-			saveStarts(key, e, n-1)
+			saveStarts(pendingFile(key), e, n-1)
 		}
 		latest.Unlock()
 	}
@@ -178,11 +179,14 @@ func (p *pool) start() {
 // exec runs e's job, t in running. A panic ends only this job, as a failed one: done drops its pending review, so a
 // restart doesn't run into it again.
 func (p *pool) exec(ctx context.Context, e *forge.Event, t *task) {
-	key, rk, chat := e.Key(), prKey(e), chatFile(e) // before the job changes e
+	key, rk := e.Key(), prKey(e) // before the job changes e
+	chat, isChat := chats.LoadAndDelete(e)
 	defer func() {
 		t.cancel() // revokes the job's vault tokens: git's remote, Pi's keys
 		done(rk)
-		_ = os.Remove(chat)
+		if isChat {
+			_ = os.Remove(chat.(string)) //nolint:forcetypeassert // only asked and resume store, strings
+		}
 		p.mu.Lock()
 		if p.running[rk] == t {
 			delete(p.running, rk)
@@ -190,6 +194,10 @@ func (p *pool) exec(ctx context.Context, e *forge.Event, t *task) {
 		p.mu.Unlock()
 	}()
 	defer proc.Recovered(func(err error) { log.Println(key, err) })
+	if isChat && countStart(chat.(string), e) > maxStarts { //nolint:forcetypeassert // as above
+		log.Println(key, "not answered: the server stopped during each of its last", maxStarts, "runs")
+		return
+	}
 	if err := p.run(ctx, e); err != nil {
 		log.Println(key, err)
 	}
@@ -342,7 +350,7 @@ func Serve(cfg Config) {
 		seen := *e // the job changes e (Refresh, Chat's review): Seen reads its own
 		if err := asked(e); err != nil || !jobs.add(e) {
 			log.Println(e.Key(), "not queued:", cmp.Or(err, errFull)) // GitHub: Redeliver resends it
-			_ = os.Remove(chatFile(e))                                // the redelivery saves it again
+			unask(e)                                                  // the redelivery saves it again
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
@@ -532,42 +540,48 @@ type pending struct {
 	Starts int `json:"starts,omitempty"`
 }
 
-// countStart counts one more start of e's review in its pendingFile and returns how many there were. Callers hold
-// latest.
-func countStart(key string, e *forge.Event) int {
+// countStart counts one more start of e's job in f, a pending, and returns how many there were. f's one writer: a
+// review's holds latest.
+func countStart(f string, e *forge.Event) int {
 	p := pending{Event: &forge.Event{}}
-	b, err := os.ReadFile(pendingFile(key))
+	b, err := os.ReadFile(f) //nolint:gosec // a pending or chat file
 	if err != nil || json.Unmarshal(b, &p) != nil || p.PullRequest.Head.SHA != e.PullRequest.Head.SHA {
 		p.Starts = 0
 	}
-	saveStarts(key, e, p.Starts+1)
+	saveStarts(f, e, p.Starts+1)
 	return p.Starts + 1
 }
 
-func saveStarts(key string, e *forge.Event, n int) {
-	if err := save(pendingFile(key), pending{e, n}); err != nil {
+func saveStarts(f string, e *forge.Event, n int) {
+	if err := save(f, pending{e, n}); err != nil {
 		log.Println(e.Key(), "pending:", err)
 	}
 }
 
 var errFull = errors.New("queue full")
 
-// asked keeps a comment's job on disk like a review's (pushed): a restart before it ran answers it then.
+// chats are the queued comments' jobs by event: each delivery's own file in chats/, a pending, removed once it ran. A
+// restart before then answers it, unless it started maxStarts times already (exec).
+var chats sync.Map
+
+// asked keeps a comment's job on disk like a review's (pushed).
 func asked(e *forge.Event) error {
 	if e.Kind == "pull_request" {
 		return nil
 	}
-	latest.Lock() // save's one writer: a comment's edits come at once
-	defer latest.Unlock()
-	return save(chatFile(e), e)
+	f := eventFile("chats", fmt.Sprintf("%s-%s-%d-%s", e.Forge, e.Kind, e.Comment.ID, rand.Text()))
+	if err := save(f, pending{Event: e}); err != nil {
+		return err
+	}
+	chats.Store(e, f)
+	return nil
 }
 
-// chatFile is a queued comment's job. Resumed once: off disk as it is queued again.
-func chatFile(e *forge.Event) string {
-	if e.Kind == "pull_request" {
-		return ""
+// unask drops e's chat file: its job isn't queued.
+func unask(e *forge.Event) {
+	if f, ok := chats.LoadAndDelete(e); ok {
+		_ = os.Remove(f.(string)) //nolint:forcetypeassert,gosec // asked's own file in chats/
 	}
-	return eventFile("chats", fmt.Sprintf("%s-%d", e.Forge, e.Comment.ID))
 }
 
 // deletingFile is a closed PR whose reports aren't deleted yet.
@@ -577,8 +591,8 @@ func eventFile(dir, key string) string {
 	return filepath.Join(proc.DataDir, dir, url.PathEscape(key)+".json") // "/" too: one name per key
 }
 
-// save stores v, an event or a pending, in f, a pending, deleting or chat file. Callers hold latest: one writer of f
-// at a time (proc.WriteAtomic).
+// save stores v, an event or a pending, in f, a pending, deleting or chat file. One writer of f at a time
+// (proc.WriteAtomic): a pending or deleting file's holds latest, a chat file is its delivery's.
 func save(f string, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -636,8 +650,8 @@ func resume(add func(*forge.Event) bool) {
 	cs, _ := filepath.Glob(filepath.Join(proc.DataDir, "chats", "*.json"))
 	for _, f := range cs {
 		e := &forge.Event{}
-		b, err := os.ReadFile(f) //nolint:gosec // the server's chats dir
-		if err != nil || json.Unmarshal(b, e) != nil {
+		b, err := os.ReadFile(f)                       //nolint:gosec // the server's chats dir
+		if err != nil || json.Unmarshal(b, e) != nil { // a pending's starts aren't the event's
 			_ = os.Remove(f)
 			continue
 		}
@@ -646,11 +660,11 @@ func resume(add func(*forge.Event) bool) {
 			continue
 		}
 		log.Println(e.Key(), "answering the comment a restart cut off")
+		chats.Store(e, f)
 		if !add(e) { // stays on disk for the next start
+			chats.Delete(e)
 			log.Println(e.Key(), "queue full")
-			continue
 		}
-		_ = os.Remove(f) // once: a comment whose job stops the server isn't answered on every start
 	}
 }
 

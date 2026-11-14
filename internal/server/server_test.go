@@ -818,28 +818,46 @@ func TestReviewGivesUp(t *testing.T) {
 	starts(maxStarts)
 }
 
-// A comment queued before a restart is answered after it, once.
+// A comment queued before a restart is answered after it: each delivery's own file, until its job ran. One whose job
+// started maxStarts times isn't run again; one for a forge that is off stays.
 func TestResumeChat(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	forges["github"] = &github.Hub{}
 	defer clear(forges)
+	var ran []*forge.Event
+	p := newPool(1, func(_ context.Context, e *forge.Event) error { ran = append(ran, e); return nil })
+	files := func() []string { fs, _ := filepath.Glob(filepath.Join(proc.DataDir, "chats", "*.json")); return fs }
 	e := &forge.Event{Forge: "github", Kind: "issue_comment", Action: "created"}
 	e.Repository.FullName, e.PullRequest.Number, e.Comment.ID = "o/r", 7, 42
-	if err := save(chatFile(e), e); err != nil {
-		t.Fatal(err)
+	edit := *e // the same comment, edited while the first runs
+	edit.Action = "edited"
+	if asked(e) != nil || asked(&edit) != nil || len(files()) != 2 {
+		t.Fatal("not one file per delivery:", files())
 	}
+	p.exec(t.Context(), e, &task{cancel: func() {}})
+	if len(ran) != 1 || len(files()) != 1 {
+		t.Fatal("the first's job removed the edit's file:", files())
+	}
+	chats.Clear() // a restart
 	q := make(chan *forge.Event, 2)
 	resume(queue(q))
-	if len(q) != 1 || (<-q).Comment.ID != 42 || proc.Exists(chatFile(e)) {
-		t.Fatal("not resumed once")
+	if len(q) != 1 || len(files()) != 1 {
+		t.Fatal("not resumed, or off disk before it ran")
 	}
-	resume(queue(q))
-	if len(q) != 0 {
-		t.Fatal("resumed twice")
+	for range maxStarts { // the server stops during its job each time
+		resumed := <-q
+		countStart(files()[0], resumed)
+		chats.Clear()
+		resume(queue(q))
 	}
-	save(chatFile(e), e)
+	p.exec(t.Context(), <-q, &task{cancel: func() {}})
+	if len(ran) != 1 || len(files()) != 0 {
+		t.Fatalf("ran after %d starts: %d, files %v", maxStarts, len(ran), files())
+	}
+	asked(e)
+	chats.Clear()
 	delete(forges, "github")
-	if resume(queue(q)); len(q) != 0 || !proc.Exists(chatFile(e)) {
+	if resume(queue(q)); len(q) != 0 || len(files()) != 1 {
 		t.Fatal("a comment for a forge that is off isn't kept")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -312,8 +313,13 @@ func uidOf(f, repo string) (uint32, error) {
 // a host crash leaves the old one or the new one, never an empty one. One f.tmp: callers serialize their writes of f.
 func WriteAtomic(f string, b []byte) error {
 	dir := filepath.Dir(f)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
+	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) { // a new dir: its entry in its parent is synced too
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if err := syncDir(filepath.Dir(dir)); err != nil {
+			return err
+		}
 	}
 	t, err := os.OpenFile(f+".tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // the server's own files, not a PR's path
 	if err != nil {
@@ -326,7 +332,11 @@ func WriteAtomic(f string, b []byte) error {
 	if err := os.Rename(f+".tmp", f); err != nil {
 		return err
 	}
-	d, err := os.Open(dir) //nolint:gosec // as above; syncs the rename itself
+	return syncDir(dir) // the rename itself
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir) //nolint:gosec // the server's own dirs
 	if err != nil {
 		return err
 	}

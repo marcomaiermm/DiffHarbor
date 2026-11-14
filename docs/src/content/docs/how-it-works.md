@@ -74,8 +74,8 @@ Runners for both:
 - A newer push replaces a waiting review of the same PR and stops a running one.
 - Up to 100 jobs wait. Past that the webhook gets a 503.
 - GitHub doesn't retry a 503 on its own: DiffHarbor asks GitHub to redeliver what got no 2xx in the last 6 hours, on start and every 30 minutes ([GitHub](../configuration/#github)). A GitLab webhook is retried only briefly.
-- Waiting reviews survive a restart, as many as the queue takes. The rest run on their PR's next push or the next restart. Waiting answers to comments survive one restart.
-- A head whose review was running each of the last 3 times the server stopped is marked failed instead of run again. A push starts the count over. Every review running at a crash or deploy counts it, also one that didn't cause it.
+- Waiting reviews survive a restart, as many as the queue takes. The rest run on their PR's next push or the next restart. Waiting answers to comments survive it too, each delivery on its own.
+- A review or an answer that was running each of the last 3 times the server stopped isn't run again: the review's head is marked failed, the answer dropped. A push starts a review's count over. Every job running at a crash or deploy counts it, also one that didn't cause it.
 
 ## Talking to the bot
 
