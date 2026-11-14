@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -91,6 +92,14 @@ func (s *Sandbox) ToolEnv() []string {
 func (s *Sandbox) Command(ctx context.Context, dir string, extra []string, name string, args ...string) *exec.Cmd {
 	c := exec.CommandContext(ctx, name, args...)
 	c.Dir, c.WaitDelay = dir, 5*time.Second
+	// In a process group of its own, killed whole when ctx ends: a test's children don't outlive a timed-out check.
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Cancel = func() error {
+		if err := syscall.Kill(-c.Process.Pid, syscall.SIGKILL); !errors.Is(err, syscall.ESRCH) {
+			return err
+		}
+		return os.ErrProcessDone // exited on its own: Wait reports its own error, not the kill's
+	}
 	c.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "GIT_TERMINAL_PROMPT=0"}
 	if AsPi {
 		if !jobUser(int(s.uid)) { // a Sandbox not from Workspace: uid 0 would run PR code as root
@@ -100,7 +109,7 @@ func (s *Sandbox) Command(ctx context.Context, dir string, extra []string, name 
 		if s.tmp != "" {
 			c.Env = append(c.Env, "TMPDIR="+s.tmp)
 		}
-		c.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: s.uid, Gid: s.uid}}
+		c.SysProcAttr.Credential = &syscall.Credential{Uid: s.uid, Gid: s.uid}
 	}
 	c.Env = append(c.Env, extra...)
 	return c
@@ -297,13 +306,67 @@ func uidOf(f, repo string) (uint32, error) {
 	}
 	m[repo] = uid
 	b, _ := json.Marshal(m)
-	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
-		return 0, err
+	return uid, WriteAtomic(f, b)
+}
+
+// WriteAtomic writes b to f (0600, its dir made 0700) through a rename, synced: a reader never sees half a file, and
+// a host crash leaves the old one or the new one, never an empty one. One f.tmp: callers serialize their writes of f.
+func WriteAtomic(f string, b []byte) error {
+	dir := filepath.Dir(f)
+	if err := mkdirSynced(dir); err != nil {
+		return err
 	}
-	if err := os.WriteFile(f+".tmp", b, 0o600); err != nil { // through a rename: never half a file
-		return 0, err
+	t, err := os.OpenFile(f+".tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // the server's own files, not a PR's path
+	if err != nil {
+		return err
 	}
-	return uid, os.Rename(f+".tmp", f)
+	_, err = t.Write(b)
+	if err = errors.Join(err, t.Sync(), t.Close()); err != nil {
+		return err
+	}
+	if err := os.Rename(f+".tmp", f); err != nil {
+		return err
+	}
+	return syncDir(dir) // the rename itself
+}
+
+// mkdirSynced makes dir (0700) and what it needs of its parents, each one's entry in its parent synced.
+func mkdirSynced(dir string) error {
+	var made []string
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(d); !errors.Is(err, fs.ErrNotExist) || d == filepath.Dir(d) {
+			break
+		}
+		made = append(made, d)
+	}
+	if len(made) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	for _, d := range made {
+		if err := syncDir(filepath.Dir(d)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Remove removes f and syncs its dir: a host crash doesn't bring it back.
+func Remove(f string) error {
+	if err := os.Remove(f); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(f))
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir) //nolint:gosec // the server's own dirs
+	if err != nil {
+		return err
+	}
+	return errors.Join(d.Sync(), d.Close())
 }
 
 // Capped keeps the first and the last N bytes written to it: PR code can print without end, and a check's

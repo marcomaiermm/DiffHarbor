@@ -146,6 +146,7 @@ func Run(ctx context.Context, sb *proc.Sandbox, scripts []Script, patch string, 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	repo := sb.Repo()
+	lineOf := fileLines(ctx, sb, repo)
 	started := time.Now()
 	var out strings.Builder
 	var ran Tests
@@ -282,7 +283,7 @@ func Run(ctx context.Context, sb *proc.Sandbox, scripts []Script, patch string, 
 			}, rel...)...), func(l string) bool {
 				m := atLine.FindStringSubmatch(l)
 				return m != nil && addedHere[m[1]+":"+m[2]] &&
-					(!strings.Contains(l, "no-floating-promises") || !fireAndForget.MatchString(lineOf(ctx, sb, repo, filepath.Join(dir, m[1]), m[2])))
+					(!strings.Contains(l, "no-floating-promises") || !fireAndForget.MatchString(lineOf(filepath.Join(dir, m[1]), m[2])))
 			}), 40)
 		}
 		if pkg, _ := sb.ReadFile(ctx, filepath.Join(repo, dir, "package.json")); bytes.Contains(pkg, []byte(`"drizzle-orm"`)) {
@@ -426,7 +427,7 @@ func Run(ctx context.Context, sb *proc.Sandbox, scripts []Script, patch string, 
 			"osv-scanner", append([]string{"scan", "source", "--format", "table"}, slices.Compact(dirs)...)...)
 	}
 
-	if s := unlisted(ctx, sb, repo, added, files, output); s != "" {
+	if s := unlisted(lineOf, added, files, output); s != "" {
 		section("names the change added beside existing ones, missing where those are listed elsewhere (do these lists need it?)", s, 10)
 	}
 
@@ -619,13 +620,13 @@ func fallowSecurity(out string, added map[string]bool) string {
 // unlisted finds the lists a change extended without their copies: an added line naming a new constant (no file
 // outside the change has it) beside two or more existing ones, and the files that name two of those but not the
 // new one, at their line naming the most: a key added to a workflow but not to the catalog or docs listing them.
-func unlisted(ctx context.Context, sb *proc.Sandbox, repo string, added map[string]bool, files []string, output func(string, ...string) string) string {
+func unlisted(lineOf func(f, n string) string, added map[string]bool, files []string, output func(string, ...string) string) string {
 	var out []string
 	seen := map[string]bool{}
 	tried := 0
 	for _, k := range slices.Sorted(maps.Keys(added)) {
 		i := strings.LastIndexByte(k, ':')
-		names := slices.Compact(slices.Sorted(slices.Values(constName.FindAllString(lineOf(ctx, sb, repo, k[:i], k[i+1:]), -1))))
+		names := slices.Compact(slices.Sorted(slices.Values(constName.FindAllString(lineOf(k[:i], k[i+1:]), -1))))
 		if len(names) < 3 {
 			continue
 		}
@@ -683,14 +684,22 @@ func unlisted(ctx context.Context, sb *proc.Sandbox, repo string, added map[stri
 	return strings.Join(out, "\n")
 }
 
-// lineOf returns line n (1-based, as text) of the repo's file f.
-func lineOf(ctx context.Context, sb *proc.Sandbox, repo, f, n string) string {
-	b, _ := sb.ReadFile(ctx, filepath.Join(repo, f))
-	i, _ := strconv.Atoi(n)
-	if l := strings.Split(string(b), "\n"); i > 0 && i <= len(l) {
-		return l[i-1]
+// fileLines returns lineOf: line n (1-based, as text) of the repo's file f. It reads each file once: a check looks a
+// line up per added line, each read a process of its own.
+func fileLines(ctx context.Context, sb *proc.Sandbox, repo string) func(f, n string) string {
+	read := map[string][]string{}
+	return func(f, n string) string {
+		l, ok := read[f]
+		if !ok {
+			b, _ := sb.ReadFile(ctx, filepath.Join(repo, f))
+			l = strings.Split(string(b), "\n")
+			read[f] = l
+		}
+		if i, _ := strconv.Atoi(n); i > 0 && i <= len(l) {
+			return l[i-1]
+		}
+		return ""
 	}
-	return ""
 }
 
 // grep keeps the lines of s that keep returns true for.

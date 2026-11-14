@@ -31,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // posts reports whether a review posts one: a full review always, so the bot shows up under Reviewers, an
@@ -45,7 +46,7 @@ func posts(full bool, r review.Result, threads []forge.Thread, lines map[string]
 //
 //nolint:gocognit,gocyclo // one job step by step, each step a few lines
 func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) (err error) {
-	key := e.Key()
+	key, start := e.Key(), time.Now()
 	p, err := f.Open(e)
 	if err != nil {
 		return err
@@ -140,6 +141,9 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		return err
 	}
 	defer sb.Close()
+	sp := Spend{Time: start, Job: "review", Key: key, SHA: sha[:min(len(sha), 12)], Kind: "full", Result: "failed"} // ok at the end: a panic stays failed
+	defer func() { logUsage(ctx, sb, sp, err) }()                                                                        // before sb.Close: it reads the sessions
+	sp.stage("checkout")
 	read, err := p.ReadToken()
 	if err != nil {
 		return err
@@ -148,6 +152,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if err != nil {
 		return err
 	}
+	sp.stage("context")
 	prFiles := diff.Paths(raw)
 	// On push only files whose changed lines differ from the last review: a rebase changes none.
 	patches := diff.PatchIDs(raw)
@@ -159,6 +164,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 				only[f] = true
 			}
 		}
+		sp.Kind = "incremental"
 	}
 	outline := diff.Analyze(raw)
 	s.Outline = &outline
@@ -167,6 +173,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	s.State.Large = s.State.Large || e.Action == "large"
 	parts, omitted := diff.Filter(raw, sb.Repo(), only, cfg.Ignored, cfg.Parts(s.State.Large))
 	d := strings.Join(parts, "")
+	sp.DiffChars = utf8.RuneCountInString(d)
 	if strings.TrimSpace(d) == "" {
 		log.Println(key, "nothing to review")
 		desc = "Nothing to review"
@@ -232,6 +239,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			}, picks)
 		}
 	}
+	sp.stage("analyze")
 	r, stats, err := review.Analyze(ctx, review.Input{
 		Agent: agent.Pi{}, Sandbox: sb, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: commits, Ticket: tk, Docs: docs, Parts: parts,
 		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings), readDeclined(e.Repo(), cfg.Learnings)), Checks: scripts, Registries: regs, Prior: prior, Addressed: addressed, Closed: closed, Settings: cfg,
@@ -243,6 +251,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if err != nil {
 		return err
 	}
+	sp.stage("post")
+	sp.Findings, sp.Dropped = len(r.Comments), len(r.Dropped)
 	if only != nil { // a push: minor findings only on what it changed, else every push finds new edge cases
 		since, err := review.Since(ctx, sb, s.State.SHA, read)
 		if err = cmp.Or(ctx.Err(), err); err != nil { // cancelled or git failed, not a force push: post and resolve nothing
@@ -251,7 +261,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		if since != "" {
 			n := len(r.Comments)
 			if r.Comments = review.Fresh(r.Comments, diff.RightLines(since, true)); n > len(r.Comments) {
-				log.Println(key, n-len(r.Comments), "minor findings and nits off the push dropped")
+				sp.OffPush = n - len(r.Comments)
+				log.Println(key, sp.OffPush, "minor findings and nits off the push dropped")
 			}
 		}
 		for i := range r.Comments {
@@ -335,6 +346,16 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	s.State.Patches = reviewedPatches(s.State.Patches, patches, slices.DeleteFunc(diff.Paths(d), func(f string) bool {
 		return slices.Contains(r.Failed, f) || slices.Contains(omitted, f)
 	}))
+	banner := ""
+	switch {
+	case n == 0 && still > 0:
+		banner = fmt.Sprintf("No actionable comments were generated in the latest review; %s from earlier reviews still open.", text.Count(still, "finding"))
+	case n == 0:
+		banner = "No actionable comments were generated in the latest review."
+	}
+	reviewed := footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc))
+	// Right after posting: a restart from here on finds this head reviewed, rather than posting its findings again.
+	s.Write(banner, reviewed)
 	if guide {
 		st := s.State
 		d := report.Data{
@@ -361,19 +382,44 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		}
 		s.State.Secret = reportSecret(s.State.Secret)
 		s.State.Report = writeReport(e, s.State.Secret, s.State.Report, d)
+		s.Write(banner, reviewed) // again, with the report's link
 	}
-	banner := ""
-	switch {
-	case n == 0 && still > 0:
-		banner = fmt.Sprintf("No actionable comments were generated in the latest review; %s from earlier reviews still open.", text.Count(still, "finding"))
-	case n == 0:
-		banner = "No actionable comments were generated in the latest review."
-	}
-	s.Write(banner, footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc)))
 	if w := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); len(w) <= 140 { // GitHub's limit
 		desc = w
 	}
+	sp.Result = "ok"
+	if len(r.Failed) > 0 {
+		sp.Result = "partial"
+	}
 	return nil
+}
+
+// ErrMoved is GiveUp's for a PR whose head isn't the queued one any more: the runs that stopped were on another.
+var ErrMoved = errors.New("the head moved")
+
+// GiveUp marks e's review failed without running it: the server stopped during each of its last tries times. Another
+// error: the walkthrough's note isn't out, the server tries again.
+func GiveUp(f forge.Forge, e *forge.Event, tries int) error {
+	p, err := f.Open(e)
+	if err != nil {
+		return err
+	}
+	queued := e.PullRequest.Head.SHA
+	if err := p.Refresh(); err != nil || e.PullRequest.State != "open" {
+		return err
+	}
+	if e.PullRequest.Head.SHA != queued {
+		return ErrMoved
+	}
+	s, err := forge.LoadSticky(p)
+	if err != nil {
+		return err
+	}
+	sha := e.PullRequest.Head.SHA
+	err = s.Post(fmt.Sprintf("⚠️ Review of `%s` not retried: the server stopped during each of its last %d tries, "+
+		"maybe the PR's tests or checks ran out of memory. Comment `@%s review` to try again.", sha[:min(len(sha), 7)], tries, f.Bot()), "")
+	p.Status(sha, "error", "Review failed: the server stopped during it") // logs its own failure, as every Status
+	return err
 }
 
 // failing counts the tests that fail, a subtest with its test once, and the packages that don't build.

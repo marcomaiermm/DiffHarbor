@@ -37,6 +37,23 @@ type loan struct {
 	up         *url.URL
 	key        string
 	paths      []string // path.Match patterns under up it may reach
+	calls      int      // model requests served, under mu
+}
+
+// maxCalls bounds the requests one lent model key serves. A pass makes about 20 at most (15 tool calls, Pi's
+// retries); PR code that reads the token in Pi's bash spends the operator's money only so far.
+// ponytail: a request count, not tokens; a token budget would read every streamed answer.
+const maxCalls = 100
+
+// spend counts one more request on l, false past maxCalls. A model key's only: git and npm cost nothing.
+func (l *loan) spend() bool {
+	if l.route == "git" || l.route == "npm" {
+		return true
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	l.calls++
+	return l.calls <= maxCalls
 }
 
 // gitPaths are a fetch's smart-HTTP requests: no git-receive-pack, no dumb HTTP.
@@ -136,6 +153,10 @@ func serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if !allowed(l, r.Method, rest, r.URL.Query().Get("service")) {
 		http.Error(w, "not through the vault", http.StatusForbidden)
+		return
+	}
+	if !l.spend() { // not 429: that would move every pass to the fallback provider
+		http.Error(w, "this run's request budget is spent", http.StatusForbidden)
 		return
 	}
 	// A revoked token also ends its streams: one held open would carry the key past its job.

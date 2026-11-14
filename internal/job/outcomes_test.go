@@ -561,3 +561,14 @@ func TestOutcomesFoundBy(t *testing.T) {
 		t.Fatalf("%v\n%s", err, b.String())
 	}
 }
+
+func TestActed(t *testing.T) {
+	for _, c := range []struct {
+		k, n int
+		want string
+	}{{0, 0, "-"}, {5, 10, "50% (24-76) few"}, {20, 40, "50% (35-65)"}, {0, 40, "0% (0-9)"}} {
+		if got := acted(c.k, c.n); got != c.want {
+			t.Errorf("acted(%d, %d) = %q, want %q", c.k, c.n, got, c.want)
+		}
+	}
+}

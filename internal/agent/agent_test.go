@@ -30,7 +30,8 @@ echo "$*" >> "$(dirname "$0")/calls"
 cat >> "$(dirname "$0")/stdin"
 case "$*" in
 auth*) echo token ;;
-*openai/*) echo "You have hit your ChatGPT usage limit (plus). Try again in 2h." >&2; exit 1 ;;
+*openai/*) s=$(echo "$*" | sed -n 's/.*--session \([^ ]*\).*/\1/p'); echo '{}' >> "$s"
+  echo "You have hit your ChatGPT usage limit (plus). Try again in 2h." >&2; exit 1 ;;
 *"--model deepseek/x:low"*) echo answer ;;
 *"--model deepseek/v:low"*) echo verified ;;
 *) exit 1 ;;
@@ -62,6 +63,14 @@ esac
 	if strings.Contains(string(calls), "private") || strings.Count(string(stdin), "private task") != 4 ||
 		!strings.Contains(string(calls), "--system-prompt "+filepath.Join(dir, "verify.system.md")) {
 		t.Fatalf("argv:\n%s\nstdin: %q", calls, stdin)
+	}
+	// a tool pass starts afresh on the fallback; the failed run's session is kept aside for the usage log
+	FallbackUntil.Store(0)
+	if out, err := runPi(context.Background(), &proc.Sandbox{Dir: dir}, "review", "private rules", "openai/sol:low", true, "private task"); err != nil || out != "answer\n" {
+		t.Fatal(out, err)
+	}
+	if !proc.Exists(filepath.Join(dir, "review.failed.session")) || proc.Exists(filepath.Join(dir, "review.session")) {
+		t.Fatal("the failed tool pass's session is not kept aside")
 	}
 }
 

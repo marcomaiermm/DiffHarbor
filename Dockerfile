@@ -51,4 +51,5 @@ RUN echo '{"type":"module"}' > /opt/package.json && node --test /opt/review-guar
     && chown -R node:node /home/node/.pi/agent/extensions && tar -C /home/node -cf /opt/node-home.tar .
 ENV PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DATA_DIR=/data CACHE_DIR=/cache
 EXPOSE 3000
+HEALTHCHECK --interval=1m --timeout=5s CMD wget -q -O /dev/null http://127.0.0.1:3000/healthz || exit 1
 CMD ["diffharbor"]

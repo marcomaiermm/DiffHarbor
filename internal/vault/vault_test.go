@@ -287,3 +287,19 @@ func TestNpm(t *testing.T) {
 		t.Fatalf("a refused request reached upstream: %s", (<-got).URL)
 	}
 }
+
+// A lent model key serves maxCalls requests, then no more: PR code that finds it can't spend without end.
+func TestKeyBudget(t *testing.T) {
+	start(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) }))
+	t.Cleanup(s.Close)
+	tok, _ := Key(t.Context(), "deepseek", s.URL, "k", "chat/completions")
+	for i := range maxCalls {
+		if c := send(t, "POST", base+"/deepseek/chat/completions", "Authorization", "Bearer "+tok); c != http.StatusOK {
+			t.Fatalf("request %d: %d", i+1, c)
+		}
+	}
+	if c := send(t, "POST", base+"/deepseek/chat/completions", "Authorization", "Bearer "+tok); c != http.StatusForbidden {
+		t.Fatalf("past the budget: %d", c)
+	}
+}

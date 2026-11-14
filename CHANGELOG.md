@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.9.0...v0.10.0) (2026-11-14)
+
+
+### Features
+
+* **forge:** new review comment layout ([#120](https://github.com/marcomaiermm/DiffHarbor/issues/120)) ([a86a320](https://github.com/marcomaiermm/DiffHarbor/commit/a86a3208e66b623c558aca9b9ac0c33ebc5fc5e6))
+* **report:** resolve calls through interfaces, callbacks and stores ([#118](https://github.com/marcomaiermm/DiffHarbor/issues/118)) ([7cfbd15](https://github.com/marcomaiermm/DiffHarbor/commit/7cfbd1538966a4951da515a521174733694c6945))
+* **review:** leaner review prompt, wording rules for model text ([#119](https://github.com/marcomaiermm/DiffHarbor/issues/119)) ([2aef2a3](https://github.com/marcomaiermm/DiffHarbor/commit/2aef2a36e82746fae0eda1498c9353ce97ff1fd9))
+
+
+### Bug Fixes
+
+* **gitlab:** escape "$" in prose so paths render as text, not math ([#115](https://github.com/marcomaiermm/DiffHarbor/issues/115)) ([5ab557b](https://github.com/marcomaiermm/DiffHarbor/commit/5ab557b118b7f08ccfe4d0a571e8e72716ddc6e7))
+
 ## [0.9.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.8.1...v0.9.0) (2026-11-11)
 
 
