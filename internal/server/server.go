@@ -51,8 +51,9 @@ type task struct {
 }
 
 // review runs reviewJob, a queued push's review, unless a newer push of the PR is queued. One that couldn't clean up
-// before it started stays pending: the next push or a restart retries it.
-func review(e *forge.Event, reviewJob func() error) (err error) {
+// before it started stays pending: the next push or a restart retries it. A head whose last maxStarts runs all stopped
+// the server runs giveUp instead.
+func review(e *forge.Event, giveUp, reviewJob func() error) (err error) {
 	key, queued := prKey(e), e.PullRequest.Head.SHA
 	latest.Lock()
 	current := latest.m[key] == queued
@@ -67,7 +68,15 @@ func review(e *forge.Event, reviewJob func() error) (err error) {
 		}
 		latest.Unlock()
 	}()
-	return reviewJob()
+	n := countStart(key, queued)
+	if n > maxStarts {
+		log.Println(e.Key(), "not reviewed: the server stopped during each of its last", maxStarts, "runs")
+		return giveUp()
+	}
+	if err = reviewJob(); errors.Is(err, proc.ErrCleanup) {
+		setStarts(key, queued, n-1) // it never ran
+	}
+	return err
 }
 
 // runJob runs e's job: a review, an answer in a thread, or deleting a closed PR's reports. A job that runs PR code
@@ -80,7 +89,7 @@ func runJob(ctx context.Context, e *forge.Event) error {
 	case e.Kind != "pull_request":
 		return job.Chat(ctx, f, mentions[e.Forge], e)
 	}
-	return review(e, func() error { return job.Review(ctx, f, e, "") })
+	return review(e, func() error { return job.GiveUp(f, e, maxStarts) }, func() error { return job.Review(ctx, f, e, "") })
 }
 
 // repoOf is the repo the scheduler runs e's job on: the forge.RepoID its sandbox's uid belongs to.
@@ -108,6 +117,8 @@ type pool struct {
 	running map[string]*task
 	run     func(context.Context, *forge.Event) error // runJob, a fake in tests
 }
+
+const jobDeadline = 4 * time.Hour // 8 parts, 2 at once, ~30 min of passes each, plus checks
 
 // newPool runs up to limit jobs at once, at least one, and queues up to 100 more.
 func newPool(limit int, run func(context.Context, *forge.Event) error) *pool {
@@ -143,8 +154,8 @@ func (p *pool) add(e *forge.Event) bool {
 // push stops it also before it ran. A finished job frees its repo and starts the next.
 func (p *pool) start() {
 	for repo, e, ok := p.s.next(); ok; repo, e, ok = p.s.next() {
-		// ponytail: one deadline for any job, a backstop for a hung call; a review in many parts takes well under it
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+		// ponytail: one deadline for any job, a backstop for a hung call, not a budget
+		ctx, cancel := context.WithTimeout(context.Background(), jobDeadline)
 		t := &task{review: e.Kind == "pull_request", cancel: cancel}
 		p.running[prKey(e)] = t
 		go func() {
@@ -164,7 +175,9 @@ func (p *pool) exec(ctx context.Context, e *forge.Event, t *task) {
 	defer func() {
 		t.cancel() // revokes the job's vault tokens: git's remote, Pi's keys
 		done(rk)
-		_ = os.Remove(chat)
+		if chat != "" {
+			_ = os.Remove(chat)
+		}
 		p.mu.Lock()
 		if p.running[rk] == t {
 			delete(p.running, rk)
@@ -365,8 +378,9 @@ func closed(e *forge.Event) error {
 	key := prKey(e)
 	latest.Lock()
 	defer latest.Unlock()
-	delete(latest.m, key)             // queued reviews of this PR skip
-	_ = os.Remove(pendingFile(key))   //nolint:gosec // eventFile escapes the key: no / left to leave the dir
+	delete(latest.m, key) // queued reviews of this PR skip
+	_ = os.Remove(pendingFile(key))
+	_ = os.Remove(triesFile(key))
 	return save(deletingFile(key), e) // a full queue, a restart or a failed delete: retryDrops
 }
 
@@ -504,30 +518,29 @@ func reportRoute(p string) (dir, sha string, ok bool) {
 // A PR's queued review stays on disk until it ran, so a restart (deploy, crash) resumes it: GitHub got its 202.
 func pendingFile(key string) string { return eventFile("pending", key) }
 
-// maxResumes is how often a restart resumes one head's review: one that kills the process (a PR's tests eating the
-// container's memory) would otherwise repeat, and be paid for, on every start.
-const maxResumes = 3
+// maxStarts is how often one head's review starts: one that kills the process (a PR's tests eating the container's
+// memory) would otherwise repeat, and be paid for, on every restart.
+const maxStarts = 3
 
-// giveUp is job.GiveUp, a fake in tests.
-var giveUp = job.GiveUp
-
-// triesFile counts key's resumes of one head, "<sha> <n>": a new push starts over.
+// triesFile counts key's review starts of one head, "<sha> <n>": a new push starts over. done removes it.
 func triesFile(key string) string { return pendingFile(key) + ".tries" }
 
-// resumed counts one more resume of e's head and returns how many there were.
-func resumed(e *forge.Event) int {
-	key, sha := prKey(e), e.PullRequest.Head.SHA
+// countStart counts one more start of sha's review and returns how many there were.
+func countStart(key, sha string) int {
 	b, _ := os.ReadFile(triesFile(key))
 	var was string
 	var n int
 	if _, err := fmt.Sscan(string(b), &was, &n); err != nil || was != sha {
 		n = 0
 	}
-	n++
-	if err := os.WriteFile(triesFile(key), fmt.Appendf(nil, "%s %d", sha, n), 0o600); err != nil {
-		log.Println(e.Key(), "tries:", err)
+	setStarts(key, sha, n+1)
+	return n + 1
+}
+
+func setStarts(key, sha string, n int) {
+	if err := proc.WriteAtomic(triesFile(key), fmt.Appendf(nil, "%s %d", sha, n)); err != nil {
+		log.Println(key, "tries:", err)
 	}
-	return n
 }
 
 var errFull = errors.New("queue full")
@@ -555,7 +568,7 @@ func eventFile(dir, key string) string {
 	return filepath.Join(proc.DataDir, dir, url.PathEscape(key)+".json") // "/" too: one name per key
 }
 
-// save stores e in f, a pendingFile or deletingFile. Callers hold latest.
+// save stores e in f, a pending, deleting or chat file. Callers of the first two hold latest.
 func save(f string, e *forge.Event) error {
 	b, err := json.Marshal(e)
 	if err != nil {
@@ -603,18 +616,6 @@ func resume(add func(*forge.Event) bool) {
 		es = append(es, e)
 	}
 	for _, e := range es {
-		if n := resumed(e); n > maxResumes {
-			log.Println(e.Key(), "not resumed: the server stopped during each of its last", maxResumes, "tries")
-			_ = os.Remove(pendingFile(prKey(e)))
-			_ = os.Remove(triesFile(prKey(e)))
-			go func() {
-				defer proc.Recovered(func(err error) { log.Println(e.Key(), err) })
-				if err := giveUp(forges[e.Forge], e, maxResumes); err != nil {
-					log.Println(e.Key(), "giving up:", err)
-				}
-			}()
-			continue
-		}
 		log.Println(e.Key(), "resuming the review a restart cut off")
 		latest.Lock()
 		latest.m[prKey(e)] = e.PullRequest.Head.SHA
@@ -627,12 +628,19 @@ func resume(add func(*forge.Event) bool) {
 	for _, f := range cs {
 		e := &forge.Event{}
 		b, err := os.ReadFile(f) //nolint:gosec // the server's chats dir
-		_ = os.Remove(f)         // once: a comment whose job stops the server isn't answered on every start
-		if err != nil || json.Unmarshal(b, e) != nil || forges[e.Forge] == nil {
+		ok := err == nil && json.Unmarshal(b, e) == nil
+		if ok && forges[e.Forge] == nil {
+			log.Println(e.Key(), "comment for", e.Forge, "which is off") // kept, as a pending review
+			continue
+		}
+		_ = os.Remove(f) // once: a comment whose job stops the server isn't answered on every start
+		if !ok {
 			continue
 		}
 		log.Println(e.Key(), "answering the comment a restart cut off")
-		add(e)
+		if !add(e) {
+			log.Println(e.Key(), "queue full")
+		}
 	}
 }
 

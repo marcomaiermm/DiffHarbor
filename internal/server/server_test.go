@@ -174,7 +174,7 @@ func TestLateCloseRecreatedRepo(t *testing.T) {
 		}
 	}
 	ran := false
-	if review(recreated, func() error { ran = true; return nil }); !ran {
+	if review(recreated, nil, func() error { ran = true; return nil }); !ran {
 		t.Fatal("the new PR's review skipped")
 	}
 }
@@ -580,14 +580,14 @@ func TestReviewCleanupKeepsPending(t *testing.T) {
 	latest.m[e.Key()] = "abc"
 	save(pendingFile(e.Key()), e)
 	latest.Unlock()
-	if err := review(e, func() error { return fmt.Errorf("uid 10001: %w: busy", proc.ErrCleanup) }); err == nil {
+	if err := review(e, nil, func() error { return fmt.Errorf("uid 10001: %w: busy", proc.ErrCleanup) }); err == nil {
 		t.Fatal("no error")
 	}
 	done(e.Key())
 	if _, err := os.Stat(pendingFile(e.Key())); err != nil {
 		t.Fatal("not kept:", err)
 	}
-	review(e, func() error { return errors.New("failed") })
+	review(e, nil, func() error { return errors.New("failed") })
 	done(e.Key())
 	if _, err := os.Stat(pendingFile(e.Key())); !os.IsNotExist(err) {
 		t.Fatal("kept:", err)
@@ -776,36 +776,36 @@ func TestReviews(t *testing.T) {
 	}
 }
 
-// A review the server stopped during on each of its last tries isn't resumed again: it is marked failed instead.
-func TestResumeGivesUp(t *testing.T) {
+// A head whose review the server stopped during on each of its last maxStarts starts gives up on the next: it is
+// marked failed instead. A review that couldn't clean up never started; a new push starts the count over.
+func TestReviewGivesUp(t *testing.T) {
 	proc.DataDir = t.TempDir()
-	forges["github"] = &github.Hub{}
-	defer clear(forges)
-	gave := make(chan string, 1)
-	defer func(g func(forge.Forge, *forge.Event, int) error) { giveUp = g }(giveUp)
-	giveUp = func(_ forge.Forge, e *forge.Event, _ int) error { gave <- e.PullRequest.Head.SHA; return nil }
-	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "synchronize"}
-	e.Repository.FullName, e.PullRequest.Number, e.PullRequest.Head.SHA = "o/r", 9, "abc"
+	e := ev("o/r", 9, "")
+	e.PullRequest.Head.SHA = "abc"
 	key := prKey(e)
 	t.Cleanup(func() { latest.Lock(); delete(latest.m, key); latest.Unlock() })
-	q := make(chan *forge.Event, maxResumes+1)
-	for range maxResumes + 1 {
+	run := func(job func() error) (ran, gave bool) {
 		latest.Lock()
-		save(pendingFile(key), e)
+		latest.m[key] = e.PullRequest.Head.SHA // as resume does after each restart
 		latest.Unlock()
-		resume(queue(q))
+		review(e, func() error { gave = true; return nil }, func() error { ran = true; return job() })
+		return ran, gave
 	}
-	if len(q) != maxResumes || proc.Exists(pendingFile(key)) || proc.Exists(triesFile(key)) || <-gave != "abc" {
-		t.Fatalf("resumed %d times, want %d, then given up", len(q), maxResumes)
+	stop := func() error { return nil } // the server stops mid-run: done never runs
+	if _, gave := run(func() error { return proc.ErrCleanup }); gave {
+		t.Fatal("gave up")
 	}
-	// a new push starts the count over
-	latest.Lock()
-	os.WriteFile(triesFile(key), []byte("old 3"), 0o600)
-	save(pendingFile(key), e)
-	latest.Unlock()
-	resume(queue(q))
-	if b, _ := os.ReadFile(triesFile(key)); string(b) != "abc 1" {
-		t.Fatalf("tries: %q", b)
+	for i := range maxStarts {
+		if ran, gave := run(stop); !ran || gave {
+			t.Fatalf("start %d: ran %v, gave up %v", i+1, ran, gave)
+		}
+	}
+	if ran, gave := run(stop); ran || !gave {
+		t.Fatalf("after %d starts: ran %v, gave up %v", maxStarts, ran, gave)
+	}
+	e.PullRequest.Head.SHA = "def"
+	if ran, _ := run(stop); !ran {
+		t.Fatal("a new push didn't start over")
 	}
 }
 
