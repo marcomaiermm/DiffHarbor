@@ -81,7 +81,7 @@ Use API keys. Pi can also log in with a ChatGPT subscription: `openai/…` witho
 
 `REPORT_URL` turns on an HTML page per PR, linked in the bot's PR comment.
 
-- **What's on it:** a verdict, the findings by weight, a reading order, diffs with findings, call graphs and what the change reaches outside the PR. Before you merge: base commits the PR is behind on, conflicts, and open PRs changing the same files or lines. At the end a draft review to send from the forge yourself. The page posts nothing.
+- **What's on it:** whether it merges (base commits the PR is behind on, conflicts, open PRs changing the same files or lines), a short brief, and a map of the parts the PR changes with the systems, tables and deploys they reach. Then what to fix before merging, the parts in reading order with their diffs and how they connect, what the tests cover, and who knows the code. The page posts nothing.
 - **Versions:** each reviewed head keeps one, the newest 10 stay. Closing the PR deletes them.
 - **Link:** `/r/<host>/id:<repo id>/<n>/<secret>`, by the repo's ID: a rename keeps it, a new repo under an old name gets its own. Links from before the ID (`/r/<host>/<repo>/<n>/<secret>`) keep working: the PR's next review moves its reports to the ID and redirects them. A PR that closes without one loses those under its current name. Under a name the repo had before a rename they stay. The secret is random per PR (130 bits) and only the PR comment holds it. Any other `/r/` path is a 404.
 - **Older reports:** reports from before the secret no longer open. The next review writes one at the new link, closing the PR deletes the old.
@@ -289,23 +289,23 @@ func main() {
 
 The report page is the templates in [`internal/report/templates/`](https://github.com/marcomaiermm/DiffHarbor/blob/main/internal/report/templates/). Files in `TEMPLATE_DIR` override them, like Django's template dirs:
 
-- `logo.png` (64 px), `favicon.svg` and `favicon-32x32.png` replace the images.
+- `logo.png` (64 px), `favicon.svg` and `favicon-32x32.png` replace the images. The page shows no logo until a template asks for it: `{{define "logo"}}{{logo}}{{end}}` puts it at the left of the top bar.
 - A `*.html` file that defines a template again replaces ours.
-- A file named like one of ours (`header.html`) replaces all of that file.
+- A file named like one of ours (`page.html`) replaces all of that file.
 - Files are read in name order. The last definition wins.
 
 ```html
 <!-- $TEMPLATE_DIR/brand.html -->
-{{define "theme"}}<style>:root { --primary: #0b5fff; --ring: #0b5fff; }</style>{{end}}
+{{define "theme"}}<style>:root { --acc: #0b5fff; /* and the other tokens of theme.html */ }</style>{{end}}
 {{define "footer"}}<footer class="py-6 text-center text-xs text-muted-foreground">Acme Engineering</footer>{{end}}
 ```
 
 **Blocks meant for this:**
 
-- `theme`: the color tokens, see `theme.html`. `--major` colors what to fix, `--verified` what is shown without a model.
-- `logo`, `head` (more in `<head>`), `header`, `footer`.
+- `theme`: the color tokens, see `theme.html`. A new `theme` replaces all of them. `--major` colors what to fix, `--verified` what is shown without a model, `--acc` the focus and the current item.
+- `logo`, `head` (more in `<head>`), `top` (the bar over the page), `footer`.
 
-The others work too but follow the page's data, which can change between versions. `finish` (`finish.html`) is the draft review at the end.
+The others work too but follow the page's data, which can change between versions.
 
 - The page's CSS is compiled with the classes its templates use. With your templates, DiffHarbor compiles it again at start (Tailwind's CLI is in the image).
 - DiffHarbor checks the templates at start and doesn't start with a broken one.
