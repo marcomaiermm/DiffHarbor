@@ -288,7 +288,7 @@ const pick = (span, list) => {
 };
 // what the PR did to it and the finding on it, as the diff's chips say it
 const chip = (text, data, cls = "") => {
-  const c = el("span", ("chip " + cls).trim(), text);
+  const c = el("span", ("dchip " + cls).trim(), text);
   Object.assign(c.dataset, data);
   return c;
 };
@@ -518,7 +518,7 @@ window.inSplit = el => {
   split(t); // what reveal opened shows
   return lineOf.get(el.matches("tbody") ? el.rows[0] : el) || null;
 };
-document.addEventListener("click", e => { if (e.target.closest(".toggle[data-diff]") && splitOn()) tables.forEach(split); });
+document.addEventListener("click", e => { if (e.target.closest("button[data-diff]") && splitOn()) tables.forEach(split); });
 if (splitOn()) {
   tables.forEach(split);
   if (location.hash) dispatchEvent(new HashChangeEvent("hashchange")); // the jump on load hit the hidden table

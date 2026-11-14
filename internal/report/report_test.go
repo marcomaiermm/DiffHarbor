@@ -60,8 +60,6 @@ func TestRender(t *testing.T) {
 			Name: "GitLab", Ref: "!", Blob: "https://gitlab.com/acme/shop/-/blob/0123456789abcdef/",
 			PRCommit: "https://gitlab.com/acme/shop/-/merge_requests/7/diffs?commit_id=",
 		}, // nothing in the page is GitHub's
-		Summary: "Handle saves orders.", Diagram: "sequenceDiagram", Decisions: []review.Decision{{Text: "Should a failed save retry?"}},
-		Story: review.Story{Problem: "Orders were lost.", Before: "POST /orders: 200, nothing stored.", After: "POST /orders: the order is in the store."},
 		Flow: []review.Step{
 			{Title: "Storage first", Why: "Save is what Handle calls.", Files: []string{"store/store.go", "missing.go"}},
 			{Title: "Then the handler", Files: []string{"api/handler.go"}},
@@ -76,21 +74,16 @@ func TestRender(t *testing.T) {
 	}
 	s := string(b)
 	order := []string{
-		"Orders were lost.", "Handle saves orders.", "Before", "POST /orders: 200, nothing stored.",
-		"After", "POST /orders: the order is in the store.", `class="vd"`, "Not ready to merge", "Fix first: Error dropped", "handler.go:2: Error dropped",
-		"Findings", "Decisions", "Fix before merging", `href="#finding-1"`, "Error dropped", "handler.go:2 · step 2", "not verified",
-		"Minor", `href="#finding-2"`, "elsewhere", "other.go · not in the diff", "Outside the diff", `id="finding-2"`,
-		`href="https://gitlab.com/acme/shop/-/blob/0123456789abcdef/other.go"`, "other.go at the head",
-		"What only a person can settle", "Should a failed save retry?",
-		"Storage first", `id="store/store.go"`, "Then the handler", `id="api/handler.go"`, `id="finding-1"`, `<span class="sev" data-sev="major">Major</span>`, `<span class="fnote-t">Error dropped</span>`,
-		`id="tests"`, `title="api/handler_test.go">TestHandle<`, `id="api/handler_test.go"`, `id="other"`, `id="README.md"`,
-		`id="deleted"`, `id="gone.go"`, `id="explore"`, "Look closer", "How the parts talk", `id="commits"`, "Work in progress", "/merge_requests/7/diffs?commit_id=aaaaaaaaaa", "Only this commit",
-		`id="finish"`, "Request changes", "Review for !7</span>",
-		"Error dropped (handler.go:2).", "Questions:\n1. Should a failed save retry?", "Minor:\n- other.go  elsewhere", "Open the draft on GitLab",
+		"Save &lt;orders&gt;", "2 commits · 5 files", "1 open item", "1 major finding",
+		`id="before"`, "Nothing found that merging alone doesn't finish.", `id="read"`,
+		`id="finding-1"`, "Error dropped", "Major finding", "Step 2", `href="https://gitlab.com/acme/shop/-/blob/0123456789abcdef/api/handler.go#L2"`,
+		"Storage first", "Save is what Handle calls.", `id="store/store.go"`, "Then the handler", `id="api/handler.go"`,
+		`id="note-1"`, `<span class="fnote-t">Error dropped</span>`, `id="gone.go"`,
+		`id="finding-2"`, "elsewhere", `href="https://gitlab.com/acme/shop/-/blob/0123456789abcdef/other.go"`,
+		`id="covered"`, "2 findings: 1 major and 1 minor.", `id="api/handler_test.go"`, `id="README.md"`, `id="team"`,
 	}
-	for _, w := range []string{"acme/shop!7 · Save", ">GitLab <svg", // the forge's own names
-		`<span class="chip" data-sev="major">1 major</span>`, `data-progress="step-2"`, `id="progress-text" data-steps="2"`, `<span class="chip" data-del>deleted</span>`, // a step's head, a file's
-		`<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2Zy`, `sizes="32x32" href="data:image/png;base64,iVBORw0KGgo`, `<img src="data:image/png;base64,iVBORw0KGgo`} { // the favicons, unescaped
+	for _, w := range []string{"acme/shop!7 · Save", "Open on GitLab", // the forge's own names
+		`<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2Zy`, `sizes="32x32" href="data:image/png;base64,iVBORw0KGgo`} { // the favicons, unescaped
 		if !strings.Contains(s, w) {
 			t.Errorf("%q missing", w)
 		}
@@ -103,11 +96,11 @@ func TestRender(t *testing.T) {
 		}
 		at += i + len(w)
 	}
-	if strings.Contains(s, "<script>alert(1)") || strings.Contains(s, "Save <orders>") {
-		t.Error("PR text reaches the page unescaped")
+	if strings.Contains(s, "<script>alert(1)") || strings.Contains(s, "Save <orders>") || strings.Contains(s, "GitHub") {
+		t.Error("PR text reaches the page unescaped, or a forge it isn't on")
 	}
-	if n := strings.Count(s, `class="fnote-b"`); n != 1 { // only "elsewhere" has a body
-		t.Errorf("%d finding bodies, want 1", n)
+	if strings.Contains(s, `class="fnote-b"`) { // a blank body shows none
+		t.Error("a finding shows a blank body")
 	}
 	if strings.Contains(s, `id="missing.go"`) {
 		t.Error("a flow file outside the diff got a block")
@@ -118,16 +111,10 @@ func TestRender(t *testing.T) {
 	if strings.Contains(button, "Viewed") || !strings.Contains(rest[:strings.Index(rest, `id="api/handler.go~body"`)], "Viewed") {
 		t.Error("the Viewed box is not beside the file's button")
 	}
-	if strings.Count(s, `id="api/handler.go"`) != 1 {
-		t.Error("a file shows twice")
-	}
-}
-
-func TestStory(t *testing.T) {
-	cs := []review.Commit{{Subject: "feat: add Save"}, {Subject: "fix(api): handle a nil store"}, {Subject: "test: cover Save"}, {Subject: "fixup! feat: add Save"}}
-	b, _, _ := Render(Data{Repo: "a/b", Commits: cs})
-	if !strings.Contains(string(b), "Each one a step") { // 1 of 4 is wip: still a story
-		t.Error("conventional commits read as a story")
+	for _, id := range regexp.MustCompile(`\sid="([^"]+)"`).FindAllStringSubmatch(s, -1) {
+		if n := strings.Count(s, ` id="`+id[1]+`"`); n != 1 {
+			t.Errorf("id %q %d times", id[1], n)
+		}
 	}
 }
 
@@ -212,7 +199,7 @@ func TestIcons(t *testing.T) {
 		b, _ := fs.ReadFile(templates, f)
 		page = append(page, b...)
 	}
-	for _, m := range regexp.MustCompile(`\{\{icon "([^"]+)"`).FindAllStringSubmatch(string(page), -1) {
+	for _, m := range regexp.MustCompile(`\{\{icon? "([^"]+)"`).FindAllStringSubmatch(string(page), -1) {
 		if icons[m[1]] == "" {
 			t.Errorf("icon %q is not in icons", m[1])
 		}
@@ -222,7 +209,7 @@ func TestIcons(t *testing.T) {
 func TestLoad(t *testing.T) {
 	defer func(t0 *template.Template, l, f template.HTML, c string) { tmpl, logo, favicons, css = t0, l, f, c }(tmpl, logo, favicons, css)
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "brand.html"), []byte(`{{define "theme"}}<style>:root{--primary:#c00}</style>{{end}}{{define "footer"}}<footer class="py-6">Acme</footer>{{end}}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "brand.html"), []byte(`{{define "theme"}}<style>:root{--primary:#c00}</style>{{end}}{{define "footer"}}<footer class="py-6">Acme</footer>{{end}}{{define "logo"}}{{logo}}{{end}}`), 0o644)
 	os.WriteFile(filepath.Join(dir, "logo.png"), []byte("acme"), 0o644)
 	if err := Load(dir); err != nil {
 		t.Fatal(err)
@@ -235,7 +222,7 @@ func TestLoad(t *testing.T) {
 	if _, err := exec.LookPath("tailwindcss"); err == nil && !strings.Contains(s, ".py-6{") { // the image has it
 		t.Error("the footer's class isn't compiled")
 	}
-	for _, w := range []string{"--primary:#c00", `<footer class="py-6">Acme</footer>`, "base64,YWNtZQ==", `id="overview"`} {
+	for _, w := range []string{"--primary:#c00", `<footer class="py-6">Acme</footer>`, "base64,YWNtZQ==", `id="read"`} {
 		if !strings.Contains(s, w) {
 			t.Errorf("%q missing", w)
 		}
@@ -367,10 +354,6 @@ func TestWeigh(t *testing.T) {
 	if w := f.Weight(); w == nil || *w != (weighed{"major", "2 major"}) {
 		t.Errorf("file: %+v", w)
 	}
-	g := &file{Lines: []line{{Findings: []*finding{{Comment: review.Comment{Severity: "critical"}}}}}}
-	if w := (step{Files: []*file{f, g}}).Weight(); w == nil || *w != (weighed{"critical", "1 blocker"}) {
-		t.Errorf("step: %+v", w)
-	}
 	if w := (&file{Findings: []*finding{{Comment: review.Comment{Severity: "minor"}}}}).Weight(); w != nil {
 		t.Errorf("minor only: %+v", w)
 	}
@@ -397,25 +380,12 @@ func TestGraph(t *testing.T) {
 	if g := graph(steps, 0, map[string][]Symbol{}); g != nil {
 		t.Errorf("no edges, still a graph: %+v", g)
 	}
-	store.Short = "store/store.go"
-	m := &deps{New: []newDep{{From: ".", To: "store", Why: "Handle uses Save"}}} // Save is new: so is the use
-	if got := matrix(steps, syms); !reflect.DeepEqual(got, m) {
-		t.Errorf("matrix %+v", got)
-	}
-	store.Changes[0].State = "" // both there before; and Save uses Handle back: a cycle
-	syms["Save"] = []Symbol{{Path: "store.go", Calls: []string{"api.go\x00Handle"}}}
-	if got := matrix(steps, syms); !reflect.DeepEqual(got, &deps{Old: []string{". → store", "store → ."}, Cycles: 1}) {
-		t.Errorf("matrix, old uses %+v", got)
-	}
-	if got := matrix(steps, map[string][]Symbol{}); got != nil {
-		t.Errorf("no uses, still a matrix: %+v", got)
-	}
 }
 
 // a way in runs the PR's declarations as a tree below it: routes first, the finding on it, the step it shows in
 func TestWays(t *testing.T) {
 	store := &file{Path: "store.go", Changes: []change{{Name: "Save", State: "new", Sev: "major"}},
-		Findings: []*finding{{Comment: review.Comment{Severity: "major"}, Href: "#store.go:9"}}}
+		Findings: []*finding{{Comment: review.Comment{Severity: "major"}, ID: "note-3"}}}
 	api := &file{Path: "api.go", Changes: []change{{Name: "Handle", sig: true}}}
 	v := view{Steps: []step{{Files: []*file{store}}, {Files: []*file{api}}}, files: map[string]*file{"store.go": store, "api.go": api}}
 	syms := map[string][]Symbol{
@@ -438,7 +408,7 @@ func TestWays(t *testing.T) {
 	if want := []string{"1 Handle [end] true signature chg true api.go:10 #api.go:10", "2 Save [blank end] false new major true api.go:12 #api.go:12"}; !slices.Equal(rows, want) {
 		t.Errorf("rows\n%q\nwant\n%q", rows, want)
 	}
-	if g.Reach != 2 || g.New != 1 || g.Sev != "major" || g.Finding != "#store.go:9" || g.Step != 1 || v.Steps[0].Way != &ws[0] {
+	if g.Reach != 2 || g.New != 1 || g.Sev != "major" || g.Finding != "#finding-3" || g.Step != 1 || v.Steps[0].Way != &ws[0] {
 		t.Errorf("way %+v", g)
 	}
 	if got := g.Says(); got != "Runs 2 declarations the PR changes, 1 of them new. A major finding is on the way." {
@@ -446,10 +416,6 @@ func TestWays(t *testing.T) {
 	}
 	if g.Name() != "GET /x" || ws[1].Name() != "main" { // CALL is no method to read
 		t.Errorf("names %q %q", g.Name(), ws[1].Name())
-	}
-	v.Ways = ws
-	if got := v.WaysSay(); got != "2 ways in · the GET /x path is in step 01" {
-		t.Errorf("ways say %q", got)
 	}
 }
 
@@ -532,21 +498,6 @@ func TestSignatures(t *testing.T) {
  	return a + b;
  }
 `}
-	var got []string
-	for _, g := range prepare(d).Inventory {
-		for _, it := range g.Items {
-			got = append(got, fmt.Sprintf("%s %s: %s -> %s +%d -%d", g.Key, it.Name, it.OldHead, it.Head, it.NPlus, it.NMinus))
-		}
-	}
-	want := []string{
-		"signature resolveItemByName: export async function resolveItemByName(input: { name: string; expansionId?: number }) { -> export async function resolveItemByName(input: { name: string }) { +0 -0",
-		"signature search: export function search(opts: { offset: number; limit: number }) { -> export function search(opts: { cursor?: string; limit: number }) { +0 -0",
-		"body protectedProcedure:  ->  +3 -1",
-		"body reflowed:  ->  +3 -1",
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("inventory\n%s", strings.Join(got, "\n"))
-	}
 	f := parse("a.ts", d.Diff, "")
 	sig := map[string]bool{}
 	cs, _ := changes(f, map[int]run{})
@@ -555,27 +506,6 @@ func TestSignatures(t *testing.T) {
 	}
 	if want := map[string]bool{"resolveItemByName": true, "search": true, "protectedProcedure": false, "reflowed": false}; !maps.Equal(sig, want) {
 		t.Errorf("changes' signatures %v", sig)
-	}
-}
-
-func TestReach(t *testing.T) {
-	ref := Ref{Path: "cmd/main.go", Line: 3, Text: "x()"}
-	api := &file{Path: "api.go", Changes: []change{
-		{Name: "Body", ID: "b"}, {Name: "Sig", ID: "s", added: true, removed: true, sig: true}, {Name: "Fresh", State: "new"}, {Name: "Guess"},
-	}}
-	syms := map[string][]Symbol{
-		"Body":  {{Path: "api.go", Exact: true, Outside: []Ref{ref}, NOutside: 9}},
-		"Sig":   {{Path: "api.go", Exact: true, Outside: []Ref{ref}, NOutside: 1}, {Path: "other.go", Exact: true, NOutside: 4}},
-		"Fresh": {{Path: "api.go", Exact: true, NOutside: 2}},
-		"Guess": {{Path: "api.go", NOutside: 2}},
-	}
-	got := reach([]step{{Files: []*file{api}}}, syms)
-	want := []affected{
-		{Name: "Sig", Path: "api.go", ID: "s", Why: "signature changed", Refs: []Ref{ref}, N: 1},
-		{Name: "Body", Path: "api.go", ID: "b", Refs: []Ref{ref}, N: 9},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("reach %+v", got)
 	}
 }
 
@@ -619,120 +549,6 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 	}
 	if c := s["Handle"][0].Calls; !slices.Equal(c, []string{"a.go\x00Save", "a.go\x00Max"}) {
 		t.Errorf("Handle calls %q", c)
-	}
-}
-
-func TestInventory(t *testing.T) {
-	d := Data{
-		Title: "t", Diff: `diff --git a/a.go b/a.go
---- a/a.go
-+++ b/a.go
-@@ -1,20 +1,10 @@
- package a
- 
--func matrix() []string {
--	out := []string{"alpha"}
--	out = append(out, "beta")
--	return out
--}
--
--func shift(n int) int {
--	total := n * 2
--	total += 10
--	return total
--}
--
--func Sig(a int) int {
-+func Sig(a, b int) int {
- 	return a
- }
- 
- func Body() {
--	println("one")
-+	println("two")
- }
--
--func Old() { println("old") }
-diff --git a/b.go b/b.go
-new file mode 100644
---- /dev/null
-+++ b/b.go
-@@ -0,0 +1,14 @@
-+package a
-+
-+func Matrix() []string {
-+	out := []string{"alpha"}
-+	out = append(out, "beta")
-+	return out
-+}
-+
-+func Shift(n int) int {
-+	total := n * 2
-+	total += 20
-+	return total
-+}
-+
-+func Fresh() {}
-`,
-		Commits: []review.Commit{{SHA: "f00dfacecafe", Subject: "feat: add Fresh", Lines: []string{"+func Fresh() {}"}}, {Subject: "wip", Lines: []string{"+func Sig(a, b int) int {"}}},
-		Whys:    map[string]string{"a.go\x00Sig": "takes b too", "a.go\x00Body": "unasked"},
-	}
-	var got []string
-	for _, g := range prepare(d).Inventory {
-		for _, it := range g.Items {
-			got = append(got, fmt.Sprintf("%s %s was=%s from=%s:%d why=%s commit=%v +%v -%v", g.Key, it.Name, it.Was, it.From, it.OldLine, it.Why, it.Commit, it.Plus, it.Minus))
-		}
-	}
-	want := []string{
-		"new Fresh was= from=:0 why=feat: add Fresh commit=true +[] -[]",
-		"signature Sig was= from=:0 why=takes b too commit=false +[] -[]",
-		"body Body was= from=:0 why=unasked commit=false +[] -[]",
-		"reworked Shift was=shift from=a.go:9 why= commit=false +[total += 20] -[total += 10]",
-		"moved Matrix was=matrix from=a.go:3 why= commit=false +[] -[]",
-		"removed Old was= from=:0 why= commit=false +[] -[]",
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("inventory\n%s", strings.Join(got, "\n"))
-	}
-	v := prepare(d)
-	got = nil
-	for _, p := range v.API() {
-		for _, r := range p.Items {
-			got = append(got, fmt.Sprintf("%s %s %s · %s:%d %s %q", p.Pkg, r.Mark, r.Sig, r.File, r.Line, r.SHA, r.Info))
-		}
-	}
-	want = []string{
-		`. + func Fresh() · b.go:15 f00dfacecafe []`,
-		`. ~ func Sig(a, b int) int · a.go:3  ["signature"]`,
-		`. ~ Body · a.go:8  ["behaviour"]`,
-		`. → func Shift(n int) int · b.go:9  ["from a.go:9 as shift, changed"]`,
-		`. → func Matrix() []string · b.go:3  ["from a.go:3 as matrix, unchanged"]`,
-		`. − func Old() · a.go:23  []`,
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("API\n%s", strings.Join(got, "\n"))
-	}
-	b, _, err := Render(d)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, w := range []string{
-		`<p class="apkg">.</p>`,
-		`aria-label="new">&#43;</span><code class="asig" data-name="Fresh">func Fresh()</code>`,
-		`<span>feat: add Fresh</span><a class="chip font-mono"`,
-		`>commit f00dfac</a>`,
-		`<a class="aloc" href="#b.go~`,
-		`>b.go:15</a>`,
-		`<span>takes b too</span><span class="chip" data-dash title="A small model's reading of its code">AI · read from the code</span>`,
-		`<span>from a.go:3 as matrix, unchanged</span>`,
-		`<summary class="as as-del">`,
-	} {
-		if !strings.Contains(string(b), w) {
-			t.Errorf("page without %s", w)
-		}
-	}
-	if keys, texts := Asks(d); !slices.Equal(keys, []string{"a.go\x00Sig"}) || !strings.Contains(texts[0], "func Sig(a, b int) int {") {
-		t.Errorf("asks %q %q", keys, texts)
 	}
 }
 
@@ -799,12 +615,12 @@ func TestSince(t *testing.T) {
 		t.Fatalf("%+v", s)
 	}
 	page := string(b)
-	for _, want := range []string{`id="since"`, `id="c.go" open data-changed`, `No longer in the PR: <s title="b.go">b.go</s>`, `1 finding fixed, 1 new: <span data-sev="" title="c.go: leak">c.go: leak</span>`, "1 fixed</", "a.go: nil map</s> · fixed in 2222222", `data-filter="changed"`, "Changed since 1111111", "changed since 1111111</span>"} {
+	for _, want := range []string{"1 file changed since 1111111, the previous review: 1 code file.", `data-filter="changed"`, "Changed since 1111111", "New since 1111111", "changed since 1111111</span>"} {
 		if !strings.Contains(page, want) {
 			t.Error("missing", want)
 		}
 	}
-	if regexp.MustCompile(`id="a.go"[^>]*data-changed`).MatchString(page) {
+	if strings.Count(page, "changed since 1111111</span>") != 1 {
 		t.Error("a.go marked though its change is the same")
 	}
 }
@@ -814,61 +630,25 @@ func TestReproProof(t *testing.T) {
 	v := prepare(Data{SHA: "0123456789", Diff: "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n x\n+y\n", Findings: []review.Comment{
 		{Path: "a.go", Line: 2, Severity: "major", Title: "r", Evidence: review.Repro + "`go test` fails, as the finding predicts."},
 		{Path: "a.go", Line: 2, Severity: "minor", Title: "p", Evidence: "A test for it passes: `go test`; lowered to minor."},
+		{Path: "a.go", Line: 2, Severity: "minor", Body: "\n\n_Verified:_ seen"},
 	}})
 	var got []string
-	for _, g := range v.Groups {
-		for _, f := range g.Items {
-			got = append(got, f.Title+" "+f.Proof)
-		}
+	for _, f := range v.files["a.go"].found() {
+		got = append(got, f.Title+" "+f.Proof)
 	}
-	if want := []string{"r Test run", "p AI cross-check"}; !slices.Equal(got, want) {
-		t.Errorf("proofs: %v", got)
+	if want := []string{"r Test run", "p AI cross-check", "_Verified:_ seen not verified"}; !slices.Equal(got, want) {
+		t.Errorf("proofs: %q", got)
 	}
 }
 
 func TestJudge(t *testing.T) {
 	const d = "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n x\n+y\n"
-	v := prepare(Data{SHA: "0123456789", Diff: d, Decisions: []review.Decision{{Text: "Retry?"}}, Flow: []review.Step{{Title: "s", Files: []string{"a.go"}}},
-		Outline: diff.Outline{Weakened: []diff.Flag{{At: "a_test.go:4", What: "skip/only: `t.Skip()`"}}},
-		Findings: []review.Comment{
-			{Path: "a.go", Line: 9, Severity: "minor", Title: "naming"},
-			{Path: "a.go", Line: 5, Severity: "nit", Title: "name it n"},
-			{Path: "a.go", Line: 2, Severity: "critical", Title: "nil map", Body: "m is nil. It panics.\n\n_Verified:_ seen", Evidence: "seen"},
-			{Path: "a.go", Line: 2, Severity: "major", Title: "leak", Body: "The file stays open.\n\nClose it."},
-		}})
-	var got []string
-	for _, g := range v.Groups {
-		for _, f := range g.Items {
-			got = append(got, g.Title+": "+f.Title+" @ "+f.Where+" · "+f.Proof)
-		}
-	}
-	want := []string{
-		"Blocks the merge: nil map @ a.go:2 · step 1 · AI cross-check",
-		"Fix before merging: leak @ a.go:2 · step 1 · not verified",
-		"Fix before merging: skip/only: `t.Skip()` @ a_test.go:4 · not in the diff · In the diff",
-		"Minor: naming @ a.go:9 · step 1 · not verified",
-		"Nits: name it n @ a.go:5 · step 1 · not verified",
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("groups:\n%s", strings.Join(got, "\n"))
-	}
-	if v.Verdict.OK || v.Verdict.Title != "Fix first: nil map" ||
-		v.Verdict.Body != "a.go:2: m is nil. After that, 2 more findings to fix, 1 minor finding, 1 nit and 1 decision." {
-		t.Errorf("verdict: %+v", v.Verdict)
-	}
-	if v.Draft.Event != "Request changes" || v.Draft.Say != "1 blocker, 2 major, 1 minor and 1 nit, listed in the draft" ||
-		v.Draft.MD != "nil map (a.go:2). m is nil.\n\nFix before merging:\n- a.go:2  leak. The file stays open.\n- a_test.go:4  skip/only: `t.Skip()`\n\nQuestions:\n1. Retry?\n\nMinor:\n- a.go:9  naming\n\nNits:\n- a.go:5  name it n" {
-		t.Errorf("draft: %+v\n%s", v.Draft, v.Draft.MD)
-	}
-
-	v = prepare(Data{SHA: "0123456789", Diff: d, Decisions: []review.Decision{{Text: "Retry?"}}})
-	if !v.Verdict.OK || v.Verdict.Short != "No findings" || v.Verdict.Body != "No finding on 0123456. 1 decision still needs you before you approve." ||
-		v.Draft.Event != "Comment" || v.Draft.MD != "No findings on 0123456.\n\nQuestions:\n1. Retry?" || v.Draft.Say != "none" {
-		t.Errorf("none: %+v %+v", v.Verdict, v.Draft)
-	}
-	v = prepare(Data{SHA: "0123456789", Diff: d, Findings: []review.Comment{{Path: "a.go", Line: 2, Severity: "minor", Title: "naming"}}})
-	if !v.Verdict.OK || v.Verdict.Short != "No blockers" || v.Draft.Event != "Comment" {
-		t.Errorf("minor only: %+v %+v", v.Verdict, v.Draft)
+	v := prepare(Data{SHA: "0123456789", Diff: d, Outline: diff.Outline{
+		Weakened: []diff.Flag{{At: "a_test.go:4", What: "skip/only: `t.Skip()`"}, {At: "a_test.go: TestGone", What: "test deleted"}},
+		Removed:  []string{"a_test.go: TestGone"},
+	}})
+	if !slices.Equal(v.now.Findings, []string{"a_test.go: skip/only: `t.Skip()`", "a_test.go: test deleted"}) || v.now.Weights["a_test.go: test deleted"] != "major" {
+		t.Errorf("weakened tests in the version: %q %v", v.now.Findings, v.now.Weights)
 	}
 	// in its step, the file with the blocker comes first
 	two := d + strings.ReplaceAll(d, "a.go", "b.go")
@@ -1015,61 +795,13 @@ func TestPlaces(t *testing.T) {
 		rs[1].Text != ", and " || rs[1].Href != "https://f/blob/other.go#L7" || !rs[1].Out || rs[2].Text != " caps it." {
 		t.Fatalf("%+v", rs)
 	}
-	if r := v.Run("TestTotal/with discount"); r.Mark != "pass" || r.Text != "not run on 1111111, passed on 2222222" {
-		t.Errorf("%+v", r)
-	}
-	if r := v.Run("TestOther"); r.Mark != "none" || r.Text != "not run on 2222222" {
-		t.Errorf("%+v", r)
-	}
 	if v.now.Tests["TestTotal/with_discount"] != "pass" || !v.now.Broken {
 		t.Errorf("%+v", v.now)
 	}
-	b, _, err := Render(d)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, w := range []string{`<p class="meta"><span>Kim</span>`, `href="#pkg/a.go:42"`, `title="other.go:7, not in the diff"`,
-		`TestTotal/with discount · not run on 1111111, passed on 2222222`, `href="#pkg/a.go:3"`, ">does not build<", "1 by Kim"} {
-		if !strings.Contains(string(b), w) {
-			t.Errorf("%q missing", w)
-		}
-	}
-	d.Tests = checks.Tests{}
-	d.Prev = nil
-	if r := prepare(d).Run("TestTotal"); r != (testRun{}) {
-		t.Errorf("no test ran, yet %+v", r)
-	}
 }
 
-// A test deleted with the declaration it is named after leaves the findings for the line under them.
-func TestRetire(t *testing.T) {
-	files := map[string]*file{
-		"a.go": {Kind: "code", Changes: []change{{Name: "totalNet", State: "gone"}, {Name: "Total", State: "gone"}, {Name: "Sum", State: "gone"}, {Name: "Net", State: "changed"}}},
-		"b.go": {Kind: "code", Changes: []change{{Name: "Total", State: "new"}}},
-		"x.go": {Kind: "test", Changes: []change{{Name: "helper", State: "gone"}}},
-	}
-	got := retire([]string{"a_test.go: TestTotalNet", "a_test.go: TestTotalNetRounding", "a_test.go: TestTotal", "a_test.go: TestTotalnetwork", "a_test.go: TestSumNet", "x_test.go: TestHelper"}, files)
-	if !reflect.DeepEqual(got, []retired{{Names: []string{"TestTotalNet", "TestTotalNetRounding"}, With: "totalNet"}}) {
-		t.Fatalf("%+v", got)
-	}
-}
-
-// A step names what to check in it and what no test reaches; the tests list their cases with how they ran.
+// A step names what to check in it and why a file sits in it; a test the PR skips marks its file.
 func TestStepTests(t *testing.T) {
-	for _, c := range []struct {
-		s    step
-		want string
-	}{
-		{step{Untested: true}, "none found that reaches what this step changes"},
-		{step{Untested: true, bare: []string{"scanLine"}}, "none: scanLine is not called by any test"},
-		{step{Untested: true, bare: []string{"a", "b", "c", "d", "e"}}, "none: a, b, c and 2 more are not called by any test"},
-		{step{Tests: []string{"x_test.go TestX"}, bare: []string{"scanLine"}}, "none reaches scanLine"},
-		{step{Tests: []string{"x_test.go TestX"}, bare: []string{"scanLine"}, Partial: true}, ""},
-	} {
-		if got := c.s.Gap(); got != c.want {
-			t.Errorf("%+v: %q, want %q", c.s, got, c.want)
-		}
-	}
 	file := func(p, body string) string {
 		return fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,0 +1,2 @@\n%s", p, p, p, p, body)
 	}
@@ -1081,17 +813,14 @@ func TestStepTests(t *testing.T) {
 	}
 	d.Outline = diff.Analyze(d.Diff)
 	v := prepare(d)
-	if v.Skipped != 1 || v.files["a_test.go"].Skipped != 1 {
-		t.Fatalf("skipped %d", v.Skipped)
-	}
-	if got := v.TestsSay(); got != "1 of 2 new cases passed on 2222222. c does not build on 2222222, so nothing ran there. 1 test is now skipped or narrowed to one." {
-		t.Error(got)
+	if n := v.files["a_test.go"].Skipped; n != 1 {
+		t.Fatalf("skipped %d", n)
 	}
 	b, _, err := Render(d)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, w := range []string{`<span>Check</span> · A returns`, `here because B calls it</span>`, `>1 skipped</span>`, `title="a_test.go">TestA</span><span class="case-s">passed on 2222222</span>`, `data-mark="pass"`} {
+	for _, w := range []string{"A returns", "here because B calls it", `>1 skipped</span>`, "2 tests ran at 2222222: 1 passed, 1 skipped.", "c doesn&#39;t build at 2222222.", "Blocked: the build failed at 2222222"} {
 		if !strings.Contains(string(b), w) {
 			t.Errorf("%q missing", w)
 		}
@@ -1162,8 +891,8 @@ func TestCallAt(t *testing.T) {
 	}
 }
 
-// A part whose review failed leaves its files unread: the verdict says so instead of clean, and an empty list
-// credits the verifier only when it dropped something.
+// A part whose review failed leaves its files unread: the page says so instead of clean, and an empty list
+// credits no verifier.
 func TestFailedNotClean(t *testing.T) {
 	d := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-package a\n+package b\n"
 	b, _, err := Render(Data{Repo: "o/r", Number: 1, SHA: "abc", Diff: d, Failed: []string{"a.go"}})
@@ -1171,21 +900,21 @@ func TestFailedNotClean(t *testing.T) {
 		t.Fatal(err)
 	}
 	page := string(b)
-	for _, w := range []string{"Not fully reviewed", "1 file not reviewed", "The review of a.go failed", "The review found nothing"} {
+	for _, w := range []string{"1 open item", "The review didn&#39;t read 1 code file", "A review part failed on them.", "1 file was in a review part that failed.", "The review found nothing to flag."} {
 		if !strings.Contains(page, w) {
 			t.Errorf("%q missing", w)
 		}
 	}
-	if strings.Contains(page, "Nothing blocks the merge") || strings.Contains(page, "A second model checked") {
-		t.Error("a clean verdict or a verifier that did not run")
+	if strings.Contains(page, "No open items") || strings.Contains(page, "A second model") {
+		t.Error("a clean page or a verifier that did not run")
 	}
 	// a file the review left out, all of it or a piece, isn't clean either
 	b, _, err = Render(Data{Repo: "o/r", Number: 1, SHA: "abc", Diff: d, Omitted: []string{"a.go"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if page = string(b); !strings.Contains(page, "1 file not fully reviewed") || !strings.Contains(page, "in the files reviewed") || strings.Contains(page, "Nothing blocks the merge") {
-		t.Error("omitted: a clean verdict")
+	if page = string(b); !strings.Contains(page, "They didn&#39;t fit the review.") || !strings.Contains(page, "1 of 1 files didn&#39;t fit the review.") || strings.Contains(page, "No open items") {
+		t.Error("omitted: a clean page")
 	}
 }
 
