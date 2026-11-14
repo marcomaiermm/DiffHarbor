@@ -755,9 +755,9 @@ func TestStillOpen(t *testing.T) {
 		fix  []int
 		want string
 	}{
-		{"repeat of an open thread", []review.Comment{again}, nil, "🟡 3/5 (1 major)"},
-		{"repeat on a resolved thread", []review.Comment{{Path: "b.go", Line: 5, Severity: "critical"}}, nil, "🟡 3/5 (1 major)"},
-		{"new one posted", []review.Comment{{Path: "c.go", Line: 1, Severity: "major"}}, nil, "🔴 4/5 (2 majors)"},
+		{"repeat of an open thread", []review.Comment{again}, nil, "🟡 3/5 · 1 major open"},
+		{"repeat on a resolved thread", []review.Comment{{Path: "b.go", Line: 5, Severity: "critical"}}, nil, "🟡 3/5 · 1 major open"},
+		{"new one posted", []review.Comment{{Path: "c.go", Line: 1, Severity: "major"}}, nil, "🔴 4/5 · 2 majors open"},
 		{"open one fixed", nil, []int{0}, "🟢 0/5"},
 	} {
 		r := review.Result{Comments: tc.cs, Fixed: tc.fix}

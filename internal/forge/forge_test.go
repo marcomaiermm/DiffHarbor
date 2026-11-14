@@ -216,9 +216,9 @@ func TestSticky(t *testing.T) {
 		LargeTicked(ticked, ticked) || LargeTicked(ticked, st.render("", "", "foot", nil)) || LargeTicked(body, body) {
 		t.Fatalf("ask: %s", body)
 	}
-	if !strings.HasPrefix(body, stickyMark+"\n> [!NOTE]\n> ⏳ busy") || !strings.Contains(body, "<summary><strong>Changes: 2 files</strong></summary>\n<dl>\n<dd>\n<br>\n\n| File | Change |\n|---|---|\n| `a.go` | x \\| y |") ||
+	if !strings.HasPrefix(body, stickyMark+"\n> [!NOTE]\n> ⏳ busy") || !strings.Contains(body, "<summary>📂 <strong>Changes: 2 files</strong></summary>\n<dl>\n<dd>\n<br>\n\n| File | Change |\n|---|---|\n| `a.go` | x \\| y |") ||
 		!strings.Contains(body, "```mermaid\nsequenceDiagram\n```") || !strings.Contains(body, "**Estimated code review effort:** 5 (Very complex)") ||
-		!strings.Contains(body, "<details open>\n<summary><strong>Walkthrough</strong></summary>\n<dl>\n<dd>\n<br>\n\ns\n\n<details>\n<summary><strong>Changes") {
+		!strings.Contains(body, "<details open>\n<summary><strong>Walkthrough</strong></summary>\n<dl>\n<dd>\n<br>\n\ns\n\n<details>\n<summary>📂 <strong>Changes") {
 		t.Fatalf("render: %s", body)
 	}
 	if got := parseState(body); got.SHA != "bbbbbbb" || got.Files["b.go"] != "new" {
@@ -265,12 +265,12 @@ func TestStickyOutline(t *testing.T) {
 			t.Errorf("above the walkthrough, want %q:\n%s", w, body)
 		}
 	}
-	_, code, _ := strings.Cut(walk, "<strong>Changes: 1 file</strong>") // the first folded section
+	_, code, _ := strings.Cut(walk, "📂 <strong>Changes: 1 file</strong>") // the first folded section
 	code, _, _ = strings.Cut(code, "</details>")
 	if !strings.Contains(code, "`api/a.go`") || strings.Contains(code, "a_test.go") || strings.Contains(code, "p1/x.go") || strings.Contains(code, "README") {
 		t.Errorf("code table: %s", code)
 	}
-	for _, w := range []string{"<strong>Tests: 1 file, 1 new case</strong></summary>", "<br>\n\n- TestA\n\n</dd>", "Data and docs: 1 file</strong></summary>\n<dl>\n<dd>\n<br>\n\n- `README.md`", "<strong>Mechanical: 3 files to skim", "- Same edit in 3 files (3)"} {
+	for _, w := range []string{"🧪 <strong>Tests: 1 file, 1 new case</strong></summary>", "<br>\n\n- TestA\n\n</dd>", "📄 <strong>Data and docs: 1 file</strong></summary>\n<dl>\n<dd>\n<br>\n\n- `README.md`", "🔁 <strong>Mechanical: 3 files to skim", "- Same edit in 3 files (3)"} {
 		if !strings.Contains(walk, w) {
 			t.Errorf("folded sections lack %q:\n%s", w, walk)
 		}
@@ -372,14 +372,14 @@ func TestRisked(t *testing.T) {
 		want    string
 	}{
 		{"nothing", nil, 0, "🟢 0/5"},
-		{"nits and folded", []review.Comment{c("nit", false), c("minor", true), c("major", true)}, 0, "🟢 1/5 (3 nits)"},
-		{"unknown severity is a minor", []review.Comment{c("", false)}, 0, "🟡 2/5 (1 minor)"},
-		{"unknown severity is a minor too", []review.Comment{c("high", false)}, 0, "🟡 2/5 (1 minor)"},
-		{"one major", []review.Comment{c("major", false), c("nit", false)}, 0, "🟡 3/5 (1 major, 1 nit)"},
-		{"two majors", []review.Comment{c("major", false), c("major", false)}, 0, "🔴 4/5 (2 majors)"},
-		{"failing tests", []review.Comment{c("minor", false)}, 2, "🔴 4/5 (2 failing tests, 1 minor)"},
-		{"failing alone", nil, 1, "🔴 4/5 (1 failing test)"},
-		{"critical", []review.Comment{c("critical", false), c("major", false)}, 0, "🔴 5/5 (1 critical, 1 major)"},
+		{"nits and folded", []review.Comment{c("nit", false), c("minor", true), c("major", true)}, 0, "🟢 1/5 · 3 nits open"},
+		{"unknown severity is a minor", []review.Comment{c("", false)}, 0, "🟡 2/5 · 1 minor open"},
+		{"unknown severity is a minor too", []review.Comment{c("high", false)}, 0, "🟡 2/5 · 1 minor open"},
+		{"one major", []review.Comment{c("major", false), c("nit", false)}, 0, "🟡 3/5 · 1 major, 1 nit open"},
+		{"two majors", []review.Comment{c("major", false), c("major", false)}, 0, "🔴 4/5 · 2 majors open"},
+		{"failing tests", []review.Comment{c("minor", false)}, 2, "🔴 4/5 · 2 failing tests, 1 minor open"},
+		{"failing alone", nil, 1, "🔴 4/5 · 1 failing test open"},
+		{"critical", []review.Comment{c("critical", false), c("major", false)}, 0, "🔴 5/5 · 1 critical, 1 major open"},
 	} {
 		if got := Risked(tc.cs, tc.failing).String(); got != tc.want {
 			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
@@ -387,7 +387,7 @@ func TestRisked(t *testing.T) {
 	}
 	st := State{SHA: "a", Risk: &Risk{Score: 3, Why: "1 major"}}
 	body := st.render("", "", "", nil)
-	if !strings.Contains(body, "</details>\n\n**Merge Risk:** **🟡 3/5 (1 major)** · up to `a`") || parseState(body).Risk.Score != 3 {
+	if !strings.Contains(body, "</details>\n\n**Merge Risk:** 🟡 3/5 · 1 major open · up to `a`") || parseState(body).Risk.Score != 3 {
 		t.Fatalf("render: %s", body)
 	}
 	for _, score := range []int{-1, 6, 99} { // an edited sticky mustn't panic the render
