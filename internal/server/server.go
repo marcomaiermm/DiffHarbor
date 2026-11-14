@@ -65,9 +65,9 @@ func review(e *forge.Event, giveUp, reviewJob func() error) (err error) {
 	key, queued := prKey(e), push{e.PullRequest.Head.SHA, e}
 	latest.Lock()
 	current := latest.m[key] == queued
-	n := 0
+	n, cerr := 0, error(nil)
 	if current {
-		n = countStart(pendingFile(key), e) // under latest: a close or push meanwhile doesn't get its file back
+		n, cerr = countStart(pendingFile(key), e) // under latest: a close or push meanwhile doesn't get its file back
 	}
 	latest.Unlock()
 	if !current {
@@ -81,17 +81,32 @@ func review(e *forge.Event, giveUp, reviewJob func() error) (err error) {
 		}
 		latest.Unlock()
 	}()
+	if cerr != nil { // not run uncounted: a review that stops the server would run on every start
+		keep = true
+		return fmt.Errorf("start count: %w", cerr)
+	}
 	if n > maxStarts {
 		log.Println(e.Key(), "not reviewed: the server stopped during each of its last", maxStarts, "runs")
-		err = giveUp()
-		keep = err != nil
-		return err
+		if err = giveUp(); !errors.Is(err, job.ErrMoved) {
+			keep = err != nil
+			return err
+		}
+		n = 1 // the runs that stopped were on the old head: GiveUp's refresh put the new one in e
+		latest.Lock()
+		if latest.m[key] == queued {
+			err = saveStarts(pendingFile(key), e, n)
+		}
+		latest.Unlock()
+		if err != nil {
+			keep = true
+			return fmt.Errorf("start count: %w", err)
+		}
 	}
 	if err = reviewJob(); errors.Is(err, proc.ErrCleanup) {
 		keep = true
 		latest.Lock()
 		if latest.m[key] == queued { // it never ran
-			saveStarts(pendingFile(key), e, n-1)
+			_ = saveStarts(pendingFile(key), e, n-1) // a start too many at worst
 		}
 		latest.Unlock()
 	}
@@ -192,10 +207,11 @@ func (p *pool) start() {
 func (p *pool) exec(ctx context.Context, e *forge.Event, t *task) {
 	key, rk := e.Key(), prKey(e) // before the job changes e
 	chat, isChat := chats.LoadAndDelete(e)
+	drop := isChat
 	defer func() {
 		t.cancel() // revokes the job's vault tokens: git's remote, Pi's keys
 		done(rk)
-		if isChat {
+		if drop {
 			_ = proc.Remove(chat.(string)) //nolint:forcetypeassert // only asked and resume store, strings
 		}
 		p.mu.Lock()
@@ -205,9 +221,16 @@ func (p *pool) exec(ctx context.Context, e *forge.Event, t *task) {
 		p.mu.Unlock()
 	}()
 	defer proc.Recovered(func(err error) { log.Println(key, err) })
-	if isChat && countStart(chat.(string), e) > maxStarts { //nolint:forcetypeassert // as above
-		log.Println(key, "not answered: the server stopped during each of its last", maxStarts, "runs")
-		return
+	if isChat {
+		switch n, err := countStart(chat.(string), e); { //nolint:forcetypeassert // as above
+		case err != nil: // not run uncounted, as a review; kept for the next start
+			drop = false
+			log.Println(key, "not answered now: start count:", err)
+			return
+		case n > maxStarts:
+			log.Println(key, "not answered: the server stopped during each of its last", maxStarts, "runs")
+			return
+		}
 	}
 	if err := p.run(ctx, e); err != nil {
 		log.Println(key, err)
@@ -553,21 +576,16 @@ type pending struct {
 
 // countStart counts one more start of e's job in f, a pending, and returns how many there were. f's one writer: a
 // review's holds latest.
-func countStart(f string, e *forge.Event) int {
+func countStart(f string, e *forge.Event) (int, error) {
 	p := pending{Event: &forge.Event{}}
 	b, err := os.ReadFile(f) //nolint:gosec // a pending or chat file
 	if err != nil || json.Unmarshal(b, &p) != nil || p.PullRequest.Head.SHA != e.PullRequest.Head.SHA {
 		p.Starts = 0
 	}
-	saveStarts(f, e, p.Starts+1)
-	return p.Starts + 1
+	return p.Starts + 1, saveStarts(f, e, p.Starts+1)
 }
 
-func saveStarts(f string, e *forge.Event, n int) {
-	if err := save(f, pending{e, n}); err != nil {
-		log.Println(e.Key(), "pending:", err)
-	}
-}
+func saveStarts(f string, e *forge.Event, n int) error { return save(f, pending{e, n}) }
 
 var errFull = errors.New("queue full")
 
@@ -580,7 +598,8 @@ func asked(e *forge.Event) error {
 	if e.Kind == "pull_request" {
 		return nil
 	}
-	f := eventFile("chats", fmt.Sprintf("%s-%s-%d-%s", e.Forge, e.Kind, e.Comment.ID, rand.Text()))
+	// by the time first: resume answers in the order they came (Glob sorts)
+	f := eventFile("chats", fmt.Sprintf("%d-%s-%s-%d-%s", time.Now().UnixNano(), e.Forge, e.Kind, e.Comment.ID, rand.Text()))
 	if err := save(f, pending{Event: e}); err != nil {
 		return err
 	}

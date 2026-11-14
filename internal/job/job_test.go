@@ -805,13 +805,14 @@ func (p *givePR) Note(id int64, b string) (int64, error) {
 	return p.skipPR.Note(id, b)
 }
 
-// GiveUp marks the PR's head now, as the runs that stopped saw it; a note it couldn't post is its error, so the server
-// keeps the review pending; a closed PR needs none.
+// GiveUp marks the queued head failed; a note it couldn't post is its error, so the server keeps the review pending.
+// A head that moved since is ErrMoved (the runs that stopped were on another), a closed PR needs nothing.
 func TestGiveUp(t *testing.T) {
 	e := &forge.Event{}
-	e.PullRequest.Head.SHA = strings.Repeat("a", 40)
-	pr := &givePR{skipPR: &skipPR{}, e: e, head: strings.Repeat("b", 40), now: "open"}
-	if err := GiveUp(giveForge{pr: pr}, e, 3); err != nil || len(pr.notes) != 1 || !strings.Contains(pr.notes[0], "Review of `bbbbbbb` not retried") ||
+	a := strings.Repeat("a", 40)
+	e.PullRequest.Head.SHA = a
+	pr := &givePR{skipPR: &skipPR{}, e: e, head: a, now: "open"}
+	if err := GiveUp(giveForge{pr: pr}, e, 3); err != nil || len(pr.notes) != 1 || !strings.Contains(pr.notes[0], "Review of `aaaaaaa` not retried") ||
 		pr.status != "error Review failed: the server stopped during it" {
 		t.Fatalf("%v %q %q", err, pr.notes, pr.status)
 	}
@@ -819,7 +820,11 @@ func TestGiveUp(t *testing.T) {
 	if err := GiveUp(giveForge{pr: pr}, e, 3); err == nil {
 		t.Fatal("a note that isn't out is no error")
 	}
-	pr.noteErr, pr.now, pr.notes = nil, "closed", nil
+	pr.noteErr, pr.notes, pr.head = nil, nil, strings.Repeat("b", 40)
+	if err := GiveUp(giveForge{pr: pr}, e, 3); !errors.Is(err, ErrMoved) || len(pr.notes) != 0 {
+		t.Fatalf("moved head: %v %q", err, pr.notes)
+	}
+	pr.now = "closed"
 	if err := GiveUp(giveForge{pr: pr}, e, 3); err != nil || len(pr.notes) != 0 {
 		t.Fatalf("closed PR: %v %q", err, pr.notes)
 	}

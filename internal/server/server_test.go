@@ -812,11 +812,20 @@ func TestReviewGivesUp(t *testing.T) {
 	t.Cleanup(func() { latest.Lock(); delete(latest.m, key); latest.Unlock() })
 	pushed(e)
 	var giveErr error
-	run := func(job func() error) (ran, gave bool) {
+	moveTo := "" // GiveUp's refresh finds this head
+	run := func(work func() error) (ran, gave bool) {
 		latest.Lock()
 		latest.m[key] = push{e.PullRequest.Head.SHA, e} // as resume does after each restart
 		latest.Unlock()
-		review(e, func() error { gave = true; return giveErr }, func() error { ran = true; return job() })
+		giveUp := func() error {
+			gave = true
+			if moveTo != "" {
+				e.PullRequest.Head.SHA = moveTo
+				return job.ErrMoved
+			}
+			return giveErr
+		}
+		review(e, giveUp, func() error { ran = true; return work() })
 		return ran, gave
 	}
 	stop := func() error { return nil } // the server stops mid-run: done never runs
@@ -854,6 +863,28 @@ func TestReviewGivesUp(t *testing.T) {
 	e.PullRequest.Head.SHA = "def"
 	pushed(e)
 	starts(maxStarts)
+	moveTo = "ghi" // the head moved while the server was down: its review runs, its count starts over
+	if ran, gave := run(stop); !ran || !gave || pendingStarts(t, key) != 1 || e.PullRequest.Head.SHA != "ghi" {
+		t.Fatalf("moved head: ran %v, gave %v, starts %d", ran, gave, pendingStarts(t, key))
+	}
+	moveTo = ""
+	starts(maxStarts - 1)
+	// a start whose count can't be saved doesn't run: a review that stops the server would run on every start
+	_ = os.Remove(pendingFile(key))
+	if err := os.MkdirAll(pendingFile(key), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if ran, _ := run(stop); ran {
+		t.Fatal("ran uncounted")
+	}
+}
+
+func pendingStarts(t *testing.T, key string) int {
+	t.Helper()
+	p := pending{Event: &forge.Event{}}
+	b, _ := os.ReadFile(pendingFile(key))
+	_ = json.Unmarshal(b, &p)
+	return p.Starts
 }
 
 // An older event of a head a newer one (a retarget) has in latest isn't queued: it would replace the newer one.
@@ -890,12 +921,17 @@ func TestResumeChat(t *testing.T) {
 	if asked(e) != nil || asked(&edit) != nil || len(files()) != 2 {
 		t.Fatal("not one file per delivery:", files())
 	}
+	chats.Clear()
+	q := make(chan *forge.Event, 2)
+	if resume(queue(q)); len(q) != 2 || (<-q).Action != "created" || (<-q).Action != "edited" {
+		t.Fatal("not resumed in the order they came")
+	}
+	chats.Store(e, files()[0])
 	p.exec(t.Context(), e, &task{cancel: func() {}})
 	if len(ran) != 1 || len(files()) != 1 {
 		t.Fatal("the first's job removed the edit's file:", files())
 	}
 	chats.Clear() // a restart
-	q := make(chan *forge.Event, 2)
 	resume(queue(q))
 	if len(q) != 1 || len(files()) != 1 {
 		t.Fatal("not resumed, or off disk before it ran")
