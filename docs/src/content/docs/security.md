@@ -61,7 +61,7 @@ Within that:
 - **The container's network** and its limits:
   - `localhost:3000/r/`. There is no SSO there, it is in front of the proxy only. A report still opens only by the secret in its link, which only that PR's comment holds.
   - On a cloud VM, the metadata endpoint. Block `169.254.169.254` for the container there.
-- **The job's tokens** (same uid): it can spend model tokens and fetch the repo it already has. It can't keep a key.
+- **The job's tokens** (same uid): it can spend model tokens, at most 100 requests per lent key, and fetch the repo it already has. It can't keep a key.
 - **The registries' packages** while the checks install. So a PR from a fork gets no `NPM_REGISTRIES`.
 - **The docs the review reads** reach the model, so a finding can quote them into the PR's comments. So a PR from a fork gets no `KNOWLEDGE_ADAPTERS`, and a public repo none unless `knowledge_public`.
 - **Credentials Pi gets itself**, readable by the PR's code during the run:
