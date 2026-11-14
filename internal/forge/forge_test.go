@@ -425,12 +425,12 @@ func TestRisked(t *testing.T) {
 	}
 }
 
-// A GET goes again after a 5xx or a rate limit, a POST doesn't: it may have landed.
+// A GET goes again after a 5xx or a short rate limit, a POST doesn't: it may have landed. A long limit is returned.
 func TestSendRetries(t *testing.T) {
-	calls := 0
+	calls, after := 0, "0"
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if calls++; calls < 3 {
-			w.Header().Set("Retry-After", "0")
+			w.Header().Set("Retry-After", after)
 			w.WriteHeader(http.StatusTooManyRequests)
 		}
 	}))
@@ -452,5 +452,13 @@ func TestSendRetries(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != http.StatusTooManyRequests || calls != 1 {
 		t.Fatalf("POST: %d after %d calls", res.StatusCode, calls)
+	}
+	calls, after = 0, "3600"
+	if res, err = Send(s.Client(), get); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusTooManyRequests || calls != 1 {
+		t.Fatalf("an hour's limit: %d after %d calls", res.StatusCode, calls)
 	}
 }

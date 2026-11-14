@@ -207,7 +207,8 @@ func MentionOf(handles ...string) *regexp.Regexp {
 }
 
 // Send sends req with c. A GET goes again, up to twice, on a network error, a 5xx or a rate limit (429, GitHub's 403
-// with Retry-After): a forge's hiccup shouldn't fail a review that already paid for its model passes.
+// with Retry-After) of at most 30 s: a forge's hiccup shouldn't fail a review that already paid for its model passes.
+// A longer limit is returned as is, as are writes and GraphQL reads (POSTs): sent twice, a comment posts twice.
 func Send(c *http.Client, req *http.Request) (*http.Response, error) {
 	for try := 0; ; try++ {
 		res, err := c.Do(req) //nolint:gosec // the forge clients' own API URLs
@@ -217,7 +218,9 @@ func Send(c *http.Client, req *http.Request) (*http.Response, error) {
 		wait := time.Second << (2 * try) // 1 s, 4 s
 		if err == nil {
 			if s, e := strconv.Atoi(res.Header.Get("Retry-After")); e == nil {
-				wait = min(time.Duration(s)*time.Second, 30*time.Second)
+				if wait = time.Duration(s) * time.Second; wait > 30*time.Second {
+					return res, nil // the job's other calls would hit it too
+				}
 			}
 			res.Body.Close()
 		}
