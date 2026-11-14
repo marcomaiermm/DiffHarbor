@@ -424,6 +424,7 @@ func bodyProfile(body string) string {
 //
 //nolint:gocognit // one job step by step, each step a few lines
 func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.Event) (err error) {
+	start := time.Now()
 	p, err := f.Open(e)
 	if err != nil {
 		return err
@@ -532,7 +533,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		return err
 	}
 	defer sb.Close()
-	sp := Spend{Time: time.Now(), Job: "chat", Key: e.Key(), Result: "failed"} // ok once answered: a panic stays failed
+	sp := Spend{Time: start, Job: "chat", Key: e.Key(), Result: "failed"} // ok once answered: a panic stays failed
 	defer func() { logUsage(ctx, sb, sp, err) }()                              // before sb.Close: it reads the sessions
 	read, err := p.ReadToken()
 	if err != nil {

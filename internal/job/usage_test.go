@@ -39,7 +39,10 @@ func TestLogUsage(t *testing.T) {
 	writeSession(t, dir, "review-1", `{"type":"session","version":3}`, user,
 		turn("openai", "gpt-6.1-terra", 1000, 0, 0, 100, 0.01), turn("openai", "gpt-6.1-terra", 200, 1000, 0, 50, 0.002))
 	writeSession(t, dir, "verify-1.failed", turn("openai", "gpt-6-luna", 500, 0, 0, 10, 0.001))
-	writeSession(t, dir, "verify-1", turn("anthropic", "claude-haiku-5-5", 400, 0, 300, 20, 0.003))
+	writeSession(t, dir, "verify-1", turn("anthropic", "claude-haiku-5-5", 400, 0, 300, 20, 0.003),
+		`{"type":"compaction","summary":"the diff","usage":{"input":100,"output":10,"cost":{"total":0.004}}}`)
+	writeSession(t, dir, "explain-1", `{"type":"session","version":3}`) // Pi failed before a model answered: no pass
+	writeSession(t, dir, "chat-1", turn("openai", "the diff, in a model name", 1, 0, 0, 1, 0))
 
 	start := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
 	logUsage(context.Background(), sb, Spend{Time: start, Job: "review", Key: "o/r#1", Result: "ok", Findings: 2}, nil)
@@ -61,7 +64,7 @@ func TestLogUsage(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &s); err != nil {
 		t.Fatal(err)
 	}
-	if s.Result != "ok" || s.Findings != 2 || s.Cost != 0.016 || len(s.Passes) != 3 {
+	if s.Result != "ok" || s.Findings != 2 || s.Cost != 0.02 || len(s.Passes) != 4 || s.Unread != 1 {
 		t.Errorf("line: %+v", s)
 	}
 	byName := map[string]int{}
@@ -72,11 +75,14 @@ func TestLogUsage(t *testing.T) {
 	if r.Turns != 2 || r.Input != 1200 || r.CacheRead != 1000 || r.Output != 150 || r.Reasoning != 10 || r.Ms != 3000 || r.Model != "openai/gpt-6.1-terra" {
 		t.Errorf("review pass: %+v", r)
 	}
-	if v := s.Passes[byName["verify-1"]]; v.CacheWrite != 300 || v.Model != "anthropic/claude-haiku-5-5" {
+	if v := s.Passes[byName["verify-1"]]; v.Turns != 1 || v.Input != 500 || v.CacheWrite != 300 || v.Model != "anthropic/claude-haiku-5-5" {
 		t.Errorf("verify pass: %+v", v)
 	}
 	if _, ok := byName["verify-1.failed"]; !ok {
 		t.Error("the pass the fallback took over from is missing")
+	}
+	if _, ok := byName["explain-1"]; ok || s.Passes[byName["chat-1"]].Model != "?" {
+		t.Errorf("passes: %+v", s.Passes)
 	}
 	for i, want := range []string{"ok", "failed", "stopped"} {
 		var got Spend
@@ -90,12 +96,15 @@ func TestLogUsage(t *testing.T) {
 	}
 }
 
+// A stage runs until the next starts; a job that fails mid-stage still has its time (logUsage ends it).
 func TestStage(t *testing.T) {
-	s := Spend{Time: time.Now().Add(-3 * time.Second)}
+	var s Spend
 	s.stage("checkout")
-	s.mark = s.mark.Add(-2 * time.Second) // two more seconds pass
+	s.mark = s.mark.Add(-3 * time.Second) // three seconds pass
 	s.stage("analyze")
-	if s.Stages["checkout"] != 3 || s.Stages["analyze"] != 2 {
+	s.mark = s.mark.Add(-2 * time.Second)
+	s.stage("")
+	if len(s.Stages) != 2 || s.Stages["checkout"] != 3 || s.Stages["analyze"] != 2 {
 		t.Errorf("stages: %v", s.Stages)
 	}
 }

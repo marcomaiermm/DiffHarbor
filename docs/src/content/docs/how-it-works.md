@@ -176,9 +176,9 @@ PRs counted before findings were listed stay in the counts only: the decisions s
 Every review, chat answer and close that ran a model adds a line to `/data/usage/<yyyy-mm>.jsonl`:
 
 - the job (`review`, `chat`, `decide`), the PR and, for a review, its head commit and whether it was full or incremental,
-- the result (`ok`, `stopped` by a newer push or a close, `failed`), the seconds in all and, for a review, per stage: checkout, context (threads, rules, ticket, docs), analyze (checks and the model passes), post,
+- the result (`ok`, `partial` with files left unreviewed, `stopped` by a newer push or a close, `failed`), the seconds in all and, for a review, per stage: checkout, context (threads, rules, ticket, docs), analyze (checks and the model passes), post. A failed review's stages end where it stopped,
 - the characters of diff reviewed, the findings verify kept and dropped, and those dropped as off a push's lines,
-- per pass the model that answered, its turns, input, cache-read, cache-write, output and reasoning tokens, Pi's cost and the model time. A pass with tools the fallback took over from is listed apart as `<name>.failed`; one without tools lists both models joined by `+`.
+- per pass the model that answered, its turns, input, cache-read, cache-write, output and reasoning tokens, Pi's cost and the model time, with Pi's context compactions. `unread` counts sessions that couldn't be read: the cost is then a floor. A pass with tools the fallback took over from is listed apart as `<name>.failed`; one without tools lists both models joined by `+`.
 
 Only counts and names, never what a prompt or reply said. What a month cost, by job:
 

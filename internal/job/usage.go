@@ -22,25 +22,30 @@ type Spend struct {
 	Key       string             `json:"key"`
 	SHA       string             `json:"sha,omitempty"`
 	Kind      string             `json:"kind,omitempty"` // a review's: full, incremental
-	Result    string             `json:"result"`         // ok, stopped, failed
+	Result    string             `json:"result"`         // ok, partial (files left unreviewed), stopped, failed
 	Secs      float64            `json:"secs"`
 	Stages    map[string]float64 `json:"stages,omitempty"` // a review's seconds per stage: checkout, context, analyze, post
-	DiffChars int                `json:"diff_chars,omitempty"`
+	DiffChars int                `json:"diff_chars,omitempty"` // runes
 	Findings  int                `json:"findings,omitempty"` // what verify kept
 	Dropped   int                `json:"dropped,omitempty"`  // what verify dropped
 	OffPush   int                `json:"off_push,omitempty"` // kept, then dropped as off a push's lines
 	Cost      float64            `json:"cost"`
+	Unread    int                `json:"unread,omitempty"` // sessions that couldn't be read: cost and passes are a floor
 	Passes    []agent.Pass       `json:"passes"`
-	mark      time.Time          // where the running stage began
+	cur       string             // the running stage, since mark
+	mark      time.Time
 }
 
-// stage closes the stage running since the last one (or Time) as name.
-func (s *Spend) stage(name string) {
+// stage ends the running stage and starts next; "" only ends it. A failed job's last stage ends in logUsage.
+func (s *Spend) stage(next string) {
 	now := time.Now()
-	if s.Stages == nil {
-		s.Stages, s.mark = map[string]float64{}, s.Time
+	if s.cur != "" {
+		if s.Stages == nil {
+			s.Stages = map[string]float64{}
+		}
+		s.Stages[s.cur] = secs(now.Sub(s.mark))
 	}
-	s.Stages[name], s.mark = secs(now.Sub(s.mark)), now
+	s.cur, s.mark = next, now
 }
 
 func secs(d time.Duration) float64 { return math.Round(d.Seconds()*10) / 10 }
@@ -50,10 +55,12 @@ var usageMu sync.Mutex
 // logUsage appends s with the passes of sb's sessions, before sb goes. err is the job's: it makes the result stopped
 // or failed, else s.Result stands. A job no model ran in writes nothing.
 func logUsage(ctx context.Context, sb *proc.Sandbox, s Spend, err error) {
+	s.stage("")
+	s.Secs = secs(time.Since(s.Time)) // before the sessions are read: that's not the job's
 	// not ctx: a stopped job's passes cost too
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
-	if s.Passes = agent.Passes(rctx, sb); len(s.Passes) == 0 {
+	if s.Passes, s.Unread = agent.Passes(rctx, sb); len(s.Passes)+s.Unread == 0 {
 		return
 	}
 	switch {
@@ -62,7 +69,6 @@ func logUsage(ctx context.Context, sb *proc.Sandbox, s Spend, err error) {
 	case err != nil:
 		s.Result = "failed"
 	}
-	s.Secs = secs(time.Since(s.Time))
 	for _, p := range s.Passes {
 		s.Cost += p.Cost
 	}

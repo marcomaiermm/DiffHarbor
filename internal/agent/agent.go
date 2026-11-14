@@ -387,45 +387,70 @@ type Pass struct {
 	Ms         int     `json:"ms"`        // model time
 }
 
-// Passes reads the usage of sb's pass sessions, by name. Through sb.ReadFile: the job's user, so PR code, can put
-// a symlink or a FIFO in their place.
-func Passes(ctx context.Context, sb *proc.Sandbox) []Pass {
-	var ps []Pass
+// usage is a Pi session line's: an assistant message's, or a compaction's (its summary call).
+type usage struct {
+	Input, Output, CacheRead, CacheWrite, Reasoning int
+	Cost                                            struct{ Total float64 }
+}
+
+// named is a pass or model name as the usage log takes it: PR code, as the sessions' user, could write any text there.
+var named = regexp.MustCompile(`^[\w.:/@+-]{1,120}$`)
+
+func safe(s string) string {
+	if named.MatchString(s) {
+		return s
+	}
+	return "?"
+}
+
+// Passes reads the usage of sb's pass sessions, by name, and how many couldn't be read. Through sb.ReadFile: the
+// job's user, so PR code, can put a symlink or a FIFO in their place. A session no model answered in is no pass.
+func Passes(ctx context.Context, sb *proc.Sandbox) (ps []Pass, unread int) {
 	fs, _ := filepath.Glob(filepath.Join(sb.Dir, "*.session"))
 	for _, f := range fs {
 		data, err := sb.ReadFile(ctx, f)
 		if err != nil {
+			unread++
 			continue
 		}
-		p := Pass{Name: strings.TrimSuffix(filepath.Base(f), ".session")}
+		p := Pass{Name: safe(strings.TrimSuffix(filepath.Base(f), ".session"))}
 		var models []string
+		used := false
 		for l := range bytes.SplitSeq(data, []byte("\n")) {
 			var e struct {
+				Type    string
+				Usage   *usage // a compaction's
 				Message struct {
 					Provider, Model string
 					DurationMs      int
-					Usage           *struct {
-						Input, Output, CacheRead, CacheWrite, Reasoning int
-						Cost                                            struct{ Total float64 }
-					}
+					Usage           *usage
 				}
 			}
-			if json.Unmarshal(l, &e) != nil || e.Message.Usage == nil {
+			if json.Unmarshal(l, &e) != nil {
 				continue
 			}
-			m, x := e.Message, e.Message.Usage
-			if id := m.Provider + "/" + m.Model; !slices.Contains(models, id) {
+			m, x, turns := e.Message, e.Message.Usage, 1
+			if e.Type == "compaction" {
+				x, turns = e.Usage, 0
+			}
+			if x == nil {
+				continue
+			}
+			used = true
+			if id := safe(m.Provider + "/" + m.Model); turns > 0 && !slices.Contains(models, id) {
 				models = append(models, id)
 			}
 			p.add(Pass{
-				Turns: 1, Input: x.Input, CacheRead: x.CacheRead, CacheWrite: x.CacheWrite, Output: x.Output,
+				Turns: turns, Input: x.Input, CacheRead: x.CacheRead, CacheWrite: x.CacheWrite, Output: x.Output,
 				Reasoning: x.Reasoning, Cost: x.Cost.Total, Ms: m.DurationMs,
 			})
 		}
-		p.Model = strings.Join(models, "+")
-		ps = append(ps, p)
+		if used {
+			p.Model = strings.Join(models, "+")
+			ps = append(ps, p)
+		}
 	}
-	return ps
+	return ps, unread
 }
 
 // add sums q's counts into p.
@@ -443,15 +468,20 @@ func (p *Pass) add(q Pass) {
 // Usage is Passes as a table with a total, for benches.
 func Usage(ctx context.Context, sb *proc.Sandbox) string {
 	row := func(p Pass) string {
-		return fmt.Sprintf("%-10s %2d turns  in %8d  cached %8d  written %7d  out %6d  $%.3f  %s", p.Name, p.Turns, p.Input, p.CacheRead, p.CacheWrite, p.Output, p.Cost, p.Model)
+		return fmt.Sprintf("%-10s %2d turns  in %8d  cached %8d  written %7d  out %6d  reasoning %6d  %5.1fs  $%.3f  %s",
+			p.Name, p.Turns, p.Input, p.CacheRead, p.CacheWrite, p.Output, p.Reasoning, float64(p.Ms)/1000, p.Cost, p.Model)
 	}
 	var b strings.Builder
 	sum := Pass{Name: "total"}
-	for _, p := range Passes(ctx, sb) {
+	ps, unread := Passes(ctx, sb)
+	for _, p := range ps {
 		b.WriteString(row(p) + "\n")
 		sum.add(p)
 	}
 	b.WriteString(row(sum))
+	if unread > 0 {
+		fmt.Fprintf(&b, "\n%d session(s) unread: the total is a floor", unread)
+	}
 	return b.String()
 }
 
