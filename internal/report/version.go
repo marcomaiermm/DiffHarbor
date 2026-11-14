@@ -4,8 +4,6 @@ import (
 	"cmp"
 	"maps"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -48,20 +46,6 @@ func stamp(v view, ids map[string]string) Version {
 
 // Sev is the severity of a finding of New or Fixed, "path: title": the one it has now or had at Prev.
 func (s *since) Sev(k string) string { return cmp.Or(s.now[k], s.Prev.Weights[k]) }
-
-// Say is how many findings it fixed and added: "1 finding fixed, 1 new".
-func (s *since) Say() string {
-	var p []string
-	if n := len(s.Fixed); n > 0 {
-		p = append(p, plural(n, "finding", "findings")+" fixed")
-	}
-	if n := len(s.New); n > 0 && len(p) > 0 {
-		p = append(p, strconv.Itoa(n)+" new")
-	} else if n > 0 {
-		p = append(p, plural(n, "new finding", "new findings"))
-	}
-	return strings.Join(p, ", ")
-}
 
 // compare marks the files whose change differs from prev's and lists what else changed; nil without prev.
 func compare(prev *Version, now Version, files map[string]*file) *since {

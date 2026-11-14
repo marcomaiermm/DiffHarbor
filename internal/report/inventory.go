@@ -5,7 +5,6 @@ import (
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
 	"fmt"
-	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -162,6 +161,9 @@ type bucket struct {
 	Items            []item
 	More             int // past maxItems
 }
+
+// wip is a commit subject that says nothing of the change: its lines keep no commit.
+var wip = regexp.MustCompile(`(?i)^(wip\b|fixup!|squash!|amend!|typo|lint|fmt\b|format\b|oops|tmp\b|\.+$|fix(es)?$|changes?$|updates?$|address(ed)? (review|comments|feedback)|(pr |review )(comments|feedback))`)
 
 // inventory is what the PR did to its code's declarations, by kind: new, signature changed, behaviour changed,
 // moved and changed, moved or renamed, removed. A new declaration and a removed one are the same moved when their
@@ -416,62 +418,4 @@ func sentence(doc string) string {
 		doc = doc[:i+1]
 	}
 	return cut(doc, 200)
-}
-
-// apkg is a directory's rows of the inventory: its API before and after.
-type apkg struct {
-	Pkg   string
-	Items []arow
-}
-
-// arow is a row with its mark: "+" new, "~" changed, "→" moved, "−" removed, and what to know of it at a glance.
-type arow struct {
-	item
-	Mark, Word string
-	Info       []string // "behaviour", "from a.go:3, unchanged"
-}
-
-// API is the inventory by directory, each in the order new, changed, moved, removed.
-func (v view) API() []apkg {
-	marks := map[string][2]string{"new": {"+", "new"}, "signature": {"~", "changed"}, "body": {"~", "changed"},
-		"reworked": {"→", "moved"}, "moved": {"→", "moved"}, "removed": {"−", "removed"}}
-	var ps []apkg
-	at := map[string]int{}
-	for _, g := range v.Inventory {
-		for _, it := range g.Items {
-			r := arow{item: it, Mark: marks[g.Key][0], Word: marks[g.Key][1]}
-			switch g.Key {
-			case "signature":
-				r.Info = []string{"signature"}
-			case "body":
-				r.Info = []string{"behaviour"}
-			case "reworked", "moved":
-				from := "from line " + strconv.Itoa(it.OldLine)
-				if it.From != "" {
-					from = "from " + path.Base(it.From) + ":" + strconv.Itoa(it.OldLine)
-				}
-				if it.Was != "" {
-					from += " as " + it.Was
-				}
-				r.Info = []string{from + map[bool]string{true: ", changed", false: ", unchanged"}[g.Key == "reworked"]}
-			}
-			p := path.Dir(it.File)
-			k, ok := at[p]
-			if !ok {
-				k, at[p] = len(ps), len(ps)
-				ps = append(ps, apkg{Pkg: p})
-			}
-			ps[k].Items = append(ps[k].Items, r)
-		}
-	}
-	slices.SortStableFunc(ps, func(a, b apkg) int { return strings.Compare(a.Pkg, b.Pkg) })
-	return ps
-}
-
-// APIMore is the rows past maxItems the inventory leaves out.
-func (v view) APIMore() (n int) {
-	for _, g := range v.Inventory {
-		n += g.More
-	}
-	return n
 }

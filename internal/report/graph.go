@@ -141,92 +141,6 @@ func build(all []changed, used map[int]bool, edges []edge, i int) *flow {
 	return g
 }
 
-// deps is which changed directories use which: a directory's changed code calls or names another's.
-type deps struct {
-	New    []newDep
-	Old    []string // "a → b": every such use joins declarations that were there before the PR
-	Cycles int      // groups of directories that use each other
-}
-
-// newDep is a use between two directories that only declarations the PR adds make: new to the PR's code, maybe
-// not to the directories, whose other code the index doesn't read here.
-type newDep struct {
-	From, To string
-	Why      string // "Handle uses Save", and how many more
-	Cycle    bool   // To uses From back, through others maybe
-}
-
-// matrix is the PR's changed directories and their uses of each other; nil without codegraph's index, with no use
-// between two of them or past maxDirs.
-func matrix(steps []step, syms map[string][]Symbol) *deps {
-	all, byDecl := decls(steps)
-	edges, _ := arrows(all, byDecl, syms, -1)
-	dirOf := func(f *file) string { return path.Dir(f.Short) }
-	var dirs []string
-	seen := map[string]bool{}
-	for _, d := range all {
-		if k := dirOf(d.f); !seen[k] {
-			seen[k], dirs = true, append(dirs, k)
-		}
-	}
-	slices.Sort(dirs)
-	if len(dirs) < 2 || len(dirs) > maxDirs {
-		return nil
-	}
-	at := map[string]int{}
-	for k, d := range dirs {
-		at[d] = k
-	}
-	n := len(dirs)
-	w, fresh, pairs := make([][]int, n), make([][]int, n), make([][][]string, n)
-	for r := range n {
-		w[r], fresh[r], pairs[r] = make([]int, n), make([]int, n), make([][]string, n)
-	}
-	cross := false
-	for _, e := range edges {
-		a, b := at[dirOf(all[e.a].f)], at[dirOf(all[e.b].f)]
-		w[a][b]++
-		if all[e.a].c.State == "new" || all[e.b].c.State == "new" {
-			fresh[a][b]++
-		}
-		pairs[a][b] = append(pairs[a][b], all[e.a].c.Name+" uses "+all[e.b].c.Name)
-		cross = cross || a != b
-	}
-	if !cross {
-		return nil
-	}
-	_, reach := order(w)
-	m := &deps{}
-	counted := make([]bool, n) // a cycle is counted by its first directory
-	for i := range n {
-		cycle := false
-		for j := i + 1; j < n && !counted[i]; j++ {
-			if reach[i][j] && reach[j][i] {
-				counted[j], cycle = true, true
-			}
-		}
-		if cycle {
-			m.Cycles++
-		}
-	}
-	for a := range n {
-		for b := range n {
-			switch {
-			case a == b || w[a][b] == 0:
-			case fresh[a][b] == w[a][b]:
-				why := pairs[a][b][0]
-				if k := len(pairs[a][b]) - 1; k > 0 {
-					why += fmt.Sprintf(" and %d more", k)
-				}
-				m.New = append(m.New, newDep{dirs[a], dirs[b], why, reach[b][a]})
-			default:
-				m.Old = append(m.Old, dirs[a]+" → "+dirs[b])
-			}
-		}
-	}
-	return m
-}
-
 // order is the nodes of the weighted graph w so that its edges point forward where they can: next always one that
 // no node left reaches without it reaching that one back, so an edge points back only within a cycle; of those
 // the one that uses the others most and is used least. reach is which node reaches which.
@@ -271,40 +185,6 @@ func order(w [][]int) (ord []int, reach [][]bool) {
 		ord = append(ord, best)
 	}
 	return ord, reach
-}
-
-// affected is a changed declaration that code outside the PR uses: what sees the change without being in the diff.
-type affected struct {
-	Name, Kind, Path, ID string // ID: its change
-	Why                  string // "signature changed", "" its body
-	Refs                 []Ref
-	N                    int
-}
-
-// reach is the changed declarations code outside the PR uses, changed signatures first, then the most used.
-// codegraph's uses only: by name, a common name would list half the repo. A removed one is in no index of the
-// head: the build tells who still calls it.
-func reach(steps []step, syms map[string][]Symbol) []affected {
-	var out []affected
-	for _, st := range steps {
-		for _, f := range st.Files {
-			for _, c := range f.Changes {
-				if c.State != "" {
-					continue
-				}
-				why := map[bool]string{true: "signature changed"}[c.sig]
-				for _, s := range syms[c.Name] {
-					if s.Path == f.Path && s.Exact && s.NOutside > 0 {
-						out = append(out, affected{c.Name, s.Kind, f.Path, c.ID, why, s.Outside, s.NOutside})
-					}
-				}
-			}
-		}
-	}
-	slices.SortStableFunc(out, func(a, b affected) int {
-		return cmp.Or(cmp.Compare(b.Why, a.Why), cmp.Compare(b.N, a.N)) // "signature changed" before ""
-	})
-	return out[:min(len(out), maxAffected)]
 }
 
 // maxTests is the tests a step names; past them, how many more.
