@@ -98,7 +98,7 @@ func TestUnlisted(t *testing.T) {
 	}
 	output("git", "init", "-q")
 	output("git", "add", ".")
-	got := unlisted(t.Context(), &proc.Sandbox{}, repo, map[string]bool{"ci.yml:2": true, "new.md:1": true}, []string{"ci.yml", "new.md"}, output)
+	got := unlisted(fileLines(t.Context(), &proc.Sandbox{}, repo), map[string]bool{"ci.yml:2": true, "new.md:1": true}, []string{"ci.yml", "new.md"}, output)
 	if want := "catalog.json:2 names AWS_KEY_ID, AWS_SECRET, CF_TOKEN but not NEW_KEY (added beside them at ci.yml:2)\n" +
 		"docs.md:2 names AWS_KEY_ID, AWS_SECRET, CF_TOKEN but not NEW_KEY (added beside them at ci.yml:2)"; got != want {
 		t.Errorf("unlisted:\n%s", got)
