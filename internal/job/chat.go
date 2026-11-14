@@ -423,7 +423,8 @@ func bodyProfile(body string) string {
 // Chat answers the event's comment on f, or reviews the PR when it asks for one; mention matches @bot.
 //
 //nolint:gocognit // one job step by step, each step a few lines
-func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.Event) error {
+func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.Event) (err error) {
+	start := time.Now()
 	p, err := f.Open(e)
 	if err != nil {
 		return err
@@ -532,6 +533,8 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		return err
 	}
 	defer sb.Close()
+	sp := Spend{Time: start, Job: "chat", Key: e.Key(), Result: "failed"} // ok once answered: a panic stays failed
+	defer func() { logUsage(ctx, sb, sp, err) }()                              // before sb.Close: it reads the sessions
 	read, err := p.ReadToken()
 	if err != nil {
 		return err
@@ -568,6 +571,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	if !ok {
 		return fmt.Errorf("chat returned no JSON, ends with %q", text.Tail(out))
 	}
+	sp.Result = "ok" // an error from here on still makes it failed
 	// What the maintainer decided on our finding, for the outcome statistics and, if intended, unlikely or wrong, the
 	// declined findings. Before the reply: it holds whether or not ours gets posted, and a failure costs a count, not
 	// the answer.
