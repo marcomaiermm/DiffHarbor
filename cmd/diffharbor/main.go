@@ -41,6 +41,7 @@ var version = "dev"
 func dry() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt) // Ctrl-C kills the passes' process groups too
 	defer stop()
+	context.AfterFunc(ctx, stop) // a second Ctrl-C kills dry
 	sb, err := agent.Workspace(ctx, "")
 	if err != nil {
 		return err

@@ -380,3 +380,16 @@ func TestCommandKillsGroup(t *testing.T) {
 	}
 	t.Fatalf("child %d still running", n)
 }
+
+// A group that is gone already is no error of the cancel: Wait reports the command's own.
+func TestCancelExited(t *testing.T) {
+	defer func(pi bool) { AsPi = pi }(AsPi)
+	AsPi = false
+	c := (&Sandbox{}).Command(t.Context(), "", nil, "true")
+	if err := c.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Cancel(); !errors.Is(err, os.ErrProcessDone) {
+		t.Fatal(err)
+	}
+}
