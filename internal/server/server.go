@@ -57,6 +57,10 @@ func review(e *forge.Event, giveUp, reviewJob func() error) (err error) {
 	key, queued := prKey(e), e.PullRequest.Head.SHA
 	latest.Lock()
 	current := latest.m[key] == queued
+	n := 0
+	if current {
+		n = countStart(key, e) // under latest: a close or push meanwhile doesn't get its file back
+	}
 	latest.Unlock()
 	if !current {
 		return nil
@@ -68,13 +72,16 @@ func review(e *forge.Event, giveUp, reviewJob func() error) (err error) {
 		}
 		latest.Unlock()
 	}()
-	n := countStart(key, queued)
 	if n > maxStarts {
 		log.Println(e.Key(), "not reviewed: the server stopped during each of its last", maxStarts, "runs")
 		return giveUp()
 	}
 	if err = reviewJob(); errors.Is(err, proc.ErrCleanup) {
-		setStarts(key, queued, n-1) // it never ran
+		latest.Lock()
+		if latest.m[key] == queued { // it never ran
+			saveStarts(key, e, n-1)
+		}
+		latest.Unlock()
 	}
 	return err
 }
@@ -175,9 +182,7 @@ func (p *pool) exec(ctx context.Context, e *forge.Event, t *task) {
 	defer func() {
 		t.cancel() // revokes the job's vault tokens: git's remote, Pi's keys
 		done(rk)
-		if chat != "" {
-			_ = os.Remove(chat)
-		}
+		_ = os.Remove(chat)
 		p.mu.Lock()
 		if p.running[rk] == t {
 			delete(p.running, rk)
@@ -380,7 +385,6 @@ func closed(e *forge.Event) error {
 	defer latest.Unlock()
 	delete(latest.m, key) // queued reviews of this PR skip
 	_ = os.Remove(pendingFile(key))
-	_ = os.Remove(triesFile(key))
 	return save(deletingFile(key), e) // a full queue, a restart or a failed delete: retryDrops
 }
 
@@ -522,24 +526,27 @@ func pendingFile(key string) string { return eventFile("pending", key) }
 // memory) would otherwise repeat, and be paid for, on every restart.
 const maxStarts = 3
 
-// triesFile counts key's review starts of one head, "<sha> <n>": a new push starts over. done removes it.
-func triesFile(key string) string { return pendingFile(key) + ".tries" }
-
-// countStart counts one more start of sha's review and returns how many there were.
-func countStart(key, sha string) int {
-	b, _ := os.ReadFile(triesFile(key))
-	var was string
-	var n int
-	if _, err := fmt.Sscan(string(b), &was, &n); err != nil || was != sha {
-		n = 0
-	}
-	setStarts(key, sha, n+1)
-	return n + 1
+// pending is a pendingFile: the review's event and how often it started. A push saves a new one: it starts over.
+type pending struct {
+	*forge.Event
+	Starts int `json:"starts,omitempty"`
 }
 
-func setStarts(key, sha string, n int) {
-	if err := proc.WriteAtomic(triesFile(key), fmt.Appendf(nil, "%s %d", sha, n)); err != nil {
-		log.Println(key, "tries:", err)
+// countStart counts one more start of e's review in its pendingFile and returns how many there were. Callers hold
+// latest.
+func countStart(key string, e *forge.Event) int {
+	p := pending{Event: &forge.Event{}}
+	b, err := os.ReadFile(pendingFile(key))
+	if err != nil || json.Unmarshal(b, &p) != nil || p.PullRequest.Head.SHA != e.PullRequest.Head.SHA {
+		p.Starts = 0
+	}
+	saveStarts(key, e, p.Starts+1)
+	return p.Starts + 1
+}
+
+func saveStarts(key string, e *forge.Event, n int) {
+	if err := save(pendingFile(key), pending{e, n}); err != nil {
+		log.Println(e.Key(), "pending:", err)
 	}
 }
 
@@ -550,6 +557,8 @@ func asked(e *forge.Event) error {
 	if e.Kind == "pull_request" {
 		return nil
 	}
+	latest.Lock() // save's one writer: a comment's edits come at once
+	defer latest.Unlock()
 	return save(chatFile(e), e)
 }
 
@@ -568,9 +577,10 @@ func eventFile(dir, key string) string {
 	return filepath.Join(proc.DataDir, dir, url.PathEscape(key)+".json") // "/" too: one name per key
 }
 
-// save stores e in f, a pending, deleting or chat file. Callers of the first two hold latest.
-func save(f string, e *forge.Event) error {
-	b, err := json.Marshal(e)
+// save stores v, an event or a pending, in f, a pending, deleting or chat file. Callers hold latest: one writer of f
+// at a time (proc.WriteAtomic).
+func save(f string, v any) error {
+	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
@@ -583,7 +593,6 @@ func done(key string) {
 	defer latest.Unlock()
 	if _, ok := latest.m[key]; !ok {
 		_ = os.Remove(pendingFile(key))
-		_ = os.Remove(triesFile(key))
 	}
 }
 
@@ -628,19 +637,20 @@ func resume(add func(*forge.Event) bool) {
 	for _, f := range cs {
 		e := &forge.Event{}
 		b, err := os.ReadFile(f) //nolint:gosec // the server's chats dir
-		ok := err == nil && json.Unmarshal(b, e) == nil
-		if ok && forges[e.Forge] == nil {
-			log.Println(e.Key(), "comment for", e.Forge, "which is off") // kept, as a pending review
+		if err != nil || json.Unmarshal(b, e) != nil {
+			_ = os.Remove(f)
 			continue
 		}
-		_ = os.Remove(f) // once: a comment whose job stops the server isn't answered on every start
-		if !ok {
+		if forges[e.Forge] == nil { // kept, as a pending review
+			log.Println(e.Key(), "comment for", e.Forge, "which is off")
 			continue
 		}
 		log.Println(e.Key(), "answering the comment a restart cut off")
-		if !add(e) {
+		if !add(e) { // stays on disk for the next start
 			log.Println(e.Key(), "queue full")
+			continue
 		}
+		_ = os.Remove(f) // once: a comment whose job stops the server isn't answered on every start
 	}
 }
 

@@ -777,13 +777,14 @@ func TestReviews(t *testing.T) {
 }
 
 // A head whose review the server stopped during on each of its last maxStarts starts gives up on the next: it is
-// marked failed instead. A review that couldn't clean up never started; a new push starts the count over.
+// marked failed instead. A review that couldn't clean up never started; one that ran, or a new push, starts over.
 func TestReviewGivesUp(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	e := ev("o/r", 9, "")
 	e.PullRequest.Head.SHA = "abc"
 	key := prKey(e)
 	t.Cleanup(func() { latest.Lock(); delete(latest.m, key); latest.Unlock() })
+	pushed(e)
 	run := func(job func() error) (ran, gave bool) {
 		latest.Lock()
 		latest.m[key] = e.PullRequest.Head.SHA // as resume does after each restart
@@ -792,21 +793,29 @@ func TestReviewGivesUp(t *testing.T) {
 		return ran, gave
 	}
 	stop := func() error { return nil } // the server stops mid-run: done never runs
+	starts := func(n int) {
+		t.Helper()
+		for i := range n {
+			if ran, gave := run(stop); !ran || gave {
+				t.Fatalf("start %d: ran %v, gave up %v", i+1, ran, gave)
+			}
+		}
+	}
 	if _, gave := run(func() error { return proc.ErrCleanup }); gave {
 		t.Fatal("gave up")
 	}
-	for i := range maxStarts {
-		if ran, gave := run(stop); !ran || gave {
-			t.Fatalf("start %d: ran %v, gave up %v", i+1, ran, gave)
-		}
-	}
+	starts(maxStarts)
 	if ran, gave := run(stop); ran || !gave {
 		t.Fatalf("after %d starts: ran %v, gave up %v", maxStarts, ran, gave)
 	}
+	pushed(e) // the same head again: a retarget, ready for review
+	starts(maxStarts - 1)
+	run(stop)
+	done(key) // that run finished: the count goes with its pending file
+	starts(maxStarts)
 	e.PullRequest.Head.SHA = "def"
-	if ran, _ := run(stop); !ran {
-		t.Fatal("a new push didn't start over")
-	}
+	pushed(e)
+	starts(maxStarts)
 }
 
 // A comment queued before a restart is answered after it, once.
@@ -827,5 +836,10 @@ func TestResumeChat(t *testing.T) {
 	resume(queue(q))
 	if len(q) != 0 {
 		t.Fatal("resumed twice")
+	}
+	save(chatFile(e), e)
+	delete(forges, "github")
+	if resume(queue(q)); len(q) != 0 || !proc.Exists(chatFile(e)) {
+		t.Fatal("a comment for a forge that is off isn't kept")
 	}
 }
