@@ -1,12 +1,16 @@
 package forge
 
 import (
+	"context"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPlace(t *testing.T) {
@@ -30,8 +34,13 @@ func TestPlace(t *testing.T) {
 	}
 	// Trimmed once, placed or not, inline or outside the diff: a fix's last blank line stays.
 	// A fix that is a blank line stays one, placed or not.
-	cs := []review.Comment{{Path: "a.go", Line: 11, Existing: "nope\n\n", Fix: "y\n\n"}, {Path: "a.go", Line: 40, Existing: "nope\n\n", Fix: "y\n\n"}, {Path: "a.go", Line: 41, Existing: "x\n", Fix: "x"},
-		{Path: "a.go", Line: 42, Existing: "x", Fix: "\n"}, {Path: "a.go", Line: 11, Existing: "\tif x {\n", Fix: "\n"}}
+	cs := []review.Comment{
+		{Path: "a.go", Line: 11, Existing: "nope\n\n", Fix: "y\n\n"},
+		{Path: "a.go", Line: 40, Existing: "nope\n\n", Fix: "y\n\n"},
+		{Path: "a.go", Line: 41, Existing: "x\n", Fix: "x"},
+		{Path: "a.go", Line: 42, Existing: "x", Fix: "\n"},
+		{Path: "a.go", Line: 11, Existing: "\tif x {\n", Fix: "\n"},
+	}
 	inline, rest, _ := Split(review.Result{Comments: cs}, nil, lines)
 	if len(inline) != 2 || len(rest) != 3 || !inline[0].OnDiff || rest[0].OnDiff { // OnDiff: what a forge refuses heads apart
 		t.Fatalf("split: %d inline, %d rest", len(inline), len(rest))
@@ -143,8 +152,15 @@ func TestPlaceDrift(t *testing.T) {
 // the diff or folded it is new, on the thread's own line never.
 func TestSplitNearThread(t *testing.T) {
 	lines := map[string]string{"a.ts:120": "x", "a.ts:122": "x", "b.ts:116": "x"}
-	r := review.Result{Comments: []review.Comment{{Path: "a.ts", Line: 115}, {Path: "a.ts", Line: 122}, {Path: "b.ts", Line: 116}, {Path: "a.ts", Line: 120},
-		{Path: "a.ts", Line: 119}, {Path: "a.ts", Line: 120, Fold: true}, {Path: "a.ts", Line: 118, Fold: true}}}
+	r := review.Result{Comments: []review.Comment{
+		{Path: "a.ts", Line: 115},
+		{Path: "a.ts", Line: 122},
+		{Path: "b.ts", Line: 116},
+		{Path: "a.ts", Line: 120},
+		{Path: "a.ts", Line: 119},
+		{Path: "a.ts", Line: 120, Fold: true},
+		{Path: "a.ts", Line: 118, Fold: true},
+	}}
 	inline, outside, folded := Split(r, []Thread{{Path: "a.ts", Line: 118, Resolved: true}, {Path: "a.ts", Line: 127}}, lines)
 	if len(inline) != 1 || inline[0].Path != "b.ts" || len(outside) != 2 || outside[0].Line != 115 || len(folded) != 1 || folded[0].Line != 120 {
 		t.Fatalf("inline %+v outside %+v folded %+v", inline, outside, folded)
@@ -409,5 +425,53 @@ func TestRisked(t *testing.T) {
 	}
 	if old := (State{SHA: "a"}).render("", "", "", nil); strings.Contains(old, "Merge Risk") || parseState(old).Risk != nil {
 		t.Fatal("old sticky shows a risk")
+	}
+}
+
+// A GET goes again after a 5xx or a short rate limit, a POST doesn't: it may have landed. A long limit is returned.
+func TestSendRetries(t *testing.T) {
+	calls, after := 0, "0"
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls++; calls < 3 {
+			w.Header().Set("Retry-After", after)
+			w.WriteHeader(http.StatusTooManyRequests)
+		}
+	}))
+	defer s.Close()
+	get, _ := http.NewRequest(http.MethodGet, s.URL, nil)
+	res, err := Send(s.Client(), get)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK || calls != 3 {
+		t.Fatalf("GET: %d after %d calls", res.StatusCode, calls)
+	}
+	calls = 0
+	post, _ := http.NewRequest(http.MethodPost, s.URL, nil)
+	if res, err = Send(s.Client(), post); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusTooManyRequests || calls != 1 {
+		t.Fatalf("POST: %d after %d calls", res.StatusCode, calls)
+	}
+	calls, after = 0, "3600"
+	if res, err = Send(s.Client(), get); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusTooManyRequests || calls != 1 {
+		t.Fatalf("an hour's limit: %d after %d calls", res.StatusCode, calls)
+	}
+	calls, after = 0, "30"
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond) // the job stops while Send waits
+	defer cancel()
+	get, _ = http.NewRequestWithContext(ctx, http.MethodGet, s.URL, nil)
+	if res, err = Send(s.Client(), get); err == nil {
+		res.Body.Close()
+	}
+	if !errors.Is(err, context.DeadlineExceeded) || calls != 1 {
+		t.Fatalf("stopped while waiting: %v after %d calls", err, calls)
 	}
 }

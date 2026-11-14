@@ -107,7 +107,7 @@ func do(method, url string, body any) ([]byte, string, error) {
 	req.Header.Set("PRIVATE-TOKEN", token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "diffharbor")
-	res, err := client.Do(req)
+	res, err := forge.Send(client, req)
 	if err != nil {
 		return nil, "", err
 	}

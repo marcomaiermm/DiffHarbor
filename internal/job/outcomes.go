@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"maps"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -144,14 +145,7 @@ func bump(m map[string]counts, k, o string) {
 func writeTally(key string, t tally) error {
 	t.Repo = key
 	b, _ := json.Marshal(t)
-	f := tallyFile(key)
-	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
-		return err
-	}
-	if err := os.WriteFile(f+".tmp", b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(f+".tmp", f)
+	return proc.WriteAtomic(tallyFile(key), b)
 }
 
 // record adds a closed PR's findings to key's tally, each with the decision filed for it. It reports false when
@@ -428,29 +422,35 @@ func Stats(w io.Writer, repo string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, t := range ts {
 		fmt.Fprintf(tw, "%s\t%d PR(s)\n\n", t.Repo, len(t.PRs))
-		fmt.Fprintln(tw, "\tfindings\t"+strings.Join(outcomeNames, "\t"))
-		row(tw, "all", t.Total, outcomeNames)
+		fmt.Fprintln(tw, outcomeHead(""))
+		outcomeRow(tw, "all", t.Total)
 		for _, g := range []struct {
 			name string
 			m    map[string]counts
 		}{{"severity", t.Severity}, {"profile", t.Profile}} {
 			for _, k := range slices.Sorted(maps.Keys(g.m)) {
-				row(tw, g.name+" "+k, g.m[k], outcomeNames)
+				outcomeRow(tw, g.name+" "+k, g.m[k])
 			}
 		}
 		fmt.Fprintln(tw)
 		if len(t.Findings) == 0 { // every PR counted before findings were kept
 			continue
 		}
-		found := map[string]counts{} // diffharbor version that found it -> outcome -> findings
+		found, models := map[string]counts{}, map[string]counts{} // diffharbor version, review / verify model -> outcome -> findings
 		for _, f := range t.Findings {
 			bump(found, cmp.Or(f.FoundBy, "-"), f.Outcome)
+			bump(models, cmp.Or(f.ReviewModel, "-")+" / "+cmp.Or(f.VerifyModel, "-"), f.Outcome)
 		}
-		fmt.Fprintln(tw, "found by\tfindings\t"+strings.Join(outcomeNames, "\t"))
-		for _, k := range slices.Sorted(maps.Keys(found)) {
-			row(tw, k, found[k], outcomeNames)
+		for _, g := range []struct {
+			head string
+			m    map[string]counts
+		}{{"found by", found}, {"review / verify model", models}} {
+			fmt.Fprintln(tw, outcomeHead(g.head))
+			for _, k := range slices.Sorted(maps.Keys(g.m)) {
+				outcomeRow(tw, k, g.m[k])
+			}
+			fmt.Fprintln(tw)
 		}
-		fmt.Fprintln(tw)
 		by := map[string]counts{} // outcome -> decision -> findings
 		for _, f := range t.Findings {
 			d := cmp.Or(f.Decision, undecided)
@@ -469,8 +469,22 @@ func Stats(w io.Writer, repo string) error {
 	return tw.Flush()
 }
 
-// row prints a table row: the findings of c and the share of each of cols.
-func row(w io.Writer, name string, c counts, cols []string) {
+// outcomeHead heads an outcomeRow table: findings, each outcome's share, and the share acted on (addressed or
+// accepted) with its 95% interval.
+func outcomeHead(name string) string {
+	return name + "\tfindings\t" + strings.Join(outcomeNames, "\t") + "\tacted on (95%)"
+}
+
+func outcomeRow(w io.Writer, name string, c counts) {
+	total := 0
+	for _, o := range outcomeNames {
+		total += c[o]
+	}
+	row(w, name, c, outcomeNames, acted(c[addressed]+c[accepted], total))
+}
+
+// row prints a table row: the findings of c, the share of each of cols, then extra.
+func row(w io.Writer, name string, c counts, cols []string, extra ...string) {
 	total := 0
 	for _, o := range cols {
 		total += c[o]
@@ -479,5 +493,24 @@ func row(w io.Writer, name string, c counts, cols []string) {
 	for _, o := range cols {
 		cells = append(cells, fmt.Sprintf("%.0f%%", 100*float64(c[o])/float64(max(total, 1))))
 	}
-	fmt.Fprintln(w, name+"\t"+strings.Join(cells, "\t"))
+	fmt.Fprintln(w, name+"\t"+strings.Join(append(cells, extra...), "\t"))
+}
+
+// minFindings is how many findings a share needs before it says much: at 30 its interval is still about ±17 points.
+const minFindings = 30
+
+// acted is k of n as a share with its Wilson 95% interval, "few" under minFindings.
+func acted(k, n int) string {
+	if n == 0 {
+		return "-"
+	}
+	const z = 1.96
+	p, nf := float64(k)/float64(n), float64(n)
+	mid := (p + z*z/(2*nf)) / (1 + z*z/nf)
+	half := z * math.Sqrt(p*(1-p)/nf+z*z/(4*nf*nf)) / (1 + z*z/nf)
+	s := fmt.Sprintf("%.0f%% (%.0f-%.0f)", 100*p, 100*max(mid-half, 0), 100*min(mid+half, 1))
+	if n < minFindings {
+		s += " few"
+	}
+	return s
 }

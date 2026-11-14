@@ -358,3 +358,49 @@ func TestCleanTmpKeepsCache(t *testing.T) {
 		t.Fatal(err, Exists(left), Exists(CacheDir))
 	}
 }
+
+// A command that times out takes its children with it: a test's server doesn't outlive the check.
+func TestCommandKillsGroup(t *testing.T) {
+	defer func(pi bool) { AsPi = pi }(AsPi)
+	AsPi = false
+	pid := filepath.Join(t.TempDir(), "pid")
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	_, _ = Run((&Sandbox{}).Command(ctx, "", nil, "sh", "-c", "sleep 30 & echo $! > "+pid+"; wait"))
+	b, err := os.ReadFile(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	for range 50 { // the kernel reaps it a moment later
+		if syscall.Kill(n, 0) != nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("child %d still running", n)
+}
+
+// A group that is gone already is no error of the cancel: Wait reports the command's own.
+func TestCancelExited(t *testing.T) {
+	defer func(pi bool) { AsPi = pi }(AsPi)
+	AsPi = false
+	c := (&Sandbox{}).Command(t.Context(), "", nil, "true")
+	if err := c.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Cancel(); !errors.Is(err, os.ErrProcessDone) {
+		t.Fatal(err)
+	}
+}
+
+// WriteAtomic makes the missing dirs on the way, Remove takes the file away again.
+func TestWriteAtomicDirs(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "a", "b", "f.json")
+	if err := WriteAtomic(f, []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Remove(f); err != nil || Exists(f) {
+		t.Fatal(err)
+	}
+}

@@ -296,10 +296,17 @@ func (st State) Update(r review.Result, sha string, prFiles []string, full bool)
 
 // Write posts or edits the walkthrough comment. Failures only log: the review itself still counts.
 func (s *Sticky) Write(banner, footer string) {
+	if err := s.Post(banner, footer); err != nil {
+		log.Println("walkthrough:", err)
+	}
+}
+
+// Post is Write for a caller whose job is the comment.
+func (s *Sticky) Post(banner, footer string) error {
 	id, err := s.pr.Note(s.id, s.State.render(banner, s.Ask, footer, s.Outline))
 	if err != nil {
-		log.Println("walkthrough:", err)
-		return
+		return err
 	}
 	s.id = id
+	return nil
 }

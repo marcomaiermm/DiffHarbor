@@ -345,6 +345,16 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	s.State.Patches = reviewedPatches(s.State.Patches, patches, slices.DeleteFunc(diff.Paths(d), func(f string) bool {
 		return slices.Contains(r.Failed, f) || slices.Contains(omitted, f)
 	}))
+	banner := ""
+	switch {
+	case n == 0 && still > 0:
+		banner = fmt.Sprintf("No actionable comments were generated in the latest review; %s from earlier reviews still open.", text.Count(still, "finding"))
+	case n == 0:
+		banner = "No actionable comments were generated in the latest review."
+	}
+	reviewed := footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc))
+	// Right after posting: a restart from here on finds this head reviewed, rather than posting its findings again.
+	s.Write(banner, reviewed)
 	if guide {
 		st := s.State
 		d := report.Data{
@@ -365,15 +375,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		}
 		s.State.Secret = reportSecret(s.State.Secret)
 		s.State.Report = writeReport(e, s.State.Secret, s.State.Report, d)
+		s.Write(banner, reviewed) // again, with the report's link
 	}
-	banner := ""
-	switch {
-	case n == 0 && still > 0:
-		banner = fmt.Sprintf("No actionable comments were generated in the latest review; %s from earlier reviews still open.", text.Count(still, "finding"))
-	case n == 0:
-		banner = "No actionable comments were generated in the latest review."
-	}
-	s.Write(banner, footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc)))
 	if w := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); len(w) <= 140 { // GitHub's limit
 		desc = w
 	}
@@ -382,6 +385,34 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		sp.Result = "partial"
 	}
 	return nil
+}
+
+// ErrMoved is GiveUp's for a PR whose head isn't the queued one any more: the runs that stopped were on another.
+var ErrMoved = errors.New("the head moved")
+
+// GiveUp marks e's review failed without running it: the server stopped during each of its last tries times. Another
+// error: the walkthrough's note isn't out, the server tries again.
+func GiveUp(f forge.Forge, e *forge.Event, tries int) error {
+	p, err := f.Open(e)
+	if err != nil {
+		return err
+	}
+	queued := e.PullRequest.Head.SHA
+	if err := p.Refresh(); err != nil || e.PullRequest.State != "open" {
+		return err
+	}
+	if e.PullRequest.Head.SHA != queued {
+		return ErrMoved
+	}
+	s, err := forge.LoadSticky(p)
+	if err != nil {
+		return err
+	}
+	sha := e.PullRequest.Head.SHA
+	err = s.Post(fmt.Sprintf("⚠️ Review of `%s` not retried: the server stopped during each of its last %d tries, "+
+		"maybe the PR's tests or checks ran out of memory. Comment `@%s review` to try again.", sha[:min(len(sha), 7)], tries, f.Bot()), "")
+	p.Status(sha, "error", "Review failed: the server stopped during it") // logs its own failure, as every Status
+	return err
 }
 
 // failing counts the tests that fail, a subtest with its test once, and the packages that don't build.
