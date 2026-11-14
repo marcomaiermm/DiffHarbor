@@ -324,8 +324,8 @@ func (u argFinder) find(e ast.Expr, depth int) (url, env, where string) {
 }
 
 // stmt is a SQL statement's verb and its table, past leading comments (sqlc writes "-- name: …" first). An update
-// counts with its set only: "update failed" is a message. ponytail: no WITH, the first table of a join only.
-var stmt = regexp.MustCompile(`(?is)^(?:\s*(?:--[^\n]*|/\*.*?\*/))*\s*(?:(select)\b.*?\bfrom|insert\s+into|delete\s+from|(update))\s+["\x60]?([A-Za-z_][\w.]*)["\x60]?(\s+set\b)?`)
+// counts with its set only: "update failed" is a message; a function is no table: from unnest($1). ponytail: no WITH, the first table of a join only.
+var stmt = regexp.MustCompile(`(?is)^(?:\s*(?:--[^\n]*|/\*.*?\*/))*\s*(?:(select)\b.*?\bfrom|insert\s+into|delete\s+from|(update))\s+["\x60]?([A-Za-z_][\w.]*)["\x60]?(\s*\()?(\s+set\b)?`)
 
 // sqlCall names the calls that take one: database/sql's, pgx's, sqlx's, an ORM's Raw; not fmt.Errorf("select … from").
 var sqlCall = regexp.MustCompile(`^(Must)?(Exec|Query|Prepare|Select|Get|Raw|NewRaw|Named)`)
@@ -411,7 +411,7 @@ func (u argFinder) store(chain []*ast.CallExpr, e cgEdge) (cgEdge, bool) {
 	for _, c := range chain {
 		if f := calleeOf(info, c); f != nil && sqlCall.MatchString(f.Name()) {
 			for _, a := range c.Args {
-				if m := stmt.FindStringSubmatch(u.sql(a, 0)); m != nil && (m[2] == "" || m[4] != "") {
+				if m := stmt.FindStringSubmatch(u.sql(a, 0)); m != nil && (m[1] == "" || m[4] == "") && (m[2] == "" || m[5] != "") {
 					e.Kind, e.TName = "writes", m[3]
 					if m[1] != "" {
 						e.Kind = "reads"

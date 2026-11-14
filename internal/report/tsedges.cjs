@@ -25,7 +25,8 @@ const is = require(ts + "/dist/ast/is.js");
 const read = /^(find\w*|get\w*|select\w*|query\w*|count\w*|aggregate|exists|load\w*|fetch\w*|scan|search)$/;
 const write = /^(insert\w*|create\w*|update\w*|upsert\w*|delete\w*|remove\w*|save\w*|set|put\w*|destroy|increment|decrement|truncate|bulk\w*|replace\w*|merge|persist|execute|exec|run)$/;
 const test = /(^|\/)(__tests__|__mocks__|tests?|e2e|spec|fixtures?)\/|\.(test|spec|stories)\.[cm]?[jt]sx?$/;
-const sql = /\b(select\b[\s\S]*?\bfrom|insert\s+into|update|delete\s+from|join)\s+["`]?([A-Za-z_][\w.]*)/i;
+// a function after from or join is no table: from unnest($1); insert into t (cols) is one
+const sql = /\b(?:(select\b[\s\S]*?\bfrom|join)\s+["`]?([A-Za-z_][\w.]*)(?!["`\w.]*\s*\()|(insert\s+into|update|delete\s+from)\s+["`]?([A-Za-z_][\w.]*))/i;
 
 const api = new API({ cwd: dir });
 let project, program, checker;
@@ -304,7 +305,7 @@ for (const file of program.getSourceFileNames()) {
     for (const c of ch.cands) {
       if (c.str !== undefined) {
         const m = sql.exec(c.str);
-        if (m) { ch.store = { name: m[2] }; if (/^(insert|update|delete)/i.test(m[1])) ch.sqlWrite = true; break }
+        if (m) { ch.store = { name: m[2] || m[4] }; if (m[3]) ch.sqlWrite = true; break }
         // a bare name: a builder's (knex("users").where(…), selectFrom("users")…), not createElement("div")
         if (ch.calls > 1 && /^[A-Za-z_][\w.]*$/.test(c.str) && c.str.length < 64) { ch.store = { name: c.str }; break }
         continue;

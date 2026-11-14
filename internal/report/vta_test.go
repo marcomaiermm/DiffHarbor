@@ -97,6 +97,7 @@ func bump(db *sql.Tx) error {
 	q := "UPDATE accounts SET n = n + 1"
 	db.Exec(q)
 	db.Exec("update failed")
+	db.Query("SELECT x FROM unnest($1::int[]) x")
 	return fmt.Errorf("select a file from disk")
 }
 `,
