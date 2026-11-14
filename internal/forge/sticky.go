@@ -198,15 +198,15 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 				kinds[diff.Kind(f)] = append(kinds[diff.Kind(f)], f)
 			}
 		}
-		if code := kinds["code"]; len(code) > 0 { // open on the PR: as many rows as a list shows
-			w.WriteString("| File | Change |\n|---|---|\n")
+		if code := kinds["code"]; len(code) > 0 { // folded like the sections below: as many rows as a list shows
+			t := "| File | Change |\n|---|---|"
 			for _, f := range code[:min(len(code), shown)] {
-				fmt.Fprintf(&w, "| `%s` | %s |\n", f, strings.ReplaceAll(st.Files[f], "|", `\|`))
+				t += fmt.Sprintf("\n| `%s` | %s |", f, strings.ReplaceAll(st.Files[f], "|", `\|`))
 			}
-			w.WriteString("\n")
 			if len(code) > shown {
-				fmt.Fprintf(&w, "… %d more files\n\n", len(code)-shown)
+				t += fmt.Sprintf("\n\n… %d more files", len(code)-shown)
 			}
+			w.WriteString(fold("<strong>Changes: "+text.Count(len(code), "file")+"</strong>", t, false, false) + "\n\n")
 		}
 		if tests := kinds["test"]; len(tests) > 0 || len(o.Added) > 0 {
 			var sum []string

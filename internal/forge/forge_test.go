@@ -216,9 +216,9 @@ func TestSticky(t *testing.T) {
 		LargeTicked(ticked, ticked) || LargeTicked(ticked, st.render("", "", "foot", nil)) || LargeTicked(body, body) {
 		t.Fatalf("ask: %s", body)
 	}
-	if !strings.HasPrefix(body, stickyMark+"\n> [!NOTE]\n> ⏳ busy") || !strings.Contains(body, "| `a.go` | x \\| y |") ||
+	if !strings.HasPrefix(body, stickyMark+"\n> [!NOTE]\n> ⏳ busy") || !strings.Contains(body, "<summary><strong>Changes: 2 files</strong></summary>\n<dl>\n<dd>\n<br>\n\n| File | Change |\n|---|---|\n| `a.go` | x \\| y |") ||
 		!strings.Contains(body, "```mermaid\nsequenceDiagram\n```") || !strings.Contains(body, "**Estimated code review effort:** 5 (Very complex)") ||
-		!strings.Contains(body, "<details open>\n<summary><strong>Walkthrough</strong></summary>\n<dl>\n<dd>\n<br>\n\ns\n\n|") {
+		!strings.Contains(body, "<details open>\n<summary><strong>Walkthrough</strong></summary>\n<dl>\n<dd>\n<br>\n\ns\n\n<details>\n<summary><strong>Changes") {
 		t.Fatalf("render: %s", body)
 	}
 	if got := parseState(body); got.SHA != "bbbbbbb" || got.Files["b.go"] != "new" {
@@ -265,7 +265,8 @@ func TestStickyOutline(t *testing.T) {
 			t.Errorf("above the walkthrough, want %q:\n%s", w, body)
 		}
 	}
-	code, _, _ := strings.Cut(walk, "<details>") // the table before the folded sections
+	_, code, _ := strings.Cut(walk, "<strong>Changes: 1 file</strong>") // the first folded section
+	code, _, _ = strings.Cut(code, "</details>")
 	if !strings.Contains(code, "`api/a.go`") || strings.Contains(code, "a_test.go") || strings.Contains(code, "p1/x.go") || strings.Contains(code, "README") {
 		t.Errorf("code table: %s", code)
 	}
