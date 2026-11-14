@@ -139,6 +139,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		return err
 	}
 	defer sb.Close()
+	sp := Spend{Time: time.Now(), Job: "review", Key: key, SHA: sha[:min(len(sha), 12)], Kind: "full", Result: "failed"} // ok at the end: a panic stays failed
+	defer func() { logUsage(ctx, sb, sp, err) }()                                                                        // before sb.Close: it reads the sessions
 	read, err := p.ReadToken()
 	if err != nil {
 		return err
@@ -147,6 +149,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if err != nil {
 		return err
 	}
+	sp.stage("checkout")
 	prFiles := diff.Paths(raw)
 	// On push only files whose changed lines differ from the last review: a rebase changes none.
 	patches := diff.PatchIDs(raw)
@@ -158,6 +161,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 				only[f] = true
 			}
 		}
+		sp.Kind = "incremental"
 	}
 	outline := diff.Analyze(raw)
 	s.Outline = &outline
@@ -166,6 +170,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	s.State.Large = s.State.Large || e.Action == "large"
 	parts, omitted := diff.Filter(raw, sb.Repo(), only, cfg.Ignored, cfg.Parts(s.State.Large))
 	d := strings.Join(parts, "")
+	sp.DiffChars = len(d)
 	if strings.TrimSpace(d) == "" {
 		log.Println(key, "nothing to review")
 		desc = "Nothing to review"
@@ -231,6 +236,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			}, picks)
 		}
 	}
+	sp.stage("context")
 	r, stats, err := review.Analyze(ctx, review.Input{
 		Agent: agent.Pi{}, Sandbox: sb, Title: forge.Redact(pr.Title), Body: forge.Redact(pr.Body), Commits: commits, Ticket: tk, Docs: docs, Parts: parts,
 		Trusted: review.TrustedContext(rules, readLearnings(e.Owner(), e.Repo(), cfg.Learnings), readDeclined(e.Repo(), cfg.Learnings)), Checks: scripts, Registries: regs, Prior: prior, Addressed: addressed, Closed: closed, Settings: cfg,
@@ -242,6 +248,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if err != nil {
 		return err
 	}
+	sp.stage("analyze")
+	sp.Findings, sp.Dropped = len(r.Comments), len(r.Dropped)
 	if only != nil { // a push: minor findings only on what it changed, else every push finds new edge cases
 		since, err := review.Since(ctx, sb, s.State.SHA, read)
 		if err = cmp.Or(ctx.Err(), err); err != nil { // cancelled or git failed, not a force push: post and resolve nothing
@@ -250,7 +258,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		if since != "" {
 			n := len(r.Comments)
 			if r.Comments = review.Fresh(r.Comments, diff.RightLines(since, true)); n > len(r.Comments) {
-				log.Println(key, n-len(r.Comments), "minor findings and nits off the push dropped")
+				sp.OffPush = n - len(r.Comments)
+				log.Println(key, sp.OffPush, "minor findings and nits off the push dropped")
 			}
 		}
 		for i := range r.Comments {
@@ -366,6 +375,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if w := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); len(w) <= 140 { // GitHub's limit
 		desc = w
 	}
+	sp.stage("post")
+	sp.Result = "ok"
 	return nil
 }
 

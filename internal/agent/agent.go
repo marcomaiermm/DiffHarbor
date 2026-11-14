@@ -372,40 +372,86 @@ func Object(text string, v any) bool {
 	return i >= 0 && j > i && json.Unmarshal([]byte(text[i:j+1]), v) == nil
 }
 
-// Usage sums the tokens and cost of the pass sessions in dir, one line per pass and a total, for benches.
-func Usage(dir string) string {
-	type use struct {
-		in, cached, out, turns int
-		cost                   float64
-	}
-	var b strings.Builder
-	var sum use
-	fs, _ := filepath.Glob(filepath.Join(dir, "*.session"))
+// Pass is what one pass used, summed over its Pi session's model turns. Model is the provider/id that answered, more
+// than one joined by "+" when a session moved to the fallback. A pass the fallback took over from is "<name>.failed".
+type Pass struct {
+	Name       string  `json:"name"`
+	Model      string  `json:"model"`
+	Turns      int     `json:"turns"`
+	Input      int     `json:"input"`
+	CacheRead  int     `json:"cache_read"`
+	CacheWrite int     `json:"cache_write"`
+	Output     int     `json:"output"`
+	Reasoning  int     `json:"reasoning"` // part of Output
+	Cost       float64 `json:"cost"`      // Pi's, from its price list
+	Ms         int     `json:"ms"`        // model time
+}
+
+// Passes reads the usage of sb's pass sessions, by name. Through sb.ReadFile: the job's user, so PR code, can put
+// a symlink or a FIFO in their place.
+func Passes(ctx context.Context, sb *proc.Sandbox) []Pass {
+	var ps []Pass
+	fs, _ := filepath.Glob(filepath.Join(sb.Dir, "*.session"))
 	for _, f := range fs {
-		data, err := os.ReadFile(f) //nolint:gosec // our own workspace
+		data, err := sb.ReadFile(ctx, f)
 		if err != nil {
 			continue
 		}
-		var u use
+		p := Pass{Name: strings.TrimSuffix(filepath.Base(f), ".session")}
+		var models []string
 		for l := range bytes.SplitSeq(data, []byte("\n")) {
 			var e struct {
 				Message struct {
-					Usage *struct {
-						Input, Output, CacheRead int
-						Cost                     struct{ Total float64 }
+					Provider, Model string
+					DurationMs      int
+					Usage           *struct {
+						Input, Output, CacheRead, CacheWrite, Reasoning int
+						Cost                                            struct{ Total float64 }
 					}
 				}
 			}
 			if json.Unmarshal(l, &e) != nil || e.Message.Usage == nil {
 				continue
 			}
-			x := e.Message.Usage
-			u.in, u.cached, u.out, u.turns, u.cost = u.in+x.Input, u.cached+x.CacheRead, u.out+x.Output, u.turns+1, u.cost+x.Cost.Total
+			m, x := e.Message, e.Message.Usage
+			if id := m.Provider + "/" + m.Model; !slices.Contains(models, id) {
+				models = append(models, id)
+			}
+			p.add(Pass{
+				Turns: 1, Input: x.Input, CacheRead: x.CacheRead, CacheWrite: x.CacheWrite, Output: x.Output,
+				Reasoning: x.Reasoning, Cost: x.Cost.Total, Ms: m.DurationMs,
+			})
 		}
-		fmt.Fprintf(&b, "%-10s %2d turns  in %8d  cached %8d  out %6d  $%.3f\n", strings.TrimSuffix(filepath.Base(f), ".session"), u.turns, u.in, u.cached, u.out, u.cost)
-		sum = use{sum.in + u.in, sum.cached + u.cached, sum.out + u.out, sum.turns + u.turns, sum.cost + u.cost}
+		p.Model = strings.Join(models, "+")
+		ps = append(ps, p)
 	}
-	fmt.Fprintf(&b, "%-10s %2d turns  in %8d  cached %8d  out %6d  $%.3f", "total", sum.turns, sum.in, sum.cached, sum.out, sum.cost)
+	return ps
+}
+
+// add sums q's counts into p.
+func (p *Pass) add(q Pass) {
+	p.Turns += q.Turns
+	p.Input += q.Input
+	p.CacheRead += q.CacheRead
+	p.CacheWrite += q.CacheWrite
+	p.Output += q.Output
+	p.Reasoning += q.Reasoning
+	p.Cost += q.Cost
+	p.Ms += q.Ms
+}
+
+// Usage is Passes as a table with a total, for benches.
+func Usage(ctx context.Context, sb *proc.Sandbox) string {
+	row := func(p Pass) string {
+		return fmt.Sprintf("%-10s %2d turns  in %8d  cached %8d  written %7d  out %6d  $%.3f  %s", p.Name, p.Turns, p.Input, p.CacheRead, p.CacheWrite, p.Output, p.Cost, p.Model)
+	}
+	var b strings.Builder
+	sum := Pass{Name: "total"}
+	for _, p := range Passes(ctx, sb) {
+		b.WriteString(row(p) + "\n")
+		sum.add(p)
+	}
+	b.WriteString(row(sum))
 	return b.String()
 }
 
@@ -456,8 +502,9 @@ func runPi(ctx context.Context, sb *proc.Sandbox, name, system, m string, tools 
 		}
 		log.Printf("%s: %v; %s for 30 min", m, err, fm)
 		FallbackUntil.Store(time.Now().Add(30 * time.Minute).UnixMilli())
-		if tools { // a fresh pass: the failed run's session would hold the prompt twice
-			os.Remove(filepath.Join(sb.Dir, name+".session"))
+		if tools { // a fresh pass: the failed run's session would hold the prompt twice. Kept aside for what it cost.
+			s := filepath.Join(sb.Dir, name)
+			_ = os.Rename(s+".session", s+".failed.session") // none: the run failed before its first turn
 		}
 	}
 	_, lvl, _ := splitModel(m)

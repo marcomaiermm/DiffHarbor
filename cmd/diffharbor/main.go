@@ -53,7 +53,7 @@ func dry() error {
 	}
 	b, _ := json.MarshalIndent(r, "", "  ")
 	fmt.Println(string(b), "\n"+stats)
-	fmt.Fprintln(os.Stderr, agent.Usage(sb.Dir))
+	fmt.Fprintln(os.Stderr, agent.Usage(context.Background(), sb))
 	return nil
 }
 

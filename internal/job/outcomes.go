@@ -226,7 +226,10 @@ var decideAsk = func(ctx context.Context, f forge.Forge, e *forge.Event, prompt,
 		return "", err
 	}
 	defer sb.Close()
-	return agent.Pi{}.Ask(ctx, sb, "decide", decideSystem, prompt, "Classify the threads.", model)
+	sp := Spend{Time: time.Now(), Job: "decide", Key: e.Key(), Result: "ok"}
+	out, err := agent.Pi{}.Ask(ctx, sb, "decide", decideSystem, prompt, "Classify the threads.", model)
+	logUsage(ctx, sb, sp, err)
+	return out, err
 }
 
 // maxDecideNotes is how many of a thread's last replies the close reads: the decision is at its end.

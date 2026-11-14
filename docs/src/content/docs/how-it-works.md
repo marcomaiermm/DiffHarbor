@@ -170,3 +170,18 @@ A repo's file there also lists its findings one by one:
 - What found it: the diffharbor version, review and verify model and head commit of the review that posted it. Read from a hidden marker on its comment, empty for findings an older version posted.
 
 PRs counted before findings were listed stay in the counts only: the decisions start with the first PR closed after the upgrade.
+
+## Usage
+
+Every review, chat answer and close that ran a model adds a line to `/data/usage/<yyyy-mm>.jsonl`:
+
+- the job (`review`, `chat`, `decide`), the PR and, for a review, its head commit and whether it was full or incremental,
+- the result (`ok`, `stopped` by a newer push or a close, `failed`), the seconds in all and, for a review, per stage: checkout, context (threads, rules, ticket, docs), analyze (checks and the model passes), post,
+- the characters of diff reviewed, the findings verify kept and dropped, and those dropped as off a push's lines,
+- per pass the model that answered, its turns, input, cache-read, cache-write, output and reasoning tokens, Pi's cost and the model time. A pass with tools the fallback took over from is listed apart as `<name>.failed`; one without tools lists both models joined by `+`.
+
+Only counts and names, never what a prompt or reply said. What a month cost, by job:
+
+```sh
+jq -s 'group_by(.job) | map({job: .[0].job, runs: length, cost: (map(.cost) | add)})' /data/usage/2026-11.jsonl
+```
