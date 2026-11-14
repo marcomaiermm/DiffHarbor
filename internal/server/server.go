@@ -498,8 +498,33 @@ func reportRoute(p string) (dir, sha string, ok bool) {
 }
 
 // A PR's queued review stays on disk until it ran, so a restart (deploy, crash) resumes it: GitHub got its 202.
-// A review that kills the process repeats on every start: there is no attempt count.
 func pendingFile(key string) string { return eventFile("pending", key) }
+
+// maxResumes is how often a restart resumes one head's review: one that kills the process (a PR's tests eating the
+// container's memory) would otherwise repeat, and be paid for, on every start.
+const maxResumes = 3
+
+// giveUp is job.GiveUp, a fake in tests.
+var giveUp = job.GiveUp
+
+// triesFile counts key's resumes of one head, "<sha> <n>": a new push starts over.
+func triesFile(key string) string { return pendingFile(key) + ".tries" }
+
+// resumed counts one more resume of e's head and returns how many there were.
+func resumed(e *forge.Event) int {
+	key, sha := prKey(e), e.PullRequest.Head.SHA
+	b, _ := os.ReadFile(triesFile(key))
+	var was string
+	var n int
+	if _, err := fmt.Sscan(string(b), &was, &n); err != nil || was != sha {
+		n = 0
+	}
+	n++
+	if err := os.WriteFile(triesFile(key), fmt.Appendf(nil, "%s %d", sha, n), 0o600); err != nil {
+		log.Println(e.Key(), "tries:", err)
+	}
+	return n
+}
 
 // deletingFile is a closed PR whose reports aren't deleted yet.
 func deletingFile(key string) string { return eventFile("deleting", key) }
@@ -530,6 +555,7 @@ func done(key string) {
 	defer latest.Unlock()
 	if _, ok := latest.m[key]; !ok {
 		_ = os.Remove(pendingFile(key))
+		_ = os.Remove(triesFile(key))
 	}
 }
 
@@ -562,6 +588,18 @@ func resume(add func(*forge.Event) bool) {
 		es = append(es, e)
 	}
 	for _, e := range es {
+		if n := resumed(e); n > maxResumes {
+			log.Println(e.Key(), "not resumed: the server stopped during each of its last", maxResumes, "tries")
+			_ = os.Remove(pendingFile(prKey(e)))
+			_ = os.Remove(triesFile(prKey(e)))
+			go func() {
+				defer proc.Recovered(func(err error) { log.Println(e.Key(), err) })
+				if err := giveUp(forges[e.Forge], e, maxResumes); err != nil {
+					log.Println(e.Key(), "giving up:", err)
+				}
+			}()
+			continue
+		}
 		log.Println(e.Key(), "resuming the review a restart cut off")
 		latest.Lock()
 		latest.m[prKey(e)] = e.PullRequest.Head.SHA

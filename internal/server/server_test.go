@@ -775,3 +775,36 @@ func TestReviews(t *testing.T) {
 		}
 	}
 }
+
+// A review the server stopped during on each of its last tries isn't resumed again: it is marked failed instead.
+func TestResumeGivesUp(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	forges["github"] = &github.Hub{}
+	defer clear(forges)
+	gave := make(chan string, 1)
+	defer func(g func(forge.Forge, *forge.Event, int) error) { giveUp = g }(giveUp)
+	giveUp = func(_ forge.Forge, e *forge.Event, _ int) error { gave <- e.PullRequest.Head.SHA; return nil }
+	e := &forge.Event{Forge: "github", Kind: "pull_request", Action: "synchronize"}
+	e.Repository.FullName, e.PullRequest.Number, e.PullRequest.Head.SHA = "o/r", 9, "abc"
+	key := prKey(e)
+	t.Cleanup(func() { latest.Lock(); delete(latest.m, key); latest.Unlock() })
+	q := make(chan *forge.Event, maxResumes+1)
+	for range maxResumes + 1 {
+		latest.Lock()
+		save(pendingFile(key), e)
+		latest.Unlock()
+		resume(queue(q))
+	}
+	if len(q) != maxResumes || proc.Exists(pendingFile(key)) || proc.Exists(triesFile(key)) || <-gave != "abc" {
+		t.Fatalf("resumed %d times, want %d, then given up", len(q), maxResumes)
+	}
+	// a new push starts the count over
+	latest.Lock()
+	os.WriteFile(triesFile(key), []byte("old 3"), 0o600)
+	save(pendingFile(key), e)
+	latest.Unlock()
+	resume(queue(q))
+	if b, _ := os.ReadFile(triesFile(key)); string(b) != "abc 1" {
+		t.Fatalf("tries: %q", b)
+	}
+}

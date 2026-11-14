@@ -369,6 +369,23 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	return nil
 }
 
+// GiveUp marks e's review failed without running it: the server stopped during each of its last tries times.
+func GiveUp(f forge.Forge, e *forge.Event, tries int) error {
+	p, err := f.Open(e)
+	if err != nil {
+		return err
+	}
+	s, err := forge.LoadSticky(p)
+	if err != nil {
+		return err
+	}
+	sha := e.PullRequest.Head.SHA
+	s.Write(fmt.Sprintf("⚠️ Review of `%s` not retried: the server stopped during each of its last %d tries, "+
+		"maybe the PR's tests or checks ran out of memory. Comment `@%s review` to try again.", sha[:min(len(sha), 7)], tries, f.Bot()), "")
+	p.Status(sha, "error", "Review failed: the server stopped during it")
+	return nil
+}
+
 // failing counts the tests that fail, a subtest with its test once, and the packages that don't build.
 func failing(t checks.Tests) int {
 	n := len(t.Broken)
