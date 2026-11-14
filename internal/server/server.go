@@ -156,7 +156,7 @@ func (p *pool) add(e *forge.Event) bool {
 		latest.Lock()
 		cur, known := latest.m[key]
 		latest.Unlock()
-		if known && cur.sha != e.PullRequest.Head.SHA {
+		if known && cur.e != e { // a newer event of the PR, of this head too (retarget), is in latest
 			return true
 		}
 		if t := p.running[key]; t != nil && t.review {

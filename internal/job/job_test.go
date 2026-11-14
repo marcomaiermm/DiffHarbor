@@ -776,3 +776,51 @@ func TestStillOpen(t *testing.T) {
 		t.Errorf("not posted: %v", cs)
 	}
 }
+
+// giveForge opens a PR whose Refresh moves the head, as a stale queued event's does.
+type giveForge struct {
+	forge.Forge
+	pr *givePR
+}
+
+func (giveForge) Bot() string                           { return "bot" }
+func (f giveForge) Open(*forge.Event) (forge.PR, error) { return f.pr, nil }
+
+type givePR struct {
+	*skipPR
+	e         *forge.Event
+	head, now string // now: the PR's state on Refresh
+	noteErr   error
+}
+
+func (p *givePR) Refresh() error {
+	p.e.PullRequest.Head.SHA, p.e.PullRequest.State = p.head, p.now
+	return nil
+}
+
+func (p *givePR) Note(id int64, b string) (int64, error) {
+	if p.noteErr != nil {
+		return 0, p.noteErr
+	}
+	return p.skipPR.Note(id, b)
+}
+
+// GiveUp marks the PR's head now, as the runs that stopped saw it; a note it couldn't post is its error, so the server
+// keeps the review pending; a closed PR needs none.
+func TestGiveUp(t *testing.T) {
+	e := &forge.Event{}
+	e.PullRequest.Head.SHA = strings.Repeat("a", 40)
+	pr := &givePR{skipPR: &skipPR{}, e: e, head: strings.Repeat("b", 40), now: "open"}
+	if err := GiveUp(giveForge{pr: pr}, e, 3); err != nil || len(pr.notes) != 1 || !strings.Contains(pr.notes[0], "Review of `bbbbbbb` not retried") ||
+		pr.status != "error Review failed: the server stopped during it" {
+		t.Fatalf("%v %q %q", err, pr.notes, pr.status)
+	}
+	pr.noteErr = errors.New("forge down")
+	if err := GiveUp(giveForge{pr: pr}, e, 3); err == nil {
+		t.Fatal("a note that isn't out is no error")
+	}
+	pr.noteErr, pr.now, pr.notes = nil, "closed", nil
+	if err := GiveUp(giveForge{pr: pr}, e, 3); err != nil || len(pr.notes) != 0 {
+		t.Fatalf("closed PR: %v %q", err, pr.notes)
+	}
+}

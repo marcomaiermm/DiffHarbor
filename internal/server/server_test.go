@@ -856,6 +856,24 @@ func TestReviewGivesUp(t *testing.T) {
 	starts(maxStarts)
 }
 
+// An older event of a head a newer one (a retarget) has in latest isn't queued: it would replace the newer one.
+func TestPoolSkipsOlderSameHead(t *testing.T) {
+	proc.DataDir = t.TempDir()
+	older, newer := ev("o/r", 3, ""), ev("o/r", 3, "")
+	older.PullRequest.Head.SHA, newer.PullRequest.Head.SHA = "abc", "abc"
+	t.Cleanup(func() { latest.Lock(); delete(latest.m, prKey(newer)); latest.Unlock() })
+	pushed(newer)
+	p := newPool(1, func(context.Context, *forge.Event) error { t.Error("the older event ran"); return nil })
+	if !p.add(older) {
+		t.Fatal("full")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.running) != 0 {
+		t.Fatal("queued")
+	}
+}
+
 // A comment queued before a restart is answered after it: each delivery's own file, until its job ran. One whose job
 // started maxStarts times isn't run again; one for a forge that is off stays.
 func TestResumeChat(t *testing.T) {
