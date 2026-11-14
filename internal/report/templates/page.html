@@ -127,7 +127,7 @@
 {{/* the rail (component 22) */}}
 {{define "rail"}}<nav class="rail" aria-label="Sections"><ul>{{range .Page.Rail}}{{template "railrow" .}}{{end}}</ul></nav>{{end}}
 {{/* a part's sub-row and Read the change carry the reading mark: the script fills it once every file is viewed */}}
-{{define "railrow"}}<li{{if .Box}} data-rail-box="{{.Box}}"{{end}}><a class="rrow{{if .Sub}} rsub{{end}}" href="{{.Href}}"><span>{{.Label}}</span>{{if or .Sub (eq .Href "#read")}}<span class="rmark" aria-hidden="true"></span><span class="vh" data-rmark>, not read</span>{{end}}{{with .N}}<span class="rc">{{.}}</span>{{end}}</a></li>{{end}}
+{{define "railrow"}}<li{{if .Box}} data-rail-box="{{.Box}}"{{end}}><a class="rrow{{if .Sub}} rsub{{end}}" href="{{.Href}}"><span>{{.Label}}</span>{{if or .Sub (eq .Href "#read")}}<span class="rmark" aria-hidden="true"></span><span class="vh" data-rmark>, not read</span>{{end}}{{with .N}} <span class="rc">{{.}}</span>{{end}}</a></li>{{end}}
 
 {{/* component 6: an item card, collapsed */}}
 {{define "card"}}<article class="ic" id="{{.ID}}"{{if ne .Kind "Minor finding"}} data-item{{end}} data-box="{{.Box}}" aria-labelledby="{{.ID}}-tt">

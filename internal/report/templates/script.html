@@ -58,7 +58,7 @@
     for (const p of $$(".pb")) {
       const on = done(p);
       mark($(".pbb", p), on);
-      if (p.dataset.box) for (const r of $$(`[data-rail-box="${CSS.escape(p.dataset.box)}"] .rrow`)) mark(r, on);
+      for (const r of $$(".rrow").filter(r => r.getAttribute("href") === "#" + p.id)) mark(r, on); // by link: a page without a map has a Code block with no box
     }
     const all = !!$("#read") && done($("#read"));
     for (const r of $$('.rrow[href="#read"]')) mark(r, all);
@@ -535,7 +535,7 @@
     const el = es.filter(e => e.isIntersecting).map(e => e.target).pop();
     if (!el) return;
     const id = "#" + (el.matches(".pb") && rail.some(a => a.getAttribute("href") === "#" + el.id) ? el.id : el.closest("section.sec")?.id || el.id);
-    for (const a of rail) if (a.getAttribute("href") === id) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current");
+    for (const a of rail) if (a.getAttribute("href") === id) a.setAttribute("aria-current", "location"); else a.removeAttribute("aria-current");
   }, { rootMargin: "-15% 0px -75% 0px" });
   for (const el of $$("main section.sec, .pb")) spy.observe(el);
   sync();

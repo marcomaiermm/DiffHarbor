@@ -870,16 +870,16 @@ func (v *view) covered() []crow {
 			s = plural(n, "finding", "findings") + ": " + strconv.Itoa(m) + " major and " + strconv.Itoa(n-m) + " minor."
 		}
 		// a finding a test run showed is no second model's word: it's counted apart
-		rest, them := n-ran, "them"
+		rest, them, each := n-ran, "them", map[bool]string{true: "it", false: "each"}[n == 1]
 		if ran > 0 {
-			them = "the other " + strconv.Itoa(rest)
+			them = "the other " + map[bool]string{true: "one", false: strconv.Itoa(rest)}[rest == 1]
 		}
 		c := evAI
 		switch {
 		case rest == 0:
-			c, s = evTest, s+" A test run showed each."
+			c, s = evTest, s+" A test run showed "+each+"."
 		case checked == rest:
-			s += " A second model agreed with " + map[bool]string{true: "each", false: them}[ran == 0] + ", and neither ran the code."
+			s += " A second model agreed with " + map[bool]string{true: each, false: them}[ran == 0] + ", and neither ran the code."
 		case checked == 0:
 			c, s = evNotSeen, s+" No second model checked "+them+"."
 		default:

@@ -210,6 +210,14 @@ func TestPageOpen(t *testing.T) {
 	if tb, d := mv.byKey["table:orders"], mv.byKey["deploy:db/migrations/0007_orders.sql"]; !slices.Contains(tb.Sel, d.El) {
 		t.Errorf("table orders keeps %q, not its migration's box %s", tb.Sel, d.El)
 	}
+	// without a map the open items cell names its kinds: here the one code file the review didn't read
+	d := tinyData()
+	d.Omitted = []string{"trim.go"}
+	v = prepare(d)
+	v.build()
+	if i := slices.IndexFunc(v.Page.Status.Stats, func(s stat) bool { return s.Label == "open item" }); i < 0 || v.Page.Status.Stats[i].Second != "1 gap in the review" {
+		t.Errorf("open items cell without a map: %+v", v.Page.Status.Stats)
+	}
 }
 
 // Arrows point where data goes: Chevron "to" at To's end, "from" at From's; on one edge the line from higher up
@@ -319,11 +327,11 @@ func TestCoveredFindings(t *testing.T) {
 	}
 	repro := review.Comment{Path: "a.go", Line: 2, Severity: "major", Title: "x", Evidence: review.Repro + "TestA fails"}
 	agreed := review.Comment{Path: "a.go", Line: 2, Severity: "minor", Title: "y", Evidence: "agreed"}
-	if l := line(findings(repro)); len(l) != 1 || l[0].Chip != evTest || l[0].Text != "1 major finding, none minor. A test run showed each." {
+	if l := line(findings(repro)); len(l) != 1 || l[0].Chip != evTest || l[0].Text != "1 major finding, none minor. A test run showed it." {
 		t.Errorf("one run-backed finding: %+v", l)
 	}
 	l := line(findings(repro, agreed))
-	if len(l) != 2 || l[0].Chip != evAI || l[0].Text != "2 findings: 1 major and 1 minor. A second model agreed with the other 1, and neither ran the code." ||
+	if len(l) != 2 || l[0].Chip != evAI || l[0].Text != "2 findings: 1 major and 1 minor. A second model agreed with the other one, and neither ran the code." ||
 		l[1] != (mline{evTest, "1 shown by a test run."}) {
 		t.Errorf("one of each: %+v", l)
 	}
