@@ -711,6 +711,7 @@ type storeScan struct {
 	seen    map[storeHit]bool
 }
 
+// note keeps a table under its key as first named, with its first query, and gives the key.
 func (sc *storeScan) note(p StorePath) string {
 	k := storeKey(p)
 	if _, ok := sc.tables[k]; !ok {

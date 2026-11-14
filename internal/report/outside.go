@@ -205,6 +205,9 @@ func storesFrom(g map[declKey][]cgEdge, start declKey) []StorePath {
 	}
 	firsts := map[StoreCall]bool{}
 	for _, f := range g[start] {
+		if len(out) >= maxStores {
+			break
+		}
 		if store(f) {
 			add(f, nil)
 		}

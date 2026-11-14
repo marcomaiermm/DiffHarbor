@@ -580,21 +580,31 @@ func storeAt(m *Map, name string) *MapStore {
 // SQL, a declaration and an alias are one table; a subquery is a table of its own; a migration names two of them.
 func TestMapStores(t *testing.T) {
 	lines := strings.Repeat("x\n", 12)
-	sql := "CREATE TABLE \"loot_sessions\" (\n  id int\n);\nALTER TABLE \"loot_sessions\" ADD COLUMN n int;\nALTER TABLE public.\"users\" ADD COLUMN x int;\n" +
+	sql := "CREATE TABLE \"app_sessions\" (\n  id int\n);\nALTER TABLE \"app_sessions\" ADD COLUMN n int;\nALTER TABLE public.\"users\" ADD COLUMN x int;\n" +
 		"CREATE UNIQUE INDEX \"users_x\" ON \"users\" USING btree (\"x\");\nCREATE TABLE \"unused\" (id int);\n-- +goose Down\nDROP TABLE \"users\";\n"
 	d := Data{Diff: newFile("a/a.go", lines) + newFile("a/schema.ts", lines) + newFile("b/b.go", lines) + newFile("b/other.go", lines) +
 		newFile("c/c.go", lines) + newFile("c/c2.go", lines) + newFile("0d/d.ts", lines) + newFile("db/migrations/0002_x.sql", sql) +
+		newFile("db/migrations/0003_y.sql", "DROP TABLE \"orders\";\n") +
 		// e/e.go: the PR adds line 3 only
 		"diff --git a/e/e.go b/e/e.go\n--- a/e/e.go\n+++ b/e/e.go\n@@ -2,0 +3 @@\n+x\n"}
-	sessions := StorePath{Kind: "reads", Table: "sessions", TPath: "a/schema.ts", TLine: 3, Text: "export const sessions = pgTable(\n  \"loot_sessions\", {", At: "0d/d.ts:4"}
+	sessions := StorePath{Kind: "reads", Table: "sessions", TPath: "a/schema.ts", TLine: 3, Text: "export const sessions = pgTable(\n  \"app_sessions\", {", At: "0d/d.ts:4"}
 	sym := func(p string, line int, state string, stores []StorePath, here ...string) Symbol {
 		s := changedSym(p, line, state, here...)
 		s.Stores = stores
 		return s
 	}
 	d.Symbols = map[string][]Symbol{
-		// b calls Save at :7, which writes users itself
-		"Save": {sym("a/a.go", 3, "new", []StorePath{{Kind: "writes", Table: "users", At: "a/a.go:4"}}, "b/b.go:7=calls")},
+		// b calls Save at :7, which writes users itself, twice, and deep four calls from b: too far for b
+		"Save": {sym("a/a.go", 3, "new", []StorePath{
+			{Kind: "writes", Table: "users", At: "a/a.go:4"},
+			{Kind: "writes", Table: "users", At: "a/a.go:5"},
+			{Kind: "writes", Table: "deep", At: "x/x.go:9", Calls: []StoreCall{{"x/x.go:1", "d1"}, {"x/x.go:2", "d2"}, {"x/x.go:3", "d3"}}},
+		}, "b/b.go:7=calls")},
+		// Flush's added line calls Save at the place the map draws: each place once
+		"Flush": {sym("b/b.go", 9, "new", []StorePath{
+			{Kind: "writes", Table: "users", At: "a/a.go:4", Calls: []StoreCall{{"b/b.go:7", "Save"}}},
+			{Kind: "writes", Table: "users", At: "a/a.go:5", Calls: []StoreCall{{"b/b.go:7", "Save"}}},
+		})},
 		// c calls List at :2; List reads users two calls down, and orders in its own part, which adds nothing for b
 		"List": {sym("b/b.go", 3, "new", []StorePath{
 			{Kind: "reads", Table: "users", At: "x/x.go:20", Calls: []StoreCall{{"b/b.go:5", "helper"}, {"x/x.go:11", "query"}}},
@@ -604,12 +614,13 @@ func TestMapStores(t *testing.T) {
 		// sessions by their SQL name
 		"Sync": {sym("c/c.go", 3, "changed", []StorePath{
 			{Kind: "writes", Table: "users", At: "a/a.go:4", Calls: []StoreCall{{"c/c.go:4", "local"}, {"c/c2.go:6", "Save"}}},
-			{Kind: "reads", Table: "loot_sessions", At: "c/c.go:8"},
+			{Kind: "reads", Table: "app_sessions", At: "c/c.go:8"},
 		})},
-		// d reads the sessions, an alias of them, and a subquery
+		// d reads the sessions, an alias of them, and a subquery, and writes audit_log
 		"Recent": {sym("0d/d.ts", 3, "new", []StorePath{
 			sessions,
-			{Kind: "reads", Table: "newerSession", TPath: "0d/d.ts", TLine: 2, Text: "const newerSession = alias(sessions, \"newer_session\")\nx", At: "0d/d.ts:5"},
+			{Kind: "writes", Table: "audit_log", At: "0d/d.ts:7"},
+			{Kind: "reads", Table: "newerSession", TPath: "0d/d.ts", TLine: 2, Text: "const newerSession = alias(sessions, \"later_session\")\nx", At: "0d/d.ts:5"},
 			{Kind: "reads", Table: "recentSq", TPath: "0d/d.ts", TLine: 1, Sub: true, At: "0d/d.ts:6"},
 		})},
 		// a call on a line the PR leaves starts no walk
@@ -620,8 +631,8 @@ func TestMapStores(t *testing.T) {
 	for _, s := range m.Stores {
 		names = append(names, s.Name)
 	}
-	// users is written: first; sessions has two parts, orders and recentSq one; audit none
-	if want := []string{"users", "sessions", "orders", "recentSq"}; !slices.Equal(names, want) {
+	// the written first, the most parts first: users, then audit_log before sessions; audit none, deep too far
+	if want := []string{"users", "audit_log", "sessions", "orders", "recentSq"}; !slices.Equal(names, want) {
 		t.Fatalf("stores %q, want %q", names, want)
 	}
 	pos := map[string]int{}
@@ -637,7 +648,7 @@ func TestMapStores(t *testing.T) {
 		}
 	}
 	want := map[string][]MapStoreUse{
-		"a": {{Kind: "writes", Decl: "Save", At: "a/a.go:4", N: 1}},
+		"a": {{Kind: "writes", Decl: "Save", At: "a/a.go:4", N: 2}},
 		"b": {{Kind: "writes", Decl: "Save", At: "b/b.go:7", Through: true, N: 1}, {Kind: "reads", Decl: "helper", At: "b/b.go:5", Through: true, N: 1}},
 		"c": {{Kind: "writes", Decl: "Save", At: "c/c2.go:6", Through: true, N: 1}, {Kind: "reads", Decl: "List", At: "c/c.go:2", Through: true, N: 1}},
 	}
@@ -651,7 +662,7 @@ func TestMapStores(t *testing.T) {
 	if s == nil || s.Path != "a/schema.ts" || s.Line != 3 || len(s.Parts) != 2 || s.Subquery {
 		t.Fatalf("sessions %+v", s)
 	}
-	if want := []MapStoreName{{"loot_sessions", "c/c.go:8"}, {"newerSession", "0d/d.ts:2"}}; !reflect.DeepEqual(s.Names, want) {
+	if want := []MapStoreName{{"app_sessions", "c/c.go:8"}, {"newerSession", "0d/d.ts:2"}}; !reflect.DeepEqual(s.Names, want) {
 		t.Errorf("sessions names %+v", s.Names)
 	}
 	if want := []MapStoreMigration{{"db/migrations/0002_x.sql", "Migration 0002", "created", []int{1, 4}}}; !reflect.DeepEqual(s.Migrations, want) {
@@ -662,6 +673,8 @@ func TestMapStores(t *testing.T) {
 	}
 	if o := storeAt(m, "orders"); len(o.Parts) != 1 || o.Parts[0].Part != "c" { // c's call into List reaches it
 		t.Errorf("orders %+v", o.Parts)
+	} else if want := []MapStoreMigration{{"db/migrations/0003_y.sql", "Migration 0003", "dropped", []int{1}}}; !reflect.DeepEqual(o.Migrations, want) {
+		t.Errorf("orders migrations %+v", o.Migrations)
 	}
 	if r := storeAt(m, "recentSq"); r == nil || !r.Subquery || len(r.Names) != 0 {
 		t.Errorf("subquery %+v", r)
