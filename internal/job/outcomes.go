@@ -418,14 +418,14 @@ func Stats(w io.Writer, repo string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, t := range ts {
 		fmt.Fprintf(tw, "%s\t%d PR(s)\n\n", t.Repo, len(t.PRs))
-		fmt.Fprintln(tw, "\tfindings\t"+strings.Join(outcomeNames, "\t")+"\t"+actedHead)
-		row(tw, "all", t.Total, outcomeNames)
+		fmt.Fprintln(tw, outcomeHead(""))
+		outcomeRow(tw, "all", t.Total)
 		for _, g := range []struct {
 			name string
 			m    map[string]counts
 		}{{"severity", t.Severity}, {"profile", t.Profile}} {
 			for _, k := range slices.Sorted(maps.Keys(g.m)) {
-				row(tw, g.name+" "+k, g.m[k], outcomeNames)
+				outcomeRow(tw, g.name+" "+k, g.m[k])
 			}
 		}
 		fmt.Fprintln(tw)
@@ -441,9 +441,9 @@ func Stats(w io.Writer, repo string) error {
 			head string
 			m    map[string]counts
 		}{{"found by", found}, {"review / verify model", models}} {
-			fmt.Fprintln(tw, g.head+"\tfindings\t"+strings.Join(outcomeNames, "\t")+"\t"+actedHead)
+			fmt.Fprintln(tw, outcomeHead(g.head))
 			for _, k := range slices.Sorted(maps.Keys(g.m)) {
-				row(tw, k, g.m[k], outcomeNames)
+				outcomeRow(tw, k, g.m[k])
 			}
 			fmt.Fprintln(tw)
 		}
@@ -465,8 +465,22 @@ func Stats(w io.Writer, repo string) error {
 	return tw.Flush()
 }
 
-// row prints a table row: the findings of c and the share of each of cols, of outcomes also the share acted on.
-func row(w io.Writer, name string, c counts, cols []string) {
+// outcomeHead heads an outcomeRow table: findings, each outcome's share, and the share acted on (addressed or
+// accepted) with its 95% interval.
+func outcomeHead(name string) string {
+	return name + "\tfindings\t" + strings.Join(outcomeNames, "\t") + "\tacted on (95%)"
+}
+
+func outcomeRow(w io.Writer, name string, c counts) {
+	total := 0
+	for _, o := range outcomeNames {
+		total += c[o]
+	}
+	row(w, name, c, outcomeNames, acted(c[addressed]+c[accepted], total))
+}
+
+// row prints a table row: the findings of c, the share of each of cols, then extra.
+func row(w io.Writer, name string, c counts, cols []string, extra ...string) {
 	total := 0
 	for _, o := range cols {
 		total += c[o]
@@ -475,14 +489,8 @@ func row(w io.Writer, name string, c counts, cols []string) {
 	for _, o := range cols {
 		cells = append(cells, fmt.Sprintf("%.0f%%", 100*float64(c[o])/float64(max(total, 1))))
 	}
-	if slices.Equal(cols, outcomeNames) {
-		cells = append(cells, acted(c[addressed]+c[accepted], total))
-	}
-	fmt.Fprintln(w, name+"\t"+strings.Join(cells, "\t"))
+	fmt.Fprintln(w, name+"\t"+strings.Join(append(cells, extra...), "\t"))
 }
-
-// actedHead heads acted's column: findings addressed or accepted, with their 95% interval.
-const actedHead = "acted on (95%)"
 
 // minFindings is how many findings a share needs before it says much: at 30 its interval is still about ±17 points.
 const minFindings = 30
