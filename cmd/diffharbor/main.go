@@ -29,6 +29,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,7 +39,9 @@ import (
 var version = "dev"
 
 func dry() error {
-	sb, err := agent.Workspace(context.Background(), "")
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt) // Ctrl-C kills the passes' process groups too
+	defer stop()
+	sb, err := agent.Workspace(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -47,7 +50,7 @@ func dry() error {
 	if err != nil {
 		return err
 	}
-	r, stats, err := review.Tree(context.Background(), sb, cwd, "", nil, false)
+	r, stats, err := review.Tree(ctx, sb, cwd, "", nil, false)
 	if err != nil {
 		return err
 	}
