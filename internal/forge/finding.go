@@ -32,14 +32,19 @@ type Finding struct {
 // suggestion opens the forge's suggestion block for Start..End: "suggestion" on GitHub, "suggestion:-1+0" on GitLab;
 // "" where none can go (the summary), placed or not. The suggestion stays unfolded: its button commits the fix.
 func Format(c Finding, suggestion string) string {
-	var head []string
-	if c.Severity != "" {
-		head = append(head, "**"+cmp.Or(badge[c.Severity], c.Severity)+"**")
-	}
+	s := c.Body
 	if c.Title != "" {
-		head = append(head, "**"+c.Title+"**")
+		s = "**" + c.Title + "**\n\n" + s
 	}
-	s := strings.Join(append(head, c.Body), "\n\n")
+	if c.Severity != "" {
+		// A title is the paragraph after the severity; without one the body starts on the next line, so Parse
+		// never takes a body that opens with a bold paragraph for a title.
+		sep := "\n\n"
+		if c.Title == "" {
+			sep = "\n"
+		}
+		s = "**" + cmp.Or(badge[c.Severity], c.Severity) + "**" + sep + s
+	}
 	// f is "" when the fix is a blank line: c.Fix says whether there is one.
 	e, f := trim(c.Existing), trim(c.Fix)
 	if c.Fix != "" && c.Start > 0 && suggestion != "" { // the forge shows a button that commits the fix

@@ -194,8 +194,11 @@ func TestFormat(t *testing.T) {
 	}
 	// No title, a body that opens in bold: the bold stays in the body.
 	bold := Finding{Comment: review.Comment{Severity: "major", Body: "**Cause:** the map is nil"}}
-	if p := Parse(Format(bold, "")); p.Severity != "major" || p.Title != "" || p.Body != "**Cause:** the map is nil" {
-		t.Fatalf("parse bold body: %+v", p)
+	for _, body := range []string{"**Cause:** the map is nil", "**Cause:**\n\nthe map is nil"} {
+		bold.Body = body
+		if p := Parse(Format(bold, "")); p.Severity != "major" || p.Title != "" || p.Body != body {
+			t.Fatalf("parse bold body %q: %+v", body, p)
+		}
 	}
 	if p := Parse("by hand"); p.Severity != "" || p.Body != "by hand" || p.Evidence != "" {
 		t.Fatalf("parse plain: %+v", p)
