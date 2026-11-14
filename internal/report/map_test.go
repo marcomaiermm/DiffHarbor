@@ -168,7 +168,7 @@ func TestMapInterface(t *testing.T) {
 	if l == nil || len(m.Lines) != 1 || l.Calls != 1 || l.Through != 1 || l.Named != 1 || !slices.Equal(l.Via, []string{"Saver"}) || l.Style != "solid" {
 		t.Fatalf("line %+v", l)
 	}
-	if want := []MapName{{"Save", "calls", "", "app/app.go:21", 1}, {"Save", "through", "Saver", "app/app.go:20", 1}, {"Save", "named", "", "app/app.go:7", 1}}; !reflect.DeepEqual(l.Names, want) {
+	if want := []MapName{{"Save", "calls", "", "app/app.go:21", 1, nil}, {"Save", "through", "Saver", "app/app.go:20", 1, nil}, {"Save", "named", "", "app/app.go:7", 1, nil}}; !reflect.DeepEqual(l.Names, want) {
 		t.Errorf("names %+v", l.Names)
 	}
 	// without VTA's edge the call is through the interface alone: dashed, with an arrowhead, and 1px however many
