@@ -777,7 +777,8 @@ func TestReviews(t *testing.T) {
 }
 
 // A head whose review the server stopped during on each of its last maxStarts starts gives up on the next: it is
-// marked failed instead. A review that couldn't clean up never started; one that ran, or a new push, starts over.
+// marked failed instead; a give-up that failed stays pending for the next restart. A review that couldn't clean up
+// never started; one that ran, or a new push, starts over.
 func TestReviewGivesUp(t *testing.T) {
 	proc.DataDir = t.TempDir()
 	e := ev("o/r", 9, "")
@@ -785,11 +786,12 @@ func TestReviewGivesUp(t *testing.T) {
 	key := prKey(e)
 	t.Cleanup(func() { latest.Lock(); delete(latest.m, key); latest.Unlock() })
 	pushed(e)
+	var giveErr error
 	run := func(job func() error) (ran, gave bool) {
 		latest.Lock()
 		latest.m[key] = e.PullRequest.Head.SHA // as resume does after each restart
 		latest.Unlock()
-		review(e, func() error { gave = true; return nil }, func() error { ran = true; return job() })
+		review(e, func() error { gave = true; return giveErr }, func() error { ran = true; return job() })
 		return ran, gave
 	}
 	stop := func() error { return nil } // the server stops mid-run: done never runs
@@ -805,8 +807,19 @@ func TestReviewGivesUp(t *testing.T) {
 		t.Fatal("gave up")
 	}
 	starts(maxStarts)
+	giveErr = errors.New("forge down")
 	if ran, gave := run(stop); ran || !gave {
 		t.Fatalf("after %d starts: ran %v, gave up %v", maxStarts, ran, gave)
+	}
+	if done(key); !proc.Exists(pendingFile(key)) {
+		t.Fatal("a failed give-up dropped the pending review")
+	}
+	giveErr = nil
+	if _, gave := run(stop); !gave {
+		t.Fatal("not given up again")
+	}
+	if done(key); proc.Exists(pendingFile(key)) {
+		t.Fatal("given up, still pending")
 	}
 	pushed(e) // the same head again: a retarget, ready for review
 	starts(maxStarts - 1)

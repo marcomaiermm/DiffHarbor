@@ -393,3 +393,14 @@ func TestCancelExited(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// WriteAtomic makes the missing dirs on the way, Remove takes the file away again.
+func TestWriteAtomicDirs(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "a", "b", "f.json")
+	if err := WriteAtomic(f, []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Remove(f); err != nil || Exists(f) {
+		t.Fatal(err)
+	}
+}

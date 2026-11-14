@@ -313,13 +313,8 @@ func uidOf(f, repo string) (uint32, error) {
 // a host crash leaves the old one or the new one, never an empty one. One f.tmp: callers serialize their writes of f.
 func WriteAtomic(f string, b []byte) error {
 	dir := filepath.Dir(f)
-	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) { // a new dir: its entry in its parent is synced too
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err
-		}
-		if err := syncDir(filepath.Dir(dir)); err != nil {
-			return err
-		}
+	if err := mkdirSynced(dir); err != nil {
+		return err
 	}
 	t, err := os.OpenFile(f+".tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // the server's own files, not a PR's path
 	if err != nil {
@@ -333,6 +328,37 @@ func WriteAtomic(f string, b []byte) error {
 		return err
 	}
 	return syncDir(dir) // the rename itself
+}
+
+// mkdirSynced makes dir (0700) and what it needs of its parents, each one's entry in its parent synced.
+func mkdirSynced(dir string) error {
+	var made []string
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(d); !errors.Is(err, fs.ErrNotExist) || d == filepath.Dir(d) {
+			break
+		}
+		made = append(made, d)
+	}
+	if len(made) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	for _, d := range made {
+		if err := syncDir(filepath.Dir(d)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Remove removes f and syncs its dir: a host crash doesn't bring it back.
+func Remove(f string) error {
+	if err := os.Remove(f); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(f))
 }
 
 func syncDir(dir string) error {

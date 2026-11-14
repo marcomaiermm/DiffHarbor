@@ -53,7 +53,7 @@ type task struct {
 
 // review runs reviewJob, a queued push's review, unless a newer push of the PR is queued. One that couldn't clean up
 // before it started stays pending: the next push or a restart retries it. A head whose last maxStarts runs all stopped
-// the server runs giveUp instead.
+// the server runs giveUp instead; one that failed stays pending too, its notice still owed.
 func review(e *forge.Event, giveUp, reviewJob func() error) (err error) {
 	key, queued := prKey(e), e.PullRequest.Head.SHA
 	latest.Lock()
@@ -66,18 +66,22 @@ func review(e *forge.Event, giveUp, reviewJob func() error) (err error) {
 	if !current {
 		return nil
 	}
+	keep := false // pending: the next push or a restart retries
 	defer func() {
 		latest.Lock()
-		if latest.m[key] == queued && !errors.Is(err, proc.ErrCleanup) {
+		if latest.m[key] == queued && !keep {
 			delete(latest.m, key)
 		}
 		latest.Unlock()
 	}()
 	if n > maxStarts {
 		log.Println(e.Key(), "not reviewed: the server stopped during each of its last", maxStarts, "runs")
-		return giveUp()
+		err = giveUp()
+		keep = err != nil
+		return err
 	}
 	if err = reviewJob(); errors.Is(err, proc.ErrCleanup) {
+		keep = true
 		latest.Lock()
 		if latest.m[key] == queued { // it never ran
 			saveStarts(pendingFile(key), e, n-1)
@@ -185,7 +189,7 @@ func (p *pool) exec(ctx context.Context, e *forge.Event, t *task) {
 		t.cancel() // revokes the job's vault tokens: git's remote, Pi's keys
 		done(rk)
 		if isChat {
-			_ = os.Remove(chat.(string)) //nolint:forcetypeassert // only asked and resume store, strings
+			_ = proc.Remove(chat.(string)) //nolint:forcetypeassert // only asked and resume store, strings
 		}
 		p.mu.Lock()
 		if p.running[rk] == t {
