@@ -110,13 +110,13 @@ func TestMapLines(t *testing.T) {
 			"Shape": {changedSym("c/c.go", 3, "signature", "d/d.go:3=references", "d/d.go:4=instantiates")},
 			// not changed: no line
 			"Idle": {changedSym("c/c.go", 9, "", "d/d.go:9=calls")},
-			// e's table only read and written by f: carried, nothing drawn
+			// e's table only read and written by f: no line, the stores carry it
 			"users": {changedSym("e/e.go", 3, "new", "f/f.go:3=reads", "f/f.go:4=writes")},
 			// an index of g without kinds counts a call
 			"Run": {changedSym("g/g.go", 3, "new", "d/d.go:20")},
 			// a JSX element is a call
 			"Rend": {changedSym("g/g.go", 9, "new", "d/d.go:30=renders")},
-			// f's Back is only read by e: no use either layout or arrowhead sees, so not a two-way pair
+			// f's Back is only read by e: no line either
 			"Back2": {changedSym("f/f.go", 9, "new", "e/e.go:7=reads")},
 		},
 	}
@@ -132,10 +132,10 @@ func TestMapLines(t *testing.T) {
 		t.Errorf("back %+v", ab.Back)
 	}
 	cd := mapLine(m, "c", "d")
-	if cd == nil || cd.Style != "dashed" || cd.Chevron != "" || cd.Named != 2 || cd.Weight != 0 || cd.Width != 1 || len(m.Lines) != 4 {
+	if cd == nil || cd.Style != "dashed" || cd.Chevron != "" || cd.Named != 2 || cd.Weight != 0 || cd.Width != 1 || len(m.Lines) != 3 {
 		t.Errorf("c-d %+v, %d lines", cd, len(m.Lines))
 	}
-	if ef := mapLine(m, "e", "f"); ef == nil || ef.Reads != 2 || ef.Writes != 1 || ef.TwoWay || ef.Style != "" || ef.Chevron != "" || !mapPart(m, "e").Alone || !mapPart(m, "f").Alone {
+	if ef := mapLine(m, "e", "f"); ef != nil || !mapPart(m, "e").Alone || !mapPart(m, "f").Alone {
 		t.Errorf("e-f %+v", ef)
 	}
 	if gd := mapLine(m, "g", "d"); gd == nil || gd.Calls != 2 || gd.Style != "solid" {
@@ -168,7 +168,7 @@ func TestMapInterface(t *testing.T) {
 	if l == nil || len(m.Lines) != 1 || l.Calls != 1 || l.Through != 1 || l.Named != 1 || !slices.Equal(l.Via, []string{"Saver"}) || l.Style != "solid" {
 		t.Fatalf("line %+v", l)
 	}
-	if want := []MapName{{"Save", "calls", "", "app/app.go:21", 1}, {"Save", "through", "Saver", "app/app.go:20", 1}, {"Save", "named", "", "app/app.go:7", 1}}; !reflect.DeepEqual(l.Names, want) {
+	if want := []MapName{{"Save", "calls", "", "app/app.go:21", 1, nil}, {"Save", "through", "Saver", "app/app.go:20", 1, nil}, {"Save", "named", "", "app/app.go:7", 1, nil}}; !reflect.DeepEqual(l.Names, want) {
 		t.Errorf("names %+v", l.Names)
 	}
 	// without VTA's edge the call is through the interface alone: dashed, with an arrowhead, and 1px however many
@@ -562,5 +562,116 @@ func TestCatFiles(t *testing.T) {
 				y(k)
 			}
 		}))
+	}
+}
+
+// storeAt is the table called name on the map, nil without one.
+func storeAt(m *Map, name string) *MapStore {
+	for i, s := range m.Stores {
+		if s.Name == name {
+			return &m.Stores[i]
+		}
+	}
+	return nil
+}
+
+// TestMapStores: the tables the change writes and reads (6.13). a writes users, b reads it two calls down in code the
+// PR leaves and writes it through its drawn call into a's Save; c writes it through a call in its own part. A name in
+// SQL, a declaration and an alias are one table; a subquery is a table of its own; a migration names two of them.
+func TestMapStores(t *testing.T) {
+	lines := strings.Repeat("x\n", 12)
+	sql := "CREATE TABLE \"loot_sessions\" (\n  id int\n);\nALTER TABLE \"loot_sessions\" ADD COLUMN n int;\nALTER TABLE public.\"users\" ADD COLUMN x int;\n" +
+		"CREATE UNIQUE INDEX \"users_x\" ON \"users\" USING btree (\"x\");\nCREATE TABLE \"unused\" (id int);\n-- +goose Down\nDROP TABLE \"users\";\n"
+	d := Data{Diff: newFile("a/a.go", lines) + newFile("a/schema.ts", lines) + newFile("b/b.go", lines) + newFile("b/other.go", lines) +
+		newFile("c/c.go", lines) + newFile("c/c2.go", lines) + newFile("0d/d.ts", lines) + newFile("db/migrations/0002_x.sql", sql) +
+		// e/e.go: the PR adds line 3 only
+		"diff --git a/e/e.go b/e/e.go\n--- a/e/e.go\n+++ b/e/e.go\n@@ -2,0 +3 @@\n+x\n"}
+	sessions := StorePath{Kind: "reads", Table: "sessions", TPath: "a/schema.ts", TLine: 3, Text: "export const sessions = pgTable(\n  \"loot_sessions\", {", At: "0d/d.ts:4"}
+	sym := func(p string, line int, state string, stores []StorePath, here ...string) Symbol {
+		s := changedSym(p, line, state, here...)
+		s.Stores = stores
+		return s
+	}
+	d.Symbols = map[string][]Symbol{
+		// b calls Save at :7, which writes users itself
+		"Save": {sym("a/a.go", 3, "new", []StorePath{{Kind: "writes", Table: "users", At: "a/a.go:4"}}, "b/b.go:7=calls")},
+		// c calls List at :2; List reads users two calls down, and orders in its own part, which adds nothing for b
+		"List": {sym("b/b.go", 3, "new", []StorePath{
+			{Kind: "reads", Table: "users", At: "x/x.go:20", Calls: []StoreCall{{"b/b.go:5", "helper"}, {"x/x.go:11", "query"}}},
+			{Kind: "reads", Table: "orders", At: "b/other.go:9", Calls: []StoreCall{{"b/b.go:6", "bq"}}},
+		}, "c/c.go:2=calls")},
+		// c writes users through local, in its own part, then Save: the path counts at Save's call; it reads the
+		// sessions by their SQL name
+		"Sync": {sym("c/c.go", 3, "changed", []StorePath{
+			{Kind: "writes", Table: "users", At: "a/a.go:4", Calls: []StoreCall{{"c/c.go:4", "local"}, {"c/c2.go:6", "Save"}}},
+			{Kind: "reads", Table: "loot_sessions", At: "c/c.go:8"},
+		})},
+		// d reads the sessions, an alias of them, and a subquery
+		"Recent": {sym("0d/d.ts", 3, "new", []StorePath{
+			sessions,
+			{Kind: "reads", Table: "newerSession", TPath: "0d/d.ts", TLine: 2, Text: "const newerSession = alias(sessions, \"newer_session\")\nx", At: "0d/d.ts:5"},
+			{Kind: "reads", Table: "recentSq", TPath: "0d/d.ts", TLine: 1, Sub: true, At: "0d/d.ts:6"},
+		})},
+		// a call on a line the PR leaves starts no walk
+		"Run": {sym("e/e.go", 3, "changed", []StorePath{{Kind: "reads", Table: "audit", At: "x/x.go:3", Calls: []StoreCall{{"e/e.go:9", "other"}}}})},
+	}
+	m := BuildMap(nil, d, nil)
+	var names []string
+	for _, s := range m.Stores {
+		names = append(names, s.Name)
+	}
+	// users is written: first; sessions has two parts, orders and recentSq one; audit none
+	if want := []string{"users", "sessions", "orders", "recentSq"}; !slices.Equal(names, want) {
+		t.Fatalf("stores %q, want %q", names, want)
+	}
+	pos := map[string]int{}
+	for i, id := range m.Order {
+		pos[id] = i
+	}
+	users := storeAt(m, "users")
+	got := map[string][]MapStoreUse{}
+	for i, p := range users.Parts {
+		got[p.Part] = p.Uses
+		if i > 0 && pos[users.Parts[i-1].Part] > pos[p.Part] {
+			t.Errorf("parts not in map order: %+v, order %v", users.Parts, m.Order)
+		}
+	}
+	want := map[string][]MapStoreUse{
+		"a": {{Kind: "writes", Decl: "Save", At: "a/a.go:4", N: 1}},
+		"b": {{Kind: "writes", Decl: "Save", At: "b/b.go:7", Through: true, N: 1}, {Kind: "reads", Decl: "helper", At: "b/b.go:5", Through: true, N: 1}},
+		"c": {{Kind: "writes", Decl: "Save", At: "c/c2.go:6", Through: true, N: 1}, {Kind: "reads", Decl: "List", At: "c/c.go:2", Through: true, N: 1}},
+	}
+	if !reflect.DeepEqual(got, want) || users.Path != "" {
+		t.Errorf("users %+v", users)
+	}
+	if want := []MapStoreMigration{{"db/migrations/0002_x.sql", "Migration 0002", "changed", []int{5, 6}}}; !reflect.DeepEqual(users.Migrations, want) {
+		t.Errorf("users migrations %+v", users.Migrations) // the Down part's drop doesn't count
+	}
+	s := storeAt(m, "sessions")
+	if s == nil || s.Path != "a/schema.ts" || s.Line != 3 || len(s.Parts) != 2 || s.Subquery {
+		t.Fatalf("sessions %+v", s)
+	}
+	if want := []MapStoreName{{"loot_sessions", "c/c.go:8"}, {"newerSession", "0d/d.ts:2"}}; !reflect.DeepEqual(s.Names, want) {
+		t.Errorf("sessions names %+v", s.Names)
+	}
+	if want := []MapStoreMigration{{"db/migrations/0002_x.sql", "Migration 0002", "created", []int{1, 4}}}; !reflect.DeepEqual(s.Migrations, want) {
+		t.Errorf("sessions migrations %+v", s.Migrations)
+	}
+	if want := []MapStoreUse{{Kind: "reads", Decl: "Recent", At: "0d/d.ts:4", N: 2}}; s.Parts[1].Part != "0d" || !reflect.DeepEqual(s.Parts[1].Uses, want) {
+		t.Errorf("d's sessions %+v", s.Parts[1]) // the alias's query counts for the table
+	}
+	if o := storeAt(m, "orders"); len(o.Parts) != 1 || o.Parts[0].Part != "c" { // c's call into List reaches it
+		t.Errorf("orders %+v", o.Parts)
+	}
+	if r := storeAt(m, "recentSq"); r == nil || !r.Subquery || len(r.Names) != 0 {
+		t.Errorf("subquery %+v", r)
+	}
+	// Save writes users: b's call sends data to a, the chevron at a's end; List reads only: at c's, the caller's
+	ab := mapLine(m, "a", "b")
+	if ab == nil || ab.Chevron != "from" || !slices.Equal(ab.Names[0].Writes, []string{"users"}) {
+		t.Errorf("a-b %+v", ab)
+	}
+	if bc := mapLine(m, "b", "c"); bc == nil || bc.Chevron != "to" || bc.Names[0].Writes != nil {
+		t.Errorf("b-c %+v", bc)
 	}
 }

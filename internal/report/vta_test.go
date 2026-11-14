@@ -241,9 +241,15 @@ func TestTSEdges(t *testing.T) {
 		"calls shout src/api.ts:12 -> send src/notify.ts",          // n.make().send()
 		"calls notifyAll src/notify.ts:4 -> toLabel src/notify.ts", // xs.map(toLabel)
 		"renders List src/App.tsx:2 -> Row src/App.tsx",            // <Row />
+		"reads listRecent src/data.ts:17 -> recentSq src/data.ts",  // a subquery is a table of its own
 	} {
 		if !slices.Contains(got, w) {
 			t.Errorf("no %q in\n%s", w, strings.Join(got, "\n"))
+		}
+	}
+	for _, e := range idx.Edges {
+		if (e.Kind == "reads" || e.Kind == "writes") && e.Sub != (e.TName == "recentSq") {
+			t.Errorf("only recentSq, made by .as(…), is a subquery: %+v", e)
 		}
 	}
 }

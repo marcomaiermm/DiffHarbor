@@ -182,7 +182,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 		{Line: 5, Kind: "url", By: "ts", SName: "Sync", SPath: "sync.go", URL: "https://blizzard.example.com/roster", URLAt: "sync.go:2"},
 	}}
 	syms := map[string][]Symbol{"Sync": {{Path: "sync.go", Line: 3, From: 3, To: 7, Exact: true}}, "other": {{Path: "sync.go", Line: 9, From: 9, To: 9, Exact: true}}}
-	idx.outside(sb, map[string]bool{"sync.go": true}, map[string]bool{"sync.go:6": true}, syms)
+	idx.outside(sb, nil, map[string]bool{"sync.go": true}, map[string]bool{"sync.go:6": true}, syms)
 	want := []OutsideCall{{System: "blizzard.example.com", Path: "sync.go", Line: 5, URL: "https://blizzard.example.com/roster", URLAt: "sync.go:2"}}
 	if got := Outside(syms); !slices.Equal(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
@@ -201,5 +201,35 @@ func TestOutsideCallPrefersURL(t *testing.T) {
 	want := OutsideCall{System: "api.example.com", Path: "b.go", Line: 9, URL: "https://api.example.com/x", URLAt: "a.go:4"}
 	if got != want {
 		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+// The store walk keeps a path per call of the start, at most three calls long, and the start's own query.
+func TestStoresWalk(t *testing.T) {
+	call := func(s, t string, line int) cgEdge {
+		return cgEdge{Kind: "calls", SPath: "x.go", SName: s, TPath: "x.go", TName: t, Line: line}
+	}
+	g := map[declKey][]cgEdge{}
+	for _, e := range []cgEdge{
+		{Kind: "writes", SPath: "x.go", SName: "start", TName: "users", Line: 2},
+		call("start", "one", 3), call("start", "one", 3), // the index's and VTA's: one call
+		call("start", "one", 6), call("one", "two", 20), call("two", "three", 30),
+		{Kind: "reads", SPath: "x.go", SName: "three", TName: "orders", TPath: "s.go", TLine: 4, Line: 40},
+		call("start", "deep", 5), call("deep", "d2", 1), call("d2", "d3", 1), call("d3", "d4", 1),
+		{Kind: "reads", SPath: "x.go", SName: "d4", TName: "far", Line: 2},
+	} {
+		g[declKey{e.SPath, e.SName}] = append(g[declKey{e.SPath, e.SName}], e)
+	}
+	var got []string
+	for _, p := range storesFrom(g, declKey{"x.go", "start"}) {
+		got = append(got, fmt.Sprintf("%s %s %s:%d at %s %v", p.Kind, p.Table, p.TPath, p.TLine, p.At, p.Calls))
+	}
+	want := []string{
+		"writes users :0 at x.go:2 []",
+		"reads orders s.go:4 at x.go:40 [{x.go:3 one} {x.go:20 two} {x.go:30 three}]",
+		"reads orders s.go:4 at x.go:40 [{x.go:6 one} {x.go:20 two} {x.go:30 three}]", // the other call into one
+	} // far is four calls down
+	if !slices.Equal(got, want) {
+		t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

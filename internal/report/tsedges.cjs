@@ -8,6 +8,7 @@
 //   reads, writes  a call to a package's method named like a read or a write (`findMany`, `insert`, …), to the store
 //            the chain names: an argument of the project (a table), a string ("users", SQL's FROM), a property between
 //            client and method (`prisma.user`), the receiver's type argument (`Repository<User>`); none: no edge.
+//            Sub: the store is a subquery the project declares (`.as("x")` on a chain), whose tables aren't followed
 //            A bare string only in a chain of calls: `_.get(o, "a.b")`, `createElement("div")` name no store
 //   requests  a call that sends a network request, to no declaration: the global fetch, node:http's and node:https's
 //            request and get, a package's call given a URL constant (below)
@@ -77,7 +78,10 @@ const declOf = (s, h, path) => {
     (is.isPropertyAssignment(n) && (is.isArrowFunction(n.initializer) || is.isFunctionExpression(n.initializer)));
   const up = k => { let p = n; for (let i = 0; i < k && p; i++) p = p.parent; return !!p && is.isSourceFile(p) };
   const top = up(1) || up(3); // a store: the module's, not a parameter
-  return { name: s.name, path, line: lineOf(n, sf), fn, top, node: n, sf };
+  // a subquery: a chain of calls made a table of its own, `db.select(…).from(t).as("x")`
+  const init = is.isVariableDeclaration(n) && n.initializer, as = init && is.isCallExpression(init) && init.expression;
+  const sub = !!as && is.isPropertyAccessExpression(as) && as.name.text === "as" && is.isCallExpression(as.expression);
+  return { name: s.name, path, line: lineOf(n, sf), fn, top, sub, node: n, sf };
 };
 const text = n => (n && (is.isIdentifier(n) || is.isStringLiteral(n) || is.isNoSubstitutionTemplateLiteral(n)) ? n.text : "");
 function calleeName(c) { // the name a call calls: `m` of `a.m()` and `m()`
@@ -99,7 +103,7 @@ const emit = (kind, s, line, t, url) => {
   if (seen.has(k)) return;
   seen.add(k);
   out.push({ Line: line, Kind: kind, By: "ts", SName: s.name, SKind: s.kind, SPath: s.path, SLine: s.line, SEnd: s.end,
-    TName: t.name, TPath: t.path || "", TLine: t.line || 0, URL: url?.url, Env: url?.env, URLAt: url?.at });
+    TName: t.name, TPath: t.path || "", TLine: t.line || 0, Sub: t.sub || undefined, URL: url?.url, Env: url?.env, URLAt: url?.at });
 };
 const isUrl = s => /^https?:\/\//.test(s);
 const envObj = s => s === "process.env" || s === "import.meta.env";

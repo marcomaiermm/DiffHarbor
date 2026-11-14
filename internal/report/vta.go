@@ -41,6 +41,7 @@ type cgEdge struct {
 	// requests: a call that sends a network request, its TName the callee (TPath ""); url: a call that passes a URL
 	// on. The URL's text or the environment variable it is read from, and where that stands (path:line); see outside.go.
 	URL, Env, URLAt string
+	Sub             bool // reads, writes: the store is a subquery the project declares (tsEdges)
 }
 
 // vtaTimeout bounds VTA on one module: loading and type-checking a large repo takes long and much memory.

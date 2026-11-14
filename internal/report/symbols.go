@@ -48,6 +48,7 @@ type Symbol struct {
 	// exact, a declaration the diff adds or changes: the requests it sends to systems outside the repo, itself or
 	// within a few calls, see outside.go
 	Requests []OutsideCall `json:"-"`
+	Stores   []StorePath   `json:"-"` // the same, the queries it runs: the map's tables (spec 6.13)
 }
 
 // Way is how the code reaches a declaration: from a route it registers ("GET", "/x/{id}", where), or from a
@@ -183,7 +184,7 @@ func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
 		added := diff.RightLines(diffText, false)
 		idx.exact(root, changed, added, syms)
 		idx.tests(sb, root, changed, syms)
-		idx.outside(sb, changed, added, syms)
+		idx.outside(sb, root, changed, added, syms)
 	}
 	return syms
 }

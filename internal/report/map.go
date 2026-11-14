@@ -79,28 +79,30 @@ type MapItem struct {
 }
 
 // MapLine is the use of one part's changed code by another: it runs from the part that declares to the part that
-// uses, the way results go. Names are what From declares and To uses, Back the other way when TwoWay.
+// uses. Names are what From declares and To uses, Back the other way when TwoWay. A store's reads and writes are
+// no use here: Map.Stores carries them.
 type MapLine struct {
 	From, To string
 	Names    []MapName
 	Back     []MapName
 	TwoWay   bool
-	// Calls, Through (calls through an interface), Named (uses without a call), Reads and Writes (a store's, kept for
-	// the page, drawn as nothing yet) count both ways.
-	Calls, Through, Named, Reads, Writes int
-	Weight                               int      // Calls + Through
-	Width                                int      // the line's px: 1 for under 3 calls, 2 for under 10, else 3
-	Style                                string   // "solid": a direct call; "dashed": through an interface or named; "": only reads and writes
-	Chevron                              string   // where the arrow heads sit: "to" (at To), "from", "both", "" for names alone
-	Via                                  []string // the interfaces its calls go through
+	// Calls, Through (calls through an interface) and Named (uses without a call) count both ways.
+	Calls, Through, Named int
+	Weight                int      // Calls + Through
+	Width                 int      // the line's px: 1 for under 3 calls, 2 for under 10, else 3
+	Style                 string   // "solid": a direct call; "dashed": through an interface or named
+	Chevron               string   // where the arrow heads sit, the way data goes: "to" (at To), "from", "both", "" for names alone
+	Via                   []string // the interfaces its calls go through
 }
 
 // MapName is a declaration a line carries and how it is used, N times, first at At (path:line). Kind: "calls",
-// "through" (Via the interface), "named", "reads", "writes".
+// "through" (Via the interface), "named".
 type MapName struct {
 	Name, Kind, Via, At string
 	N                   int
-	Writes              []string // the tables its code writes, itself or within 3 calls: the line's chevron sits at its callee
+	// calls: the tables its code writes, itself or within 3 calls, the call into it the first: the call sends data to
+	// it, so the line's chevron sits at its end (decision 27)
+	Writes []string
 }
 
 // OutsideCall is a call out of the repo that code names (Outside): the system, the line of changed code that sends
@@ -167,7 +169,7 @@ type MapStore struct {
 	Migrations []MapStoreMigration
 }
 
-// MapStoreName is another name of a table: an alias, the name SQL gives it.
+// MapStoreName is another name of a table: an alias at its declaration, the name SQL gives it at its first query.
 type MapStoreName struct{ Name, At string }
 
 // MapStorePart is how a part uses a table: each use is a declaration that holds the query, or a call whose
@@ -245,6 +247,8 @@ type mapper struct {
 	box   map[string]*MapDeploy
 	gen   map[string]bool
 	added map[string]bool
+	drawn []drawnCall           // the calls the map draws: the store walk starts at them too
+	wrote map[partName][]string // the tables a part's declaration writes, for its callers' chevrons
 }
 
 // BuildMap is the map of d's change, with the outside calls (Outside). sb is the checkout: its
@@ -266,6 +270,7 @@ func BuildMap(sb *proc.Sandbox, d Data, outside []OutsideCall) *Map {
 	}
 	b.lines()
 	b.layout()
+	b.orderStores()
 	b.reach()
 	b.tables(sb)
 	b.deploy()
@@ -439,7 +444,7 @@ type use struct{ decl, user int }
 type nameKey struct{ name, kind, via string }
 
 // lines reads the uses of changed declarations between parts (6.2): a direct call, a call through an interface, a
-// name used without one, a store read or write.
+// name used without one; and the tables the change writes and reads (6.13), whose writes move a call's chevron.
 //
 // Through an interface: the index ties an interface's method to the methods behind it with a use on the line where
 // the interface declares it, and the callers of the interface's method are uses of the interface's. VTA, which
@@ -476,6 +481,14 @@ func (b *mapper) lines() {
 	used := usage{}
 	behind, kinds := b.direct(used, names, iface)
 	b.through(used, names, iface, behind)
+	b.stores(names)
+	for u, ns := range used {
+		for k, n := range ns {
+			if k.kind == "calls" {
+				n.Writes = b.wrote[partName{u.decl, k.name}]
+			}
+		}
+	}
 	b.m.NoKinds = !kinds && len(used) > 0
 	done := map[use]bool{}
 	for _, u := range slices.SortedFunc(maps.Keys(used), func(x, y use) int { return cmp.Or(cmp.Compare(x.decl, y.decl), cmp.Compare(x.user, y.user)) }) {
@@ -484,7 +497,7 @@ func (b *mapper) lines() {
 		}
 		done[u], done[use{u.user, u.decl}] = true, true
 		l := MapLine{From: b.m.Parts[u.decl].ID, To: b.m.Parts[u.user].ID, Names: sortNames(used[u]), Back: sortNames(used[use{u.user, u.decl}])}
-		l.TwoWay = drawn(l.Names) && drawn(l.Back) // reads and writes alone back are no use the layout sees
+		l.TwoWay = len(l.Names) > 0 && len(l.Back) > 0
 		l.count()
 		b.m.Lines = append(b.m.Lines, l)
 	}
@@ -522,8 +535,11 @@ func (b *mapper) direct(used usage, names []string, iface map[string]string) (be
 				if iface[h] != "" { // the index's tie to an interface: no call
 					behind[h], k = append(behind[h], s), "named"
 				}
-				if up, ok := b.part[placeOf(h)]; ok && up != dp {
+				if up, ok := b.part[placeOf(h)]; ok && up != dp && k != "reads" && k != "writes" {
 					used.add(dp, up, n, k, "", h)
+					if k == "calls" {
+						b.drawn = append(b.drawn, drawnCall{s, n, h, up})
+					}
 				}
 			}
 		}
@@ -572,10 +588,6 @@ func (l *MapLine) count() {
 				vias[n.Via] = true
 			case "named":
 				l.Named += n.N
-			case "reads":
-				l.Reads += n.N
-			case "writes":
-				l.Writes += n.N
 			}
 		}
 	}
@@ -589,7 +601,19 @@ func (l *MapLine) count() {
 	case l.Through+l.Named > 0:
 		l.Style = "dashed"
 	}
-	l.Chevron = map[[2]bool]string{{true, true}: "both", {true, false}: "to", {false, true}: "from"}[[2]bool{arrow(l.Names), arrow(l.Back)}]
+	// a call gives its result back to the caller; a call into code that writes sends its data to the callee
+	at := map[string]bool{}
+	for _, d := range []struct {
+		ns               []MapName
+		caller, declarer string
+	}{{l.Names, "to", "from"}, {l.Back, "from", "to"}} {
+		for _, n := range d.ns {
+			if n.Kind == "calls" || n.Kind == "through" {
+				at[map[bool]string{false: d.caller, true: d.declarer}[len(n.Writes) > 0]] = true
+			}
+		}
+	}
+	l.Chevron = map[[2]bool]string{{true, true}: "both", {true, false}: "to", {false, true}: "from"}[[2]bool{at["to"], at["from"]}]
 }
 
 // calledAt is whether s has a call at site h.
@@ -598,15 +622,10 @@ func calledAt(s *Symbol, h string) bool {
 	return i >= 0 && useKind(kindAt(s, i)) == "calls"
 }
 
-// arrow is whether a direction has calls: the chevron sits at the caller's edge.
-func arrow(ns []MapName) bool {
-	return slices.ContainsFunc(ns, func(n MapName) bool { return n.Kind == "calls" || n.Kind == "through" })
-}
-
-// sortNames puts calls first, then those through an interface, names, reads, writes; in each the most uses first,
-// ties in name order ignoring case.
+// sortNames puts calls first, then those through an interface, then names; in each the most uses first, ties in name
+// order ignoring case.
 func sortNames(m map[nameKey]*MapName) []MapName {
-	rank := map[string]int{"calls": 0, "through": 1, "named": 2, "reads": 3, "writes": 4}
+	rank := map[string]int{"calls": 0, "through": 1, "named": 2}
 	var out []MapName
 	for _, n := range m {
 		out = append(out, *n)
@@ -616,6 +635,331 @@ func sortNames(m map[nameKey]*MapName) []MapName {
 			cmp.Compare(strings.ToLower(x.Name), strings.ToLower(y.Name)), cmp.Compare(x.Name, y.Name), cmp.Compare(x.Via, y.Via))
 	})
 	return out
+}
+
+// drawnCall is a call the map draws, into s (named name) at h, from the part up.
+type drawnCall struct {
+	s    *Symbol
+	name string
+	h    string
+	up   int
+}
+
+// partName is a part's declaration by name.
+type partName struct {
+	part int
+	name string
+}
+
+// storeUse is a part's use of a table, before its places are counted.
+type storeUse struct {
+	kind, decl string
+	through    bool
+}
+
+var (
+	// quotedName is a name in quotes, as SQL calls a table: pgTable("items", …)
+	quotedName = regexp.MustCompile("[\"'`]([A-Za-z_][\\w.]*)[\"'`]")
+	// madeBy is a declaration made by a call, the call's first argument in group 1 when it is a name: alias(t, "x")
+	madeBy = regexp.MustCompile(`=\s*(?:await\s+)?[\w.]+\s*(?:<[^>]*>)?\(\s*(\w*)`)
+	// the statements of a migration that create or change a table, its name in group 1
+	createTable = regexp.MustCompile(`(?i)\bCREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([\w."` + "`" + `\[\]]+)`)
+	alterTable  = regexp.MustCompile(`(?i)\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?([\w."` + "`" + `\[\]]+)`)
+	createIndex = regexp.MustCompile(`(?i)\bCREATE\s+(?:UNIQUE\s+)?INDEX\b.*?\bON\s+(?:ONLY\s+)?([\w."` + "`" + `\[\]]+)`)
+)
+
+// storeKey is a table as an edge names it: its declaration's place, else its name, in any case.
+func storeKey(p StorePath) string {
+	if p.TPath != "" {
+		return p.TPath + ":" + strconv.Itoa(p.TLine)
+	}
+	return strings.ToLower(p.Table)
+}
+
+// tableNames is what a table's declaration made by a call says of it: the name it quotes on its line or the next,
+// and the call's first argument when that is a name, the table an alias is of (alias(t, "x")); "" for none.
+func tableNames(text string) (quoted, of string) {
+	first, next, _ := strings.Cut(text, "\n")
+	m := madeBy.FindStringSubmatchIndex(first)
+	if m == nil {
+		return "", ""
+	}
+	of = first[m[2]:m[3]]
+	if q := quotedName.FindStringSubmatch(first[m[0]:]); q != nil {
+		return q[1], of
+	}
+	if q := quotedName.FindStringSubmatch(next); q != nil {
+		return q[1], of
+	}
+	return "", of
+}
+
+// storeHit is a part's use of a table at a place: a query, or the call a path counts at.
+type storeHit struct {
+	key  string // storeKey
+	part int
+	use  storeUse
+	at   string
+}
+
+// storeScan gathers the uses: the tables as first named, each with its first query, and every place once.
+type storeScan struct {
+	b       *mapper
+	tables  map[string]StorePath
+	firstAt map[string]string
+	hits    []storeHit
+	seen    map[storeHit]bool
+}
+
+func (sc *storeScan) note(p StorePath) string {
+	k := storeKey(p)
+	if _, ok := sc.tables[k]; !ok {
+		sc.tables[k], sc.firstAt[k] = p, p.At
+	}
+	return k
+}
+
+// add keeps a place once, whichever start reached it, under the name it came first with: the map's for a drawn call.
+func (sc *storeScan) add(h storeHit) {
+	if k := (storeHit{h.key, h.part, storeUse{kind: h.use.kind, through: h.use.through}, h.at}); !sc.seen[k] {
+		sc.seen[k] = true
+		sc.hits = append(sc.hits, h)
+	}
+}
+
+// through is a query that part pi's calls reach: it counts at the last call in the part, named by its callee, and
+// not when the query is the part's own.
+func (sc *storeScan) through(pi int, calls []StoreCall, p StorePath) {
+	if q, ok := sc.b.part[placeOf(p.At)]; ok && q == pi {
+		return
+	}
+	for i := len(calls) - 1; i >= 0; i-- {
+		if q, ok := sc.b.part[placeOf(calls[i].At)]; ok && q == pi {
+			sc.add(storeHit{sc.note(p), pi, storeUse{p.Kind, calls[i].Callee, true}, calls[i].At})
+			return
+		}
+	}
+}
+
+// joinTables is one table per box (6.13): a name-only table joins the declaration that quotes it, an alias the table
+// it is of, a name is one table. root gives a table's box key; named, by a name SQL may give it (lower case), a table.
+func joinTables(tables map[string]StorePath) (root func(string) string, named map[string]string) {
+	keys := slices.Sorted(maps.Keys(tables))
+	byName, parent := map[string]string{}, map[string]string{}
+	for _, k := range keys {
+		if p := tables[k]; p.TPath != "" && byName[strings.ToLower(p.Table)] == "" {
+			byName[strings.ToLower(p.Table)] = k
+		}
+	}
+	named = map[string]string{}
+	for _, k := range keys {
+		p := tables[k]
+		if p.TPath == "" { // a name only: SQL's own, before a declaration's
+			named[k] = k
+			continue
+		}
+		named[strings.ToLower(p.Table)] = cmp.Or(named[strings.ToLower(p.Table)], k)
+		q, of := tableNames(p.Text)
+		if t := byName[strings.ToLower(of)]; of != "" && t != "" && t != k {
+			parent[k] = t
+		}
+		if q = strings.ToLower(q); q != "" {
+			if _, ok := tables[q]; ok && parent[q] == "" {
+				parent[q] = k
+			}
+			named[q] = cmp.Or(named[q], k)
+		}
+	}
+	return func(k string) string {
+		for range len(keys) { // an alias of an alias; a cycle ends somewhere
+			p, ok := parent[k]
+			if !ok {
+				break
+			}
+			k = p
+		}
+		return k
+	}, named
+}
+
+// stores is Map.Stores (6.13), but for their order, and the tables each part's declaration writes (wrote). A query
+// of a declaration the PR adds or changes is its part's. A part's call reaches more, within maxHops calls: a call the
+// map draws and a call on a line the diff adds start a path (storeScan.through).
+func (b *mapper) stores(names []string) {
+	sc := &storeScan{b: b, tables: map[string]StorePath{}, firstAt: map[string]string{}, seen: map[storeHit]bool{}}
+	for _, c := range b.drawn { // first: the map's name for the callee
+		for _, p := range c.s.Stores {
+			if len(p.Calls) < maxHops {
+				sc.through(c.up, append([]StoreCall{{c.h, c.name}}, p.Calls...), p)
+			}
+		}
+	}
+	wrote := map[partName][]string{} // table keys
+	for _, n := range names {
+		for i := range b.d.Symbols[n] {
+			s := &b.d.Symbols[n][i]
+			pi, ok := b.part[s.Path]
+			if !ok || !s.Exact || !b.stated(s) {
+				continue
+			}
+			for _, p := range s.Stores {
+				switch {
+				case len(p.Calls) == 0:
+					sc.add(storeHit{sc.note(p), pi, storeUse{p.Kind, n, false}, p.At})
+				case b.added[p.Calls[0].At]:
+					sc.through(pi, p.Calls, p)
+				}
+				if p.Kind == "writes" && len(p.Calls) < maxHops {
+					wrote[partName{pi, n}] = append(wrote[partName{pi, n}], sc.note(p))
+				}
+			}
+		}
+	}
+	root, named := joinTables(sc.tables)
+	box := map[string]int{}
+	uses := map[int]map[int]map[storeUse]*MapStoreUse{} // box -> part -> use
+	for _, h := range sc.hits {
+		r := root(h.key)
+		i, ok := box[r]
+		if !ok {
+			p := sc.tables[r]
+			st := MapStore{Name: p.Table, Subquery: p.Sub}
+			if p.TPath != "" {
+				st.Path, st.Line = p.TPath, p.TLine
+			}
+			i, box[r] = len(b.m.Stores), len(b.m.Stores)
+			b.m.Stores = append(b.m.Stores, st)
+			uses[i] = map[int]map[storeUse]*MapStoreUse{}
+		}
+		if uses[i][h.part] == nil {
+			uses[i][h.part] = map[storeUse]*MapStoreUse{}
+		}
+		if uses[i][h.part][h.use] == nil {
+			uses[i][h.part][h.use] = &MapStoreUse{Kind: h.use.kind, Decl: h.use.decl, Through: h.use.through, At: h.at}
+		}
+		uses[i][h.part][h.use].N++
+	}
+	for _, k := range slices.Sorted(maps.Keys(sc.tables)) {
+		i, ok := box[root(k)]
+		if p := sc.tables[k]; ok && k != root(k) && !strings.EqualFold(p.Table, b.m.Stores[i].Name) {
+			at := sc.firstAt[k]
+			if p.TPath != "" {
+				at = p.TPath + ":" + strconv.Itoa(p.TLine)
+			}
+			b.m.Stores[i].Names = append(b.m.Stores[i].Names, MapStoreName{p.Table, at})
+		}
+	}
+	for i := range b.m.Stores {
+		b.storeParts(&b.m.Stores[i], uses[i])
+	}
+	b.wrote = map[partName][]string{}
+	for pn, ks := range wrote {
+		var ns []string
+		for _, k := range ks {
+			ns = append(ns, sc.tables[root(k)].Table)
+		}
+		slices.SortFunc(ns, func(x, y string) int {
+			return cmp.Or(cmp.Compare(strings.ToLower(x), strings.ToLower(y)), cmp.Compare(x, y))
+		})
+		b.wrote[pn] = slices.Compact(ns)
+	}
+	b.storeMigrations(func(name string) (int, bool) {
+		k := named[strings.ToLower(name)]
+		i, ok := box[root(k)]
+		return i, ok && k != ""
+	})
+}
+
+// storeParts sets a table's names in name order and its parts' uses: writes first, a query before a call, the
+// most first, then by name ignoring case.
+func (b *mapper) storeParts(st *MapStore, uses map[int]map[storeUse]*MapStoreUse) {
+	slices.SortFunc(st.Names, func(x, y MapStoreName) int {
+		return cmp.Or(cmp.Compare(strings.ToLower(x.Name), strings.ToLower(y.Name)), cmp.Compare(x.Name, y.Name))
+	})
+	for _, pi := range slices.Sorted(maps.Keys(uses)) {
+		var us []MapStoreUse
+		for _, u := range uses[pi] {
+			us = append(us, *u)
+		}
+		slices.SortFunc(us, func(x, y MapStoreUse) int {
+			return cmp.Or(-cmp.Compare(x.Kind, y.Kind), cmp.Compare(map[bool]int{true: 1}[x.Through], map[bool]int{true: 1}[y.Through]),
+				cmp.Compare(y.N, x.N), cmp.Compare(strings.ToLower(x.Decl), strings.ToLower(y.Decl)), cmp.Compare(x.Decl, y.Decl), cmp.Compare(x.At, y.At))
+		})
+		st.Parts = append(st.Parts, MapStorePart{b.m.Parts[pi].ID, us})
+	}
+}
+
+// storeMigrations adds to the tables the PR's migrations name (6.13): CREATE TABLE, ALTER TABLE, CREATE INDEX … ON
+// and DROP TABLE in what runs on migrate (upLines). A migration that creates a table created it, also when it changes
+// it; else one that drops it dropped it; else it changed it.
+func (b *mapper) storeMigrations(table func(name string) (int, bool)) {
+	type key struct {
+		store int
+		path  string
+	}
+	kinds, lines := map[key]map[string]bool{}, map[key][]int{}
+	b.upLines(func(p string, no int, text string) {
+		for _, st := range []struct {
+			re   *regexp.Regexp
+			kind string
+		}{{createTable, "created"}, {alterTable, "changed"}, {createIndex, "changed"}, {dropTable, "dropped"}} {
+			m := st.re.FindStringSubmatch(text)
+			if m == nil {
+				continue
+			}
+			for _, t := range strings.Split(m[1], ",") { // DROP TABLE a, b
+				fs := strings.Fields(t)
+				if len(fs) == 0 {
+					continue
+				}
+				i, ok := table(bareName(fs[0]))
+				if !ok {
+					continue
+				}
+				k := key{i, p}
+				if kinds[k] == nil {
+					kinds[k] = map[string]bool{}
+				}
+				kinds[k][st.kind] = true
+				lines[k] = append(lines[k], no)
+			}
+		}
+	})
+	for _, k := range slices.SortedFunc(maps.Keys(kinds), func(x, y key) int { return cmp.Or(cmp.Compare(x.store, y.store), cmp.Compare(x.path, y.path)) }) {
+		kind := "changed"
+		if kinds[k]["created"] {
+			kind = "created"
+		} else if kinds[k]["dropped"] {
+			kind = "dropped"
+		}
+		ls := lines[k]
+		slices.Sort(ls)
+		b.m.Stores[k.store].Migrations = append(b.m.Stores[k.store].Migrations, MapStoreMigration{k.path, migrationLabel(k.path), kind, slices.Compact(ls)})
+	}
+}
+
+// orderStores puts Map.Stores in order (6.13): the tables some part writes first, then more parts first, then by
+// name ignoring case; each table's parts in map order.
+func (b *mapper) orderStores() {
+	pos := map[string]int{}
+	for i, id := range b.m.Order {
+		pos[id] = i
+	}
+	writes := func(s MapStore) int {
+		for _, p := range s.Parts {
+			if slices.ContainsFunc(p.Uses, func(u MapStoreUse) bool { return u.Kind == "writes" }) {
+				return 0
+			}
+		}
+		return 1
+	}
+	for i := range b.m.Stores {
+		slices.SortStableFunc(b.m.Stores[i].Parts, func(x, y MapStorePart) int { return cmp.Compare(pos[x.Part], pos[y.Part]) })
+	}
+	slices.SortStableFunc(b.m.Stores, func(x, y MapStore) int {
+		return cmp.Or(cmp.Compare(writes(x), writes(y)), cmp.Compare(len(y.Parts), len(x.Parts)),
+			cmp.Compare(strings.ToLower(x.Name), strings.ToLower(y.Name)), cmp.Compare(x.Name, y.Name), cmp.Compare(x.Path, y.Path))
+	})
 }
 
 // ids is the parts' IDs in folder order, minus skip.
@@ -709,11 +1053,6 @@ func rows(node []string, cols []int, adj [][]mapEdge) (top int, row []int) {
 	return top, row
 }
 
-// drawn is whether a direction has a use the map draws: reads and writes are only carried.
-func drawn(ns []MapName) bool {
-	return slices.ContainsFunc(ns, func(x MapName) bool { return x.Kind == "calls" || x.Kind == "through" || x.Kind == "named" })
-}
-
 // weights is the matrix of the drawn lines: w[i][j] is how much part i uses part j, at least 1 when it does.
 func (b *mapper) weights(at map[string]int) [][]int {
 	n := len(b.m.Parts)
@@ -723,10 +1062,10 @@ func (b *mapper) weights(at map[string]int) [][]int {
 	}
 	for _, l := range b.m.Lines {
 		from, to := at[l.From], at[l.To]
-		if drawn(l.Names) { // To uses what From declares
+		if len(l.Names) > 0 { // To uses what From declares
 			w[to][from] += max(l.Weight, 1)
 		}
-		if drawn(l.Back) {
+		if len(l.Back) > 0 {
 			w[from][to] += max(l.Weight, 1)
 		}
 	}
@@ -1016,15 +1355,14 @@ const (
 	tableTime               = time.Minute
 )
 
-// drops is the tables the migrations of the diff drop: a DROP TABLE on a line the PR adds, what runs on migrate (a
-// goose file's Down part doesn't count). A file's text is its head's, the diff's lines without it.
-func (b *mapper) drops() []MapTable {
-	var out []MapTable
-	diff.EachFile(b.d.Diff, func(p, f string) {
+// upLines calls f with each line of the diff's SQL files that the PR adds and that runs on migrate, comments aside: a
+// goose file's Down part doesn't count. A file's text is its head's, the diff's lines without it.
+func (b *mapper) upLines(f func(p string, no int, text string)) {
+	diff.EachFile(b.d.Diff, func(p, fd string) {
 		if path.Ext(p) != ".sql" {
 			return
 		}
-		fl := parse(p, f, "")
+		fl := parse(p, fd, "")
 		type ln struct {
 			no   int
 			text string
@@ -1047,26 +1385,40 @@ func (b *mapper) drops() []MapTable {
 				lines = append(lines, ln{i + 1, t, added[i+1]})
 			}
 		}
-		seen := map[string]bool{}
 		for _, l := range lines {
 			if downMark.MatchString(l.text) {
 				break
 			}
-			m := dropTable.FindStringSubmatch(l.text)
-			if m == nil || !l.add || strings.HasPrefix(strings.TrimSpace(l.text), "--") {
+			if l.add && !strings.HasPrefix(strings.TrimSpace(l.text), "--") {
+				f(p, l.no, l.text)
+			}
+		}
+	})
+}
+
+// bareName is a table's name in SQL without its schema and quotes: public."items" is items.
+func bareName(s string) string {
+	return strings.Trim(s[strings.LastIndexByte(s, '.')+1:], "\"`'[]")
+}
+
+// drops is the tables the migrations of the diff drop: a DROP TABLE in upLines.
+func (b *mapper) drops() []MapTable {
+	var out []MapTable
+	seen := map[[2]string]bool{}
+	b.upLines(func(p string, no int, text string) {
+		m := dropTable.FindStringSubmatch(text)
+		if m == nil {
+			return
+		}
+		for _, t := range strings.Split(m[1], ",") {
+			fs := strings.Fields(t)
+			if len(fs) == 0 {
 				continue
 			}
-			for _, t := range strings.Split(m[1], ",") {
-				fs := strings.Fields(t)
-				if len(fs) == 0 {
-					continue
-				}
-				name := fs[0][strings.LastIndexByte(fs[0], '.')+1:]
-				name = strings.Trim(name, "\"`'[]")
-				if tableName.MatchString(name) && !seen[name] && len(out) < maxDrops {
-					seen[name] = true
-					out = append(out, MapTable{Name: name, Path: p, Line: l.no})
-				}
+			name := bareName(fs[0])
+			if tableName.MatchString(name) && !seen[[2]string{p, name}] && len(out) < maxDrops {
+				seen[[2]string{p, name}] = true
+				out = append(out, MapTable{Name: name, Path: p, Line: no})
 			}
 		}
 	})

@@ -196,7 +196,7 @@ func (idx *cgIndex) exact(root *os.Root, changed, added map[string]bool, syms ma
 		if e.SKind == "file" {
 			in = ""
 		}
-		if e.TPath == "" { // a store only named (a string, SQL's table): no declaration to point at
+		if e.TPath == "" { // a store only named (a string, SQL's table): no declaration to point at; the store walk keeps it (outside.go)
 			continue
 		}
 		if from := find(e.SPath, e.SName, e.SLine); from != nil && known[from] != nil {

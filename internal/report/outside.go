@@ -5,7 +5,9 @@ import (
 	"diffharbor/internal/proc"
 	"maps"
 	"net/url"
+	"os"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -20,6 +22,7 @@ const (
 	maxWalk    = 400 // declarations whose calls the index is asked for
 	maxPer     = 5   // outside calls from one declaration
 	maxOutside = 40  // in all
+	maxStores  = 100 // queries one declaration's walk keeps
 )
 
 // declKey is a declaration as the edges name it. Two of one name in a file are one: the index's name is no more.
@@ -166,9 +169,76 @@ func systemName(rawURL, env, sender string) string {
 	return cmp.Or(env, sender)
 }
 
-// outside sets Requests on the declarations the PR adds or changes (an added line between their lines) that send a
-// request, themselves or within maxHops calls.
-func (idx *cgIndex) outside(sb *proc.Sandbox, changed, added map[string]bool, syms map[string][]Symbol) {
+// StorePath is a query a declaration's code runs (spec 6.13): Kind "reads" or "writes", the table as the store edge
+// names it (Table; TPath and TLine its declaration, "" when the code only names it; Text that line and the next; Sub,
+// the declaration is a subquery), At the query's place. Calls lead to it from the declaration, the first in its own
+// code; none for its own query.
+type StorePath struct {
+	Kind, Table, TPath, Text, At string
+	TLine                        int
+	Sub                          bool
+	Calls                        []StoreCall
+}
+
+// StoreCall is a call on a store path: its place (path:line) and its callee.
+type StoreCall struct{ At, Callee string }
+
+// storesFrom are the queries start's code runs, its own and those within maxHops calls: a walk per call it makes, so
+// each of its calls keeps the paths it begins. Each declaration once per walk, the first path to it; the first
+// maxStores in all.
+func storesFrom(g map[declKey][]cgEdge, start declKey) []StorePath {
+	var out []StorePath
+	add := func(e cgEdge, calls []StoreCall) {
+		if len(out) < maxStores {
+			p := StorePath{Kind: e.Kind, Table: e.TName, TPath: e.TPath, TLine: e.TLine, Sub: e.Sub, Calls: calls}
+			p.At = e.SPath + ":" + strconv.Itoa(e.Line)
+			out = append(out, p)
+		}
+	}
+	store := func(e cgEdge) bool { return e.Kind == "reads" || e.Kind == "writes" }
+	call := func(e cgEdge) StoreCall {
+		return StoreCall{e.SPath + ":" + strconv.Itoa(cmp.Or(e.Line, e.SLine)), e.TName}
+	}
+	type step struct {
+		k     declKey
+		calls []StoreCall
+	}
+	firsts := map[StoreCall]bool{}
+	for _, f := range g[start] {
+		if store(f) {
+			add(f, nil)
+		}
+		if f.Kind != "calls" || f.TPath == "" || f.Line == 0 || firsts[call(f)] {
+			continue
+		}
+		firsts[call(f)] = true
+		k := declKey{f.TPath, f.TName}
+		seen := map[declKey]bool{start: true, k: true}
+		level := []step{{k, []StoreCall{call(f)}}}
+		for hop := 1; hop <= maxHops && len(level) > 0; hop++ {
+			var next []step
+			for _, s := range level {
+				for _, e := range g[s.k] {
+					t := declKey{e.TPath, e.TName}
+					switch {
+					case store(e):
+						add(e, s.calls)
+					case e.Kind == "calls" && e.TPath != "" && !seen[t]:
+						seen[t] = true
+						next = append(next, step{t, append(slices.Clip(s.calls), call(e))})
+					}
+				}
+			}
+			level = next
+		}
+	}
+	return out
+}
+
+// outside sets Requests and Stores on the declarations the PR adds or changes (an added line between their lines):
+// the requests they send and the queries they run, themselves or within maxHops calls. root: the checkout, for the
+// lines that declare a table.
+func (idx *cgIndex) outside(sb *proc.Sandbox, root *os.Root, changed, added map[string]bool, syms map[string][]Symbol) {
 	at := map[declKey][]*Symbol{}
 	for _, name := range slices.Sorted(maps.Keys(syms)) { // the cap cuts the same ones every run
 		ss := syms[name]
@@ -185,9 +255,16 @@ func (idx *cgIndex) outside(sb *proc.Sandbox, changed, added map[string]bool, sy
 	}
 	starts := slices.SortedFunc(maps.Keys(at), func(a, b declKey) int { return cmp.Or(cmp.Compare(a.Path, b.Path), cmp.Compare(a.Name, b.Name)) })
 	g := idx.callGraph(sb, starts)
+	lines := sources(root)
 	for k, ss := range at {
+		reqs, stores := sendersFrom(g, k), storesFrom(g, k)
+		for i, p := range stores {
+			if p.TPath != "" {
+				stores[i].Text = lines.text(p.TPath, p.TLine) + "\n" + lines.text(p.TPath, p.TLine+1)
+			}
+		}
 		for _, s := range ss {
-			s.Requests = sendersFrom(g, k)
+			s.Requests, s.Stores = reqs, stores
 		}
 	}
 }
