@@ -49,11 +49,10 @@ type nameN struct {
 	N    int
 }
 
-// cpath is a call path from an entry to a finding (component 30).
+// cpath is a call path from an entry to a finding (component 30, to a finding): the path and what the way runs.
 type cpath struct {
-	Entry, EntryPath, EntryPart string
-	Rows                        []prow
-	Kind, Href                  string // the last row's link to the item card
+	Path *pathView
+	Says string
 }
 
 // pstep is a step of the reading order, with this part's files only.
@@ -475,6 +474,7 @@ func (v *view) stepsOf(b *pblock) {
 		}
 	}
 	// a call path per finding in the part: the first way that reaches it
+	var hops map[string]Hop
 	for _, k := range b.Cards {
 		for _, w := range v.Ways {
 			if w.Finding != "#"+k.ID {
@@ -490,17 +490,14 @@ func (v *view) stepsOf(b *pblock) {
 					chain, d = append([]wrow{w.Rows[i]}, chain...), w.Rows[i].D
 				}
 			}
-			cp := cpath{Kind: k.Kind, Href: "#" + k.ID}
-			if w.Method == "CALL" || w.Method == "" {
-				cp.Entry, cp.EntryPath = "Call in", w.At.Path
-			} else {
-				cp.Entry = w.Method + " " + w.Route
-				cp.EntryPath = w.At.Path
-			}
+			entryPart := ""
 			if pt := v.partOf(w.At.Path); pt != nil && "part:"+pt.ID != b.Key {
-				cp.EntryPart = pt.Label
+				entryPart = pt.Label
 			}
-			cp.Rows = v.pathRows(chain, b.Label)
+			if hops == nil {
+				hops = v.hops()
+			}
+			cp := cpath{Path: v.findingPath(w, chain, entryPart, b.Label, "#"+k.ID, hops), Says: w.Says()}
 			b.Paths = append(b.Paths, cp)
 			break
 		}

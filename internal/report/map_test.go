@@ -1,6 +1,7 @@
 package report
 
 import (
+	"cmp"
 	"context"
 	"diffharbor/internal/review"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -686,5 +688,101 @@ func TestMapStores(t *testing.T) {
 	}
 	if bc := mapLine(m, "b", "c"); bc == nil || bc.Chevron != "to" || bc.Names[0].Writes != nil {
 		t.Errorf("b-c %+v", bc)
+	}
+}
+
+// The traced path as the script draws it (uses spec 4): a hop's relation and structure on its joint, a hop the index
+// gives no place a joint without words, the calls down to the request, and a system named after the declaration
+// that sends drawn as "Outside the repo".
+func TestTracePath(t *testing.T) {
+	v := &view{Data: Data{
+		Diff: newFile("a/a.go", "package a\nfunc Entry() { Fetch() }\n") + newFile("b/b.go", "package b\n\nfunc Fetch() {\n\tsend()\n}\n\nfunc send() {\n\thttp.Get(u)\n}\n"),
+		Symbols: map[string][]Symbol{
+			"Fetch": {{Path: "b/b.go", Line: 3, Exact: true, Ways: []Way{{
+				Method: "CALL", Route: "Entry", Path: "a/a.go", Line: 2,
+				Chain: []Hop{{Name: "Fetch", Path: "b/b.go", Line: 3, In: "a/a.go", At: 2, Shape: 4, Rel: "iface"}},
+			}}}},
+			"send": {{Path: "b/b.go", Line: 7, Exact: true}},
+		},
+	}}
+	tr := &MapTrace{
+		Method: "CALL", Route: "Entry", At: ref{Path: "a/a.go", Line: 2},
+		Rows: []wrow{{Name: "Fetch", Path: "b/b.go", Call: "Fetch(…)", At: ref{Path: "a/a.go", Line: 2}}},
+		Call: OutsideCall{System: "send", Path: "b/b.go", Line: 8, Calls: []StoreCall{{At: "b/b.go:4", Callee: "send"}}},
+	}
+	p := v.tracePath(tr, "", v.hops())
+	var got []string
+	for _, it := range p.Items {
+		got = append(got, it.T+":"+cmp.Or(it.Kind, it.Rel)+":"+it.Name+":"+strconv.Itoa(it.Line))
+	}
+	want := []string{"s:callin:a/a.go:0", "j:iface::2", "s:out:Fetch(…):3", "j:call::4", "s:out:send(…):7", "j:request::8", "s:sysrepo:send:0"}
+	if !slices.Equal(got, want) {
+		t.Errorf("items\n got %q\nwant %q", got, want)
+	}
+	if j := p.Items[1]; j.Sh != 4 || j.Text != "func Entry() { Fetch() }" || j.Mark != "Fetch" {
+		t.Errorf("joint %+v", j)
+	}
+	if p.Label != "Path from a/a.go to send" {
+		t.Errorf("label %q", p.Label)
+	}
+	// the way gives the declaration's own place for a row the entry names: the hop at the entry's place draws it
+	tr.Rows[0].At = ref{Path: "b/b.go", Line: 3}
+	if j := v.tracePath(tr, "", v.hops()).Items[1]; j.Path != "a/a.go" || j.Line != 2 || j.Rel != "iface" || j.Sh != 4 || j.Text == "" {
+		t.Errorf("joint at the entry %+v", j)
+	}
+	// the index names it without a place: the joint has no words, but its relation, though the page knows the
+	// declaration at another line
+	v.Symbols["Fetch"][0].Ways[0].Chain[0].At = 0
+	v.Symbols["Fetch"][0].Line = 5
+	if j := v.tracePath(tr, "", v.hops()).Items[1]; j.Line != 0 || j.Text != "" || j.Rel != "iface" || j.Sh != 4 {
+		t.Errorf("joint without a place %+v", j)
+	}
+}
+
+// A call path to a finding (5.7): the route's registration line is the joint under it, with its relation and
+// structure, though the way gives the row its declaration's place; the finding's station links to its card.
+func TestFindingPath(t *testing.T) {
+	v := &view{Data: Data{
+		Diff: newFile("a/routes.go", "package a\nr.Get(\"/orders\", List)\n") + newFile("b/b.go", "package b\n\nfunc List() {}\n"),
+		Symbols: map[string][]Symbol{
+			"List": {{Path: "b/b.go", Line: 3, Exact: true, Ways: []Way{{
+				Method: "GET", Route: "/orders", Path: "a/routes.go", Line: 2,
+				Chain: []Hop{{Name: "List", Path: "b/b.go", Line: 3, In: "a/routes.go", At: 2, Shape: 1, Rel: "call"}},
+			}}}},
+		},
+	}}
+	w := way{Method: "GET", Route: "/orders", At: ref{Path: "a/routes.go", Line: 2}}
+	rows := []wrow{{Name: "List", Path: "b/b.go", Call: "List", At: ref{Path: "b/b.go", Line: 3}, Sev: &weighed{Sev: "major"}}}
+	p := v.findingPath(w, rows, "", "", "#f1", v.hops())
+	if len(p.Items) != 3 {
+		t.Fatalf("items %+v", p.Items)
+	}
+	if j := p.Items[1]; j.Rel != "call" || j.Path != "a/routes.go" || j.Line != 2 || j.Sh != 1 || j.Text != `r.Get("/orders", List)` {
+		t.Errorf("joint %+v", j)
+	}
+	if s := p.Items[2]; s.Kind != "finding" || s.Find != "#f1" {
+		t.Errorf("finding %+v", s)
+	}
+}
+
+// The joint under a route whose first declaration the page doesn't know (no Symbol): ways gives the row the
+// declaration's place, the hop at the entry's line draws the joint; a hop the index gives no place, no words.
+func TestFindingPathUnknown(t *testing.T) {
+	store := &file{Path: "store.go", Changes: []change{{Name: "Save", State: "new", Sev: "major"}}}
+	v := &view{Data: Data{
+		Diff: newFile("server.go", "package a\n\nr.Get(\"/x\", Handle)\n") + newFile("store.go", "package b\n\n\n\nfunc Save() {}\n"),
+		Symbols: map[string][]Symbol{"Save": {{Path: "store.go", Line: 5, Exact: true, Ways: []Way{{
+			Method: "GET", Route: "/x", Path: "server.go", Line: 3,
+			Chain: []Hop{{Name: "Handle", Path: "api.go", Line: 10, In: "server.go", At: 3, Shape: 2, Rel: "call"}, {Name: "Save", Path: "store.go", Line: 5, In: "api.go", At: 12}},
+		}}}}},
+	}, Steps: []step{{Files: []*file{store}}}, files: map[string]*file{"store.go": store}}
+	w := ways(v, v.Symbols)[0]
+	if j := v.findingPath(w, w.Rows, "", "", "", v.hops()).Items[1]; j.Path != "server.go" || j.Line != 3 || j.Rel != "call" || j.Sh != 2 || j.Text != `r.Get("/x", Handle)` {
+		t.Errorf("joint %+v", j)
+	}
+	v.Symbols["Save"][0].Ways[0].Chain[0].At = 0
+	w = ways(v, v.Symbols)[0]
+	if j := v.findingPath(w, w.Rows, "", "", "", v.hops()).Items[1]; j.Line != 0 || j.Text != "" || j.Rel != "call" || j.Sh != 2 {
+		t.Errorf("joint without a place %+v", j)
 	}
 }

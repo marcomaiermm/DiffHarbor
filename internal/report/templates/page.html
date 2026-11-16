@@ -103,7 +103,7 @@
         {{with .Tests}}<p class="cfoot">Places in tests aren't counted: {{.}}.</p>{{end}}
         {{with .Pairs}}<div class="rpart"><p class="lbl">Parts that use each other</p>{{range .}}<p class="ln13">{{md .}}</p>{{end}}</div>{{end}}</div></div>{{end}}
     {{with .Trace}}<div><button class="disc" type="button" id="trace-b" aria-expanded="false" aria-controls="tracepath" data-disc data-trace-boxes="{{spaced .Boxes}}" data-trace-lines="{{spaced .Lines}}">{{ico "chevron-down" 16}}<span>{{md .Label}}</span></button>
-      <div id="tracepath" hidden><ol class="cpath traced"><li class="cin"><span class="cin1">{{.Entry}}</span><span class="path">{{wb .Call}}</span>{{with .EntryPart}}<span class="cpart">{{.}}</span>{{end}}</li>{{range $i, $r := .Rows}}{{if eq (inc $i) (len $.Page.Map.Trace.Rows)}}<li class="cout"><span class="csys" translate="no">{{$r.Name}}</span><span>{{$r.Word}} <span class="m12">{{wb $r.At}}</span></span><span>{{$r.State}}</span></li>{{else}}{{template "prow" $r}}{{end}}{{end}}</ol>{{with .Foot}}<p class="cfoot">{{.}}</p>{{end}}</div></div>{{end}}
+      <div id="tracepath" hidden>{{template "path" .Path}}{{with .Foot}}<p class="cfoot">{{.}}</p>{{end}}</div></div>{{end}}
   </div>{{end}}
   {{range .All}}{{with .Panel}}<div class="selp" data-panel="{{.Key}}" hidden>{{template "panel" .}}</div>{{end}}{{end}}
 </figure>{{end}}{{end}}
@@ -127,7 +127,8 @@
 
 {{define "rdecl"}}<div class="rdecl"><span class="rn"><code translate="no">{{.Name}}</code><span class="m12">{{wb .Path}}{{with .Line}}:{{.}}{{end}}</span><span class="rc2">{{plural .N "place" "places"}}</span></span>{{range .Places}}<span class="m12 rp">{{wb .Path}}{{with .Line}}:{{.}}{{end}}</span>{{end}}</div>{{end}}
 
-{{define "prow"}}<li><span class="cdecl" translate="no">{{.Name}}</span>{{with .Part}}<span class="cpart">{{.}}</span>{{end}}<span>{{.State}}</span><span>{{.Word}} <span class="m12">{{wb .At}}</span></span></li>{{end}}
+{{/* component 30, a path: the script draws its stations and joints from the items */}}
+{{define "path"}}<ol class="pa" aria-label="{{.Label}}" data-items="{{json .Items}}"></ol>{{end}}
 
 {{define "panel"}}{{$p := .}}<div class="selh"><span class="sn1{{if $p.Code}} snm{{end}}"{{if $p.Code}} translate="no"{{end}}>{{$p.Head}}</span>{{with $p.Path}}<span class="m12">{{wb .}}</span>{{end}}<span class="sc">{{$p.Count}}</span><span class="sr">{{with $p.Read}}<a class="lnk" href="{{$p.ReadHref}}">{{.}}</a>{{end}}<button class="gb" type="button" data-clear>Show everything</button></span></div>
   {{if eq $p.Kind "table"}}{{range $k := $p.Kinds}}<div class="selsub"><div class="bh"><p class="lbl">{{if eq $k "writes"}}Written by{{else}}Read by{{end}}</p>{{template "chip" (ev "shown" "Call graph")}}</div><div class="selrows">{{range $p.Rows}}{{if eq .Kind $k}}<a class="selrow tr" href="{{.Href}}"><span><span class="tp">{{.Title}}</span> · {{md .Place}}</span></a>{{end}}{{end}}</div></div>{{end}}
@@ -231,7 +232,7 @@
     {{with .DB}}<p>{{.}} <span class="cite">From git at the base</span></p>{{end}}
   </div></div>{{end}}
   {{with .Cards}}<div class="icards">{{range .}}{{template "card" .}}{{end}}</div>{{end}}
-  {{with .Paths}}<div class="pgp"><h4>Call paths to a finding</h4>{{range .}}<ol class="cpath"><li class="cin"><span class="cin1">{{.Entry}}</span><span class="path">{{wb .EntryPath}}</span>{{with .EntryPart}}<span class="cpart">{{.}}</span>{{end}}</li>{{range .Rows}}{{template "prow" .}}{{end}}<li><a class="lnk" href="{{.Href}}">{{.Kind}}</a></li></ol>{{end}}</div>{{end}}
+  {{with .Paths}}<div class="pgp"><h4>Call paths to a finding</h4>{{range .}}<div>{{template "path" .Path}}<p class="cfoot">{{.Says}}</p></div>{{end}}</div>{{end}}
   {{with .Steps}}<div class="pgp"><div class="bh"><h4>Steps</h4>{{template "chip" (ev "inf" "Inferred by the review")}}</div><div class="steps">{{range .}}{{$s := .}}<div class="step" data-step><button class="sbtn" type="button" aria-expanded="false"><span class="sn">{{.N}}</span><span class="stt">{{.Title}}</span><span class="sf">{{plural (len .Files) "file" "files"}}</span><span class="rmark" aria-hidden="true"></span><span class="vh" data-rmark>, not read</span>{{ico "chevron-down" 16}}{{with .Why}}<span class="sw">{{md .}}</span>{{end}}</button>
     <div class="sexp" hidden>{{with .Check}}<p class="ln13"><strong>Check</strong> · {{md .}}</p>{{end}}{{with .Tests}}<p class="ln13">Tests that reach it: {{range $i, $t := .}}{{sep $i (len $s.Tests)}}<code class="cd" translate="no">{{test $t}}</code>{{end}}{{with $s.More}} and {{.}} more{{end}}{{if not $s.Ran}} · not run here{{end}}.</p>{{end}}{{with .Graph}}{{template "graph" .}}{{end}}<div class="pfiles">{{range .Files}}{{template "file" .}}{{end}}</div></div></div>{{end}}</div></div>{{end}}
   {{with .Minors}}<div><button class="disc" type="button" aria-expanded="false" data-disc>{{ico "chevron-down" 16}}<span>Minor findings · {{len .}} · not counted</span></button><div class="icards" hidden>{{range .}}{{template "card" .}}{{end}}</div></div>{{end}}
