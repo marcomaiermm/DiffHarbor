@@ -672,6 +672,23 @@ func TestInversion(t *testing.T) {
 	}
 }
 
+// A finding that rests on an unshown rule of an external service says so before the evidence, loses its fix and
+// drops to minor; a nit stays a nit.
+func TestPremise(t *testing.T) {
+	fix := Comment{Severity: "major", Existing: "a", Fix: "b"}
+	cs := []Comment{fix, {Severity: "nit"}, fix}
+	kept, _, _, ok := verdicts(cs, nil, `{"verdicts":[{"i":0,"keep":true,"evidence":"two providers","premise":"WAF needs the S3 bucket in its region"},{"i":1,"keep":true,"premise":"x"},{"i":2,"keep":true,"premise":""}]}`, nil)
+	if !ok || len(kept) != 3 {
+		t.Fatalf("%v %+v", ok, kept)
+	}
+	if want := "\n\n_Unverified premise:_ WAF needs the S3 bucket in its region\n\n" + Verified + "two providers"; kept[0].Severity != "minor" || kept[0].Body != want || kept[0].Fix != "" || kept[0].Existing != "" {
+		t.Errorf("with premise: %+v", kept[0])
+	}
+	if kept[1].Severity != "nit" || kept[2].Severity != "major" || kept[2].Fix != "b" || strings.Contains(kept[2].Body, "premise") {
+		t.Errorf("nit %+v, without premise %+v", kept[1], kept[2])
+	}
+}
+
 // A kept defect no caller or source reaches folds whatever the profile, a critical one and nits excepted; a pass
 // that never answered the question folds nothing.
 func TestTrigger(t *testing.T) {
