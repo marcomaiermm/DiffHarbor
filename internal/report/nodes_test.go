@@ -321,7 +321,8 @@ func TestUsesReach(t *testing.T) {
 // station QUERY shop.list goes on (no end), called at items.ts:27, listItems read at the line that names orders.
 // GET /items' named handler getItems is a station of its own, then its call that passes the input on, not the one
 // before it that doesn't (renameUser, which writes users). GET /ping's handler reaches no table: the way ends at the
-// route. GET /deep's goes down past maxDown: its third station ends "bound". A class method, keyed Mailer.send, as
+// route. GET /deep's goes down past maxDown to listItems, cut there, but GET /items' way goes on from it to orders: no
+// "bound" on a station another way continues from. GET /far's is cut at deepUsers, which ends "bound". A class method, keyed Mailer.send, as
 // its uses name it: send.
 func TestUsesTS(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(tsAPI, "dist", "api", "sync", "api.js")); err != nil {
@@ -342,6 +343,7 @@ func TestUsesTS(t *testing.T) {
 		"getItems":    {{Path: "src/api.ts", Line: 14, Exact: true, Refs: []Ref{{Path: "src/api.ts", Line: 18, In: "get /items"}}}},
 		"toLabel":     {{Path: "src/notify.ts", Line: 3, Exact: true, Refs: []Ref{{Path: "src/api.ts", Line: 19, In: "get /ping"}}}},
 		"getDeep":     {{Path: "src/api.ts", Line: 20, Exact: true, Refs: []Ref{{Path: "src/api.ts", Line: 23, In: "get /deep"}}}},
+		"getFar":      {{Path: "src/api.ts", Line: 24, Exact: true, Refs: []Ref{{Path: "src/api.ts", Line: 27, In: "get /far"}}}},
 		"Mailer.send": {{Path: "src/notify.ts", Line: 2, Exact: true, Refs: []Ref{{Path: "src/notify.ts", Line: 8, In: "mailTwice"}}}},
 	}
 	_, nodes, _ := idx.uses(sb, root, nil, nil, syms)
@@ -357,13 +359,16 @@ func TestUsesTS(t *testing.T) {
 		got.WriteString("\n")
 	}
 	want := `GET /deep route down getDeep call@src/api.ts:23
+GET /far route down getFar call@src/api.ts:27
 GET /items route down getItems call@src/api.ts:18
 GET /ping route end route
 QUERY shop.list route down listItems call@src/items.ts:27
  getDeep decl down deepItems call@src/api.ts:21
+ getFar decl down deepList call@src/api.ts:25
  getItems decl down listItems call@src/api.ts:16
- deepItems decl down deepList call@src/data.ts:19
- deepList decl end bound
+ deepItems decl down listItems call@src/data.ts:19
+ deepList decl down deepUsers call@src/data.ts:20
+ deepUsers decl end bound
  listItems decl down orders read@src/data.ts:18
  orders table end table
 `

@@ -548,6 +548,7 @@ func (idx *cgIndex) down(sb *proc.Sandbox, sts map[string]*station, book *useBoo
 			joint: Joint{Rel: "call", Path: e.SPath, Line: e.Line}, in: in,
 		}
 	}
+	var cut []string // the stations a way stops at past maxDown
 	for _, k := range slices.Sorted(maps.Keys(passes)) {
 		r := sts[k]
 		var ways [][]downStep // the stations to the call each way goes down from
@@ -571,11 +572,17 @@ func (idx *cgIndex) down(sb *proc.Sandbox, sts map[string]*station, book *useBoo
 			steps = append(pre, steps...)
 			if len(steps) > maxDown {
 				steps = steps[:maxDown]
-				steps[maxDown-1].node.End = &End{Kind: "bound"}
+				cut = append(cut, steps[maxDown-1].key)
 			}
 			link(sts, k, steps, book, r.rank)
 			r.node.End = nil // it goes on down
 			break
+		}
+	}
+	// a station is shared by every way through it: "bound" only where no other way goes on down from it
+	for _, c := range cut {
+		if st := sts[c]; st != nil && st.down == "" && st.node.End == nil {
+			st.node.End = &End{Kind: "bound"}
 		}
 	}
 }

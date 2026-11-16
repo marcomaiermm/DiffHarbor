@@ -1,5 +1,5 @@
 import { web, rpc, router, h } from "fakeweb";
-import { listOrders, addUser, findPosts, listItems, renameUser, deepItems } from "./data";
+import { listOrders, addUser, findPosts, listItems, renameUser, deepItems, deepList } from "./data";
 import { Notifier, notifyAll, toLabel } from "./notify";
 const app = web();
 function getOrders(_req: unknown, res: { json(x: unknown): void }) { listOrders().then((o) => res.json(o)); }
@@ -21,3 +21,7 @@ function getDeep(req: any) {
   return deepItems(req.team);
 }
 app.get("/deep", getDeep);
+function getFar(req: any) {
+  return deepList(req.team);
+}
+app.get("/far", getFar);
