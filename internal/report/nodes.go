@@ -142,7 +142,7 @@ func (idx *cgIndex) uses(sb *proc.Sandbox, root *os.Root, changed, added map[str
 			w.add(u.s, u.r, rank(u.s, u.r))
 		}
 		if u.s.Exact {
-			book.at(u.r.Path, u.r.In, u.name, u.r.Line, rank(u.s, u.r))
+			book.at(u.r.Path, u.r.In, ownName(u.name), u.r.Line, rank(u.s, u.r))
 		}
 	}
 	sts := w.sts
@@ -294,7 +294,7 @@ func (b *useBook) past(syms map[string][]Symbol, names []string) {
 	for _, name := range names {
 		for i := range syms[name] {
 			for _, r := range pastDecls(&syms[name][i]) {
-				b.at(r.Path, r.In, name, r.Line, 5)
+				b.at(r.Path, r.In, ownName(name), r.Line, 5)
 			}
 		}
 	}
@@ -364,7 +364,7 @@ func (b *useBook) count(s *Symbol, name string, lines files, upKey func(*Symbol,
 			refs = append(refs, r)
 			continue
 		}
-		g := b.at(r.Path, r.In, name, r.Line, 4)
+		g := b.at(r.Path, r.In, ownName(name), r.Line, 4)
 		if g.got != nil && g.got.Iface != "" {
 			r.Rel, r.Via = "tie", g.got.Iface
 		}
@@ -383,7 +383,7 @@ func (b *useBook) count(s *Symbol, name string, lines files, upKey func(*Symbol,
 		}
 	}
 	for _, r := range pastDecls(s) {
-		for _, l := range linesOf(b.at(r.Path, r.In, name, r.Line, 5)) {
+		for _, l := range linesOf(b.at(r.Path, r.In, ownName(name), r.Line, 5)) {
 			if at := r.Path + ":" + strconv.Itoa(l); !have[at] {
 				have[at], s.Uses = true, s.Uses+1
 			}
@@ -427,6 +427,10 @@ func placeNodes(sts map[string]*station) (nodes []Node, place map[string]int) {
 	}
 	return nodes, place
 }
+
+// ownName is the name a declaration has in its code and its index: a method's without its type, "Store.Record"'s
+// Record. A structure looks for it, as a use names it.
+func ownName(name string) string { return name[strings.LastIndex(name, ".")+1:] }
 
 // linesOf are the lines of g's declaration that name its name, none when no front-end read it.
 func linesOf(g *useGroup) []int {
@@ -579,7 +583,7 @@ func (idx *cgIndex) down(sb *proc.Sandbox, sts map[string]*station, book *useBoo
 // reach is the stations below s toward each table and system it reaches, at most maxReach (Symbol.Reach): its own,
 // not shared, as the joint into the first is from s. Their keys, the first of each.
 func (idx *cgIndex) reach(s *Symbol, name string, sts map[string]*station, book *useBook, lines files) []string {
-	from := declKey{s.Path, name[strings.LastIndex(name, ".")+1:]} // the declaration's own name, as its index has it
+	from := declKey{s.Path, ownName(name)}
 	var out []string
 	seen := map[string]bool{}
 	ends := make([]any, 0, len(s.Stores)+len(s.Requests))

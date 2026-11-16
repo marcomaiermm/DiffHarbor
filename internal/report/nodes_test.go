@@ -21,6 +21,9 @@ func waysOf(nodes []Node) string {
 		}
 		if j := n.JUp; j != nil {
 			fmt.Fprintf(&b, " %s@%s:%d", j.Rel, j.Path, j.Line)
+			if j.Via != "" {
+				fmt.Fprintf(&b, " via %s", j.Via)
+			}
 		}
 		if n.End != nil {
 			fmt.Fprintf(&b, " end %s %s", n.End.Kind, n.End.Text)
@@ -33,7 +36,8 @@ func waysOf(nodes []Node) string {
 // The ways up from Rec's uses: A's to main through B, though C calls it too; D, only a test calls; X and Y, which
 // call each other; z.go, not in the code graph; a name found by name; L0, whose callers run past the bound; N,
 // which nothing calls; the interface recorder, which lists it; two methods String in one file; a test's use, which
-// gets no structure and no way. TestW's second line is a use of its own, as is the second String's.
+// gets no structure and no way; H, a route's handler the checker adds. TestW's second line is a use of its own, as is
+// the second String's. B calls A through the interface Runner, as VTA says.
 func TestUsesWalk(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("no node")
@@ -41,8 +45,9 @@ func TestUsesWalk(t *testing.T) {
 	sb, dir := sandbox(t)
 	var l strings.Builder // L9 calls L8 … L0 calls Rec: past the walk's depth
 	l.WriteString("package a\n")
-	cg := `insert into files values ('rec.go'), ('a.go'), ('b.go'), ('main.go'), ('x.go'), ('rec_test.go'), ('l.go'), ('n.go');` +
-		`insert into nodes values ('n', 'function', 'N', 'n.go', 3, 5);insert into edges values ('n', 'r', 'calls', 4);`
+	cg := `insert into files values ('rec.go'), ('a.go'), ('b.go'), ('main.go'), ('x.go'), ('rec_test.go'), ('l.go'), ('n.go'), ('h.go');` +
+		`insert into nodes values ('n', 'function', 'N', 'n.go', 3, 5), ('h', 'function', 'H', 'h.go', 3, 5);` +
+		`insert into edges values ('n', 'r', 'calls', 4), ('h', 'r', 'calls', 4);`
 	for i := range 10 {
 		callee := "Rec"
 		if i > 0 {
@@ -65,6 +70,7 @@ func TestUsesWalk(t *testing.T) {
 		"rec_test.go": "package a\n\nfunc TestD(t *testing.T) {\n\tD()\n}\n",
 		"l.go":        l.String(),
 		"n.go":        "package a\n\nfunc N() {\n\tRec()\n}\n",
+		"h.go":        "package a\n\nfunc H() {\n\tRec()\n}\n",
 		"i.go":        "package a\n\ntype recorder interface {\n\tRec()\n}\n",
 		"m.go":        "package a\n\nfunc (P) String() string {\n\tRec()\n\treturn \"\"\n}\n\nfunc (Q) String() string {\n\tRec()\n\tRec()\n\treturn \"\"\n}\n",
 		"w_test.go":   "package a\n\nfunc TestW(t *testing.T) {\n\tRec()\n\tRec()\n}\n",
@@ -93,7 +99,10 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 	if err != nil {
 		t.Fatal(err)
 	}
-	idx := &cgIndex{dbs: []cgDB{{DB: filepath.Join(dir, ".codegraph", "codegraph.db")}}}
+	idx := &cgIndex{dbs: []cgDB{{DB: filepath.Join(dir, ".codegraph", "codegraph.db")}}, Edges: []cgEdge{
+		{By: "ts", Kind: "handles", SName: "get /h", SKind: "route", SPath: "r.go", SLine: 3, Line: 3, TName: "H", TPath: "h.go", TLine: 3},
+		{By: "vta", Kind: "calls", SName: "B", SKind: "function", SPath: "b.go", SLine: 3, SEnd: 5, Line: 4, TName: "A", TPath: "a.go", TLine: 3, Via: "Runner"},
+	}}
 	run := func() (map[string][]Symbol, []Shape, []Node, bool) {
 		syms := map[string][]Symbol{
 			"Rec": {{Path: "rec.go", Line: 3, From: 3, To: 3, Exact: true, Refs: []Ref{
@@ -108,6 +117,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 				{Path: "w_test.go", Line: 4, In: "TestW"},
 				{Path: "m.go", Line: 4, In: "String"},
 				{Path: "m.go", Line: 9, In: "String", Rel: "call"}, // the index's word on line 9 only
+				{Path: "h.go", Line: 4, In: "H"},
 			}}},
 			"Other": {{Path: "rec.go", Line: 9, Refs: []Ref{{Path: "b.go", Line: 8, In: "C"}}}},
 		}
@@ -115,9 +125,10 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 		return syms, shapes, nodes, over
 	}
 	syms, shapes, nodes, over := run()
-	want := `A decl up B call@b.go:4
+	want := `A decl up B iface@b.go:4 via Runner
 D decl end tests D
 B decl up main call@main.go:4
+H decl up /h call@r.go:3
 Rec decl end nograph i.go
 L0 decl up L1 call@l.go:8
 L1 decl up L2 call@l.go:12
@@ -131,6 +142,7 @@ String decl end nograph m.go
 String decl end nograph m.go
 main call-in end main 
 N call-in end nocaller 
+/h route end route 
 X decl up Y call@x.go:9
 Y decl end cycle X
 Z decl end nograph z.go
@@ -166,7 +178,8 @@ w_test.go:4  sh0 test
 w_test.go:5  sh0 test
 m.go:4  sh%d up String
 m.go:9 call sh%d up String
-m.go:10  sh%[8]d up String`, sh(0), sh(2), sh(3), sh(5), sh(6), sh(7), sh(10), sh(11))
+m.go:10  sh%[8]d up String
+h.go:4  sh%d up H`, sh(0), sh(2), sh(3), sh(5), sh(6), sh(7), sh(10), sh(11), sh(13))
 	if got := strings.Join(refs, "\n"); got != wantRefs || syms["Rec"][0].Uses != 2 {
 		t.Errorf("refs, %d more uses:\n%s\nwant\n%s", syms["Rec"][0].Uses, got, wantRefs)
 	}
@@ -307,7 +320,9 @@ func TestUsesReach(t *testing.T) {
 // From a route the way goes down the handler's call that reads its input to the table that call reads: the route
 // station QUERY shop.list goes on (no end), called at items.ts:27, listItems read at the line that names orders.
 // GET /items' named handler getItems is a station of its own, then its call that passes the input on, not the one
-// before it that doesn't (renameUser, which writes users).
+// before it that doesn't (renameUser, which writes users). GET /ping's handler reaches no table: the way ends at the
+// route. GET /deep's goes down past maxDown: its third station ends "bound". A class method, keyed Mailer.send, as
+// its uses name it: send.
 func TestUsesTS(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(tsAPI, "dist", "api", "sync", "api.js")); err != nil {
 		t.Skip("no TypeScript 7.1 at DIFFHARBOR_TS")
@@ -323,8 +338,11 @@ func TestUsesTS(t *testing.T) {
 	idx := &cgIndex{dbs: []cgDB{{Prefix: ""}}}
 	idx.tsEdges(sb, dir)
 	syms := map[string][]Symbol{
-		"listItems": {{Path: "src/data.ts", Line: 18, Exact: true, Refs: []Ref{{Path: "src/items.ts", Line: 27, In: "query shop.list"}}}},
-		"getItems":  {{Path: "src/api.ts", Line: 14, Exact: true, Refs: []Ref{{Path: "src/api.ts", Line: 18, In: "get /items"}}}},
+		"listItems":   {{Path: "src/data.ts", Line: 18, Exact: true, Refs: []Ref{{Path: "src/items.ts", Line: 27, In: "query shop.list"}}}},
+		"getItems":    {{Path: "src/api.ts", Line: 14, Exact: true, Refs: []Ref{{Path: "src/api.ts", Line: 18, In: "get /items"}}}},
+		"toLabel":     {{Path: "src/notify.ts", Line: 3, Exact: true, Refs: []Ref{{Path: "src/api.ts", Line: 19, In: "get /ping"}}}},
+		"getDeep":     {{Path: "src/api.ts", Line: 20, Exact: true, Refs: []Ref{{Path: "src/api.ts", Line: 23, In: "get /deep"}}}},
+		"Mailer.send": {{Path: "src/notify.ts", Line: 2, Exact: true, Refs: []Ref{{Path: "src/notify.ts", Line: 8, In: "mailTwice"}}}},
 	}
 	_, nodes, _ := idx.uses(sb, root, nil, nil, syms)
 	var got strings.Builder
@@ -338,9 +356,14 @@ func TestUsesTS(t *testing.T) {
 		}
 		got.WriteString("\n")
 	}
-	want := `GET /items route down getItems call@src/api.ts:18
+	want := `GET /deep route down getDeep call@src/api.ts:23
+GET /items route down getItems call@src/api.ts:18
+GET /ping route end route
 QUERY shop.list route down listItems call@src/items.ts:27
+ getDeep decl down deepItems call@src/api.ts:21
  getItems decl down listItems call@src/api.ts:16
+ deepItems decl down deepList call@src/data.ts:19
+ deepList decl end bound
  listItems decl down orders read@src/data.ts:18
  orders table end table
 `
@@ -349,6 +372,9 @@ QUERY shop.list route down listItems call@src/items.ts:27
 	}
 	if r := syms["listItems"][0].Refs[0]; r.Up == 0 || nodes[r.Up-1].Kind != "route" || r.Shape == 0 {
 		t.Errorf("the use's station and structure: %+v", r)
+	}
+	if s := syms["Mailer.send"][0]; s.Uses != 1 || len(s.Refs) != 2 || s.Refs[0].Shape == 0 || s.Refs[1].Line != 9 {
+		t.Errorf("Mailer.send: %d more uses, refs %+v; line 9 counts, line 8 gets a structure", s.Uses, s.Refs)
 	}
 }
 
@@ -364,9 +390,14 @@ func TestPlaceNodes(t *testing.T) {
 	}
 }
 
-// The ends of a way down: a subquery, a system, each after the call that leads to it.
+// The ends of a way down: a subquery, a system, each after the call that leads to it; a read whose statement names
+// the table before the call that reads it, joined at that call.
 func TestChainDown(t *testing.T) {
-	sb, _ := sandbox(t)
+	sb, dir := sandbox(t)
+	src := "export const q = db\n  .select({ id: orders.id })\n  .from(orders);\n"
+	if err := os.WriteFile(filepath.Join(dir, "q.ts"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	root, err := sb.Pinned()
 	if err != nil {
 		t.Fatal(err)
@@ -385,6 +416,7 @@ func TestChainDown(t *testing.T) {
 			&OutsideCall{System: "api.example.com", URLAt: "c.go:1", Calls: append(via, StoreCall{At: "b.go:6", Callee: "Do"})},
 			"list decl call@a.go:5 in Run\napi.example.com system request@b.go:6 in list end system\n",
 		},
+		{&StorePath{Kind: "reads", Table: "orders", TPath: "s.ts", TLine: 2, At: "q.ts:1"}, "orders table read@q.ts:3 in Run end table\n"},
 	} {
 		var got strings.Builder
 		for _, s := range chainDown(g, declKey{"a.go", "Run"}, c.end, sources(root)) {

@@ -157,7 +157,12 @@ func (b *shaper) emit(n *synNode, at int) {
 			}
 		}
 		seen = seen || on
-		if !on && k.L > line {
+		switch {
+		case on || k.L <= line: // on the way, or on n's own row
+		case len(off) > 0 && off[len(off)-1].L == k.L: // on the line of the one before: one entry, one row (rule 2)
+			last := &off[len(off)-1]
+			last.E, last.U = max(last.E, k.E), last.U || k.U
+		default:
 			off = append(off, k)
 		}
 	}
@@ -409,11 +414,26 @@ func goShape(gf *goFile, line int, name string, ways bool) (synUse, bool) {
 		return synUse{}, false
 	}
 	u := synUse{Span: [2]int{gf.lineOf(decl.Pos()), gf.lineOf(decl.End())}}
+	spec := decl
+	if g, ok := decl.(*ast.GenDecl); ok && len(g.Specs) == 1 {
+		spec = g.Specs[0]
+	}
+	own := map[*ast.Ident]bool{} // the name decl declares: no use of a subject of that name, a wrapper's own
+	switch d := spec.(type) {
+	case *ast.FuncDecl:
+		own[d.Name] = true
+	case *ast.TypeSpec:
+		own[d.Name] = true
+	case *ast.ValueSpec:
+		for _, id := range d.Names {
+			own[id] = true
+		}
+	}
 	var ids, strs []ast.Node
 	ast.Inspect(decl, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.Ident:
-			if l := gf.lineOf(n.Pos()); n.Name == name && (len(u.Lines) == 0 || u.Lines[len(u.Lines)-1] != l) {
+			if l := gf.lineOf(n.Pos()); n.Name == name && !own[n] && (len(u.Lines) == 0 || u.Lines[len(u.Lines)-1] != l) {
 				u.Lines, ids = append(u.Lines, l), append(ids, n)
 			}
 		case *ast.BasicLit:
@@ -428,10 +448,6 @@ func goShape(gf *goFile, line int, name string, ways bool) (synUse, bool) {
 		u.Lines = append(u.Lines, line)
 		slices.SortFunc(ids, func(a, b ast.Node) int { return cmp.Compare(a.Pos(), b.Pos()) })
 		slices.Sort(u.Lines)
-	}
-	spec := decl
-	if g, ok := decl.(*ast.GenDecl); ok && len(g.Specs) == 1 {
-		spec = g.Specs[0]
 	}
 	if t, ok := spec.(*ast.TypeSpec); ok {
 		if _, ok := t.Type.(*ast.InterfaceType); ok {

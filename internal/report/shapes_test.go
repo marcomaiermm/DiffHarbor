@@ -136,6 +136,18 @@ func (s *Store) Record(ctx context.Context, its []Item) error {
 3 fold 0  n1 6
 1 fold 0  n1 9
 `, 5},
+		{"arguments that share a later line: one entry, one row", "items", `package a
+
+func Save(ctx context.Context, db *DB, a, b, c int) error {
+	_, err := db.Exec(ctx, "INSERT INTO items(x)",
+		a, b, c)
+	return err
+}
+`, `0 func 3 func Save(ctx context.Context, db *DB, a, b, c int) error {
+1 stmt 4 _, err := db.Exec(ctx, "INSERT INTO items(x)", *
+2 fold 0  n1 5
+1 fold 0  n1 6
+`, 4},
 	} {
 		u, ok := goShape(parseGo([]byte(c.src)), c.line, c.name, true)
 		if !ok {
@@ -145,6 +157,12 @@ func (s *Store) Record(ctx context.Context, its []Item) error {
 		if got := rowsOf(s); !ok || got != c.want {
 			t.Errorf("%s: got\n%s\nwant\n%s", c.why, got, c.want)
 		}
+	}
+
+	// a wrapper of the same name: its own name is no use, only the line that calls the subject
+	u, ok = goShape(parseGo([]byte("package a\n\nfunc (b B) Close() error {\n\treturn b.a.Close()\n}\n")), 4, "Close", true)
+	if s, _ := shape("a.go", "Close", u.Span, u.Ways); !ok || fmt.Sprint(u.Lines) != "[4]" || len(s.Rows) == 0 || s.Rows[0].Use {
+		t.Errorf("wrapper: lines %v, rows\n%s", u.Lines, rowsOf(s))
 	}
 }
 
@@ -222,8 +240,15 @@ func TestShapeBounds(t *testing.T) {
 	}
 
 	// three wide containers with long entries: past maxShapeBytes the folds drop their entries, then texts cut
+	// and the function's own entries after them, the outermost fold: it drops first, the innermost keeps its entries
 	var ways [][]synEl
 	head := synEl{K: "func", L: 1, T: "func f() {"}
+	for i := range 3 {
+		head.Kids = append(head.Kids, synKid{K: "if", L: 2 + i*10, E: 10 + i*10, T: "if c {"})
+	}
+	for j := range 3 {
+		head.Kids = append(head.Kids, synKid{K: "stmt", L: 32 + j, E: 32 + j, T: strings.Repeat("z", 58)})
+	}
 	for i := range 3 {
 		var kids []synKid
 		for j := range 8 {
@@ -231,12 +256,42 @@ func TestShapeBounds(t *testing.T) {
 		}
 		kids[4].U = true
 		h := head
-		h.Kids, h.W = []synKid{{K: "if", L: 2 + i*10, E: 10 + i*10, T: "if c {"}}, 0
+		h.W = i
 		ways = append(ways, []synEl{h, {K: "if", L: 2 + i*10, T: fmt.Sprintf("if c%d {", i), Kids: kids, W: 4}, {K: "stmt", L: 6 + i*10, T: "backfill()", W: -1}})
 	}
 	s, ok = shape("a.go", "backfill", [2]int{1, 40}, ways)
 	if b, _ := json.Marshal(s); !ok || len(b) > maxShapeBytes {
 		t.Errorf("%d bytes:\n%s", len(b), rowsOf(s))
+	}
+	var outer, inner *ShapeRow
+	for i, r := range s.Rows {
+		if r.Kind == "fold" && r.Depth == 1 {
+			outer = &s.Rows[i]
+		}
+		if r.Kind == "fold" && r.Depth == 2 {
+			inner = &s.Rows[i]
+		}
+	}
+	if outer == nil || inner == nil || outer.Kept != nil || outer.More == nil || *outer.More != [2]int{32, 34} || inner.Kept == nil {
+		t.Errorf("the outermost fold drops first, the last inner one keeps its entries:\n%s", rowsOf(s))
+	}
+
+	// rows too long even without the folds' entries: every text cuts to shortText, the use in view
+	ways = nil
+	head = synEl{K: "func", L: 1, T: "func f() {"}
+	for i := range 20 {
+		head.Kids = append(head.Kids, synKid{K: "stmt", L: 2 + i, E: 2 + i, T: "x"})
+	}
+	for i := range 20 {
+		h := head
+		h.W = i
+		ways = append(ways, []synEl{h, {K: "stmt", L: 2 + i, T: strings.Repeat("w", 50) + " + backfill(a)", W: -1}})
+	}
+	s, ok = shape("a.go", "backfill", [2]int{1, 22}, ways)
+	for _, r := range s.Rows {
+		if n := len([]rune(r.Text)); !ok || n > shortText || r.Use && !strings.HasSuffix(r.Text, "backfill") {
+			t.Errorf("row %q: at most %d characters, a use's ending with the name", r.Text, shortText)
+		}
 	}
 }
 

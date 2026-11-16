@@ -16,3 +16,5 @@ export async function nsWrite(v: unknown) { await db.insert(schema.users).values
 export const recentSq = db.select().from(orders).as("recent");
 export async function listRecent() { return db.select().from(recentSq); }
 export async function listItems(team: string) { return db.select().from(orders).where(team); }
+export async function deepItems(team: string) { return deepList(team); }
+export async function deepList(team: string) { return db.select().from(users).where(team); }
