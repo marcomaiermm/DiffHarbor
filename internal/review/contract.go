@@ -341,9 +341,27 @@ func where(t ticket.Ticket, q string) (string, bool) {
 	return "Description", quoted(t.Body, q) // across headings
 }
 
+// listMark is a Markdown list marker or heading at a quote's start.
+var listMark = regexp.MustCompile(`^(?:[-*+]|\d+[.)]|#{1,6})\s+`)
+
+// bare is q without the Markdown around it: a list marker or heading, emphasis that wraps it whole. What is left is
+// still in q's source word for word.
+func bare(q string) string {
+	q = listMark.ReplaceAllString(strings.TrimSpace(q), "")
+	for _, m := range []string{"**", "__", "*", "_"} {
+		if len(q) <= 2*len(m) || !strings.HasPrefix(q, m) || !strings.HasSuffix(q, m) {
+			continue
+		}
+		if in := q[len(m) : len(q)-len(m)]; !strings.Contains(in, m) { // "**a** and **b**" keeps its marks
+			q = strings.TrimSpace(in)
+		}
+	}
+	return q
+}
+
 // quote checks q against its source: the description, or the ticket of key in ts.
 func quote(q, in, body string, ts []ticket.Ticket) (Quote, bool) {
-	q = strings.TrimSpace(q)
+	q = bare(q)
 	if in == "description" {
 		return Quote{Text: q, In: in}, q != "" && quoted(body, q)
 	}

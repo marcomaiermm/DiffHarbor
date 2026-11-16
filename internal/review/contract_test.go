@@ -202,6 +202,24 @@ func TestQuoted(t *testing.T) {
 	}
 }
 
+// A quote loses the Markdown around it and stays in its source: "**Merge after X.**", "- cmd/a records …".
+func TestBareQuote(t *testing.T) {
+	const body = "Notes\n\n**Merge after WID-101.**\n\n- cmd/ingest -backfill records past builds.\n1. Run 0011 first.\n**a** and **b**"
+	for q, want := range map[string]string{
+		"**Merge after WID-101.**":                    "Merge after WID-101.",
+		"- cmd/ingest -backfill records past builds.": "cmd/ingest -backfill records past builds.",
+		"1. Run 0011 first.":                          "Run 0011 first.",
+		"Merge after WID-101.":                        "Merge after WID-101.",
+		"**a** and **b**":                             "**a** and **b**",                // not one emphasis
+		"-backfill records past builds.":              "-backfill records past builds.", // a flag isn't a marker
+	} {
+		got, ok := quote(q, "description", body, nil)
+		if !ok || got.Text != want {
+			t.Errorf("quote(%q) = %q, %v; want %q", q, got.Text, ok, want)
+		}
+	}
+}
+
 // A place stands when the head has every line of it, at most 40; a bare path only where one may stand.
 func TestPlaced(t *testing.T) {
 	line := func(p string, n int) (string, bool) { return "", p == "a.go" && n >= 1 && n <= 60 }
