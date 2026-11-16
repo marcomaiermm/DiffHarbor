@@ -297,6 +297,20 @@ type change struct {
 	sig             bool   // what callers see of it differs: see signature
 }
 
+// stateRank weighs what the PR did to a declaration, as said: one name changed twice says the most.
+var stateRank = map[string]int{"changed": 1, "signature": 2, "new": 3}
+
+// said is what the PR did to c, as the popover says it: "new", "signature", "changed".
+func (c change) said() string {
+	switch {
+	case c.State == "new":
+		return "new"
+	case c.sig:
+		return "signature"
+	}
+	return "changed"
+}
+
 type step struct {
 	Title, Why string
 	Check      string // what to check in it, the guide's
@@ -510,14 +524,7 @@ func prepare(d Data) view {
 				continue
 			}
 			s := &d.Symbols[c.c.Name][i]
-			st := "changed"
-			switch {
-			case c.c.State == "new":
-				st = "new"
-			case c.c.sig:
-				st = "signature"
-			}
-			if rank := map[string]int{"changed": 1, "signature": 2, "new": 3}; rank[st] > rank[s.State] { // one name twice in a file: the most
+			if st := c.c.said(); stateRank[st] > stateRank[s.State] { // one name twice in a file: the most
 				s.State = st
 			}
 			if heavier(c.c.Sev, s.Sev) && review.Blocks(c.c.Sev) {

@@ -1,5 +1,5 @@
 import { web, rpc, router, h } from "fakeweb";
-import { listOrders, addUser, findPosts } from "./data";
+import { listOrders, addUser, findPosts, listItems, renameUser } from "./data";
 import { Notifier, notifyAll } from "./notify";
 const app = web();
 function getOrders(_req: unknown, res: { json(x: unknown): void }) { listOrders().then((o) => res.json(o)); }
@@ -11,3 +11,8 @@ export const appRouter = router({
 });
 export function shout(n: Notifier) { n.make().send("hi"); notifyAll(["a"]); }
 export function view() { return h.createElement("div"); }
+function getItems(req: any) {
+  renameUser();
+  return listItems(req.team);
+}
+app.get("/items", getItems);

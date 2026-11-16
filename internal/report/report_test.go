@@ -718,7 +718,7 @@ func TestWalk(t *testing.T) {
 	}
 	sb, dir := sandbox(t)
 	for p, src := range map[string]string{
-		"a.go":      "package a\n\nfunc Save() { helper() }\n\nfunc helper() {}\n\nfunc Lonely() {}\n\nfunc Hidden() {}\n",
+		"a.go":      "package a\n\nfunc Save() {\n\thelper()\n}\n\nfunc helper() {}\n\nfunc Lonely() {}\n\nfunc Hidden() {}\n",
 		"a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestSave(t *testing.T) { Save() }\n",
 		"b.go":      "package a\n\n// Lonely is alone.\n",
 		"lib.rs":    "pub fn wrap() -> i32 { 1 }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn wraps() { assert_eq!(super::wrap(), 1); }\n}\n",
@@ -733,10 +733,10 @@ func TestWalk(t *testing.T) {
 db.exec("create table nodes (id text, kind text, name text, file_path text, start_line int, end_line int);" +
   "create table edges (source text, target text, kind text, line int); create table files (path text);" +
   "insert into files values ('a.go'), ('a_test.go'), ('b.go'), ('lib.rs');" +
-  "insert into nodes values ('s', 'function', 'Save', 'a.go', 3, 3), ('h', 'function', 'helper', 'a.go', 5, 5)," +
-  " ('l', 'function', 'Lonely', 'a.go', 7, 7), ('x', 'function', 'Hidden', 'a.go', 9, 9), ('i', 'import', 'testing', 'a_test.go', 3, 3)," +
+  "insert into nodes values ('s', 'function', 'Save', 'a.go', 3, 5), ('h', 'function', 'helper', 'a.go', 7, 7)," +
+  " ('l', 'function', 'Lonely', 'a.go', 9, 9), ('x', 'function', 'Hidden', 'a.go', 11, 11), ('i', 'import', 'testing', 'a_test.go', 3, 3)," +
   " ('t', 'function', 'TestSave', 'a_test.go', 5, 5), ('w', 'function', 'wrap', 'lib.rs', 1, 1), ('ws', 'function', 'wraps', 'lib.rs', 6, 6);" +
-  "insert into edges values ('s', 'h', 'calls', 3), ('t', 's', 'calls', 5);")`
+  "insert into edges values ('s', 'h', 'calls', 4), ('t', 's', 'calls', 5);")`
 	if err := os.MkdirAll(filepath.Join(dir, ".codegraph"), 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -748,7 +748,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 			t.Fatal(err, string(out))
 		}
 	}
-	s, _, _, _ := Symbols(sb, "+++ b/a.go\n+func Save() { helper() }\n+func helper() {}\n+func Lonely() {}\n+func Hidden() {}\n+++ b/lib.rs\n+pub fn wrap() -> i32 { 1 }\n")
+	s, shapes, _, _ := Symbols(sb, "+++ b/a.go\n+func Save() {\n+\thelper()\n+}\n+func helper() {}\n+func Lonely() {}\n+func Hidden() {}\n+++ b/lib.rs\n+pub fn wrap() -> i32 { 1 }\n")
 	for name, want := range map[string]struct {
 		tests    []string
 		untested bool
@@ -765,6 +765,34 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 		if got := s[name][0]; !slices.Equal(got.Tests, want.tests) || got.Untested != want.untested {
 			t.Errorf("%s: tests %v, untested %v", name, got.Tests, got.Untested)
 		}
+	}
+	// the way into helper, from Save, which only a test calls: its joint is a call, with Save's structure
+	if ws := s["helper"][0].Ways; len(ws) != 1 || len(ws[0].Chain) != 1 {
+		t.Fatalf("helper's ways %+v", ws)
+	} else if h := ws[0].Chain[0]; h.Rel != "call" || h.At != 4 || h.Shape == 0 || shapes[h.Shape-1].Span != [2]int{3, 5} {
+		t.Errorf("helper's joint %+v", h)
+	}
+}
+
+// A station says what the PR did to its declaration (the most of a name changed twice), the heaviest blocking
+// finding on it, its map part; one outside the PR's files is "outside"; a table nothing.
+func TestStations(t *testing.T) {
+	f := &file{Path: "a.go", Findings: []*finding{{Comment: review.Comment{Severity: "major"}, ID: "note-7"}}}
+	v := view{files: map[string]*file{"a.go": f}}
+	v.Map = &Map{Parts: []MapPart{{Label: "api", Files: []string{"a.go"}}}}
+	v.Nodes = []Node{{Name: "Save", Kind: "decl", Path: "a.go"}, {Name: "Use", Kind: "decl", Path: "b.go"}, {Name: "users", Kind: "table", Path: "a.go"}}
+	stations(&v, []changed{
+		{f: f, c: change{Name: "Store.Save", sig: true, Sev: "major"}},
+		{f: f, c: change{Name: "Save", State: "new", Sev: "minor"}},
+		{f: f, c: change{Name: "Gone", State: "gone", Sev: "critical"}},
+	})
+	want := []Node{
+		{Name: "Save", Kind: "decl", Path: "a.go", State: "new", Part: "api", Sev: "major", Find: "#finding-7"},
+		{Name: "Use", Kind: "decl", Path: "b.go", State: "outside"},
+		{Name: "users", Kind: "table", Path: "a.go"},
+	}
+	if !reflect.DeepEqual(v.Nodes, want) {
+		t.Errorf("got %+v\nwant %+v", v.Nodes, want)
 	}
 }
 

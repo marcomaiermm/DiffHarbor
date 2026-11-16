@@ -170,6 +170,7 @@ func (idx *cgIndex) exact(root *os.Root, changed, added map[string]bool, syms ma
 	}
 	type uses struct {
 		refs, out []Ref
+		past      []Ref // the places past the refs kept
 		seen      map[Ref]bool
 		files     map[string]bool
 		n, nOut   int
@@ -233,6 +234,8 @@ func (idx *cgIndex) exact(root *os.Root, changed, added map[string]bool, syms ma
 		u.files[r.Path] = true
 		if len(u.refs) < maxRefs {
 			u.kept[site], u.refs = len(u.refs), append(u.refs, r)
+		} else {
+			u.past = append(u.past, Ref{Path: r.Path, Line: r.Line, In: r.In})
 		}
 		switch {
 		case changed[r.Path]:
@@ -249,7 +252,7 @@ func (idx *cgIndex) exact(root *os.Root, changed, added map[string]bool, syms ma
 		}
 	}
 	for s, u := range known {
-		s.Refs, s.Uses, s.Files, s.Exact = u.refs, u.n, len(u.files), true
+		s.Refs, s.Uses, s.Files, s.Exact, s.past = u.refs, u.n, len(u.files), true, u.past
 		s.Outside, s.NOutside, s.NOutsideTests = u.out, u.nOut, u.nTest
 	}
 }
@@ -482,7 +485,7 @@ function ways(d, start, name, path, line) {
 
 // naming is the first line from..to of p that names name, as Go's files.naming; 0 for none or no end
 const naming = (p, name, from, to) => {
-  const ls = lines(p), w = new RegExp("(^|[^\\w$])" + name.replace(/[$]/g, "\\$") + "([^\\w$]|$)");
+  const ls = lines(p), w = new RegExp("(^|[^\\w$])" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "([^\\w$]|$)");
   for (let i = Math.max(from, 1); i <= Math.min(to || 0, ls.length); i++) if (w.test(ls[i - 1])) return i;
   return 0;
 };

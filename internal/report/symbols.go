@@ -50,8 +50,12 @@ type Symbol struct {
 	Requests []OutsideCall `json:"-"`
 	Stores   []StorePath   `json:"-"` // the same, the queries it runs: the map's tables (spec 6.13)
 	// a declaration the PR adds or changes: up to 3 indexes into Data.Nodes, 1-based, the first station below it
-	// toward each table or system it reaches (uses spec 9.2)
+	// toward each table or system it reaches (uses spec 9.2). That station's JUp is the joint from this declaration
+	// into it, with Up 0: the declaration is no station of its own.
 	Reach []int `json:"reach,omitempty"`
+	// exact: the places past the maxRefs kept, path, line and the declaration they sit in: the uses pass counts the
+	// other lines of their declarations that name it (decision 28)
+	past []Ref
 }
 
 // Way is how the code reaches a declaration: from a route it registers ("GET", "/x/{id}", where), or from a
@@ -136,8 +140,8 @@ type Node struct {
 	Sev    string `json:"v,omitempty"`  // the heaviest blocking finding on it
 	Find   string `json:"f,omitempty"`  // that finding's card anchor
 	Up     int    `json:"u,omitempty"`  // the next station toward an entry
-	JUp    *Joint `json:"ju,omitempty"`
-	Down   int    `json:"d,omitempty"` // the next station down from a route, or toward a table or system
+	JUp    *Joint `json:"ju,omitempty"` // the joint to Up; on a Reach's first station, with Up 0, from the declaration
+	Down   int    `json:"d,omitempty"`  // the next station down from a route, or toward a table or system
 	JDown  *Joint `json:"jd,omitempty"`
 	End    *End   `json:"e,omitempty"` // the way stops here
 }

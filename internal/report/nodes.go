@@ -7,6 +7,7 @@ import (
 	"diffharbor/internal/proc"
 	"diffharbor/internal/review"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"path"
@@ -24,17 +25,17 @@ const (
 	maxReach                 = 3 // ends a declaration's "Reaches" draws
 )
 
-// tsExt are the files a TypeScript program may hold.
-var tsExt = map[string]bool{".ts": true, ".tsx": true, ".js": true, ".jsx": true, ".mjs": true, ".cjs": true, ".mts": true, ".cts": true}
-
-// useGroup is one declaration that names a declaration: where it is (Path; In, the name it has, "" a file's top
-// level), the name, a line of it that names it; what a front-end read of it, and its shape (1-based, 0 none).
+// useGroup is a line of a declaration that names a declaration: where it is (Path; In, the name the declaration
+// has, "" a file's top level), the name, the line; what a front-end read of its declaration, and its shape (1-based,
+// 0 none), which the groups of one declaration share.
 type useGroup struct {
 	Path, In, Name string
 	Line           int
-	rank, seq      int // uses spec 9.3's order: 1 the PR's own, 2 a drawn way's joint, 3 in the PR's files, 4 the rest
-	got            *synUse
-	shape          int
+	// uses spec 9.3's order: 1 the PR's own, 2 a drawn way's joint, 3 in the PR's files, 4 the rest; 5 its lines
+	// alone, no structure: a use in a test file (spec 7), a place past the refs kept
+	rank, seq int
+	got       *synUse
+	shape     int
 }
 
 type useBook struct {
@@ -42,12 +43,13 @@ type useBook struct {
 	seq    int
 }
 
-// at is the group of p, in and name, ranked the best it is asked with.
+// at is the group of line in p, in and name, ranked the best it is asked with; in a test file for its lines alone,
+// however it is asked (spec 7: no structure for tests).
 func (b *useBook) at(p, in, name string, line, rank int) *useGroup {
-	k := p + "\x00" + in + "\x00" + name
-	if in == "" || strings.Contains(in, " ") { // a file's top level, a route: the statement at line
-		k += "\x00" + strconv.Itoa(line)
+	if checks.IsTest(p) {
+		rank = 5
 	}
+	k := p + "\x00" + in + "\x00" + name + "\x00" + strconv.Itoa(line)
 	g := b.groups[k]
 	if g == nil {
 		b.seq++
@@ -89,8 +91,8 @@ type useStart struct {
 // uses fills what uses spec 9.2 adds to the symbols: the stations of the ways up from each use to an entry and down
 // from a route to its table or system (Data.Nodes, Ref.Up, Symbol.Reach), each use's code structure (Data.Shapes,
 // Ref.Shape, Hop.Shape, Joint.Shape), a listing in an interface ("tie"), every line of a declaration that names one as
-// a use, uses in test files marked. Within the page's budget in 9.3's order; over: the budget left a structure out. A
-// pass that fails leaves its part empty: the index's alone.
+// a use, uses in test files marked: those get no structure and no way (spec 7). Within the page's budget in 9.3's
+// order; over: the budget left a structure out. A pass that fails leaves its part empty: the index's alone.
 func (idx *cgIndex) uses(sb *proc.Sandbox, root *os.Root, changed, added map[string]bool, syms map[string][]Symbol) (shapes []Shape, nodes []Node, over bool) {
 	names := slices.Sorted(maps.Keys(syms))
 	pr := func(s *Symbol) bool { return s.Exact && changed[s.Path] && addedIn(added, s.Path, s.From, s.To) }
@@ -111,6 +113,8 @@ func (idx *cgIndex) uses(sb *proc.Sandbox, root *os.Root, changed, added map[str
 	}
 	rank := func(s *Symbol, r Ref) int {
 		switch {
+		case r.Test:
+			return 5
 		case pr(s):
 			return 1
 		case changed[r.Path]:
@@ -124,20 +128,27 @@ func (idx *cgIndex) uses(sb *proc.Sandbox, root *os.Root, changed, added map[str
 	w := &upWalk{at: map[useStart]int{}, sts: map[string]*station{}}
 	var starts []useStart
 	for _, u := range all {
-		if s := (useStart{u.r.Path, u.r.In, u.r.Line}); u.s.Exact && !strings.Contains(u.r.In, " ") && !hasKey(w.at, s) {
+		s := useStart{u.r.Path, u.r.In, u.r.Line}
+		if _, ok := w.at[s]; !ok && u.s.Exact && !u.r.Test && !strings.Contains(u.r.In, " ") {
 			w.at[s], starts = len(starts), append(starts, s)
 		}
 	}
 	if len(starts) > 0 && (!runNode(sb, cgTests, map[string]any{"repo": sb.Repo(), "dbs": idx.dbs, "extra": idx.added(), "ups": starts}, w) || len(w.Starts) != len(starts)) {
 		w.Stations, w.Starts = nil, nil
 	}
-	for _, u := range all {
-		w.add(u.s, u.r, rank(u.s, u.r))
+	book := &useBook{groups: map[string]*useGroup{}}
+	for _, u := range all { // the uses' own lines first, then the joints of their ways (uses spec 9.3)
+		if !u.r.Test {
+			w.add(u.s, u.r, rank(u.s, u.r))
+		}
+		if u.s.Exact {
+			book.at(u.r.Path, u.r.In, u.name, u.r.Line, rank(u.s, u.r))
+		}
 	}
-	book, sts := &useBook{groups: map[string]*useGroup{}}, w.sts
-	for _, st := range sts { // the joints up, ranked as the uses that reach them
-		if j := st.node.JUp; j != nil && st.up != "" && j.Line > 0 {
-			st.jUp = book.at(j.Path, sts[st.up].node.Name, st.node.Name, j.Line, st.rank)
+	sts := w.sts
+	for _, k := range slices.Sorted(maps.Keys(sts)) { // the joints up, ranked as the uses that reach them
+		if st := sts[k]; st.node.JUp != nil && st.up != "" && st.node.JUp.Line > 0 {
+			st.jUp = book.at(st.node.JUp.Path, sts[st.up].node.Name, st.node.Name, st.node.JUp.Line, st.rank)
 		}
 	}
 	lines := sources(root)
@@ -145,19 +156,15 @@ func (idx *cgIndex) uses(sb *proc.Sandbox, root *os.Root, changed, added map[str
 	reach := map[*Symbol][]string{}
 	for _, name := range names {
 		for i := range syms[name] {
-			if s := &syms[name][i]; pr(s) {
+			if s := &syms[name][i]; pr(s) && !checks.IsTest(s.Path) { // no way for a test's helper (spec 7)
 				reach[s] = idx.reach(s, name, sts, book, lines)
 			}
 		}
 	}
 
 	// the front-ends: each use's declaration, its lines and ways
-	for _, u := range all {
-		if u.s.Exact {
-			book.at(u.r.Path, u.r.In, u.name, u.r.Line, rank(u.s, u.r))
-		}
-	}
 	eachHop(syms, names, func(h *Hop, in string) { book.at(h.In, in, h.Name, h.At, 2) })
+	book.past(syms, names)
 	order := slices.SortedFunc(maps.Values(book.groups), func(a, b *useGroup) int {
 		return cmp.Or(cmp.Compare(a.rank, b.rank), cmp.Compare(a.seq, b.seq))
 	})
@@ -282,14 +289,44 @@ func eachHop(syms map[string][]Symbol, names []string, f func(h *Hop, in string)
 	}
 }
 
-// placeShapes is the groups' shapes, in order within the budget (uses spec 9.3), each group's set; over: one didn't
-// fit.
+// past adds a group, for its lines alone, of each declaration past the refs the symbols keep.
+func (b *useBook) past(syms map[string][]Symbol, names []string) {
+	for _, name := range names {
+		for i := range syms[name] {
+			for _, r := range pastDecls(&syms[name][i]) {
+				b.at(r.Path, r.In, name, r.Line, 5)
+			}
+		}
+	}
+}
+
+// pastDecls is a place of each declaration past the refs s keeps (a file's top level: each place), whose other lines
+// count as uses.
+func pastDecls(s *Symbol) []Ref {
+	var out []Ref
+	seen := map[string]bool{}
+	for _, r := range s.past {
+		if k := r.Path + "\x00" + r.In; r.In == "" || !seen[k] {
+			seen[k], out = true, append(out, r)
+		}
+	}
+	return out
+}
+
+// placeShapes is the groups' shapes, in order within the budget (uses spec 9.3), each group's set; the groups of one
+// declaration share one. over: one didn't fit.
 func placeShapes(order []*useGroup) (shapes []Shape, over bool) {
-	total := 0
+	total, done := 0, map[string]int{} // a declaration's shape, by path, span and name
 	for _, g := range order {
 		if g.got == nil || len(g.got.Ways) == 0 {
 			continue
 		}
+		k := fmt.Sprint(g.Path, g.got.Span, g.Name)
+		if i, ok := done[k]; ok {
+			g.shape = i
+			continue
+		}
+		done[k] = 0
 		sh, ok := shape(g.Path, g.Name, g.got.Span, g.got.Ways)
 		if !ok {
 			continue
@@ -301,17 +338,18 @@ func placeShapes(order []*useGroup) (shapes []Shape, over bool) {
 		}
 		total += len(b)
 		shapes = append(shapes, sh)
-		g.shape = len(shapes)
+		g.shape, done[k] = len(shapes), len(shapes)
 	}
 	return shapes, over
 }
 
 // count gives s's uses their shapes and a listing in an interface "tie", and adds every other line of an exact use's
-// declaration that names name as a use of its own (decision 28), to maxRefs. Out: each use's station, by upKey.
+// declaration that names name as a use of its own (decision 28), to maxRefs; those of the declarations past the refs
+// kept count. A use in a test file gets no shape and no station. Out: each use's station, by upKey.
 func (b *useBook) count(s *Symbol, name string, lines files, upKey func(*Symbol, Ref) string) map[useStart]string {
 	ups := map[useStart]string{}
 	have := map[string]bool{s.Path + ":" + strconv.Itoa(s.Line): true}
-	for _, r := range slices.Concat(s.Refs, s.Outside) {
+	for _, r := range slices.Concat(s.Refs, s.Outside, s.past) {
 		have[r.Path+":"+strconv.Itoa(r.Line)] = true
 	}
 	for _, h := range s.Here {
@@ -319,24 +357,35 @@ func (b *useBook) count(s *Symbol, name string, lines files, upKey func(*Symbol,
 	}
 	var refs []Ref
 	for _, r := range s.Refs {
-		ups[useStart{r.Path, r.In, r.Line}] = upKey(s, r)
+		if !r.Test {
+			ups[useStart{r.Path, r.In, r.Line}] = upKey(s, r)
+		}
 		if !s.Exact {
 			refs = append(refs, r)
 			continue
 		}
 		g := b.at(r.Path, r.In, name, r.Line, 4)
-		if g.got != nil && g.got.Iface {
-			r.Rel, r.Via = "tie", r.In
+		if g.got != nil && g.got.Iface != "" {
+			r.Rel, r.Via = "tie", g.got.Iface
 		}
-		r.Shape = g.shape
+		r.Shape = g.shape // none in a test file: see at
 		refs = append(refs, r)
 		for _, l := range linesOf(g) {
 			if at := r.Path + ":" + strconv.Itoa(l); !have[at] {
 				have[at] = true
 				x := r
-				x.Line, x.Text = l, cut(strings.TrimSpace(lines.text(r.Path, l)), maxText)
+				x.Line, x.Text, x.Rel, x.Via = l, cut(strings.TrimSpace(lines.text(r.Path, l)), maxText), "", ""
 				refs, s.Uses = append(refs, x), s.Uses+1
-				ups[useStart{x.Path, x.In, x.Line}] = upKey(s, r)
+				if !r.Test {
+					ups[useStart{x.Path, x.In, x.Line}] = upKey(s, r)
+				}
+			}
+		}
+	}
+	for _, r := range pastDecls(s) {
+		for _, l := range linesOf(b.at(r.Path, r.In, name, r.Line, 5)) {
+			if at := r.Path + ":" + strconv.Itoa(l); !have[at] {
+				have[at], s.Uses = true, s.Uses+1
 			}
 		}
 	}
@@ -379,11 +428,6 @@ func placeNodes(sts map[string]*station) (nodes []Node, place map[string]int) {
 	return nodes, place
 }
 
-func hasKey[K comparable, V any](m map[K]V, k K) bool {
-	_, ok := m[k]
-	return ok
-}
-
 // linesOf are the lines of g's declaration that name its name, none when no front-end read it.
 func linesOf(g *useGroup) []int {
 	if g.got == nil {
@@ -393,7 +437,8 @@ func linesOf(g *useGroup) []int {
 }
 
 // read asks the front-ends for each group: Go's here, TypeScript's through tsedges.cjs --shapes in the project of its
-// index; the ways for the first 2·maxShapes in order (a structure of one row is none), the lines alone for the rest.
+// index; the ways for the first 2·maxShapes in order (a structure of one row is none), the lines alone for the rest
+// and for those ranked for their lines alone.
 func (idx *cgIndex) read(sb *proc.Sandbox, root *os.Root, order []*useGroup) {
 	type item struct {
 		File string `json:"file"`
@@ -408,8 +453,8 @@ func (idx *cgIndex) read(sb *proc.Sandbox, root *os.Root, order []*useGroup) {
 	if _, err := os.Stat(filepath.Join(tsAPI, "dist", "api", "sync", "api.js")); err == nil {
 		tsOK = true
 	}
+	ways := func(i int) bool { return i < 2*maxShapes && order[i].rank < 5 }
 	for i, g := range order {
-		ways := i < 2*maxShapes
 		switch ext := path.Ext(g.Path); {
 		case ext == ".go":
 			gf, ok := gos[g.Path]
@@ -419,10 +464,13 @@ func (idx *cgIndex) read(sb *proc.Sandbox, root *os.Root, order []*useGroup) {
 				}
 				gos[g.Path] = gf
 			}
-			if u, ok := goShapeOf(gf, g.Line, g.Name, ways); ok {
+			if gf == nil {
+				continue
+			}
+			if u, ok := goShape(gf, g.Line, g.Name, ways(i)); ok {
 				g.got = &u
 			}
-		case tsExt[ext] && tsOK:
+		case jsExt[ext] && tsOK:
 			best := -1
 			for j, d := range idx.dbs {
 				if strings.HasPrefix(g.Path, d.Prefix) && (best < 0 || len(d.Prefix) > len(idx.dbs[best].Prefix)) {
@@ -442,7 +490,7 @@ func (idx *cgIndex) read(sb *proc.Sandbox, root *os.Root, order []*useGroup) {
 		items := make([]item, len(is))
 		for j, i := range is {
 			g := order[i]
-			items[j] = item{strings.TrimPrefix(g.Path, prefix), g.Line, g.Name, g.In, i < 2*maxShapes}
+			items[j] = item{strings.TrimPrefix(g.Path, prefix), g.Line, g.Name, g.In, ways(i)}
 		}
 		var got []*synUse
 		if !runNode(sb, tsEdgesJS, map[string]any{"dir": dir, "ts": tsAPI, "shapes": items}, &got) || len(got) != len(is) {
@@ -454,48 +502,69 @@ func (idx *cgIndex) read(sb *proc.Sandbox, root *os.Root, order []*useGroup) {
 	}
 }
 
-func goShapeOf(gf *goFile, line int, name string, ways bool) (synUse, bool) {
-	if gf == nil {
-		return synUse{}, false
-	}
-	return goShape(gf, line, name, ways)
-}
-
 // down is the way down from each route the ways reach (uses spec 9.2): its handler's first call that passes its
-// input on and, within maxHops calls of that one, reaches a table or a system, to the first it reaches; at most
-// maxDown stations, the table or system included, then "bound".
+// input on (a named handler is a station of its own, then its call) and, within maxHops calls of that one, reaches a
+// table or a system, to the first it reaches; at most maxDown stations, the table or system included, then "bound".
 func (idx *cgIndex) down(sb *proc.Sandbox, sts map[string]*station, book *useBook, lines files) {
+	byLine := func(a, b cgEdge) int { return cmp.Compare(a.Line, b.Line) }
+	inner := map[declKey][]cgEdge{} // a named handler's calls that pass its input on
+	for _, e := range idx.Edges {
+		if e.Kind == "passes" && e.SKind != "route" {
+			inner[declKey{e.SPath, e.SName}] = append(inner[declKey{e.SPath, e.SName}], e)
+		}
+	}
+	for _, es := range inner {
+		slices.SortFunc(es, byLine)
+	}
 	passes := map[string][]cgEdge{} // a route's key: its calls that pass its input on
 	var targets []declKey
-	for k, st := range sts {
+	for _, k := range slices.Sorted(maps.Keys(sts)) {
+		st := sts[k]
 		if st.node.Kind != "route" {
 			continue
 		}
 		for _, e := range idx.Edges {
-			if e.Kind == "passes" && e.SPath == st.node.Path && strings.EqualFold(e.SName, st.node.Method+" "+st.node.Name) {
+			if e.Kind == "passes" && e.SKind == "route" && e.SPath == st.node.Path && strings.EqualFold(e.SName, st.node.Method+" "+st.node.Name) {
 				passes[k] = append(passes[k], e)
 				targets = append(targets, declKey{e.TPath, e.TName})
+				for _, h := range inner[declKey{e.TPath, e.TName}] {
+					targets = append(targets, declKey{h.TPath, h.TName})
+				}
 			}
 		}
-		slices.SortFunc(passes[k], func(a, b cgEdge) int { return cmp.Compare(a.Line, b.Line) })
+		slices.SortFunc(passes[k], byLine)
 	}
 	if len(targets) == 0 {
 		return
 	}
 	g := idx.callGraph(sb, targets)
+	step := func(e cgEdge, in string) downStep {
+		return downStep{
+			key: e.TPath + "\x00" + e.TName + "\x00" + strconv.Itoa(e.TLine), node: Node{Name: e.TName, Kind: "decl", Path: e.TPath, Line: e.TLine},
+			joint: Joint{Rel: "call", Path: e.SPath, Line: e.Line}, in: in,
+		}
+	}
 	for _, k := range slices.Sorted(maps.Keys(passes)) {
 		r := sts[k]
+		var ways [][]downStep // the stations to the call each way goes down from
 		for _, e := range passes[k] {
-			x := declKey{e.TPath, e.TName}
+			first := step(e, r.node.Method+" "+r.node.Name)
+			if hs := inner[declKey{e.TPath, e.TName}]; len(hs) > 0 {
+				for _, h := range hs {
+					ways = append(ways, []downStep{first, step(h, e.TName)})
+				}
+				continue
+			}
+			ways = append(ways, []downStep{first})
+		}
+		for _, pre := range ways {
+			last := pre[len(pre)-1].node
+			x := declKey{last.Path, last.Name}
 			steps := chainDown(g, x, firstEnd(g, x), lines)
 			if len(steps) == 0 {
 				continue
 			}
-			first := downStep{
-				key: x.Path + "\x00" + x.Name + "\x00" + strconv.Itoa(e.TLine), node: Node{Name: x.Name, Kind: "decl", Path: x.Path, Line: e.TLine},
-				joint: Joint{Rel: "call", Path: e.SPath, Line: e.Line}, in: r.node.Method + " " + r.node.Name,
-			}
-			steps = append([]downStep{first}, steps...)
+			steps = append(pre, steps...)
 			if len(steps) > maxDown {
 				steps = steps[:maxDown]
 				steps[maxDown-1].node.End = &End{Kind: "bound"}
@@ -510,7 +579,7 @@ func (idx *cgIndex) down(sb *proc.Sandbox, sts map[string]*station, book *useBoo
 // reach is the stations below s toward each table and system it reaches, at most maxReach (Symbol.Reach): its own,
 // not shared, as the joint into the first is from s. Their keys, the first of each.
 func (idx *cgIndex) reach(s *Symbol, name string, sts map[string]*station, book *useBook, lines files) []string {
-	from := declKey{s.Path, name[strings.LastIndex(name, ".")+1:]}
+	from := declKey{s.Path, name[strings.LastIndex(name, ".")+1:]} // the declaration's own name, as its index has it
 	var out []string
 	seen := map[string]bool{}
 	ends := make([]any, 0, len(s.Stores)+len(s.Requests))
@@ -533,8 +602,8 @@ func (idx *cgIndex) reach(s *Symbol, name string, sts map[string]*station, book 
 		sts[steps[0].key] = &station{node: steps[0].node, rank: 1}
 		st := sts[steps[0].key]
 		st.node.JUp = &steps[0].joint
-		if steps[0].in = name; steps[0].named() {
-			st.jUp = book.at(steps[0].joint.Path, name, steps[0].node.Name, steps[0].joint.Line, 1)
+		if steps[0].named() {
+			st.jUp = book.at(steps[0].joint.Path, steps[0].in, steps[0].node.Name, steps[0].joint.Line, 1)
 		}
 		link(sts, steps[0].key, steps[1:], book, 1)
 		out = append(out, steps[0].key)
@@ -550,10 +619,10 @@ type downStep struct {
 	in    string
 }
 
-// named is whether the joint names the station by a name a structure can mark: a declaration, a table the
-// project declares; not a system, nor a table only a string names.
+// named is whether the joint names the station by a name a structure can mark: a declaration, a table (a string
+// that names it, SQL's, is marked when no identifier does); not a system.
 func (d downStep) named() bool {
-	return d.node.Kind == "decl" || (d.node.Kind == "table" || d.node.Kind == "subquery") && d.node.Path != ""
+	return d.node.Kind != "system"
 }
 
 // firstEnd is the first table, else the first system, x reaches: a *StorePath, a *OutsideCall, nil.
@@ -672,7 +741,6 @@ func stations(v *view, chs []changed) {
 			}
 		}
 	}
-	rank := map[string]int{"changed": 1, "signature": 2, "new": 3}
 	for i := range v.Nodes {
 		n := &v.Nodes[i]
 		if n.Kind == "table" || n.Kind == "subquery" || n.Kind == "system" {
@@ -687,14 +755,7 @@ func stations(v *view, chs []changed) {
 			if c.f.Path != n.Path || c.c.State == "gone" || c.c.Name[strings.LastIndex(c.c.Name, ".")+1:] != n.Name {
 				continue
 			}
-			st := "changed"
-			switch {
-			case c.c.State == "new":
-				st = "new"
-			case c.c.sig:
-				st = "signature"
-			}
-			if rank[st] > rank[n.State] {
+			if st := c.c.said(); stateRank[st] > stateRank[n.State] {
 				n.State = st
 			}
 			if heavier(c.c.Sev, n.Sev) && review.Blocks(c.c.Sev) {

@@ -77,6 +77,75 @@ func Run(ctx context.Context, flags Flags) error {
 	if got := rowsOf(s); !ok || got != want {
 		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}
+
+	for _, c := range []struct {
+		why, name, src, want string
+		line                 int
+	}{
+		{"a chain over lines: one chain row, the use's link a row of its own, the others its entries", "items", `package a
+
+func List(db *DB) ([]Row, error) {
+	return db.Select("id").
+		From(items).
+		Where("x = ?", 1).
+		All()
+}
+`, `0 func 3 func List(db *DB) ([]Row, error) {
+1 chain 4 return db.Select("id").
+2 link 5 From(items). *
+2 fold 0  n2 6 7
+`, 5},
+		{"the if's own init declares err; ok's declaration is in a block the if isn't in: no notes", "backfill", `package a
+
+func Run(ctx context.Context) error {
+	cfg, err := load()
+	if err := validate(ctx); err != nil {
+		return backfill(ctx, cfg)
+	}
+	{
+		ok := true
+		_ = ok
+	}
+	if ok {
+		backfill(ctx, cfg)
+	}
+	return err
+}
+`, `0 func 3 func Run(ctx context.Context) error {
+1 fold 0  n1 4
+1 if 5 if err := validate(ctx); err != nil {
+2 stmt 6 return backfill(ctx, cfg) *
+1 fold 0  n1 8
+1 if 12 if ok {
+2 stmt 13 backfill(ctx, cfg) *
+1 fold 0  n1 15
+`, 6},
+		{"a table only SQL names: the string at the line is the use", "items", `package a
+
+func (s *Store) Record(ctx context.Context, its []Item) error {
+	for _, it := range its {
+		if _, err := s.db.ExecContext(ctx, "INSERT INTO items(name) VALUES ($1)", it.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+`, `0 func 3 func (s *Store) Record(ctx context.Context, its []Item) err…
+1 loop 4 for _, it := range its {
+2 if 5 if _, err := s.db.ExecContext(ctx, "INSERT INTO items(name)… *
+3 fold 0  n1 6
+1 fold 0  n1 9
+`, 5},
+	} {
+		u, ok := goShape(parseGo([]byte(c.src)), c.line, c.name, true)
+		if !ok {
+			t.Fatalf("%s: no declaration", c.why)
+		}
+		s, ok := shape("a.go", c.name, u.Span, u.Ways)
+		if got := rowsOf(s); !ok || got != c.want {
+			t.Errorf("%s: got\n%s\nwant\n%s", c.why, got, c.want)
+		}
+	}
 }
 
 // A way 12 levels deep keeps the outer two, one levels row and the inner five; a long row keeps the use in view.
@@ -91,9 +160,9 @@ func TestShapeBounds(t *testing.T) {
 	if !ok {
 		t.Fatal("no shape")
 	}
-	deep, lv := 0, 0
+	depth, lv := 0, 0
 	for _, r := range s.Rows {
-		deep = max(deep, r.Depth)
+		depth = max(depth, r.Depth)
 		if r.Kind == "levels" {
 			lv++
 			if r.Depth != 2 || r.N != 6 || *r.More != [2]int{3, 8} {
@@ -101,12 +170,55 @@ func TestShapeBounds(t *testing.T) {
 			}
 		}
 	}
-	if deep > maxShapeDepth || lv != 1 {
-		t.Errorf("depth %d, %d levels rows:\n%s", deep, lv, rowsOf(s))
+	if depth > maxShapeDepth || lv != 1 {
+		t.Errorf("depth %d, %d levels rows:\n%s", depth, lv, rowsOf(s))
 	}
 	last := s.Rows[len(s.Rows)-1]
 	if !last.Use || len([]rune(last.Text)) != maxRowText || !strings.HasPrefix(last.Text, "…") || !strings.HasSuffix(last.Text, "backfill") {
 		t.Errorf("the use's row %q: 60 characters ending with the name", last.Text)
+	}
+
+	// the same depth with a fold before the way at depth 2 and one inside the cut, and a second, shallow use under the
+	// row of depth 2: that row stays, so the cut starts below it, and both uses stay marked
+	var deep, shallow []synEl
+	for i := 1; i <= 12; i++ {
+		kids := []synKid{{K: "object", L: 10 * (i + 1), E: 200, T: "k"}}
+		w := 0
+		if i == 2 || i == 5 {
+			kids, w = append([]synKid{{K: "stmt", L: 10*i + 1, E: 10*i + 1, T: "x"}}, kids...), 1
+		}
+		if i == 3 {
+			kids = append(kids, synKid{K: "stmt", L: 199, E: 199, T: "backfill()", U: true})
+		}
+		el := synEl{K: "object", L: 10 * i, T: fmt.Sprintf("k%d: {", i), Kids: kids, W: w}
+		deep = append(deep, el)
+		if i <= 3 {
+			if i == 3 {
+				el.W = 1
+			}
+			shallow = append(shallow, el)
+		}
+	}
+	deep = append(deep, synEl{K: "stmt", L: 130, T: "backfill()", W: -1})
+	shallow = append(shallow, synEl{K: "stmt", L: 199, T: "backfill()", W: -1})
+	s, ok = shape("a.ts", "backfill", [2]int{10, 200}, [][]synEl{deep, shallow})
+	uses, lv := 0, 0
+	for _, r := range s.Rows {
+		if r.Depth > maxShapeDepth-1 || r.More != nil && r.More[0] == 0 {
+			t.Errorf("row %+v", r)
+		}
+		if r.Use {
+			uses++
+		}
+		if r.Kind == "levels" {
+			lv++
+			if r.Depth != 3 || r.N != 6 || *r.More != [2]int{40, 90} {
+				t.Errorf("levels row %+v %v: the rows of depth 3 to 8, lines 40 to 90", r, *r.More)
+			}
+		}
+	}
+	if !ok || uses != 2 || lv != 1 {
+		t.Errorf("%d uses, %d levels rows:\n%s", uses, lv, rowsOf(s))
 	}
 
 	// three wide containers with long entries: past maxShapeBytes the folds drop their entries, then texts cut
@@ -161,10 +273,18 @@ func TestTSShape(t *testing.T) {
 	items := []map[string]any{
 		{"file": "src/items.ts", "line": 9, "name": "KINDS", "in": "filtersSchema", "ways": true},
 		{"file": "src/items.ts", "line": 27, "name": "listItems", "in": "query shop.list", "ways": true},
+		{"file": "src/data.ts", "line": 11, "name": "audit_log", "in": "rawCount", "ways": true}, // only SQL names it
+		{"file": "src/notify.ts", "line": 5, "name": "send", "in": "send", "ways": false},        // an interface lists it
 	}
 	var got []*synUse
-	if !runNode(sb, tsEdgesJS, map[string]any{"dir": repo, "ts": tsAPI, "shapes": items}, &got) || len(got) != 2 || got[0] == nil || got[1] == nil {
+	if !runNode(sb, tsEdgesJS, map[string]any{"dir": repo, "ts": tsAPI, "shapes": items}, &got) || len(got) != 4 || got[0] == nil || got[1] == nil || got[2] == nil || got[3] == nil {
 		t.Fatalf("got %+v", got)
+	}
+	if w := got[2].Ways; fmt.Sprint(got[2].Lines) != "[11]" || len(w) != 1 || !strings.HasPrefix(w[0][len(w[0])-1].T, `"SELECT count(*) FROM audit_log"`) {
+		t.Errorf("audit_log: the string is the use: %+v", got[2])
+	}
+	if got[3].Iface != "Sender" {
+		t.Errorf("send listed in Sender: %+v", got[3])
 	}
 	s, ok := shape("src/items.ts", "KINDS", got[0].Span, got[0].Ways)
 	if !ok || fmt.Sprint(got[0].Lines) != "[9 10]" {

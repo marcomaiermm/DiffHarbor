@@ -1,6 +1,6 @@
 import { s } from "fakeschema";
 import { proc, router } from "fakeweb";
-import { listItems } from "./data";
+import { listItems, listOrders } from "./data";
 
 export const KINDS = ["a", "b"] as const;
 export const filtersSchema = s.object({
@@ -26,7 +26,7 @@ export const itemsRouter = router({
         if (ok) {
           return listItems(input.team);
         }
-        return [];
+        return listOrders();
       }),
   },
 });

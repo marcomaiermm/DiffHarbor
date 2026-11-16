@@ -1,6 +1,7 @@
 // tsedges: what the TypeScript checker (TS >= 7.1's API) resolves in the project at dir that codegraph's index can't,
 // as cgEdges, paths relative to dir. No list of frameworks or ORMs, only what a call's declaration and its name say:
-//   calls    a call or a callback passed on (`xs.map(f)`) to a declaration of the project, by its type: `a.b().c()`
+//   calls    a call or a callback passed on (`xs.map(f)`) to a declaration of the project, by its type: `a.b().c()`;
+//            one to a member of an interface or a type literal with Via, that interface's or type's name
 //   renders  a JSX element of a component of the project
 //   handles  a function of the project passed to a package's call: a route, a procedure, a listener; an inline one
 //            is a "route" itself, named by the call's string (`get("/x", …)`) or, at a module's top level, the key
@@ -13,7 +14,8 @@
 //   requests  a call that sends a network request, to no declaration: the global fetch, node:http's and node:https's
 //            request and get, a package's call given a URL constant (below)
 //   passes   a call in an inline route's handler that passes its input on (its first parameter; `input` of a
-//            destructured one) to a function of the project: the way down from a route (uses spec 9.2)
+//            destructured one) to a function of the project: the way down from a route (uses spec 9.2). A named
+//            handler: from the route to it, and from it for each of its calls that passes its input on
 //   references  a name of the project in the chain that registers an inline route (`p.input(schema).query(…)`),
 //            from the route: the way up from the name ends there
 //   url      a call with an argument that is a URL: a string, `new URL(…)` or a template starting with http:// or
@@ -103,14 +105,24 @@ function declKind(n) {
 const isFn = n => n && (is.isArrowFunction(n) || is.isFunctionExpression(n));
 
 const out = [], seen = new Set();
-const emit = (kind, s, line, t, url) => {
+const emit = (kind, s, line, t, url, via) => {
   if (!s || !t) return;
   const k = [kind, s.path, s.name, s.line, line, t.name, t.path, t.line].join("\0");
   if (seen.has(k)) return;
   seen.add(k);
   out.push({ Line: line, Kind: kind, By: "ts", SName: s.name, SKind: s.kind, SPath: s.path, SLine: s.line, SEnd: s.end,
-    TName: t.name, TPath: t.path || "", TLine: t.line || 0, Sub: t.sub || undefined, URL: url?.url, Env: url?.env, URLAt: url?.at });
+    TName: t.name, TPath: t.path || "", TLine: t.line || 0, Sub: t.sub || undefined, URL: url?.url, Env: url?.env, URLAt: url?.at,
+    Via: via || undefined });
 };
+// ifaceOf is the name of the interface or type whose member n is; "" for none
+const ifaceOf = n => {
+  if (!n || !(is.isMethodSignatureDeclaration(n) || is.isPropertySignatureDeclaration(n))) return "";
+  const p = n.parent;
+  if (is.isInterfaceDeclaration(p)) return text(p.name);
+  return is.isTypeLiteralNode(p) && is.isTypeAliasDeclaration(p.parent) ? text(p.parent.name) : "";
+};
+// fnOf is the function a declaration of the project holds: its own, a variable's or a property's arrow; null none
+const fnOf = d => (is.isFunctionDeclaration(d.node) || is.isMethodDeclaration(d.node) ? d.node : isFn(d.node.initializer) ? d.node.initializer : null);
 const isUrl = s => /^https?:\/\//.test(s);
 const envObj = s => s === "process.env" || s === "import.meta.env";
 const isStr = x => is.isStringLiteral(x) || is.isNoSubstitutionTemplateLiteral(x) || is.isTemplateExpression(x);
@@ -183,7 +195,8 @@ const ambientOf = h => safe(() => {
   return true;
 });
 
-const done = new Set(); // a file in two projects: once
+const done = new Set(); // a file in two projects: once; a named handler's calls: once
+const handlers = new Map(); // a file's named handlers: their declaration, their function
 for (project of shapes ? [] : projects()) {
 program = project.program, checker = project.checker;
 decls.clear(), ambients.clear();
@@ -280,8 +293,8 @@ for (const file of program.getSourceFileNames()) {
   }
   const line = n => lineOf(n, sf);
   for (const c of calls) {
-    const t = decl(syms[c.at]), r = eff(c.scope);
-    if (t && (t.fn || c.jsx)) emit(c.jsx ? "renders" : "calls", r, line(c.n), t);
+    const t = decl(syms[c.at]), r = eff(c.scope), via = t && !c.jsx && ifaceOf(t.node);
+    if (t && (t.fn || c.jsx || via)) emit(c.jsx ? "renders" : "calls", r, line(c.n), t, null, via);
     if (t && t.fn && !c.jsx && r?.route && reads(c.n, r.input)) emit("passes", r, line(c.n), t);
   }
   const routeOf = new Map(inlines.filter(s => s.route).map(s => [s.call, s]));
@@ -298,9 +311,31 @@ for (const file of program.getSourceFileNames()) {
     if (!t || !t.fn) continue;
     const at = callAt.get(r.call);
     if (at !== undefined && ext(at) && label(r.call)) { // a handler: from the route the call registers
-      const c = r.call, l = line(c);
-      emit("handles", { name: routeName(c), kind: "route", path, line: l, end: endOf(c, sf) }, l, t);
+      const c = r.call, l = line(c), rt = { name: routeName(c), kind: "route", path, line: l, end: endOf(c, sf) };
+      emit("handles", rt, l, t);
+      const fn = fnOf(t);
+      if (fn && !handlers.has(t)) handlers.set(t, fn);
+      if (fn) emit("passes", rt, l, t); // the route hands its input to it
     } else emit("calls", eff(r.scope), line(r.n), t);
+  }
+  // a named handler's calls that pass its input on, wherever it is declared: one round trip for the file's
+  const hcalls = [];
+  for (const [t, fn] of handlers) {
+    if (done.has(t.path + "\0" + t.line)) continue;
+    done.add(t.path + "\0" + t.line);
+    const input = inputOf(fn), v = n => {
+      if (is.isCallExpression(n) && calleeName(n) && reads(n, input)) hcalls.push({ t, n });
+      n.forEachChild(v);
+    };
+    if (fn.body) v(fn.body);
+  }
+  handlers.clear();
+  if (hcalls.length) {
+    const hs = resolve(hcalls.map(h => calleeName(h.n)));
+    hcalls.forEach((h, i) => {
+      const d = decl(hs[i]);
+      if (d && d.fn) emit("passes", { name: h.t.name, kind: "function", path: h.t.path, line: h.t.line, end: endOf(fnOf(h.t), h.t.sf) }, lineOf(h.n, h.t.sf), d);
+    });
   }
   // requests: platform senders by where they are declared; urls: whatever call passes one on
   const sym = (x, p) => syms[ids.get(p + ":" + x.pos)];
@@ -378,7 +413,8 @@ for (const file of program.getSourceFileNames()) {
 // shaped is the --shapes mode (uses spec 5 and 9.2): for each {file, line, name, in, ways} of shapes, the declaration of
 // file that holds line (the one named in, else the statement at the module's top), every line in it that names what
 // the name at line resolves to, and with ways the way down to the first 3 of them: shapes.go's synUse, null where
-// the program doesn't hold the file. shapes.go turns the ways into rows.
+// the program doesn't hold the file. Without a name at line, a string there that holds it as a word is the use: a
+// table SQL names. shapes.go turns the ways into rows.
 function shaped(items) {
   const out = items.map(() => null), byFile = new Map();
   items.forEach((it, i) => byFile.set(it.file, [...(byFile.get(it.file) || []), i]));
@@ -387,13 +423,22 @@ function shaped(items) {
     const pr = all.find(p => p.program.getSourceFile(root + file));
     if (!pr) continue;
     project = pr, program = pr.program, checker = pr.checker, decls.clear();
-    const sf = program.getSourceFile(root + file), want = new Set(idx.map(i => items[i].name)), ids = new Map();
-    const visit = n => { if (is.isIdentifier(n) && want.has(n.text)) ids.set(n.text, [...(ids.get(n.text) || []), n]); n.forEachChild(visit) };
+    const sf = program.getSourceFile(root + file), want = new Set(idx.map(i => items[i].name)), ids = new Map(), strs = [];
+    const visit = n => {
+      if (is.isIdentifier(n) && want.has(n.text)) ids.set(n.text, [...(ids.get(n.text) || []), n]);
+      else if (isStr(n)) strs.push(n);
+      n.forEachChild(visit);
+    };
     visit(sf);
+    const word = (t, name) => new RegExp("(^|[^\\w$])" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "([^\\w$]|$)").test(t);
     const asks = [];
     for (const i of idx) {
       const it = items[i], at = (ids.get(it.name) || []).find(n => lineOf(n, sf) === it.line);
-      if (!at) continue;
+      if (!at) {
+        const lit = strs.find(n => lineOf(n, sf) <= it.line && it.line <= endOf(n, sf) && word(sf.text.slice(n.getStart(sf), n.end), it.name));
+        if (lit) asks.push({ i, at: lit, d: holder(lit, it.in), inside: [] });
+        continue;
+      }
       const d = holder(at, it.in);
       asks.push({ i, at, d, inside: ids.get(it.name).filter(n => n.pos >= d.pos && n.end <= d.end) });
     }
@@ -405,7 +450,7 @@ function shaped(items) {
       const uses = me ? a.inside.filter((_, j) => ss[j]?.id === me.id) : [a.at];
       const lines = [], marked = [];
       for (const n of uses) if (!lines.includes(lineOf(n, sf))) lines.push(lineOf(n, sf)), marked.push(n);
-      const u = { s: [lineOf(a.d, sf), endOf(a.d, sf)], n: lines, i: is.isInterfaceDeclaration(a.d) || undefined };
+      const u = { s: [lineOf(a.d, sf), endOf(a.d, sf)], n: lines, i: (is.isInterfaceDeclaration(a.d) && text(a.d.name)) || undefined };
       if (items[a.i].ways) u.w = marked.slice(0, 3).map(n => wayOf(n, a.d, uses, sf, conds));
       out[a.i] = u;
     }

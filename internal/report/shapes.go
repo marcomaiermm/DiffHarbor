@@ -47,12 +47,13 @@ type synKid struct {
 }
 
 // synUse is what a front-end reads of one declaration that names a subject: its lines (Span), every line in it that
-// names the subject, the ways down to the first maxMarked of them, and whether it is an interface type that lists it.
+// names the subject, the ways down to the first maxMarked of them, and the interface type's name when it is one
+// that lists it.
 type synUse struct {
 	Span  [2]int    `json:"s"`
 	Lines []int     `json:"n"`
 	Ways  [][]synEl `json:"w,omitempty"`
-	Iface bool      `json:"i,omitempty"`
+	Iface string    `json:"i,omitempty"`
 }
 
 // synNode is the ways of one declaration merged: shared nodes once, w the entry of the parent the node sits in.
@@ -185,37 +186,97 @@ func (b *shaper) fold(ks []synKid, d int, after bool) {
 	b.rows = append(b.rows, r)
 }
 
-// levels keeps a way deeper than maxShapeDepth rows readable: the rows of depth 0 and 1, one "levels" row for those
-// between, the inner 5. The rows below the cut move up to follow it.
+// levels keeps each way deeper than maxShapeDepth rows readable, the deepest first: the rows of depth 0 and 1, one
+// "levels" row for those between, the inner 5. Only that way's rows and what hangs off them fold; a use, a row on
+// another way and a levels row stay, so the cut moves below them (and may then keep the way deeper). The rows below
+// the cut move up to follow it.
 func levels(rows []ShapeRow) []ShapeRow {
-	deep := 0
-	for _, r := range rows {
-		deep = max(deep, r.Depth)
+	for {
+		out, ok := cutLevels(rows)
+		if !ok {
+			return rows
+		}
+		rows = out
 	}
-	if deep <= maxShapeDepth {
-		return rows
+}
+
+// cutLevels cuts the deepest use's way past maxShapeDepth once; ok false when there is none or it can't be cut.
+func cutLevels(rows []ShapeRow) ([]ShapeRow, bool) {
+	up := make([]int, len(rows)) // each row's parent, -1 none
+	var stack []int
+	for i, r := range rows {
+		for len(stack) > 0 && rows[stack[len(stack)-1]].Depth >= r.Depth {
+			stack = stack[:len(stack)-1]
+		}
+		up[i] = -1
+		if len(stack) > 0 {
+			up[i] = stack[len(stack)-1]
+		}
+		stack = append(stack, i)
 	}
-	from, to := 2, deep-5 // the depths that go
-	var out []ShapeRow
-	lv := -1
-	for _, r := range rows {
-		switch {
-		case r.Depth < from:
-			out = append(out, r)
-		case r.Depth <= to:
-			if lv < 0 {
-				lv, out = len(out), append(out, ShapeRow{Kind: "levels", Depth: from, More: &[2]int{r.Line, r.Line}})
-			}
-			if r.Kind != "fold" {
-				m := out[lv].More
-				out[lv].N, m[0], m[1] = out[lv].N+1, min(m[0], r.Line), max(m[1], r.Line)
-			}
-		default:
-			r.Depth -= to - from
-			out = append(out, r)
+	way := func(i int) []int { // the rows from the top down to i
+		var w []int
+		for ; i >= 0; i = up[i] {
+			w = append(w, i)
+		}
+		slices.Reverse(w)
+		return w
+	}
+	deep := -1
+	for i, r := range rows {
+		if r.Use && r.Depth > maxShapeDepth && (deep < 0 || r.Depth > rows[deep].Depth) {
+			deep = i
 		}
 	}
-	return out
+	if deep < 0 {
+		return rows, false
+	}
+	a := way(deep)
+	d := len(a) - 1
+	from, to := 2, 0
+	for moved := true; moved; { // below every row the cut mustn't take
+		moved, to = false, min(from+d-7, d-1)
+		for i, r := range rows {
+			if i == deep || !r.Use && r.Kind != "levels" {
+				continue
+			}
+			b, c := way(i), 0 // c: the rows the two ways share, the last of them stays
+			for c < len(b) && c < len(a) && a[c] == b[c] {
+				c++
+			}
+			if from <= c-1 && c-1 <= to {
+				from, moved = c, true
+			}
+		}
+	}
+	if from >= to { // a cut that moves nothing up
+		return rows, false
+	}
+	end := func(i int) int { // past i's rows and those below it
+		j := i + 1
+		for j < len(rows) && rows[j].Depth > rows[i].Depth {
+			j++
+		}
+		return j
+	}
+	s0, s1 := a[from], a[to+1]
+	e0, e1 := end(s0), end(s1)
+	lv := ShapeRow{Kind: "levels", Depth: rows[s0].Depth}
+	for _, r := range slices.Concat(rows[s0:s1], rows[e1:e0]) {
+		if r.Kind == "fold" {
+			continue
+		}
+		if lv.More == nil {
+			lv.More = &[2]int{r.Line, r.Line}
+		}
+		lv.N, lv.More[0], lv.More[1] = lv.N+1, min(lv.More[0], r.Line), max(lv.More[1], r.Line)
+	}
+	out := append(slices.Clone(rows[:s0]), lv)
+	for _, r := range rows[s1:e1] {
+		r.Depth -= to - from
+		out = append(out, r)
+	}
+	return append(out, rows[e0:]...), true
 }
 
 // slim keeps a shape within maxShapeBytes: the folds drop their kept entries, outermost first (their counts and
@@ -340,28 +401,42 @@ func (gf *goFile) declAt(line int) ast.Node {
 
 // goShape reads the Go declaration of gf that holds line for every line in it that names name and, with ways, the
 // ways down to the first maxMarked of them: section 5's kinds from go/ast. By name: a local of the same name counts.
-// ok false when no declaration holds line.
+// When no identifier at line names it, a string there that holds it as a word does: a table SQL names. ok false
+// when no declaration holds line.
 func goShape(gf *goFile, line int, name string, ways bool) (synUse, bool) {
 	decl := gf.declAt(line)
 	if decl == nil {
 		return synUse{}, false
 	}
 	u := synUse{Span: [2]int{gf.lineOf(decl.Pos()), gf.lineOf(decl.End())}}
-	var ids []*ast.Ident
+	var ids, strs []ast.Node
 	ast.Inspect(decl, func(n ast.Node) bool {
-		if id, ok := n.(*ast.Ident); ok && id.Name == name {
-			if l := gf.lineOf(id.Pos()); len(u.Lines) == 0 || u.Lines[len(u.Lines)-1] != l {
-				u.Lines, ids = append(u.Lines, l), append(ids, id)
+		switch n := n.(type) {
+		case *ast.Ident:
+			if l := gf.lineOf(n.Pos()); n.Name == name && (len(u.Lines) == 0 || u.Lines[len(u.Lines)-1] != l) {
+				u.Lines, ids = append(u.Lines, l), append(ids, n)
+			}
+		case *ast.BasicLit:
+			if n.Kind == token.STRING && gf.lineOf(n.Pos()) <= line && line <= gf.lineOf(n.End()) && wordEnd(n.Value, name) > 0 {
+				strs = append(strs, n)
 			}
 		}
 		return true
 	})
+	if !slices.Contains(u.Lines, line) && len(strs) > 0 {
+		ids = append(ids, strs[0])
+		u.Lines = append(u.Lines, line)
+		slices.SortFunc(ids, func(a, b ast.Node) int { return cmp.Compare(a.Pos(), b.Pos()) })
+		slices.Sort(u.Lines)
+	}
 	spec := decl
 	if g, ok := decl.(*ast.GenDecl); ok && len(g.Specs) == 1 {
 		spec = g.Specs[0]
 	}
 	if t, ok := spec.(*ast.TypeSpec); ok {
-		_, u.Iface = t.Type.(*ast.InterfaceType)
+		if _, ok := t.Type.(*ast.InterfaceType); ok {
+			u.Iface = t.Name.Name
+		}
 	}
 	if !ways {
 		return u, true
@@ -392,20 +467,32 @@ func pathTo(root, n ast.Node) []ast.Node {
 	return out
 }
 
+// linkSpan is a chain's link as a node: from its name to its end.
+type linkSpan struct{ pos, end token.Pos }
+
+func (s linkSpan) Pos() token.Pos { return s.pos }
+func (s linkSpan) End() token.Pos { return s.end }
+
 // way is the rows path makes, from its declaration down to its last node, the use; each container with its entries
-// (ids marks those that hold a use) and the one the way goes on in.
-func (gf *goFile) way(path []ast.Node, ids []*ast.Ident) []synEl {
+// (ids marks those that hold a use) and the one the way goes on in. A chain of calls and selectors over lines is one
+// chain row, its links its entries, and the link the use is in a row of its own, its arguments its entries (section
+// 5 rule 1).
+func (gf *goFile) way(path []ast.Node, ids []ast.Node) []synEl {
 	in := func(k, n ast.Node) bool { return k.Pos() <= n.Pos() && n.End() <= k.End() }
-	holds := func(k ast.Node) bool { return slices.ContainsFunc(ids, func(id *ast.Ident) bool { return in(k, id) }) }
-	var fn *ast.FuncDecl // where a condition's name comes from
-	if len(path) > 0 {
-		fn, _ = path[0].(*ast.FuncDecl)
-	}
-	var way []synEl
-	var nodes [][]ast.Node // the kids of each of way
-	var at []int           // where each of way is in path
+	holds := func(k ast.Node) bool { return slices.ContainsFunc(ids, func(id ast.Node) bool { return in(k, id) }) }
+	var rows []wayRow
+	skip := map[ast.Node]bool{} // a chain's own nodes, its row and its links' stand for them
 	for j, n := range path {
+		if skip[n] {
+			continue
+		}
 		k, kids, ok := goEntries(n)
+		if j < len(path)-1 && chainTop(path, j) {
+			if ch := gf.chainRows(n.(ast.Expr), path[len(path)-1], skip); ch != nil {
+				rows = append(rows, ch...)
+				continue
+			}
+		}
 		switch {
 		case j == len(path)-1: // the use
 		case !ok:
@@ -416,30 +503,118 @@ func (gf *goFile) way(path []ast.Node, ids []*ast.Ident) []synEl {
 		if _, b := n.(*ast.BlockStmt); b && !isElseOf(path, j) {
 			continue
 		}
-		el := synEl{K: k, L: gf.lineOf(n.Pos()), T: gf.text(n), W: -1}
-		if ifs, ok := n.(*ast.IfStmt); ok {
-			el.C = goCond(fn, ifs, gf.lineOf, gf.text)
+		r := wayRow{n: n, k: k, kids: kids}
+		if _, ok := n.(*ast.IfStmt); ok {
+			r.c = goCond(path, j, gf.lineOf, gf.text)
 		}
+		rows = append(rows, r)
+	}
+	way := make([]synEl, len(rows))
+	for j, r := range rows {
+		var next ast.Node // the row the way goes on to
+		if j+1 < len(rows) {
+			next = rows[j+1].n
+		}
+		el := synEl{K: r.k, L: gf.lineOf(r.n.Pos()), T: gf.text(r.n), W: -1, C: r.c}
 		var flat []ast.Node
-		for _, kid := range kids {
+		for _, kid := range r.kids {
 			_, sub, _ := goEntries(kid)
 			// an entry on this line that holds no more of the way: its own entries hang below this row
-			if gf.lineOf(kid.Pos()) == el.L && len(sub) > 0 && (j+1 >= len(path) || !in(kid, path[j+1])) {
+			if gf.lineOf(kid.Pos()) == el.L && len(sub) > 0 && (next == nil || !in(kid, next)) {
 				flat = append(flat, sub...)
 			} else {
 				flat = append(flat, kid)
 			}
 		}
-		for _, kid := range flat {
+		for i, kid := range flat {
 			el.Kids = append(el.Kids, synKid{K: goKind(kid), L: gf.lineOf(kid.Pos()), E: gf.lineOf(kid.End()), T: gf.text(kid), U: holds(kid)})
+			if next != nil && el.W < 0 && in(kid, next) {
+				el.W = i
+			}
 		}
-		way, nodes, at = append(way, el), append(nodes, flat), append(at, j)
-	}
-	for j := range way[:max(len(way)-1, 0)] { // the entry the next one sits in
-		next := path[at[j+1]]
-		way[j].W = slices.IndexFunc(nodes[j], func(k ast.Node) bool { return in(k, next) })
+		way[j] = el
 	}
 	return way
+}
+
+// wayRow is a node on a way that makes a row, its kind, its entries and its condition note.
+type wayRow struct {
+	n    ast.Node
+	k    string
+	kids []ast.Node
+	c    *ShapeCond
+}
+
+// chainRows is the rows of the chain n when it runs over lines: one chain row, its links its entries, and the link
+// use is in, its arguments its entries (none when use is the head); the chain's own nodes join skip. nil for a
+// chain on one line or none.
+func (gf *goFile) chainRows(n ast.Expr, use ast.Node, skip map[ast.Node]bool) []wayRow {
+	links := goLinks(n)
+	if len(links) == 0 || gf.lineOf(links[len(links)-1].span.Pos()) <= gf.lineOf(n.Pos()) {
+		return nil
+	}
+	rows := []wayRow{{n: n, k: "chain"}}
+	for _, l := range links {
+		skip[l.x], skip[l.sel] = true, true
+		rows[0].kids = append(rows[0].kids, l.span)
+		if l.span.Pos() <= use.Pos() && use.End() <= l.span.End() {
+			r := wayRow{n: l.span, k: "link"}
+			if l.call != nil {
+				r.kids = exprs(l.call.Args)
+			}
+			rows = append(rows, r)
+		}
+	}
+	return rows
+}
+
+// goLink is a link of a chain: the selector, the call it is the function of (nil a field's read), the outermost of
+// the two, and its span from the selector's name.
+type goLink struct {
+	sel  *ast.SelectorExpr
+	call *ast.CallExpr
+	x    ast.Node
+	span linkSpan
+}
+
+// goLinks is the links of the chain n, `db.Select(…).From(t).All()`, from the head's out; none when n is no chain.
+func goLinks(n ast.Expr) []goLink {
+	var ls []goLink
+	for x := n; ; {
+		call, _ := x.(*ast.CallExpr)
+		fun := x
+		if call != nil {
+			fun = call.Fun
+		}
+		sel, ok := fun.(*ast.SelectorExpr)
+		if !ok {
+			break
+		}
+		ls = append(ls, goLink{sel, call, x, linkSpan{sel.Sel.Pos(), x.End()}})
+		x = sel.X
+	}
+	slices.Reverse(ls)
+	return ls
+}
+
+// chainTop is whether path[j] is the outermost call or selector of a chain: not the function of a call or the
+// operand of a selector above it.
+func chainTop(path []ast.Node, j int) bool {
+	switch path[j].(type) {
+	case *ast.CallExpr, *ast.SelectorExpr:
+	default:
+		return false
+	}
+	if j == 0 {
+		return true
+	}
+	switch p := path[j-1].(type) {
+	case *ast.CallExpr:
+		return p.Fun != path[j]
+	case *ast.SelectorExpr:
+		return p.X != path[j]
+	}
+	return true
 }
 
 // goEntries is n's row kind and the entries it holds as a container; ok false for a node that makes no row: an
@@ -547,9 +722,11 @@ func compositeKind(c *ast.CompositeLit) string {
 	return "object"
 }
 
-// goKind is the kind of an entry: the value it holds; a statement's own kind.
+// goKind is the kind of an entry: the value it holds; a statement's own kind; a chain's link.
 func goKind(n ast.Node) string {
 	switch n := n.(type) {
+	case linkSpan:
+		return "link"
 	case *ast.KeyValueExpr:
 		return goKind(n.Value)
 	case *ast.ExprStmt:
@@ -568,37 +745,76 @@ func goKind(n ast.Node) string {
 	return "stmt"
 }
 
-// goCond is where an if's condition gets its name, when fn declares it before the if: its line and its value.
-func goCond(fn *ast.FuncDecl, s *ast.IfStmt, lineOf func(token.Pos) int, text func(ast.Node) string) *ShapeCond {
+// goCond is where the condition of the if at path[j] gets its name, when its function declares it before the if in
+// a block around it (the nearest, in scope): its line and its value. None when the if's own init declares it: the
+// row shows that already.
+func goCond(path []ast.Node, j int, lineOf func(token.Pos) int, text func(ast.Node) string) *ShapeCond {
+	s := path[j].(*ast.IfStmt)
 	name := condName(s.Cond)
-	if fn == nil || fn.Body == nil || name == "" {
+	if name == "" {
 		return nil
 	}
-	var c *ShapeCond
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		if n == nil || n.Pos() >= s.Pos() {
-			return false
+	if id, _ := declares(s.Init, name); id != nil {
+		return nil
+	}
+	for i := j - 1; i >= 0; i-- {
+		var list []ast.Stmt // the statements of path[i] that run before the way on
+		switch n := path[i].(type) {
+		case *ast.FuncDecl, *ast.FuncLit:
+			return nil
+		case *ast.BlockStmt:
+			list = n.List
+		case *ast.CaseClause:
+			list = n.Body
+		case *ast.CommClause:
+			list = n.Body
+		case *ast.IfStmt:
+			list = []ast.Stmt{n.Init}
+		case *ast.ForStmt:
+			list = []ast.Stmt{n.Init}
+		case *ast.SwitchStmt:
+			list = []ast.Stmt{n.Init}
+		case *ast.TypeSwitchStmt:
+			list = []ast.Stmt{n.Init}
 		}
-		var lhs, rhs []ast.Expr
-		switch n := n.(type) {
-		case *ast.AssignStmt:
-			if n.Tok == token.DEFINE {
-				lhs, rhs = n.Lhs, n.Rhs
-			}
-		case *ast.ValueSpec:
-			for _, id := range n.Names {
-				lhs = append(lhs, id)
-			}
-			rhs = n.Values
-		}
-		for i, l := range lhs {
-			if id, ok := l.(*ast.Ident); ok && id.Name == name && len(rhs) > 0 {
-				c = &ShapeCond{Name: name, Line: lineOf(id.Pos()), Text: cutRow(text(rhs[min(i, len(rhs)-1)]), "", false, maxRowText)}
+		for k := len(list) - 1; k >= 0; k-- {
+			if st := list[k]; st != nil && st.End() <= path[i+1].Pos() {
+				if id, v := declares(st, name); id != nil {
+					return &ShapeCond{Name: name, Line: lineOf(id.Pos()), Text: cutRow(text(v), "", false, maxRowText)}
+				}
 			}
 		}
-		return true // the nearest before the if wins
-	})
-	return c
+	}
+	return nil
+}
+
+// declares is the identifier st declares as name (`name := v`, `var name = v`) and its value; nil none.
+func declares(st ast.Stmt, name string) (*ast.Ident, ast.Expr) {
+	var lhs, rhs []ast.Expr // nil st: neither
+	switch st := st.(type) {
+	case *ast.AssignStmt:
+		if st.Tok == token.DEFINE {
+			lhs, rhs = st.Lhs, st.Rhs
+		}
+	case *ast.DeclStmt:
+		if g, ok := st.Decl.(*ast.GenDecl); ok {
+			for _, sp := range g.Specs {
+				if vs, ok := sp.(*ast.ValueSpec); ok && len(vs.Values) > 0 {
+					for i, id := range vs.Names {
+						if id.Name == name {
+							return id, vs.Values[min(i, len(vs.Values)-1)]
+						}
+					}
+				}
+			}
+		}
+	}
+	for i, l := range lhs {
+		if id, ok := l.(*ast.Ident); ok && id.Name == name && len(rhs) > 0 {
+			return id, rhs[min(i, len(rhs)-1)]
+		}
+	}
+	return nil, nil
 }
 
 // condName is the variable a condition reads first: x of *x, !x, x.y, x != nil.

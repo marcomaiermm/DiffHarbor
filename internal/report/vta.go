@@ -1,6 +1,7 @@
 package report
 
 import (
+	"cmp"
 	"context"
 	"diffharbor/internal/proc"
 	"encoding/json"
@@ -207,6 +208,10 @@ func vtaCalls(dir string, names []string) ([]cgEdge, error) {
 			out = append(out, c)
 		}
 	}
+	slices.SortFunc(out, func(a, b cgEdge) int { // the call graph's map gives them in any order: the refs kept are the same every run
+		return cmp.Or(cmp.Compare(a.SPath, b.SPath), cmp.Compare(a.Line, b.Line), cmp.Compare(a.SName, b.SName), cmp.Compare(a.Kind, b.Kind),
+			cmp.Compare(a.TPath, b.TPath), cmp.Compare(a.TName, b.TName))
+	})
 	return append(out, argEdges(pkgs, mod, rel)...), nil
 }
 

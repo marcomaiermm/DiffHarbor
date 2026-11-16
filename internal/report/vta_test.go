@@ -247,15 +247,53 @@ func TestTSEdges(t *testing.T) {
 		"calls query shop.list src/items.ts:27 -> listItems src/data.ts",             // a procedure under its key path
 		"passes query shop.list src/items.ts:27 -> listItems src/data.ts",            // the handler passes its input on
 		"references query shop.list src/items.ts:23 -> listInputSchema src/items.ts", // the procedure's input schema
+		"calls query shop.list src/items.ts:29 -> listOrders src/data.ts",            // a call that doesn't read the input
+		"passes get /items src/api.ts:18 -> getItems src/api.ts",                     // the route hands its input to its named handler
+		"passes getItems src/api.ts:16 -> listItems src/data.ts",                     // which passes it on
+		"calls relay src/notify.ts:6 -> send src/notify.ts",                          // through an interface
 	} {
 		if !slices.Contains(got, w) {
 			t.Errorf("no %q in\n%s", w, strings.Join(got, "\n"))
+		}
+	}
+	for _, w := range []string{
+		"passes query shop.list src/items.ts:29 -> listOrders src/data.ts", // listOrders() reads no input
+		"passes get /orders src/api.ts:5 -> listOrders src/data.ts",        // nor in a named handler
+		"passes getItems src/api.ts:15 -> renameUser src/data.ts",          // renameUser() neither
+	} {
+		if slices.Contains(got, w) {
+			t.Errorf("%q: the call doesn't pass the input on", w)
+		}
+	}
+	for _, e := range idx.Edges {
+		if via := e.SName == "relay" && e.TName == "send"; via != (e.Via == "Sender") {
+			t.Errorf("only relay's call goes through the interface Sender: %+v", e)
 		}
 	}
 	for _, e := range idx.Edges {
 		if (e.Kind == "reads" || e.Kind == "writes") && e.Sub != (e.TName == "recentSq") {
 			t.Errorf("only recentSq, made by .as(…), is a subquery: %+v", e)
 		}
+	}
+}
+
+// A call VTA resolves through an interface is a use called through it: Ref.Rel "iface" and the interface.
+func TestRefIface(t *testing.T) {
+	sb, dir := sandbox(t)
+	if err := os.WriteFile(filepath.Join(dir, "run.go"), []byte("package a\n\nfunc Run(s S) {\n\ts.Rec()\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := sb.Pinned()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := &cgIndex{Nodes: []cgNode{{Name: "Rec", Path: "store.go", Kind: "method", Line: 3, End: 3}}, Edges: []cgEdge{
+		{Line: 4, Kind: "calls", By: "vta", SName: "Run", SKind: "function", SPath: "run.go", SLine: 3, SEnd: 5, TName: "Rec", TPath: "store.go", TLine: 3, Via: "S"},
+	}}
+	syms := map[string][]Symbol{"Rec": {{Path: "store.go", Line: 3}}}
+	idx.exact(root, map[string]bool{"store.go": true}, nil, syms)
+	if rs := syms["Rec"][0].Refs; len(rs) != 1 || rs[0].Rel != "iface" || rs[0].Via != "S" {
+		t.Errorf("refs %+v", rs)
 	}
 }
 
