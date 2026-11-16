@@ -317,6 +317,12 @@ func lineDecls(path string, src []byte, wanted map[string]bool, syms map[string]
 			sig = strings.Join(ls[i:min(end+1, len(ls))], "\n")
 		} else if _, n := signature(ls[i:]); n > 1 { // parameters over several lines: all of them
 			sig = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(strings.Join(ls[i:i+n], "\n")), "{"))
+		} else if k := strings.IndexByte(l, '='); (m[1] == "const" || m[1] == "let" || m[1] == "var") && k > 0 && !fnValue.MatchString(strings.TrimSpace(l[k+1:])) {
+			n, closed := statement(ls[i:]) // a value over several lines, a schema's object, a type's "<…>": all of it
+			sig = strings.TrimRight(strings.Join(ls[i:i+n], "\n"), " \t")
+			if !closed {
+				sig += "\n…"
+			}
 		}
 		var doc []string
 		for j := i - 1; j >= 0; j-- {
@@ -335,6 +341,40 @@ func lineDecls(path string, src []byte, wanted map[string]bool, syms map[string]
 
 // maxSigLines is the lines a signature reads at most.
 const maxSigLines = 25
+
+// statement is the lines of ls the statement ls[0] starts takes: until its brackets ( [ { and a type's < close, at
+// most maxSigLines; closed is false when they didn't. A "<" or ">" with a space before it compares.
+func statement(ls []string) (n int, closed bool) {
+	depth := 0
+	for n = 0; n < len(ls) && n < maxSigLines; n++ {
+		t := strings.TrimSpace(ls[n])
+	scan:
+		for j := 0; j < len(t); j++ {
+			c, prev := t[j], byte(' ')
+			if j > 0 {
+				prev = t[j-1]
+			}
+			switch {
+			case c == '"' || c == '\'' || c == '`':
+				k := strings.IndexByte(t[j+1:], c)
+				if k < 0 {
+					break scan
+				}
+				j += k + 1
+			case c == '/' && j+1 < len(t) && t[j+1] == '/':
+				break scan
+			case c == '(' || c == '[' || c == '{', c == '<' && prev != ' ':
+				depth++
+			case c == ')' || c == ']' || c == '}', c == '>' && prev != '=' && (j == 0 || prev != ' '):
+				depth--
+			}
+		}
+		if depth <= 0 {
+			return n + 1, true
+		}
+	}
+	return n, false
+}
 
 var (
 	// fnValue is a value that's a function, after a const's, let's or var's "=": "async (a) =>", "function (", "func(".

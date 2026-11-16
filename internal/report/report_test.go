@@ -307,8 +307,19 @@ func TestSymbols(t *testing.T) {
 	}
 	write("a.go", "package a\n\n// Limit caps it.\nconst Limit = 3\n\ntype T struct {\n\tCount int // how many\n}\n\nfunc Use() int { return Limit }\n\nfunc Show(t T) int {\n\treturn t.Count + f().Limit\n}\n")
 	write("c.go", "package a\n\ntype Rec struct {\n\tID      string `json:\"id\"`\n\tCreated int    `json:\"c\"`\n}\n")
-	write("b.ts", "/** Greets. */\nexport function greet(n: string) {\n  return n\n}\ngreet(\"x\")\n")
-	s := Symbols(sb, "+x := a.Limit + t.Count + Show(t)\n+greet(y)\n+Rec{}\n")
+	write("b.ts", "/** Greets. */\nexport function greet(n: string) {\n  return n\n}\ngreet(\"x\")\n"+
+		"export const KEYS = Object.keys(T) as Array<\n\tkeyof typeof T\n>;\nconst schema = z.object({\n\tq: z.string(), // a < b\n\tn: z.number(),\n});\nconst add = (a: number) => {\n\treturn a\n};\n")
+	s := Symbols(sb, "+x := a.Limit + t.Count + Show(t)\n+greet(y)\n+Rec{}\n+use(KEYS, schema, add)\n")
+	// a value over several lines reads whole; a function's value stops at its body
+	for name, want := range map[string]string{
+		"KEYS":   "export const KEYS = Object.keys(T) as Array<\n\tkeyof typeof T\n>;",
+		"schema": "const schema = z.object({\n\tq: z.string(), // a < b\n\tn: z.number(),\n});",
+		"add":    "const add = (a: number) =>",
+	} {
+		if g := s[name]; len(g) != 1 || g[0].Sig != want {
+			t.Errorf("%s: %+v, want sig %q", name, g, want)
+		}
+	}
 	l := s["Limit"]
 	if len(l) != 1 || l[0].Sig != "const Limit = 3" || l[0].Doc != "Limit caps it." || l[0].Uses != 2 || l[0].Refs[0].In != "Use" || l[0].Kind != "constant" || l[0].Unit != "package" {
 		t.Errorf("Limit %+v", l)
