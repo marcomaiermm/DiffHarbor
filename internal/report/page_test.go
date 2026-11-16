@@ -422,6 +422,35 @@ func TestRouteChevrons(t *testing.T) {
 	}
 }
 
+// A line between columns two apart detours on another row only where no box sits at either end of it: at the end
+// it would run into that box's ports and read as a line to it (#457: fetchApi to lib beside db to trpc).
+func TestRouteDetourPassesNoBox(t *testing.T) {
+	v := &view{Data: Data{Map: &Map{
+		Parts: []MapPart{
+			{ID: "db", Label: "db", Col: 1, Row: 0}, {ID: "lib", Label: "lib", Col: 2, Row: 0}, {ID: "trpc", Label: "trpc", Col: 2, Row: 1},
+		},
+		Order:   []string{"db", "lib", "trpc"},
+		Systems: []MapSystem{{Name: "fetchApi", Parts: []string{"lib"}}},
+		Lines: []MapLine{
+			{From: "trpc", To: "db", Calls: 1, Width: 1, Style: "solid", Chevron: "from"},
+			{From: "lib", To: "db", Calls: 1, Width: 1, Style: "solid", Chevron: "to"},
+		},
+	}}}
+	v.mapView()
+	mv := v.Page.Map
+	trpc := mv.partBox["trpc"]
+	for _, r := range mv.Lines {
+		if r.Style != "dotted" {
+			continue
+		}
+		for _, p := range r.pts {
+			if p[1] >= float64(trpc.Y) && p[1] <= float64(trpc.Y+boxH) {
+				t.Errorf("fetchApi to lib runs at y %v, in trpc's row: %v", p[1], r.pts)
+			}
+		}
+	}
+}
+
 // A system's name breaks before "." and "_" on the fewest, most even lines, at most 3; a line still too long is cut.
 func TestSysLines(t *testing.T) {
 	for _, c := range []struct {

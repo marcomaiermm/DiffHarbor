@@ -418,7 +418,8 @@ func (mv *mapView) route(m *Map, sys bool) {
 				if r < 0 || r > maxRow {
 					continue
 				}
-				free := true
+				// a lane on another row passes no box at either end: it would run into that box's ports
+				free := r == ra || r == rb || !at[[2]int{ca, r}] && !at[[2]int{cb, r}]
 				for c := ca + 1; c < cb; c++ {
 					free = free && !at[[2]int{c, r}]
 				}
