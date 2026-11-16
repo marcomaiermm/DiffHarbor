@@ -420,7 +420,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		s.State.Report, now = writeReport(e, s.State.Secret, s.State.Report, d)
 		s.Write(banner, reviewed) // again, with the report's link
 		if now.Short != "" {      // the report's merge status decides (decision 6): failure only when blocked, its short form says why
-			desc, state, merge = now.Short, "success", true
+			desc, state, merge = text.OneLine(now.Short, 140), "success", true
 			if now.Blocked {
 				state = "failure"
 			}
