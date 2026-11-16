@@ -157,3 +157,19 @@ func linear(ctx context.Context, id string) (string, error) {
 	}
 	return out.Data.Issue.Title + "\n\n" + out.Data.Issue.Description + "\n", nil
 }
+
+// Ticket is a tracker issue the PR names, read whole: the page shows every ticket uncut, the prompt keeps its cuts.
+// Outcome, DoneWhen and Notes are the ticket's contract, from its sections or checklists; Body is the description
+// as the tracker has it, for the contract pass.
+type Ticket struct {
+	Key, Was          string // Was: its key before the tracker moved it ("PYR-228" for "BIS-228"); "" if none
+	Title, State, URL string
+	Done              bool      // State is one of the tracker's done states
+	Due               time.Time // zero: no due date
+	Outcome           string
+	DoneWhen          []string
+	Notes             string
+	Body              string
+	Blocks, BlockedBy []string  // keys
+	Read              time.Time // when the tracker answered
+}
