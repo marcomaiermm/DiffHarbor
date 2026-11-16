@@ -755,6 +755,9 @@ func TestThreadIDs(t *testing.T) {
 		if id := ids[report.ThreadKey(c)]; id != 11 && id != 5 {
 			t.Errorf("%v: id %d", c, id)
 		}
+		if c.Earlier != (c.Path == "a.go") { // the open thread's comes from an earlier review, the fresh one doesn't
+			t.Errorf("%v: earlier %v", c, c.Earlier)
+		}
 	}
 	if len(ids) != 2 {
 		t.Errorf("ids %v", ids)

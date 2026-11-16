@@ -2,8 +2,10 @@ package report
 
 import (
 	"cmp"
+	"diffharbor/internal/review"
 	"maps"
 	"slices"
+	"strconv"
 	"time"
 )
 
@@ -17,6 +19,13 @@ type Version struct {
 	Weights  map[string]string `json:"weights,omitempty"`  // "path: title" of Findings -> its severity
 	Tests    map[string]string `json:"tests,omitempty"`    // the tests the page names -> pass, fail, skip or none (not run); unset when none ran
 	Broken   bool              `json:"broken,omitempty"`   // a changed package did not build
+	Items    []Item            `json:"items,omitempty"`    // the open items by kind and place; none in a version from before them
+}
+
+// Item is an open item as a Version keeps it, for a later page to mark what is new since (spec 5.13).
+type Item struct {
+	Kind  string `json:"kind"`  // "finding" (major or worse), "before" (Before you merge), "test-with", "test-kept", "test-stay" (Test changes' groups 1 to 3), "gap"
+	Place string `json:"place"` // a finding's "path:line", a before-merge item's name or path, a test file's path, a file the review didn't read
 }
 
 // since is what changed from the version before to this one.
@@ -39,8 +48,27 @@ func stamp(v view, ids map[string]string) Version {
 	for _, r := range v.Risks {
 		for _, it := range r.Items {
 			now.Risks = append(now.Risks, it.What)
+			now.Items = append(now.Items, Item{"before", it.What})
 		}
 	}
+	for _, c := range v.Findings {
+		if review.Blocks(c.Severity) {
+			now.Items = append(now.Items, Item{"finding", c.Path + ":" + strconv.Itoa(c.Line)})
+		}
+	}
+	for kind, fs := range map[string][]TestFile{"test-with": v.TestChanges.With, "test-kept": v.TestChanges.Kept} {
+		for _, f := range fs {
+			now.Items = append(now.Items, Item{kind, f.Path})
+		}
+	}
+	for _, f := range v.TestChanges.Stay {
+		now.Items = append(now.Items, Item{"test-stay", f.Path})
+	}
+	for _, p := range slices.Concat(v.Failed, v.Omitted) {
+		now.Items = append(now.Items, Item{"gap", p})
+	}
+	slices.SortFunc(now.Items, func(a, b Item) int { return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Place, b.Place)) })
+	now.Items = slices.Compact(now.Items)
 	return now
 }
 
