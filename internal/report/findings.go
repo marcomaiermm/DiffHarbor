@@ -16,7 +16,7 @@ type finding struct {
 }
 
 // judge words the findings for the diff's notes, and records the weakened tests in the version, so the next
-// review sees them come and go.
+// review sees them come and go. They weigh "test", no severity: Test changes counts them, not the major findings.
 func judge(v *view, found []*finding) {
 	gone := map[string]bool{}
 	for _, r := range retire(v.Outline.Removed, v.files) {
@@ -29,7 +29,7 @@ func judge(v *view, found []*finding) {
 		if w.What == "test deleted" && gone[strings.TrimSpace(rest)] {
 			continue // with the code it tested
 		}
-		v.now.Findings, v.now.Weights[p+": "+w.What] = append(v.now.Findings, p+": "+w.What), "major"
+		v.now.Findings, v.now.Weights[p+": "+w.What] = append(v.now.Findings, p+": "+w.What), "test"
 	}
 	for _, fd := range found {
 		fd.Body = strings.TrimSpace(fd.Body) // a verified finding without a body is "\n\n_Verified:_ …"

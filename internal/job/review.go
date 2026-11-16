@@ -218,7 +218,18 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		}
 	}
 	// at most 12,100 so nested rules keep their 6000 in TrustedContext's 18,500
-	rules := text.Truncate(cfg.ReadRules(func(n ...string) string { return p.File(pr.Base.SHA, n...) }), 12_100) + p.NestedRules(pr.Base.SHA, files)
+	var ruled [][2]string // the rules files read: name, text
+	rules := text.Truncate(cfg.ReadRules(func(n ...string) string {
+		for _, name := range n {
+			if t := p.File(pr.Base.SHA, name); t != "" {
+				ruled = append(ruled, [2]string{name, t})
+				return t
+			}
+		}
+		return ""
+	}), 12_100)
+	ruleSet := report.ReadRules(pr.Base.SHA, rules, ruled)
+	rules += p.NestedRules(pr.Base.SHA, files)
 	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(sb.Dir, "skills"))
 
 	started := time.Now()
@@ -382,6 +393,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		d.CI = ciOf(ctx, p, sb, key, sha, prFiles)
 		d.Members = membersOf(p, key)
 		d.Outside = report.Outside(d.Symbols)
+		d.Rules, d.Parts = ruleSet, len(parts)
+		report.Static(ctx, sb, &d, diff.Paths(strings.Join(parts, ""))) // before the map: its Before merging reads Env
 		d.Map = report.BuildMap(sb, d, d.Outside)
 		d.Tickets, d.FollowUps, d.TicketErrs, d.TicketsCapped = tickets.Tickets, tickets.FollowUps, tickets.Failed, tickets.Capped
 		d.Split = report.SplitTickets(tickets.Keys, changes, d.Flow)
@@ -721,7 +734,7 @@ func others(p forge.PR, key, raw string) []report.Other {
 	return out
 }
 
-// openFindings is what the report shows inline: the threads still open after this review, and its new findings.
+// openFindings is what the report shows inline: the threads still open after this review, Earlier, and its new findings.
 func openFindings(threads, open []forge.Thread, r review.Result) []review.Comment {
 	fixed := map[string]bool{}
 	for _, i := range r.Fixed {
@@ -731,7 +744,7 @@ func openFindings(threads, open []forge.Thread, r review.Result) []review.Commen
 	for _, t := range threads {
 		if !t.Resolved && !fixed[t.ID] {
 			c := forge.Parse(forge.Clean(t.Body))
-			c.Path, c.Line = t.Path, t.Line
+			c.Path, c.Line, c.Earlier = t.Path, t.Line, true
 			cs = append(cs, c)
 		}
 	}

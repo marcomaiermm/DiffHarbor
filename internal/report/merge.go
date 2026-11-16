@@ -70,7 +70,8 @@ var (
 
 // risks is what the files' diffs change that a merge doesn't finish, by kind: environment variables and CI secrets
 // read or no longer read, migrations, dependencies, deploy and CI files, configuration. It sets the IDs it jumps to.
-func risks(fs []*file) []risk {
+// env is Data.Env: what reads each variable at the head.
+func risks(fs []*file, env map[string]EnvVar) []risk {
 	n := names{env: map[string]*[2]string{}, defaults: map[string]bool{}, deps: map[string]*lib{}}
 	var data, ship, conf []riskItem
 	for _, f := range fs {
@@ -96,7 +97,7 @@ func risks(fs []*file) []risk {
 	}
 	var rs []risk
 	for _, r := range []risk{
-		{Title: "Environment", Hint: "Read by added lines and by no removed one: set it where the app runs before it deploys. One no longer read can go after.", Items: n.vars()},
+		{Title: "Environment", Hint: "Read by added lines and by no removed one: set it where the app runs before it deploys. One no longer read can go after.", Items: n.vars(env)},
 		{Title: "Migrations", Hint: "They run against live data: order them with the deploy and know the way back.", Items: data},
 		{Title: "Dependencies", Hint: "New, removed and changed versions in the manifests; a changed major version is marked.", Items: n.libs()},
 		{Title: "Build, deploy and CI", Hint: "They change how it ships, not what it does: the diff's tests don't cover them.", Items: ship},
@@ -169,17 +170,24 @@ func (n names) scan(f *file, manifest *regexp.Regexp) {
 	}
 }
 
-// vars is the environment variables read and no longer read; one both is only moved.
-func (n names) vars() []riskItem {
+// vars is the environment variables read and no longer read; one both is only moved. With env (the head's readers,
+// nil when none were searched), one is no longer read only when a whole search at the head found nothing that reads
+// or names it; one it found is still read, and one whose search stopped early or didn't run says so.
+func (n names) vars(env map[string]EnvVar) []riskItem {
 	var is []riskItem
 	for _, v := range slices.Sorted(maps.Keys(n.env)) {
 		at := n.env[v]
+		e, searched := env[v]
 		switch {
 		case at[0] != "" && at[1] == "" && n.defaults[v]:
 			is = append(is, riskItem{What: v, Note: "newly read, has a default", ID: at[0]})
 		case at[0] != "" && at[1] == "":
 			is = append(is, riskItem{What: v, Note: "newly read", ID: at[0], Warn: secretName.MatchString(v)})
-		case at[1] != "" && at[0] == "":
+		case at[1] == "" || at[0] != "":
+		case len(e.Reads)+len(e.Named) > 0: // the head still reads it
+		case env != nil && (!searched || e.Cut):
+			is = append(is, riskItem{What: v, Note: "no longer read in the diff; the search at the head stopped early", ID: at[1]})
+		default:
 			is = append(is, riskItem{What: v, Note: "no longer read", ID: at[1]})
 		}
 	}

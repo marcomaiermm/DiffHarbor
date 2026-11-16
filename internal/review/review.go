@@ -152,6 +152,7 @@ type Comment struct {
 	// review model's JSON: it must not vouch for itself.
 	Evidence string     `json:"-"`
 	Fold     bool       `json:"-"`               // Settings.Fold: in the review's summary, folded, not inline
+	Earlier  bool       `json:"-"`               // a finding of an earlier review, still open: the report flags it
 	Again    *int       `json:"again,omitempty"` // the fixed earlier finding it brings back, an index into Input.Addressed
 	pass     int        // the reviewer pass that reported it: capped's limits hold per pass
 	noCause  bool       // the verifier named nothing that reaches it in normal operation: Settings.Fold folds it

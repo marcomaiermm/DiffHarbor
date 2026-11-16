@@ -69,6 +69,13 @@ type Data struct {
 	Map         *Map              // the map of the change (BuildMap); nil when there is none to draw
 	Bot         string            // the bot's handle: @Bot talks to it
 	Threads     map[string]int64  // the comment id of each finding's inline thread, by ThreadKey; none for one not posted inline
+	Rules       Rules             // What the review covered, "Rules": the rules files read on the base, and whether a cut applied
+	Parts       int               // the review's parts: Coverage, "ran in 4 parts"
+	TestChanges TestChanges       // Test changes, its three groups (Static)
+	Kinds       []FileKind        // What the review covered, files by kind (Static)
+	Env         map[string]EnvVar // Before you merge, Environment: what reads each variable at the head (Static); nil: not searched
+	Migrations  []Migration       // Before you merge, Order: the docs and tests that name each migration (Static)
+	Excerpts    []Excerpt         // lines of unchanged files and of the base the page quotes, beside Sources (Static, Excerpts)
 	CI          *CI               // the forge's checks at SHA and the CI workflows on the base; nil when the forge reads none
 	Members     *Members          // who has access to the repo now; nil when the forge can't list them
 	// The tickets section (5.9). Tickets: the cards, open first, then done, by key. FollowUps: the follow-ups line,
@@ -405,7 +412,7 @@ func prepare(d Data) view {
 	for _, p := range slices.Concat(order, gone) {
 		all = append(all, files[p])
 	}
-	v.Risks, v.BaseMoved = risks(all), baseMoved(d.Behind, files) // before parts: risks marks the lines it jumps to
+	v.Risks, v.BaseMoved = risks(all, d.Env), baseMoved(d.Behind, files) // before parts: risks marks the lines it jumps to
 	v.now = stamp(v, ids)
 	for _, p := range slices.Concat(order, gone) {
 		f := files[p]
