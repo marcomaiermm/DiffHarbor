@@ -73,6 +73,13 @@
 .diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(1) { @apply w-px px-2 text-right whitespace-nowrap tabular-nums select-none; min-width: calc(5ch + 16px); /* a table cell takes width as a wish */ color: var(--diff-dim); }
 .diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(2) { @apply w-px pr-2 select-none; }
 .diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(3) { @apply pr-4 whitespace-pre; }
+/* the numbers and the sign stay while a wide line scrolls: opaque, the row's tint laid over the code's ground */
+.diff tr.add { --row: var(--diff-add-bg); }
+.diff tr.del { --row: var(--diff-del-bg); }
+.diff :is(tr.add, tr.del, tr.ctx)::before, .diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(-n+2), .sl > .no { position: sticky; z-index: 1; background: linear-gradient(var(--row, transparent), var(--row, transparent)) var(--diff-bg); }
+.diff :is(tr.add, tr.del, tr.ctx)::before { left: 0; }
+.diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(1) { left: calc(5ch + 8px); }
+.diff :is(tr.add, tr.del, tr.ctx) > td:nth-child(2) { left: calc(10ch + 24px); }
 .sl > .no { color: var(--diff-dim); }
 .diff tr.add > td:nth-child(2) { color: var(--diff-add); }
 .diff tr.del > td:nth-child(2) { color: var(--diff-del); }
@@ -81,6 +88,7 @@
 .diff tr.del .chg { background: rgb(247 118 142 / 0.36); }
 /* folded runs: moved code, imports, comments, whitespace */
 .diff tr.fold-head td, .split-fold { background: var(--diff-hunk); }
+.diff tr.fold-head td > span { position: sticky; left: 12px; width: calc(100cqw - 24px); } /* in view while a wide file scrolls */
 .diff .trace-line { color: var(--diff-muted); font-size: 12px; }
 .diff .trace-line:hover, .diff a.trace-icon:hover { color: var(--diff-fg); }
 .diff .trace-description { color: var(--diff-dim); }
@@ -121,14 +129,16 @@
 .split-fold:hover { color: var(--diff-fg); }
 .split-fold.open .trace-chevron { rotate: 90deg; }
 .split-seg { display: grid; grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr); }
-.split-pane { @apply overflow-x-auto; scrollbar-width: none; }
+/* a pane scrolls on its own, its column as wide as its widest line so every line's tint runs to the end */
+.split-pane { @apply overflow-x-auto; display: grid; grid-template-columns: minmax(max-content, 1fr); scrollbar-width: thin; }
 .split-gutter { display: block; background: var(--diff-hunk); }
-.sl { @apply flex h-5 w-max min-w-full leading-5 whitespace-pre; }
-.sl > .no { @apply w-12 shrink-0 pr-3 text-right select-none; }
+.sl { @apply flex h-5 leading-5 whitespace-pre; }
+.sl > .no { @apply left-0 w-12 shrink-0 pr-3 text-right select-none; }
 .sl > .code { @apply pr-4; }
-.sl.mod { background: var(--diff-mod); }
+.sl.add { --row: var(--diff-add-bg); }
+.sl.mod { --row: var(--diff-mod); background: var(--row); }
 .sl.mod .chg { background: var(--diff-mod-chg); }
-.sl.del { background: color-mix(in oklab, var(--diff-fg) 9%, transparent); }
+.sl.del { --row: color-mix(in oklab, var(--diff-fg) 9%, transparent); background: var(--row); }
 .sl.del > .code { @apply opacity-75; }
 .ribbon.mod { fill: var(--diff-mod); stroke: color-mix(in oklab, #7aa2f7 55%, transparent); }
 .ribbon.add { fill: rgb(158 206 106 / 0.16); stroke: rgb(158 206 106 / 0.55); }
@@ -707,6 +717,8 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 /* 44 px (section 3): a control drawn smaller keeps its look and reaches 44 through padding or an invisible extension.
    Links stacked in a list, in a call path, in an excerpt header or in a table row are as tall as their 44 row. */
 :is(.fw,.ctab .evd,.exh,.cpath li)>a,.kt .ar>a{display:inline-flex;align-items:center;min-height:44px;min-width:44px}
+/* a path's <wbr>s would split a flex link into items: it wraps as text, padded to 44 px on one line */
+:is(.fw,.ctab .evd,.exh,.cpath li,.kt .ar)>a.path{display:inline-block;padding-block:calc((44px - 1lh)/2)}
 .kt .ar>a{position:relative;z-index:1;margin:-12px 0}
 :is(.stat .slb,.since,.selh .sr)>a.lnk{position:relative;display:inline-block}
 :is(.stat .slb,.since,.selh .sr)>a.lnk::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:44px;transform:translate(-50%,-50%)}

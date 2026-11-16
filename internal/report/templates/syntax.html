@@ -419,6 +419,7 @@ const lineOf = new WeakMap(); // a row of the table -> what shows it side by sid
 let keep = null; // the gap button clicked side by side, to focus again once it is drawn anew
 const clone = node => [...node.childNodes].map(n => n.cloneNode(true));
 const split = table => {
+  if (!table.querySelector("tr.ctx") && !(table.querySelector("tr.del") && table.querySelector("tr.add"))) return; // a new or a deleted file: one side, read whole
   const box = el("div", "split");
   box.dataset.path = table.dataset.path;
   let l = [], r = [], blocks = [], cur = null;
