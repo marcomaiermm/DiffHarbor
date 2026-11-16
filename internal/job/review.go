@@ -371,6 +371,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		}
 		d.PR = report.Header(ctx, sb, report.PR{Created: pr.CreatedAt, Author: pr.User.Login, Head: pr.Head.Ref, Base: pr.Base.Ref, Body: forge.Redact(pr.Body)})
 		d.Knowledge = report.Learn(ctx, sb, raw, pr.CreatedAt)
+		d.CI = ciOf(ctx, p, sb, key, sha, prFiles)
+		d.Members = membersOf(p, key)
 		d.Outside = report.Outside(d.Symbols)
 		d.Map = report.BuildMap(sb, d, d.Outside)
 		s.State.Secret = reportSecret(s.State.Secret)

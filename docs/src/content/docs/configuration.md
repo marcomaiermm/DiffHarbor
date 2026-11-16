@@ -16,7 +16,9 @@ Create a GitHub App:
   - Contents: read/write. GitHub needs write to resolve threads. Reviews get a read-only token.
   - Pull requests: read/write
   - Commit statuses: read/write
-  - Issues and Metadata: read
+  - Issues and Metadata: read. Metadata also lists the repo's collaborators, the report's current members.
+  - Checks and Actions: read. The report reads the head's check runs and their workflows with them. Without them
+    it says the checks weren't read.
 - **Events:** Pull request, Pull request review comment, Issue comment.
 
 | Variable | |

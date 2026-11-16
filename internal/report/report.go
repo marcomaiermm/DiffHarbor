@@ -68,6 +68,8 @@ type Data struct {
 	Map         *Map              // the map of the change (BuildMap); nil when there is none to draw
 	Bot         string            // the bot's handle: @Bot talks to it
 	Threads     map[string]int64  // the comment id of each finding's inline thread, by ThreadKey; none for one not posted inline
+	CI          *CI               // the forge's checks at SHA and the CI workflows on the base; nil when the forge reads none
+	Members     *Members          // who has access to the repo now; nil when the forge can't list them
 }
 
 // Forge is how the forge hosting the repository names and links what a report points to.
