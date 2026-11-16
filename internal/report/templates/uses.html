@@ -427,10 +427,11 @@ const draw = (items, ol, inBranch) => {
         const b = el("button", "pa-fb", `${it.bs.length - it.show} more declarations use it`);
         b.type = "button";
         b.addEventListener("click", () => {
-          ol.querySelectorAll(":scope > .pa-bl[hidden]").forEach(x => { x.hidden = false; });
+          const hid = [...ol.querySelectorAll(":scope > .pa-bl[hidden]")];
+          hid.forEach(x => { x.hidden = false; });
           m.remove();
           turns(ol);
-          ol.querySelector(":scope > .pa-bl:nth-child(" + (it.show + 1) + ") .pa-jc")?.focus();
+          hid[0]?.querySelector(".pa-jc")?.focus();
         });
         m.append(b);
         ol.append(m);

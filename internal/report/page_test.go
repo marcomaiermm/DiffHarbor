@@ -632,7 +632,7 @@ func usesData(d *Data) {
 			{Kind: "decl", Text: "function submit(form)", Line: 10},
 			{Kind: "object", Depth: 1, Text: "const req = {", Line: 11},
 			{Kind: "call", Depth: 2, Text: "pay: Charge(form.total),", Line: 12, Use: true},
-			{Kind: "fold", Depth: 2, N: 3, Kept: []ShapeLeaf{{Kind: "stmt", Text: `currency: "EUR",`, Line: 13}}, More: &[2]int{15, 16}},
+			{Kind: "fold", Depth: 2, N: 3, Kept: []ShapeLeaf{{Kind: "stmt", Text: `currency: "EUR",`, Line: 13}, {Kind: "call", Text: "fee: Charge(form.fee),", Line: 14, Use: true}}, More: &[2]int{15, 15}},
 			{Kind: "chain", Depth: 1, Text: "client", Line: 17},
 			{Kind: "link", Depth: 2, Text: ".retry(3)", Line: 17},
 			{Kind: "call", Depth: 2, Text: ".then(() => Charge(rest))", Line: 18, Use: true},

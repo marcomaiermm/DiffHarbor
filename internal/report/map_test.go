@@ -725,9 +725,40 @@ func TestTracePath(t *testing.T) {
 	if p.Label != "Path from a/a.go to send" {
 		t.Errorf("label %q", p.Label)
 	}
-	// the way gives the declaration's own place: the joint has no words
+	// the way gives the declaration's own place for a row the entry names: the hop at the entry's place draws it
 	tr.Rows[0].At = ref{Path: "b/b.go", Line: 3}
-	if j := v.tracePath(tr, "", v.hops()).Items[1]; j.Line != 0 || j.Text != "" {
-		t.Errorf("joint at the declaration %+v", j)
+	if j := v.tracePath(tr, "", v.hops()).Items[1]; j.Path != "a/a.go" || j.Line != 2 || j.Rel != "iface" || j.Sh != 4 || j.Text == "" {
+		t.Errorf("joint at the entry %+v", j)
+	}
+	// the index names it without a place: the joint has no words, but its relation
+	v.Symbols["Fetch"][0].Ways[0].Chain[0].At = 0
+	if j := v.tracePath(tr, "", v.hops()).Items[1]; j.Line != 0 || j.Text != "" || j.Rel != "iface" || j.Sh != 4 {
+		t.Errorf("joint without a place %+v", j)
+	}
+}
+
+// A call path to a finding (5.7): the route's registration line is the joint under it, with its relation and
+// structure, though the way gives the row its declaration's place; the finding's station links to its card.
+func TestFindingPath(t *testing.T) {
+	v := &view{Data: Data{
+		Diff: newFile("a/routes.go", "package a\nr.Get(\"/orders\", List)\n") + newFile("b/b.go", "package b\n\nfunc List() {}\n"),
+		Symbols: map[string][]Symbol{
+			"List": {{Path: "b/b.go", Line: 3, Exact: true, Ways: []Way{{
+				Method: "GET", Route: "/orders", Path: "a/routes.go", Line: 2,
+				Chain: []Hop{{Name: "List", Path: "b/b.go", Line: 3, In: "a/routes.go", At: 2, Shape: 1, Rel: "call"}},
+			}}}},
+		},
+	}}
+	w := way{Method: "GET", Route: "/orders", At: ref{Path: "a/routes.go", Line: 2}}
+	rows := []wrow{{Name: "List", Path: "b/b.go", Call: "List", At: ref{Path: "b/b.go", Line: 3}, Sev: &weighed{Sev: "major"}}}
+	p := v.findingPath(w, rows, "", "", "#f1", v.hops())
+	if len(p.Items) != 3 {
+		t.Fatalf("items %+v", p.Items)
+	}
+	if j := p.Items[1]; j.Rel != "call" || j.Path != "a/routes.go" || j.Line != 2 || j.Sh != 1 || j.Text != `r.Get("/orders", List)` {
+		t.Errorf("joint %+v", j)
+	}
+	if s := p.Items[2]; s.Kind != "finding" || s.Find != "#f1" {
+		t.Errorf("finding %+v", s)
 	}
 }

@@ -76,24 +76,33 @@ func (v *view) entryItem(method, route string, at ref, part string) pitem {
 }
 
 // wayItems is a way's rows as joints and stations, each joint the place where the station above names the one below.
-func (v *view) wayItems(rows []wrow, prev, user string, hops map[string]Hop) []pitem {
+// entry is the way's entry place: a row the entry names carries its declaration's place (ways), so its hop is found
+// by the entry's.
+func (v *view) wayItems(rows []wrow, entry ref, prev, user string, hops map[string]Hop) []pitem {
 	var out []pitem
 	for _, r := range rows {
 		j := pitem{T: "j", Mark: r.Name, User: user, Used: r.Name, Path: r.At.Path, Line: r.At.Line}
 		if r.Call != r.Name {
 			j.Rel = "call"
 		}
-		if h, ok := hops[r.Path+"\x00"+r.Name+"\x00"+r.At.Path+"\x00"+strconv.Itoa(r.At.Line)]; ok {
-			j.Rel, j.Sh = cmp.Or(h.Rel, j.Rel), h.Shape
-			if h.At == 0 { // the index names it without a place: a line with no words
-				j.Path, j.Line = "", 0
-			}
-		}
 		s := pitem{T: "s", Kind: "decl", Name: r.Call, Says: r.Tag, Path: r.Path}
 		for _, d := range v.Symbols[r.Name] {
 			if d.Path == r.Path && d.Exact {
 				s.Line = d.Line
 				break
+			}
+		}
+		k := r.Path + "\x00" + r.Name + "\x00"
+		h, ok := hops[k+r.At.Path+"\x00"+strconv.Itoa(r.At.Line)]
+		if !ok && r.At.Path == s.Path && r.At.Line == s.Line {
+			if h, ok = hops[k+entry.Path+"\x00"+strconv.Itoa(entry.Line)]; ok {
+				j.Path, j.Line = entry.Path, entry.Line
+			}
+		}
+		if ok {
+			j.Rel, j.Sh = cmp.Or(h.Rel, j.Rel), h.Shape
+			if h.At == 0 { // the index names it without a place: a line with no words
+				j.Path, j.Line = "", 0
 			}
 		}
 		if j.Path == s.Path && j.Line == s.Line { // the way gives its declaration's place, not the line that names it
@@ -136,7 +145,7 @@ func (v *view) lineText(p string, n int) string {
 // OutsideCall.Calls), the system.
 func (v *view) tracePath(t *MapTrace, entryPart string, hops map[string]Hop) *pathView {
 	entry := v.entryItem(t.Method, t.Route, t.At, entryPart)
-	items := append([]pitem{entry}, v.wayItems(t.Rows, entryPart, cmp.Or(t.Route, t.At.Path), hops)...)
+	items := append([]pitem{entry}, v.wayItems(t.Rows, t.At, entryPart, cmp.Or(t.Route, t.At.Path), hops)...)
 	last := t.Rows[len(t.Rows)-1].Name
 	for _, c := range t.Call.Calls {
 		p, n, _ := span(c.At)
@@ -164,7 +173,7 @@ func (v *view) tracePath(t *MapTrace, entryPart string, hops map[string]Hop) *pa
 // findingPath is a call path to a finding (5.7) as a path: the way's entry and its rows down to the finding, whose
 // station links to the card.
 func (v *view) findingPath(w way, rows []wrow, entryPart, prev, href string, hops map[string]Hop) *pathView {
-	items := append([]pitem{v.entryItem(w.Method, w.Route, w.At, entryPart)}, v.wayItems(rows, prev, cmp.Or(w.Route, path.Base(w.At.Path)), hops)...)
+	items := append([]pitem{v.entryItem(w.Method, w.Route, w.At, entryPart)}, v.wayItems(rows, w.At, prev, cmp.Or(w.Route, path.Base(w.At.Path)), hops)...)
 	if s := &items[len(items)-1]; s.Kind == "finding" {
 		s.Find = href
 	}
