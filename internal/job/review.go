@@ -375,6 +375,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	reviewed := footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc))
 	// Right after posting: a restart from here on finds this head reviewed, rather than posting its findings again.
 	s.Write(banner, reviewed)
+	merge := false // the report's merge status set the commit status
 	if guide {
 		st := s.State
 		d := report.Data{
@@ -398,6 +399,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		d.Map = report.BuildMap(sb, d, d.Outside)
 		d.Tickets, d.FollowUps, d.TicketErrs, d.TicketsCapped = tickets.Tickets, tickets.FollowUps, tickets.Failed, tickets.Capped
 		d.Split = report.SplitTickets(tickets.Keys, changes, d.Flow)
+		d.SplitOff = cfg.SuggestSplit.Lines == 0 && cfg.SuggestSplit.Files == 0
 		var decls []string // the declarations the PR adds or changes: places the contract pass may cite
 		for name, ss := range d.Symbols {
 			for _, sy := range ss {
@@ -412,10 +414,17 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			Tickets: d.Tickets, Summary: st.Summary, Flow: st.Flow, Walk: st.Files, Findings: d.Findings, Decls: decls,
 		})
 		s.State.Secret = reportSecret(s.State.Secret)
-		s.State.Report = writeReport(e, s.State.Secret, s.State.Report, d)
+		var now report.Version
+		s.State.Report, now = writeReport(e, s.State.Secret, s.State.Report, d)
 		s.Write(banner, reviewed) // again, with the report's link
+		if now.Short != "" {      // the report's merge status decides (decision 6): failure only when blocked, its short form says why
+			desc, state, merge = now.Short, "success", true
+			if now.Blocked {
+				state = "failure"
+			}
+		}
 	}
-	if w := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); len(w) <= 140 { // GitHub's limit
+	if w := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); !merge && len(w) <= 140 { // GitHub's limit
 		desc = w
 	}
 	sp.Result = "ok"
@@ -659,27 +668,24 @@ func Moved(dir string) string {
 	return string(b)
 }
 
-// writeReport renders the PR's report into its secret's folder as the version of its head, against the newest of
-// another head, and returns its URL; "" when that fails, the review stands without it. d.Routine is this review's: an
+// writeReport renders the PR's report into its secret's folder as the version of its head, and returns its URL and
+// that version; "" when that fails, the review stands without it. d.Routine is this review's: an
 // incremental one has none, and the last full one's line numbers may be stale.
 // link is the walkthrough's last one: reports it names from before the repo's ID move here first (adopt). Until they
 // did, it stays the link.
 // ponytail: two reviews of a PR finishing at once can drop one's entry from versions.json; a lock per PR if it shows.
-func writeReport(e *forge.Event, secret, link string, d report.Data) string {
+func writeReport(e *forge.Event, secret, link string, d report.Data) (string, report.Version) {
 	dir, s := reportPath(e)+"/"+secret, Reports()
 	if err := adopt(namedDir(e, secret, link), dir); err != nil { // the next report retries; till then link serves
 		log.Println(e.Key(), "report:", Hide(err, secret))
-		return link
+		return link, report.Version{}
 	}
 	vs, err := Versions(dir)
 	if err != nil {
 		log.Println(e.Key(), "report:", Hide(err, secret))
-		return ""
+		return "", report.Version{}
 	}
 	vs = slices.DeleteFunc(vs, func(v report.Version) bool { return v.SHA == d.SHA })
-	if len(vs) > 0 {
-		d.Prev = &vs[0]
-	}
 	b, now, err := report.Render(d)
 	now.At = time.Now()
 	vs = slices.Insert(vs, 0, now)
@@ -700,12 +706,12 @@ func writeReport(e *forge.Event, secret, link string, d report.Data) string {
 	}
 	if err != nil {
 		log.Println(e.Key(), "report:", Hide(err, secret))
-		return ""
+		return "", now
 	}
 	for _, v := range vs[len(keep):] {
 		_ = deletePage(s, dir, v.SHA)
 	}
-	return ReportURL + "/r/" + dir
+	return ReportURL + "/r/" + dir, now
 }
 
 // maxClash is the PRs others fetches the diff of, those sharing the most files first.

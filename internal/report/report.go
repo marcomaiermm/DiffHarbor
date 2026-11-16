@@ -57,7 +57,6 @@ type Data struct {
 	Behind      []review.Commit    // the base's commits since the fork point (review.Behind)
 	Conflicts   bool               // the forge says the PR conflicts with its base
 	Forge       Forge
-	Prev        *Version          // the version before: the report marks what changed since; nil for the first
 	Dropped     []review.Comment  // what the verifier dropped, its reason in Evidence
 	Failed      []string          // files whose review part failed: not reviewed
 	Omitted     []string          // files the review left out, all of them or a piece: too large
@@ -87,6 +86,7 @@ type Data struct {
 	TicketErrs    map[string]string
 	TicketsCapped bool
 	Split         *Split
+	SplitOff      bool // the repo turned split suggestions off: the intro says the review proposed none
 	// The gate and contract passes (review.ReadTerms): Gates feed the merge status's "Waits for {gate}" (spec 4) and
 	// the gate card (5.6), Serves and Order its items, Contracts the ticket cards' rows and four answers (5.9),
 	// Differences the difference cards (5.7, 5.6). Errs names the passes that failed: the page says what wasn't read.
@@ -279,7 +279,6 @@ type file struct {
 	Changes          []change   // the declarations it changes
 	Moves            []change   // the declarations that only moved here, ID their fold
 	Long             bool       // lists Changes above its diff
-	Changed          string     // Prev's short SHA when its change differs from Prev's, or it's new to the PR
 	Placed           string     // why the guide put it in its step, when it isn't plain
 	Skipped          int        // tests it skips or narrows to one (skip, only)
 	New, Gone        bool       // the PR adds or deletes it
@@ -328,12 +327,12 @@ type view struct {
 	Graphs               bool            // a graph to draw: the page loads cytoscape
 	Risks                []risk          // what a merge doesn't finish
 	BaseMoved            []review.Commit // of Behind, those that change the PR's files
-	Since                *since          // what changed from Prev
 	now                  Version         // what the next version compares with
 	files                map[string]*file
 	Page                 page              // what the page shows: see build
 	lines                map[string]string // the diff's new lines: newLines
 	found                []*card           // the findings as cards, in Findings' order
+	lead                 []*card           // the differences and test group 2 in parts: before the findings, each an open item
 }
 
 // shared is the directory all paths share, with its slash; none for a single path.
@@ -358,6 +357,7 @@ func Render(d Data) ([]byte, Version, error) {
 	if err := tmpl.ExecuteTemplate(&b, "report.html", v); err != nil {
 		return nil, Version{}, fmt.Errorf("report: %w", err)
 	}
+	v.now.Short, v.now.Blocked = v.Page.Status.Short, v.Page.Status.Kind == "blocked"
 	return b.Bytes(), v.now, nil
 }
 
@@ -500,7 +500,6 @@ func prepare(d Data) view {
 		v.Graphs = v.Graphs || v.Steps[i].Graph != nil
 	}
 	judge(&v, found) // adds the weakened tests' findings to v.now
-	v.Since = compare(d.Prev, v.now, files)
 	chs, _ := decls(v.Steps)
 	for _, c := range chs { // the popover says what the PR did to it
 		for i, s := range d.Symbols[c.c.Name] {

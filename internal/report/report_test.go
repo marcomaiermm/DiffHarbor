@@ -584,46 +584,37 @@ func TestRisks(t *testing.T) {
 	}
 }
 
-// A report against the version before marks the files whose change changed and lists what else did.
+// A version keeps what a later page's script compares (5.13): each file's change, and the open items by kind and
+// place, a difference by its place and a gate only while it waits; the page embeds this version's and each file's box.
 func TestSince(t *testing.T) {
 	file := func(p, line string) string {
 		return fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1 +1 @@\n-x\n+%s\n", p, p, p, p, line)
 	}
 	d := Data{
-		Repo: "a/b", SHA: "1111111aaa", Diff: file("a.go", "one") + file("b.go", "two"),
-		Findings: []review.Comment{{Path: "a.go", Line: 1, Title: "nil map"}},
+		Repo: "a/b", SHA: "2222222bbb", Diff: file("a.go", "one") + file("c.go", "three") + file("README.md", "doc"),
+		Findings: []review.Comment{{Path: "c.go", Line: 1, Title: "leak", Severity: "major"}},
+		Terms: review.Terms{
+			Gates:       []review.Gate{{Name: "the cutover", Waits: true}, {Name: "CAT-9 to merge"}},
+			Differences: []review.Difference{{Status: review.Deviates, Title: "x", At: "a.go:1"}},
+		},
 	}
-	_, prev, err := Render(d)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.SHA, d.Prev = "2222222bbb", &prev
-	d.Diff = file("a.go", "one") + file("c.go", "three") // b.go dropped, c.go new, a.go the same
-	d.Findings = []review.Comment{{Path: "c.go", Line: 1, Title: "leak"}}
 	d.Outline.Weakened = []diff.Flag{{At: "c_test.go:4", What: "test deleted"}}
-	if b, v, _ := Render(d); !slices.Contains(v.Findings, "c_test.go: test deleted") || v.Weights["c_test.go: test deleted"] != "test" {
-		t.Errorf("a weakened test is no finding of the version: %+v", v)
-	} else if strings.Contains(string(b), "open items new") {
-		t.Error("a weakened test counts as a new major") // Test changes counts it
-	}
-	d.Outline.Weakened = nil
-	b, now, err := Render(d)
+	b, v, err := Render(d)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := prepare(d).Since
-	if len(s.Files) != 1 || s.Files[0].Path != "c.go" || !slices.Equal(s.Back, []string{"b.go"}) ||
-		!slices.Equal(s.New, []string{"c.go: leak"}) || !slices.Equal(s.Fixed, []string{"a.go: nil map"}) || now.SHA != d.SHA {
-		t.Fatalf("%+v", s)
+	if !slices.Contains(v.Findings, "c_test.go: test deleted") || v.Weights["c_test.go: test deleted"] != "test" {
+		t.Errorf("a weakened test is no finding of the version: %+v", v)
+	}
+	want := []Item{{"difference", "a.go:1"}, {"finding", "c.go:1"}, {"gate", "the cutover"}}
+	if !slices.Equal(v.Items, want) || len(v.Files) != 3 {
+		t.Errorf("items %+v, files %v", v.Items, v.Files)
 	}
 	page := string(b)
-	for _, want := range []string{"1 file changed since 1111111, the previous review: 1 code file.", `data-filter="changed"`, "Changed since 1111111", "New since 1111111", "changed since 1111111</span>"} {
+	for _, want := range []string{`"where":{"README.md":"doc","a.go":"code","c.go":"code"}`, `"items":[{"kind":"difference","place":"a.go:1"}`, `data-filter="changed" aria-pressed="false" hidden`, `<p class="since" id="since" hidden>`} {
 		if !strings.Contains(page, want) {
 			t.Error("missing", want)
 		}
-	}
-	if strings.Count(page, "changed since 1111111</span>") != 1 {
-		t.Error("a.go marked though its change is the same")
 	}
 }
 
@@ -789,7 +780,6 @@ func TestPlaces(t *testing.T) {
 		Story:     review.Story{Before: "old", After: "new", Proof: "TestTotal/with discount"},
 		Commits:   []review.Commit{{SHA: "2222222bbb", Author: "Kim", Subject: "s"}},
 		Tests:     checks.Tests{Ran: map[string]string{"TestTotal/with_discount": "pass"}, Broken: []string{"pkg/b"}},
-		Prev:      &Version{SHA: "1111111aaa", Tests: map[string]string{"TestTotal/with_discount": "none"}},
 	}
 	v := prepare(d)
 	rs := v.Refs(d.Summary)

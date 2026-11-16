@@ -28,7 +28,6 @@ type mapView struct {
 	NoGraph       bool
 	Sentence      string
 	Keys          []mkey // the glyphs the key row shows, in its order
-	Since         string // the Since base's short SHA, for the git-commit key
 	OnMap         int    // open items on a box
 	Off           []offLink
 	Reach         string // the reach line
@@ -42,8 +41,8 @@ type mapView struct {
 	partBox       map[string]*mbox // a part's ID -> its box
 }
 
-// mkey is a glyph of the legend's key row; Since names the base of the git-commit mark.
-type mkey struct{ K, Since string }
+// mkey is a glyph of the legend's key row. The git-commit mark's is the script's: it knows the Since base.
+type mkey struct{ K string }
 
 // mbox is a box of the map (component 24). Kind: "part", "system", "deploy", "table", "removed", "generated".
 type mbox struct {
@@ -51,7 +50,7 @@ type mbox struct {
 	X, Y, W                    int
 	Lines                      []string // a system's name on up to three lines
 	Open, Files, Reach         int
-	New, DB, Eye, Commit, Hide bool
+	New, DB, Eye, Hide         bool
 	Pos                        bool   // placed in the figure
 	Small                      bool   // the label in 12
 	Line2                      string // a deploy, table, removed or generated box's text after its name
@@ -132,13 +131,6 @@ func (v *view) mapView() {
 	v.Page.Map = mv
 	n := 0
 	el := func() string { n++; return "b" + strconv.Itoa(n) }
-	changed := map[string]bool{}
-	if v.Since != nil {
-		mv.Since = short(v.Since.Prev.SHA)
-		for _, f := range v.Since.Files {
-			changed[f.Path] = true
-		}
-	}
 	unread := map[string]bool{}
 	for _, p := range slices.Concat(v.Omitted, v.Failed) {
 		unread[p] = true
@@ -148,7 +140,6 @@ func (v *view) mapView() {
 		b := &mbox{El: el(), Key: "part:" + p.ID, Kind: "part", Label: p.Label, Path: p.Path, Files: len(p.Files), Reach: p.Reach, New: p.New, DB: p.DB, Eye: p.Unread > 0, part: p}
 		b.Small = len(p.Label) > 15
 		for _, f := range p.Files {
-			b.Commit = b.Commit || changed[f]
 			b.Eye = b.Eye || unread[f]
 		}
 		mv.add(b)
@@ -187,9 +178,6 @@ func (v *view) mapView() {
 		b := &mbox{El: el(), Key: key, Kind: "deploy", Label: d.Label, Path: d.Path}
 		mv.add(b)
 		mv.Deploy = append(mv.Deploy, b)
-		if d.Path != "" {
-			b.Commit = changed[d.Path]
-		}
 	}
 	// the tables (6.13): writers first, then by parts, then by name
 	for _, s := range m.Stores {
@@ -873,9 +861,6 @@ func (mv *mapView) words(v *view) {
 		if b.Reach > 0 {
 			a = append(a, plural(b.Reach, "place", "places")+" outside this PR")
 		}
-		if b.Commit {
-			a = append(a, "changed since "+mv.Since)
-		}
 		b.Aria, b.Says = strings.Join(a, ", "), strings.Join(says, " ")
 	}
 	// a migration's hover: the parts that used a table it drops, the tables it changes
@@ -930,14 +915,13 @@ func (mv *mapView) words(v *view) {
 		keys["reach"] = keys["reach"] || b.Reach > 0
 		keys["db"] = keys["db"] || b.DB
 		keys["eye"] = keys["eye"] || b.Eye
-		keys["commit"] = keys["commit"] || b.Commit
 	}
 	if m.NoGraph {
 		keys["heavy"], keys["iface"], keys["dash"], keys["dot"] = false, false, false, false
 	}
-	for _, k := range []string{"heavy", "iface", "dash", "dot", "reach", "db", "eye", "commit"} {
+	for _, k := range []string{"heavy", "iface", "dash", "dot", "reach", "db", "eye"} {
 		if keys[k] {
-			mv.Keys = append(mv.Keys, mkey{k, mv.Since})
+			mv.Keys = append(mv.Keys, mkey{k})
 		}
 	}
 	// the reach (6.7)

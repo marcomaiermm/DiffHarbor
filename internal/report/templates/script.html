@@ -35,7 +35,7 @@
       trace(on, b);
     }
   };
-  const discButtons = ".icb, .pbb, .sbtn, button[data-disc]";
+  const discButtons = ".icb, .pbb, .sbtn, .tch, button[data-disc]";
   // a region inside closed ones: open each, outermost last, and a closed file too
   const fileOpen = (f, on) => { f.toggleAttribute("open", on); $(".file-toggle", f).setAttribute("aria-expanded", on); };
   const openUp = el => {
@@ -119,7 +119,7 @@
       for (const x of $$("[data-item], .pb, [data-rail-box], .kt tr")) { x.classList.remove("on"); x.removeAttribute("data-off"); }
       for (const x of $$("[data-item], .pb")) x.hidden = false;
       for (const x of $$("[data-rail-box]")) x.hidden = false;
-      for (const s of $$("#before, #read")) { const e = $(":scope > [data-empty], .sbody > [data-empty]", s); if (e) e.hidden = true; }
+      for (const s of $$("#before, #read, #tests")) { const e = $(":scope > [data-empty], .sbody > [data-empty]", s); if (e) e.hidden = true; }
       counts();
       if (!quiet && /^#(part|table|box)=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
       filter();
@@ -295,27 +295,116 @@
   keys(keysOn());
   for (const c of $$("input[data-keys]")) c.addEventListener("change", () => keys(c.checked));
 
-  // the versions next to this page's URL: the menu's rows and a newer version's banner (none: a page alone)
-  const base = location.pathname.replace(/\/+$/, "").replace(/\/[0-9a-f]{40}(?:[0-9a-f]{24})?$/, "");
-  const sha = {{.SHA}}, prev = {{with .Prev}}{{.SHA}}{{else}}""{{end}};
-  fetch(base + "/versions").then(r => r.ok ? r.json() : []).then(vs => {
+  // Since (5.13): the version this browser opened before this one, else the previous review; the versions menu picks
+  // another for this visit. Files compare by their patch IDs, open items by Version.Items: a group (the gap, a test
+  // group) is new when the base had none of its kind.
+  const sha = {{.SHA}}, since = JSON.parse($("#since-data").textContent);
+  const seenKey = {{printf "diffharbor:seen:%s#%d" .Repo .Number}};
+  let seen = null;
+  try { seen = JSON.parse(get(seenKey)); } catch {}
+  const opened = seen ? (seen.at !== sha ? seen.at : seen.base) || "" : "";
+  set(seenKey, JSON.stringify({ at: sha, base: opened }));
+  const count = (k, one, many) => k + " " + (k === 1 ? one : many);
+  const and = a => a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a.at(-1);
+  const group = k => k === "gap" || k.startsWith("test-");
+  const commit = $("#i-commit").innerHTML;
+  let base = null;
+  const compare = (b, how) => {
+    for (const x of $$("[data-since]")) x.parentNode.removeChild(x);
+    for (const x of $$("[data-changed]")) x.removeAttribute("data-changed");
+    for (const x of $$("[data-aria0]")) x.setAttribute("aria-label", x.dataset.aria0);
+    base = b;
+    const s7 = b.sha.slice(0, 7), was = b.files || {};
+    const changed = Object.keys(since.files).filter(p => since.files[p] !== was[p]).sort();
+    const at = new Set(changed), where = {}, kinds = { code: 0, doc: 0, test: 0, other: 0 };
+    for (const p of changed) { const w = since.where[p] || "other"; if (w in kinds) kinds[w]++; else where[w] = (where[w] || 0) + 1; }
+    const said = since.boxes.filter(([k]) => where[k]).map(([k, l, d]) => d ? l : where[k] + " in " + l);
+    for (const [k, one, many] of [["code", "code file", "code files"], ["doc", "doc", "docs"], ["test", "test file", "test files"], ["other", "other file", "other files"]]) if (kinds[k]) said.push(count(kinds[k], one, many));
+    const key = i => i.kind + "\t" + i.place, now = new Set(since.items.map(key));
+    const old = b.items ? new Set(b.items.map(key)) : null, oldKinds = new Set((b.items || []).map(i => i.kind)), nowKinds = new Set(since.items.map(i => i.kind));
+    let news = 0, fixed = 0;
+    if (old) {
+      for (const k of now) if (!group(k.split("\t")[0]) && !old.has(k)) news++;
+      for (const k of old) if (!group(k.split("\t")[0]) && !now.has(k)) fixed++;
+      for (const k of nowKinds) if (group(k) && !oldKinds.has(k)) news++;
+      for (const k of oldKinds) if (group(k) && !nowKinds.has(k)) fixed++;
+    }
+    const line = $("#since"), filt = $('button[data-filter="changed"]');
+    line.hidden = filt.hidden = !changed.length && !news && !fixed;
+    if (line.hidden) return mode === "changed" && setMode("all");
+    $("span", line).textContent = count(changed.length, "file", "files") + " changed since " + s7 + ", " + how + " (" + String(b.at).slice(0, 10) + ")" + (said.length ? ": " + and(said) : "") + "." +
+      (news + fixed ? " · " + count(news, "open item", "open items") + " new · " + fixed + " fixed" : "");
+    filt.textContent = "Changed since " + s7;
+    const mark = (el, text) => el.insertAdjacentHTML("beforeend", '<span class="chip st2" data-since>' + commit + text + "</span>");
+    for (const p of at) {
+      const f = document.getElementById(p);
+      if (!f?.matches(".file")) continue;
+      f.setAttribute("data-changed", "");
+      mark($(".file-head > .file-toggle", f), "changed since " + s7);
+    }
+    for (const c of $$("article[data-k], article[data-paths]")) {
+      const ks = JSON.parse(c.dataset.k || "[]"), ps = JSON.parse(c.dataset.paths || "[]"), m = $(".icm", c);
+      if (!m) continue;
+      const isNew = old && ks.some(k => group(k) ? !oldKinds.has(k) : !old.has(k));
+      if (isNew || ps.some(p => at.has(p))) {
+        mark(m, (isNew ? "New since " : "Changed since ") + s7);
+        const pl = $(":scope > .pl", m);
+        if (pl) m.append(pl);
+      }
+    }
+    for (const k of Object.keys(where)) {
+      for (const b of $$(`.mb[data-box="${CSS.escape(k)}"]`)) {
+        let mk = $(".mk", b);
+        if (!mk) { mk = document.createElement("span"); mk.className = "mk"; ($(".mb2", b) || b).append(mk); }
+        mk.hidden = false;
+        mk.insertAdjacentHTML("beforeend", '<span data-since style="display: inline-flex;">' + commit + "</span>");
+        b.dataset.aria0 ??= b.getAttribute("aria-label");
+        b.setAttribute("aria-label", b.dataset.aria0 + ", changed since " + s7);
+      }
+    }
+    const sk = $("[data-since-key]");
+    if (sk) {
+      sk.hidden = !Object.keys(where).length;
+      if (!sk.hidden) { sk.parentElement.hidden = false; $("span:last-child", sk).textContent = s7; }
+    }
+  };
+  // the versions next to this page's URL: the menu's rows, each with "Compare with this", and a newer version's banner
+  // (none: a page alone)
+  const home = location.pathname.replace(/\/+$/, "").replace(/\/[0-9a-f]{40}(?:[0-9a-f]{24})?$/, "");
+  fetch(home + "/versions").then(r => r.ok ? r.json() : []).then(vs => {
     if (!Array.isArray(vs) || !vs.some(v => v.sha === sha)) return;
-    const row = (v, i) => {
-      const me = v.sha === sha, r = document.createElement(me ? "p" : "a");
-      r.className = "mrow";
-      if (me) r.setAttribute("aria-current", "page"); else r.href = (i ? base + "/" + v.sha : base) + location.hash;
-      r.innerHTML = me ? $("#vermenu .mrow svg").outerHTML : '<span style="width: 16px;"></span>';
-      const t = document.createElement("span");
-      t.textContent = v.sha.slice(0, 7) + " · " + String(v.at).slice(0, 10);
-      const note = me ? "this page" : v.sha === prev ? "compared with" : "";
-      if (note) t.insertAdjacentHTML("beforeend", ' · <span class="ui12 i3">' + note + "</span>");
-      r.append(t);
-      return r;
+    const rows = () => {
+      const row = (v, i) => {
+        const me = v.sha === sha, r = document.createElement("div"), a = document.createElement(me ? "p" : "a");
+        r.className = "vrow";
+        a.className = "mrow";
+        if (me) a.setAttribute("aria-current", "page"); else a.href = (i ? home + "/" + v.sha : home) + location.hash;
+        a.innerHTML = me ? $("#vermenu .mrow svg").outerHTML : '<span style="width: 16px;"></span>';
+        const t = document.createElement("span");
+        t.textContent = v.sha.slice(0, 7) + " · " + String(v.at).slice(0, 10);
+        const note = me ? "this page" : base && v.sha === base.sha ? "compared with" : "";
+        if (note) t.insertAdjacentHTML("beforeend", ' · <span class="ui12 i3">' + note + "</span>");
+        a.append(t);
+        r.append(a);
+        if (!note) {
+          const c = document.createElement("button");
+          c.type = "button";
+          c.className = "gb vcmp";
+          c.textContent = "Compare with this";
+          c.addEventListener("click", () => { compare(v, "the version you picked"); rows(); });
+          r.append(c);
+        }
+        return r;
+      };
+      for (const list of $$(".verrows")) list.replaceChildren(...vs.map(row));
     };
-    for (const list of $$(".verrows")) list.replaceChildren(...vs.map(row));
+    const i = vs.findIndex(v => v.sha === sha), b = vs.find(v => v.sha === opened && v.sha !== sha);
+    if (b) compare(b, "the version you opened last");
+    else if (vs[i + 1]) compare(vs[i + 1], "the previous review");
+    rows();
     if (vs[0].sha !== sha) {
       const newer = $("#newer");
-      $("a", newer).href = base + location.hash;
+      $("a", newer).href = home + location.hash;
       newer.hidden = false;
     }
   }).catch(() => {});
@@ -350,6 +439,8 @@
     if (d) return choose(d.dataset.diff);
     const f = t.closest("button[data-filter]");
     if (f) return setMode(f.dataset.filter);
+    const g = t.closest("a[data-gate]");
+    if (g) { e.preventDefault(); const to = $(g.getAttribute("href")); to.scrollIntoView({ block: "start" }); return $("h3", to).focus({ preventScroll: true }); }
     if (t.closest("[data-show-changed]")) { e.preventDefault(); setMode("changed"); $("#h-read").focus(); return $("#read").scrollIntoView({ block: "start" }); }
     const ft = t.closest(".file-toggle");
     if (ft) return fileOpen(ft.closest(".file"), !ft.closest(".file").hasAttribute("open"));
@@ -513,7 +604,7 @@
       if (next) {
         e.preventDefault();
         openUp(next);
-        const b = $(".icb", next);
+        const b = $(".icb", next) || $("h3", next); // a gate has no disclosure: its title takes focus
         next.scrollIntoView({ block: "start" });
         b.focus({ preventScroll: true });
       }

@@ -104,7 +104,7 @@ Below the walkthrough, its comment shows a score from 0 to 5, computed from what
 | 5 | any critical | red |
 
 - Findings from earlier reviews that are still open count by their severity, a minor if unknown.
-- The `diffharbor` commit status adds the score when the text fits GitHub's 140 characters.
+- The `diffharbor` commit status adds the score when the text fits GitHub's 140 characters. A PR that gets a report page takes the page's merge status instead: failure only when a failed run or a conflict blocks the merge, otherwise success, with the short form, such as "Waits · 3 open items", as its text.
 
 ### Who sets the profile
 

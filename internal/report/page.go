@@ -37,7 +37,6 @@ var (
 // page is the v4 page: each field one section or part of one.
 type page struct {
 	Over, Meta string
-	Since      *sinceLine
 	Status     mstatus
 	Brief      []bline
 	Map        *mapView
@@ -46,32 +45,34 @@ type page struct {
 	Parts      []*pblock
 	Others     *pblock // major findings in no part and no deploy box
 	Minors     []*card // minor findings in files outside every part
-	Open       int     // open items: Before, the major findings, the gap
+	Open       int     // open items (5.3): Before, Read the change's, Test changes', the gap
+	Tests      tests
+	Tickets    tsec
 	Covered    []crow
-	Kinds      []kindRow
+	OpenKinds  []cline // What the review covered, Open items: each kind a link to its first item
+	KindBar    *kindsBar
+	Kinds      []kindRow // without Data.Kinds: the files outside the parts
 	Team       team
 	Rail       []railRow
 	Keys       string // the evidence key's shortcut line
 	given      int    // the files the review was given: the diff's, without lockfiles and generated ones
 }
 
-// sinceLine is the header's last line (component 28): what changed since the previous review.
-type sinceLine struct {
-	SHA, Text string
-}
-
-// mstatus is the merge status panel (component 3): Kind "blocked", "open" or "none".
+// mstatus is the merge status panel (component 3): Kind "blocked", "waits", "open" or "none".
 type mstatus struct {
 	Kind, Head, Short string
 	Lines             []mline
-	Note              string // the line under the head of "{n} open items" and "No open items"
+	Note              []string // the lines under the head of "{n} open items" and "No open items"
+	Clears            string   // what ends the wait
+	Gate, GateText    string   // the link to the gate
 	Stats             []stat
 }
 
-// mline is a line of the merge status, led by its chip.
+// mline is a line of the merge status, led by its chip, with a link after it.
 type mline struct {
-	Chip chip
-	Text string
+	Chip           chip
+	Text           string
+	Href, HrefText string
 }
 
 // stat is a stat cell (component 4): "84 of 173", its label (a link when Href is set) and its second line.
@@ -88,9 +89,11 @@ type bline struct {
 type card struct {
 	ID, Kind, Title, Line string
 	Chip                  chip
+	St                    *schip // the status chip, before the evidence chip
+	Ticket                string // the ticket chip
 	Place, PlaceHref      string
 	Step                  int
-	Tags                  []string
+	Tags                  []tag
 	Box                   string // the map box it sits on: a part's ID, "deploy:N", "" off the map
 	Body                  string // a finding's text, the model's
 	Blocks                []cblock
@@ -99,18 +102,29 @@ type card struct {
 	GH, GHText, GHPlace   string // the GitHub link (component 9)
 	Files                 []fileGroup
 	Sev                   string
+	Gate                  bool   // the gate variant: always open, Clr its last line
+	Clr                   string // what ends the wait and how a run starts
+	Stats                 string // a test group's stats line
+	Tables                []ttable
+	Samples               []sample
+	Keys                  []string // its Version.Items as "kind\tplace", a group's kind alone: Since's New marks
+	Paths                 []string // its files: Since's Changed marks
 }
 
-// cblock is a block of a card: its label row with one chip, then its lines.
+// cblock is a block of a card: its label row with one chip, an excerpt, then its lines.
 type cblock struct {
-	Label string
-	Chip  chip
-	Lines []cline
+	Label   string
+	Chip    chip
+	Excerpt *excerpt
+	Lines   []cline
 }
 
-// cline is a line of a block: text with code spans, a link to the diff, and a note after it.
+// cline is a line of a block: text with code spans, a link to the diff, and a note after it; a Quote is a quote
+// block (component 8) with its Cite.
 type cline struct {
-	Text, Href, Code, Note string
+	Lead, Text, Href, Code, Note string // Lead goes before Code: "Test:"
+	Quote                        bool
+	Cite                         string
 }
 
 // fileGroup is a gap card's files of one part.
@@ -121,9 +135,9 @@ type fileGroup struct {
 
 // excerpt is a code excerpt (component 7): rows of the file at the head, cited ones marked.
 type excerpt struct {
-	Path, Range, Href, Cited string
-	Rows                     []xrow
-	More                     []xrow // past 8 rows: behind "Show {n} more lines"
+	Path, At, Range, Href, Cited string // At: "at 722b251" or "on the base"
+	Rows                         []xrow
+	More                         []xrow // past 8 rows: behind "Show {n} more lines"
 }
 
 // xrow is a row of an excerpt; a Gap row stands for lines left out.
@@ -147,12 +161,13 @@ type crow struct {
 	Lines []mline
 }
 
-// kindRow is a kind of file What the review covered lists with its diffs.
+// kindRow is a kind of file What the review covered lists: its diffs, and links to the files a part shows.
 type kindRow struct {
-	Name  string
-	Add   int
-	Del   int
-	Files []*file
+	Kind, Name, Text string
+	Chip             chip
+	N, Add, Del      int
+	Files            []*file
+	Links            []string
 }
 
 // team is Who changed this code (5.11).
@@ -162,6 +177,8 @@ type team struct {
 	Rows      []teamRow
 	New       string
 	Removed   string
+	NoMember  string // the parts no current member changed or reviewed in 12 months (Data.Members read)
+	Members   string // why the page can't say who of the team is current
 }
 
 type teamRow struct {
@@ -181,12 +198,17 @@ func (v *view) build() {
 	p := &v.Page
 	p.Over, p.Meta = v.over(), v.meta()
 	v.mapView()
-	p.Since = v.sinceLine() // after the map: it names the boxes
 	p.Brief = v.brief()
+	p.Tickets = v.ticketsView()
 	v.cards()
 	v.blocks()
+	p.Open = len(p.Before) + p.ReadN() + len(p.Tests.Cards)
 	p.Status = v.status()
-	p.Covered, p.Kinds = v.covered(), v.kinds()
+	p.KindBar = v.kindBar()
+	if p.KindBar == nil {
+		p.Kinds = v.kinds()
+	}
+	p.Covered = v.covered()
 	p.Team = v.team()
 	p.Rail = v.rail()
 }
@@ -234,73 +256,6 @@ func thousands(n int) string {
 	return s
 }
 
-// sinceLine is what changed since the previous review (5.13); nil for the first one or when nothing did.
-func (v *view) sinceLine() *sinceLine {
-	s := v.Since
-	if s == nil || len(s.Files) == 0 {
-		return nil
-	}
-	sha := short(s.Prev.SHA)
-	where := map[string]int{}
-	var code, tests, docs, other int
-	var order []string
-	for _, f := range s.Files {
-		k := v.boxOf(f.Path)
-		switch {
-		case k != "":
-			if where[k] == 0 {
-				order = append(order, k)
-			}
-			where[k]++
-		case f.Kind == "code":
-			code++
-		case f.Kind == "test":
-			tests++
-		case f.Kind == "doc":
-			docs++
-		default:
-			other++
-		}
-	}
-	var at []string
-	for _, k := range v.inMapOrder(order) {
-		if strings.HasPrefix(k, "deploy:") {
-			at = append(at, strings.ToLower(v.boxLabel(k)))
-		} else {
-			at = append(at, strconv.Itoa(where[k])+" in "+v.boxLabel(k))
-		}
-	}
-	for _, c := range []struct {
-		n          int
-		one, other string
-	}{{code, "code file", "code files"}, {docs, "doc", "docs"}, {tests, "test file", "test files"}, {other, "other file", "other files"}} {
-		if c.n > 0 {
-			at = append(at, plural(c.n, c.one, c.other))
-		}
-	}
-	t := plural(len(s.Files), "file", "files") + " changed since " + sha + ", the previous review"
-	if !s.Prev.At.IsZero() {
-		t += " (" + s.Prev.At.Format(time.DateOnly) + ")"
-	}
-	t += ": " + join(at) + "."
-	news, fixed := 0, 0
-	for _, k := range s.New {
-		if review.Blocks(s.Sev(k)) {
-			news++
-		}
-	}
-	for _, k := range s.Fixed {
-		if review.Blocks(s.Sev(k)) {
-			fixed++
-		}
-	}
-	news += len(s.Risen)
-	if news+fixed > 0 {
-		t += " · " + strconv.Itoa(news) + " open items new · " + strconv.Itoa(fixed) + " fixed"
-	}
-	return &sinceLine{SHA: sha, Text: t}
-}
-
 // brief is the change in brief: the sentences whose place is a line of the diff's files.
 func (v *view) brief() []bline {
 	var out []bline
@@ -318,7 +273,8 @@ func (v *view) brief() []bline {
 	return out
 }
 
-// status is the merge status (section 4): Blocked by a failed run or a conflict, else the open items.
+// status is the merge status (section 4), by its precedence: Blocked by a failed run or a conflict, Waits for a gate,
+// the open items, none. The review run computes it; nothing on the page changes it.
 func (v *view) status() mstatus {
 	var st mstatus
 	sha := short(v.SHA)
@@ -328,34 +284,67 @@ func (v *view) status() mstatus {
 			fails = append(fails, n)
 		}
 	}
+	var ciFails []Check
+	if v.CI != nil {
+		ciFails = slices.DeleteFunc(slices.Clone(v.CI.Checks), func(c Check) bool { return !c.Failed() })
+	}
 	base := cmp.Or(v.PR.Base, "the base branch")
 	if v.Conflicts {
-		st.Lines = append(st.Lines, mline{evBase, "The PR conflicts with " + base + "."})
+		st.Lines = append(st.Lines, mline{Chip: evBase, Text: "The PR conflicts with " + base + "."})
+	}
+	for _, c := range ciFails {
+		l := mline{Chip: chip{"fail", "Run failed"}, Text: c.Name + " failed at " + sha + "."}
+		if c.URL != "" {
+			l.Href, l.HrefText = c.URL, "Open the run on "+cmp.Or(v.Forge.Name, "GitHub")
+		}
+		st.Lines = append(st.Lines, l)
 	}
 	if len(fails) > 0 {
 		names := fails
 		if len(names) > 3 {
 			names = append(names[:3:3], plural(len(fails)-3, "more", "more"))
 		}
-		st.Lines = append(st.Lines, mline{chip{"fail", "Run failed"}, plural(len(fails), "test", "tests") + " failed at " + sha + ": " + join(names) + "."})
+		st.Lines = append(st.Lines, mline{Chip: chip{"fail", "Run failed"}, Text: plural(len(fails), "test", "tests") + " failed at " + sha + ": " + join(names) + "."})
 	}
 	if b := v.Data.Tests.Broken; len(b) > 0 {
-		st.Lines = append(st.Lines, mline{chip{"fail", "Run failed"}, join(b) + map[bool]string{true: " doesn't", false: " don't"}[len(b) == 1] + " build at " + sha + "."})
+		st.Lines = append(st.Lines, mline{Chip: chip{"fail", "Run failed"}, Text: join(b) + map[bool]string{true: " doesn't", false: " don't"}[len(b) == 1] + " build at " + sha + "."})
 	}
 	n := v.Page.Open
 	items := plural(n, "open item", "open items")
+	waits := v.waiting()
 	switch {
 	case v.Conflicts:
 		st.Kind, st.Head, st.Short = "blocked", "Blocked: a conflict with "+base, "Blocked · conflict with "+base
+	case len(ciFails) == 1:
+		st.Kind, st.Head, st.Short = "blocked", "Blocked: "+ciFails[0].Name+" failed at "+sha, "Blocked · "+ciFails[0].Name+" failed"
+	case len(ciFails) > 1:
+		st.Kind, st.Head, st.Short = "blocked", "Blocked: "+plural(len(ciFails), "CI check", "CI checks")+" failed at "+sha, "Blocked · "+plural(len(ciFails), "CI check", "CI checks")+" failed"
 	case len(fails) > 0:
 		st.Kind, st.Head, st.Short = "blocked", "Blocked: "+plural(len(fails), "test", "tests")+" failed at "+sha, "Blocked · "+plural(len(fails), "test", "tests")+" failed"
 	case len(v.Data.Tests.Broken) > 0:
 		st.Kind, st.Head, st.Short = "blocked", "Blocked: the build failed at "+sha, "Blocked · the build failed"
+	case len(waits) > 0:
+		g := waits[0]
+		st.Kind, st.Head, st.Short = "waits", "Waits for "+g.Name, "Waits · "+items
+		st.Lines = append(st.Lines, mline{Chip: wordChip(g.In), Text: "“" + g.Text + "”"}, v.gateTracker(g, false))
+		st.Clears = v.clears(g)
 	case n > 0:
-		st.Kind, st.Head, st.Short, st.Note = "open", items, items, "Nothing blocks the merge." // nothing reads a wait yet
+		st.Kind, st.Head, st.Short, st.Note = "open", items, items, []string{"Nothing blocks the merge, and nothing says to wait."}
 	default:
 		st.Kind, st.Head, st.Short = "none", "No open items", "No open items"
-		st.Note = "Nothing to finish before merging, no major finding and no gap in the review."
+		st.Note = []string{"No difference, nothing to finish before merging, no major finding, no test change and no gap in the review."}
+		if len(v.Tickets) == 0 {
+			st.Note = append(st.Note, "No ticket was read, so nothing compared the code with what the tickets ask.")
+		}
+	}
+	if len(waits) > 0 {
+		st.Gate, st.GateText = "#"+slug(waits[0].Name)+"-gate", "Go to "+gateLink(waits[0].Name)
+		if st.Kind == "blocked" {
+			st.Lines = append(st.Lines, mline{Text: "Also waits for " + waits[0].Name + "."})
+		}
+	}
+	if slices.ContainsFunc(v.Terms.Errs, func(e string) bool { return strings.HasPrefix(e, "gates:") }) {
+		st.Lines = append(st.Lines, mline{Chip: evRun, Text: "The gate pass failed, so nothing checked whether the description or a ticket asks to wait."})
 	}
 	// the open items
 	open := stat{N: strconv.Itoa(n), Label: map[bool]string{true: "open item", false: "open items"}[n == 1]}
@@ -366,24 +355,26 @@ func (v *view) status() mstatus {
 		open.Second = strconv.Itoa(v.Page.Map.OnMap) + " of them on the map"
 	default:
 		var k []string
-		if b := len(v.Page.Before); b > 0 {
-			k = append(k, strconv.Itoa(b)+" before merging")
-		}
-		if m := v.majors(); m > 0 {
-			k = append(k, plural(m, "major finding", "major findings"))
-		}
-		if v.Page.Gap != nil {
-			k = append(k, "1 gap in the review")
+		for _, c := range v.openKinds() {
+			k = append(k, c.Text)
 		}
 		open.Second = strings.Join(k, ", ")
 	}
 	st.Stats = append(st.Stats, open)
-	// the tests run here
+	// the tests run here, else the CI they're left to
 	ran := stat{N: strconv.Itoa(len(v.Data.Tests.Ran)), Label: map[bool]string{true: "test run here", false: "tests run here"}[len(v.Data.Tests.Ran) == 1]}
-	if len(v.Data.Tests.Ran) == 0 {
-		ran.Second = "No test result reached this page"
-	} else {
+	switch c := v.CI; {
+	case len(v.Data.Tests.Ran) > 0:
 		ran.Second = v.ranText() + " at " + sha
+	case c != nil && c.Tests != "":
+		ran.Second = "Left to CI (" + c.Tests + ")"
+		if c.Edited {
+			ran.Second += ", which this PR edits"
+		}
+	case c != nil && len(c.Workflows) == 0:
+		ran.Second = "No CI workflow on the base branch."
+	default:
+		ran.Second = "No test result reached this page"
 	}
 	st.Stats = append(st.Stats, ran)
 	// the files the review didn't read
@@ -397,12 +388,69 @@ func (v *view) status() mstatus {
 	v.Page.given = total
 	nr := stat{N: strconv.Itoa(len(unread)), Of: strconv.Itoa(total), Label: "files not read by the review", Href: "#covered"}
 	if len(unread) == 0 {
-		nr.Of, nr.Second = "", "It read all "+strconv.Itoa(total)
+		nr.Of, nr.Second = "", "Every file fit the review"
 	} else {
 		nr.Second = strconv.Itoa(code) + " of them code"
 	}
 	st.Stats = append(st.Stats, nr)
+	// the tickets
+	if t := v.Page.Tickets; t.Shown {
+		ts := stat{N: strconv.Itoa(len(t.Cards)), Label: map[bool]string{true: "ticket", false: "tickets"}[len(t.Cards) == 1], Href: "#tickets"}
+		if len(v.Tickets) == 0 {
+			ts.Label += " named in commits"
+			ts.Second = "None was read for this review"
+		} else {
+			tk := v.Tickets[0] // open tickets come first
+			ts.Second = strings.TrimSpace(tk.Key + " " + tk.State)
+			n := 0
+			for _, d := range v.Terms.Differences {
+				if d.Ticket == tk.Key {
+					n++
+				}
+			}
+			ts.Second += " · " + map[bool]string{true: "no difference", false: plural(n, "difference", "differences")}[n == 0]
+		}
+		st.Stats = append(st.Stats, ts)
+	}
 	return st
+}
+
+// openKinds is the open items by kind, each with a link to its first item: differences, before merging, major
+// findings, test changes, the gap.
+func (v *view) openKinds() []cline {
+	p := &v.Page
+	var all []*card
+	all = append(all, p.Before...)
+	for _, b := range p.Parts {
+		all = append(all, b.Cards...)
+	}
+	if p.Others != nil {
+		all = append(all, p.Others.Cards...)
+	}
+	all = append(all, p.Tests.Cards...)
+	var out []cline
+	for _, k := range []struct{ kind, one, many string }{
+		{"Difference", "difference", "differences"},
+		{"Before merging", "before merging", "before merging"},
+		{"Major finding", "major finding", "major findings"},
+		{"Test change", "test change", "test changes"},
+	} {
+		var first *card
+		n := 0
+		for _, c := range all {
+			if c.Kind == k.kind {
+				n++
+				first = cmp.Or(first, c)
+			}
+		}
+		if n > 0 {
+			out = append(out, cline{Text: plural(n, k.one, k.many), Href: "#" + first.ID})
+		}
+	}
+	if p.Gap != nil {
+		out = append(out, cline{Text: "1 gap in the review", Href: "#gap"})
+	}
+	return out
 }
 
 // ranText is how the tests run here ended: "3 passed, 1 failed".
@@ -500,12 +548,12 @@ func (v *view) findingCard(i int, c review.Comment) *card {
 			k.Step = i + 1
 		}
 	}
-	if v.Since != nil {
-		if slices.Contains(v.Since.New, c.Path+": "+c.Title) {
-			k.Tags = append(k.Tags, "New since "+short(v.Since.Prev.SHA))
-		} else if f := v.files[c.Path]; f != nil && f.Changed != "" {
-			k.Tags = append(k.Tags, "Changed since "+f.Changed)
-		}
+	if c.Earlier {
+		k.Tags = append(k.Tags, tag{"history", "From an earlier review, still open"})
+	}
+	k.Paths = []string{c.Path}
+	if review.Blocks(c.Severity) {
+		k.Keys = []string{"finding\t" + c.Path + ":" + strconv.Itoa(c.Line)}
 	}
 	k.Excerpt = v.excerpt(c.Path, c.Line, c.Line, c.Line)
 	if slices.Contains(v.Omitted, c.Path) || slices.Contains(v.Failed, c.Path) {
@@ -572,11 +620,16 @@ func (v *view) excerpt(p string, from, to, cited int) *excerpt {
 			}
 		}
 	}
+	return v.cut(p, lines, 1, from, to, cited)
+}
+
+// cut is the excerpt of lines, the file's from line 1, around from..to, starting at floor or later.
+func (v *view) cut(p string, lines []string, floor, from, to, cited int) *excerpt {
 	if from > len(lines) {
 		return nil
 	}
-	a, b := max(1, from-2), min(len(lines), to+3)
-	x := &excerpt{Path: p, Range: strconv.Itoa(a) + "–" + strconv.Itoa(b), Cited: strconv.Itoa(cited)}
+	a, b := max(floor, from-2), min(len(lines), to+3)
+	x := &excerpt{Path: p, At: "at " + short(v.SHA), Range: strconv.Itoa(a) + "–" + strconv.Itoa(b), Cited: strconv.Itoa(cited)}
 	if a == b {
 		x.Range = strconv.Itoa(a)
 	}
@@ -607,6 +660,18 @@ func (v *view) cards() {
 	for i, c := range v.Findings {
 		k := v.findingCard(i, c)
 		v.found = append(v.found, k)
+	}
+	// the gates first, then the differences: those on a deploy box are read in Before you merge, the rest in their part
+	for _, g := range v.waiting() {
+		p.Before = append(p.Before, v.gateCard(g))
+	}
+	for i, d := range v.Terms.Differences {
+		k := v.diffCard(i, d)
+		if strings.HasPrefix(k.Box, "deploy:") {
+			p.Before = append(p.Before, k)
+		} else {
+			v.lead = append(v.lead, k)
+		}
 	}
 	// a card per deploy box: its risks, then the major findings on it
 	for _, r := range v.Risks {
@@ -684,6 +749,7 @@ func (v *view) cards() {
 		k.Blocks = []cblock{{Label: "The base branch", Chip: evGit, Lines: lines}}
 		p.Before = append(p.Before, k)
 	}
+	v.beforeExtras()
 	// the major findings on a deploy box are read there; the rest in their part, else with the others
 	for _, k := range v.found {
 		if review.Blocks(k.Sev) && strings.HasPrefix(k.Box, "deploy:") {
@@ -726,17 +792,11 @@ func (v *view) cards() {
 		if len(fit) > 0 {
 			g.Files = append(g.Files, fileGroup{Label: "Didn't fit: " + plural(len(fit), "code file", "code files"), Files: fit})
 		}
+		g.Keys = []string{"gap"}
+		g.Paths = unread
 		p.Gap = g
 	}
-	p.Open = len(p.Before) + v.majors()
-	if p.Gap != nil {
-		p.Open++
-	}
-	for _, k := range p.Before { // a major finding on a deploy box counts once
-		if k.Kind == "Major finding" {
-			p.Open--
-		}
-	}
+	v.lead = append(v.lead, v.testCards()...)
 }
 
 // fileHref is a path's link into the page's diff, "" when the page doesn't show it.
@@ -758,7 +818,11 @@ func (v *view) riskCard(r risk, items []riskItem, box, title string) *card {
 		if i := strings.Index(at, "~"); i > 0 {
 			at = at[:i]
 		}
+		if !paths[at] {
+			k.Paths = append(k.Paths, at)
+		}
 		paths[at] = true
+		k.Keys = append(k.Keys, "before\t"+it.What)
 		l := cline{Code: it.What, Href: "#" + it.ID, Note: it.Note}
 		if at != it.What {
 			l.Note = strings.TrimSpace(it.Note + " · in " + path.Base(at))
@@ -778,9 +842,6 @@ func (v *view) riskCard(r risk, items []riskItem, box, title string) *card {
 			k.GHPlace = p
 			if slices.Contains(v.Omitted, p) || slices.Contains(v.Failed, p) {
 				k.Cov = "The review didn't read this file, so no finding of this run covers it."
-			}
-			if f := v.files[p]; f != nil && f.Changed != "" {
-				k.Tags = append(k.Tags, "Changed since "+f.Changed)
 			}
 		}
 	}
@@ -802,62 +863,122 @@ func slug(s string) string {
 	return strings.Trim(slugBad.ReplaceAllString(strings.ToLower(s), "-"), "-")
 }
 
-// covered is What the review covered: the open items, the tests, the findings, the coverage (5.10).
+// covered is What the review covered: the open items, the rules, the tests, the findings, the coverage (5.10).
+//
+//nolint:gocognit,gocyclo // a row per source, each with its states
 func (v *view) covered() []crow {
 	p := &v.Page
 	sha := short(v.SHA)
 	var rows []crow
-	var kinds []string
-	if b := len(p.Before) - countKind(p.Before, "Major finding"); b > 0 {
-		kinds = append(kinds, strconv.Itoa(b)+" before merging")
+	p.OpenKinds = v.openKinds()
+	if len(p.OpenKinds) == 0 {
+		rows = append(rows, crow{"Open items", []mline{{Text: "None."}}})
+	} else {
+		rows = append(rows, crow{Label: "Open items"}) // the template draws p.OpenKinds as links
 	}
-	if m := v.majors(); m > 0 {
-		kinds = append(kinds, plural(m, "major finding", "major findings"))
-	}
-	if p.Gap != nil {
-		kinds = append(kinds, "1 gap in the review")
-	}
-	open := "None"
-	if len(kinds) > 0 {
-		open = strconv.Itoa(p.Open) + ": " + join(kinds)
-	}
-	rows = append(rows, crow{"Open items", []mline{{Text: open + "."}}})
-	t := v.Data.Tests
-	switch {
-	case len(t.Ran) == 0 && len(t.Broken) == 0:
-		rows = append(rows, crow{"Tests and linters", []mline{{Text: "None ran here. No test result reached this page."}}})
+	// the rules the review followed, as on the base
+	base := cmp.Or(v.PR.Base, "the base branch")
+	switch r := v.Rules; {
+	case len(r.Files) == 0:
+		rows = append(rows, crow{"Rules", []mline{{Chip: evBase, Text: "No rules file on the base branch."}}})
 	default:
-		ls := []mline{}
-		if len(t.Ran) > 0 {
-			c := chip{"run", "Run passed"}
-			if slices.Contains(slices.Collect(maps.Values(t.Ran)), "fail") {
-				c = chip{"fail", "Run failed"}
+		var whole, cut []string
+		for _, f := range r.Files {
+			if f.Cut {
+				cut = append(cut, "`"+f.Path+"`")
+			} else {
+				whole = append(whole, "`"+f.Path+"`")
 			}
-			ls = append(ls, mline{c, plural(len(t.Ran), "test", "tests") + " ran at " + sha + ": " + v.ranText() + "."})
 		}
-		if len(t.Broken) > 0 {
-			ls = append(ls, mline{chip{"fail", "Run failed"}, join(t.Broken) + map[bool]string{true: " doesn't", false: " don't"}[len(t.Broken) == 1] + " build at " + sha + "."})
+		at := ", as on " + base + " at " + short(r.SHA)
+		var ls []mline
+		if len(whole) > 0 {
+			ls = append(ls, mline{Chip: evBase, Text: join(whole) + at + ", read whole. This PR can't change the rules it is reviewed by."})
 		}
-		rows = append(rows, crow{"Tests and linters", ls})
+		if len(cut) > 0 {
+			ls = append(ls, mline{Chip: evBase, Text: join(cut) + at + ", cut short to fit the review. This PR can't change the rules it is reviewed by."})
+		}
+		rows = append(rows, crow{"Rules", ls})
 	}
+	// the tests and linters: the runs here, then CI's
+	t := v.Data.Tests
+	var ls []mline
+	if len(t.Ran) > 0 {
+		c := chip{"run", "Run passed"}
+		if slices.Contains(slices.Collect(maps.Values(t.Ran)), "fail") {
+			c = chip{"fail", "Run failed"}
+		}
+		ls = append(ls, mline{Chip: c, Text: plural(len(t.Ran), "test", "tests") + " ran at " + sha + ": " + v.ranText() + "."})
+	}
+	if len(t.Broken) > 0 {
+		ls = append(ls, mline{Chip: chip{"fail", "Run failed"}, Text: join(t.Broken) + map[bool]string{true: " doesn't", false: " don't"}[len(t.Broken) == 1] + " build at " + sha + "."})
+	}
+	ci := v.CI
+	if len(ls) == 0 {
+		s := "None ran here."
+		switch {
+		case ci != nil && ci.Tests != "" && len(ci.Checks) == 0:
+			s += " Left to CI (" + ci.Tests + "); its result isn't on this page."
+		case ci != nil && len(ci.Workflows) == 0:
+			s += " No CI workflow on the base branch."
+		case ci == nil:
+			s += " No test result reached this page."
+		}
+		ls = append(ls, mline{Text: s})
+	}
+	if ci != nil {
+		var passed, pending int
+		for _, c := range ci.Checks {
+			switch {
+			case c.Failed():
+				l := mline{Chip: chip{"fail", "Run failed"}, Text: "`" + c.Name + "` failed at " + sha + "."}
+				if c.URL != "" {
+					l.Href, l.HrefText = c.URL, "Open the run on "+cmp.Or(v.Forge.Name, "GitHub")
+				}
+				ls = append(ls, l)
+			case c.Status == "pending":
+				pending++
+			case c.Conclusion == "success":
+				passed++
+			}
+		}
+		if passed > 0 {
+			ls = append(ls, mline{Chip: chip{"run", "Run passed"}, Text: plural(passed, "CI check", "CI checks") + " passed at " + sha + "."})
+		}
+		if pending > 0 {
+			ls = append(ls, mline{Chip: evRun, Text: plural(pending, "CI check was", "CI checks were") + " still running when the review read them."})
+		}
+		if ci.Err != "" {
+			ls = append(ls, mline{Chip: evRun, Text: "The forge's checks weren't read for this review, so no CI result is on this page."})
+		}
+	}
+	rows = append(rows, crow{"Tests and linters", ls})
 	if pr := v.Story.Proof; pr != "" {
 		res := map[string]string{"pass": "passed", "fail": "failed", "skip": "was skipped"}[ranOf(t.Ran, pr)]
-		if res != "" {
+		switch res {
+		case "":
+			rows = append(rows, crow{"Proof on the base", []mline{{Text: "Not run: `" + pr + "`, the test the review picked as proof."}}})
+		default:
 			c := chip{"run", "Run passed"}
 			if res == "failed" {
 				c = chip{"fail", "Run failed"}
 			}
-			rows = append(rows, crow{"Proof on the base", []mline{{c, "`" + pr + "` " + res + " at " + sha + "."}}})
+			rows = append(rows, crow{"Proof on the base", []mline{{Chip: c, Text: "`" + pr + "` " + res + " at " + sha + "."}}})
 		}
+	} else {
+		rows = append(rows, crow{"Proof on the base", []mline{{Text: "None."}}})
 	}
 	if n := len(v.Findings); n > 0 {
-		m, ran, checked := v.majors(), 0, 0
+		m, ran, checked, earlier := v.majors(), 0, 0, 0
 		for _, c := range v.Findings {
 			switch {
 			case runBacked(c):
 				ran++
 			case c.Evidence != "":
 				checked++
+			}
+			if c.Earlier {
+				earlier++
 			}
 		}
 		var s string
@@ -885,19 +1006,22 @@ func (v *view) covered() []crow {
 		default:
 			s += " A second model agreed with " + strconv.Itoa(checked) + " of " + them + ", and neither ran the code."
 		}
-		ls := []mline{{c, s}}
+		if earlier > 0 {
+			s += " " + strconv.Itoa(earlier) + map[bool]string{true: " comes", false: " come"}[earlier == 1] + " from an earlier review."
+		}
+		ls := []mline{{Chip: c, Text: s}}
 		if ran > 0 && rest > 0 {
-			ls = append(ls, mline{evTest, strconv.Itoa(ran) + " shown by a test run."})
+			ls = append(ls, mline{Chip: evTest, Text: strconv.Itoa(ran) + " shown by a test run."})
 		}
 		if d := len(v.Dropped); d > 0 {
-			ls = append(ls, mline{evAI, plural(d, "finding was", "findings were") + " dropped by the cross-check."})
+			ls = append(ls, mline{Chip: evAI, Text: plural(d, "finding was", "findings were") + " dropped by the cross-check."})
 		}
 		rows = append(rows, crow{"Findings", ls})
 	} else {
-		rows = append(rows, crow{"Findings", []mline{{evRun, "The review found nothing to flag."}}})
+		rows = append(rows, crow{"Findings", []mline{{Chip: evRun, Text: "The review found nothing to flag."}}})
 	}
 	unread, _ := v.unread()
-	cov := "The review read all " + plural(v.Page.given, "file", "files") + " it was given."
+	cov := "The review read all " + plural(v.Page.given, "file", "files") + " it was given"
 	if len(unread) > 0 {
 		var p []string
 		var fit, failed int
@@ -914,12 +1038,16 @@ func (v *view) covered() []crow {
 		if failed > 0 {
 			p = append(p, plural(failed, "file was", "files were")+" in a review part that failed")
 		}
-		cov = join(p) + "."
+		cov = join(p)
 	}
+	if v.Parts > 1 {
+		cov += ", which ran in " + strconv.Itoa(v.Parts) + " parts"
+	}
+	cov += "."
 	if skip := len(v.files) - v.Page.given; skip > 0 {
 		cov += " " + strconv.Itoa(skip) + " more were skipped by rule."
 	}
-	rows = append(rows, crow{"Coverage", []mline{{evRun, cov}}})
+	rows = append(rows, crow{"Coverage", []mline{{Chip: evRun, Text: cov}}})
 	return rows
 }
 
@@ -990,7 +1118,7 @@ func (v *view) team() team {
 		known    bool
 	}
 	var rs []kr
-	var news, gone []string
+	var news, gone, quiet []string
 	for _, b := range v.Page.Parts {
 		if b.Removed || b.Generated || b.Others {
 			continue
@@ -1001,6 +1129,12 @@ func (v *view) team() team {
 		}
 		ag := Aggregate(v.Knowledge, paths)
 		r := kr{r: teamRow{ID: b.ID, Label: b.Label, Path: b.Path, Files: b.FilesText(), Changed: "+" + thousands(b.Add) + " −" + thousands(b.Del)}, med: ag.Median, old: ag.Oldest, known: ag.Known > 0}
+		// git names can't be matched to the forge's logins: only a part nobody changed in 12 months is known to have
+		// no current member who did
+		if m := v.Members; m != nil && m.Err == "" && !b.New && ag.Known > 0 && len(ag.People) == 0 {
+			b.NoMember = true
+			quiet = append(quiet, b.Label)
+		}
 		if ag.Known > 0 {
 			r.r.Days = strconv.Itoa(ag.Median)
 			if ag.Oldest != ag.Median && ag.Known > 1 {
@@ -1022,6 +1156,12 @@ func (v *view) team() team {
 	if len(news) > 0 {
 		t.New = "New in this PR: " + join(news) + "."
 	}
+	if len(quiet) > 0 {
+		t.NoMember = "No current member changed or reviewed " + join(quiet) + " in 12 months."
+	}
+	if m := v.Members; m != nil && m.Err != "" {
+		t.Members = "The forge's member list wasn't read, so the page can't say whether a current member changed this code."
+	}
 	if m := v.Page.Map; m != nil && m.src.Removed != nil {
 		for _, f := range m.src.Removed.Folders {
 			gone = append(gone, "`"+f.Path+"` ("+plural(f.N, "file", "files")+")")
@@ -1040,6 +1180,10 @@ func (v *view) rail() []railRow {
 		if b.N > 0 {
 			rs = append(rs, railRow{Label: b.Label, Href: "#" + b.Anchor(), N: b.N, Sub: true, Box: b.Key})
 		}
+	}
+	rs = append(rs, railRow{Label: "Test changes", Href: "#tests", N: len(p.Tests.Cards)})
+	if p.Tickets.Shown {
+		rs = append(rs, railRow{Label: "The tickets", Href: "#tickets", N: len(p.Tickets.Cards)})
 	}
 	return append(rs, railRow{Label: "What the review covered", Href: "#covered"}, railRow{Label: "Who changed this code", Href: "#team"})
 }

@@ -626,6 +626,73 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .warn{position:relative;overflow:hidden;background:var(--raised);border-radius:8px;padding:16px 16px 16px 20px;display:flex;gap:10px;align-items:flex-start;color:var(--ink)}
 .warn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--line3)}
 .warn svg{flex:none;margin-top:4px;color:var(--ink2)}
+/* gate (6), status chips (2), quotes in blocks */
+.gate{padding:20px}
+.gate .gk{font-size:12px;font-weight:500;color:var(--ink2);margin-bottom:4px}
+.gate h3{font:600 15px/1.5 var(--sans);color:var(--inkhi);scroll-margin-top:80px}
+.gate .slines{margin-top:12px;gap:12px}
+.chip.st svg{color:var(--ink2)}
+.badge{border:1px solid var(--line3);color:var(--ink2);font-weight:400}
+/* test-change group (18) */
+.tg-stats{font-size:13px;color:var(--ink2)}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl.fx{table-layout:fixed}
+.tbl th{text-align:left;font:600 12px/1.5 var(--sans);color:var(--ink2);padding:0 12px 8px 0;vertical-align:bottom}
+.tbl td{padding:10px 12px 10px 0;border-top:1px solid var(--line);vertical-align:top;color:var(--ink);overflow-wrap:anywhere}
+.tbl td:last-child,.tbl th:last-child{padding-right:0}
+.tbl td.n,.tbl th.n{text-align:right;font:400 12px/1.6 var(--mono);color:var(--ink2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbl th.n{font:600 12px/1.5 var(--sans)}
+.samples{display:flex;flex-direction:column;gap:12px}
+.sample{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink)}
+.exp2{background:var(--ground);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font:400 12.5px/22px var(--mono);color:var(--code);overflow-x:auto;white-space:pre}
+.arrow{color:var(--ink3);font-size:13px;padding-left:12px}
+/* ticket card (11), ticket chip (5), four answers (12), contract rows (10) */
+.tcs{display:flex;flex-direction:column;gap:8px}
+.tc{background:var(--surface);border:1px solid var(--line);border-radius:8px;min-width:0;scroll-margin-top:80px}
+.tch{display:flex;align-items:flex-start;gap:12px;width:100%;min-height:56px;padding:12px 20px;background:transparent;border:0;border-radius:8px;text-align:left;cursor:pointer;color:var(--ink)}
+.tch:hover{background:var(--hover)}
+.tch>svg{margin-top:4px;flex:none;color:var(--ink2);transition:transform .16s ease-out}
+.tch[aria-expanded="true"]>svg{transform:rotate(180deg)}
+.tch .mt{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0}
+.tch .l1{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.tch .tt{font:600 15px/1.5 var(--sans);color:var(--inkhi)}
+.tch .tst{font-weight:400;font-size:13px;color:var(--ink2)}
+.tcb{padding:0 20px 20px;display:flex;flex-direction:column;gap:20px}
+.tk{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--line2);font:400 12px/1 var(--sans);color:var(--ink2);white-space:nowrap;vertical-align:top;flex:none}
+.tk .k{font:500 12px/1 var(--mono);color:var(--inkhi)}
+.fa{display:flex;flex-direction:column;gap:12px}
+.fag{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.fac{background:var(--raised);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.fac .fq{font:600 13px/1.4 var(--sans);color:var(--ink2)}
+.fac .fw{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:4px}
+.ctab{width:100%;border-collapse:collapse;table-layout:fixed}
+.ctab th{text-align:left;font:600 12px/1.5 var(--sans);color:var(--ink2);padding:0 16px 8px 0}
+.ctab td{padding:12px 16px 12px 0;border-top:1px solid var(--line);vertical-align:top}
+.ctab td:last-child,.ctab th:last-child{padding-right:0}
+.ctab .ask{font-size:15px;color:var(--ink);overflow-wrap:anywhere}
+.ctab .stc{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.ctab .evd{font-size:13px;color:var(--ink2);display:flex;flex-direction:column;align-items:flex-start;gap:4px;overflow-wrap:anywhere}
+.fu{font-size:13px;color:var(--ink2)}
+/* files-by-kind bar (14) */
+.kinds{display:flex;flex-direction:column;gap:12px}
+.lbar{display:flex;gap:2px;height:14px}
+.lbar span{border-radius:4px;min-width:6px}
+.k-code{background:var(--ink2)}
+.k-test{background:repeating-linear-gradient(45deg,var(--ink2) 0 2px,var(--raised) 2px 5px)}
+.k-doc{background:radial-gradient(circle,var(--ink3) 1px,transparent 1.4px) 0 0/6px 6px,var(--raised)}
+.k-del{border:1px solid var(--ink3)}
+.krows{display:flex;flex-direction:column}
+.krow{display:grid;grid-template-columns:12px 168px 64px 128px minmax(0,1fr);column-gap:12px;row-gap:4px;align-items:baseline;padding:12px 0;border-top:1px solid var(--line);font-size:13px;color:var(--ink2)}
+.krow .sw{width:12px;height:12px;border-radius:3px;position:relative;top:1px}
+.krow .nm{font-weight:600;color:var(--inkhi)}
+.krow .lc{font:400 12px/1.5 var(--mono)}
+.krow .cp2{grid-column:2/-1;color:var(--ink)}
+.krow .cp2 .chip{margin:0 6px 4px 0}
+.krow .dz{grid-column:2/-1}
+.dlinks{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.vrow{display:flex;align-items:center;gap:4px}
+.vrow>.mrow{flex:1;min-width:0}
+.vcmp{flex:none;font-size:12px}
 /* sheet (17), More */
 .scrim{position:fixed;inset:0;z-index:40;background:color-mix(in srgb,var(--ground) 70%,transparent)}
 .vsheet{position:fixed;left:0;right:0;bottom:0;z-index:41;max-height:85vh;max-height:85dvh;overflow:auto;overscroll-behavior:contain;background:var(--surface);border-top:1px solid var(--line2);border-radius:12px 12px 0 0;animation:v4up .16s ease-out}
@@ -683,6 +750,18 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .sbtn .sw{grid-column:2/3;grid-row:3}
 .sexp{padding:16px}
 .pbx{padding-left:0}
+.tbl thead,.ctab thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.tbl,.tbl tbody,.tbl tr,.tbl td,.ctab,.ctab tbody,.ctab tr,.ctab td{display:block;width:auto}
+.tbl tr,.ctab tr{padding:12px 0;border-top:1px solid var(--line)}
+.tbl td,.ctab td{border:0;padding:2px 0;text-align:left!important}
+.tbl td:first-child,.ctab td:first-child{font-size:15px;font-weight:500;color:var(--ink)}
+.tbl td[data-col]::before,.ctab td[data-col]::before{content:attr(data-col) ": ";color:var(--ink3);font:400 13px var(--sans)}
+.krow{grid-template-columns:12px auto auto minmax(0,1fr)}
+.krow .cp2,.krow .dz{grid-column:1/-1}
+.fag{grid-template-columns:minmax(0,1fr)}
+.tch{padding:12px}
+.tcb{padding:0 12px 16px}
+.gate{padding:16px}
 }
 @media (max-width:359px){.secbtn .slb{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.secbtn{padding:0 12px;min-width:44px}.tb-l:has(.fchip:not([hidden]),.short:not([hidden])) .n360{display:none}}
 

@@ -242,11 +242,14 @@ func TestReportVersions(t *testing.T) {
 	key := reportSecret("")
 	dir := reportPath(e) + "/" + key
 	for i := range maxVersions + 2 {
-		if u := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(i)}); u != ReportURL+"/r/github.com/id:5/7/"+key {
+		if u, _ := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(i)}); u != ReportURL+"/r/github.com/id:5/7/"+key {
 			t.Fatal(u)
 		}
 	}
-	writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(5)}) // reviewed again: the newest
+	// reviewed again: the newest; its merge status sets the commit status, failure only when blocked
+	if _, now := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(5), Conflicts: true}); now.Short != "Blocked · conflict with the base branch" || !now.Blocked {
+		t.Errorf("%+v", now)
+	}
 	vs, err := Versions(dir)
 	if err != nil || len(vs) != maxVersions || vs[0].SHA != sha(5) || vs[1].SHA != sha(maxVersions+1) || vs[0].At.IsZero() {
 		t.Fatalf("%+v", vs)
@@ -268,16 +271,16 @@ func TestReportVersions(t *testing.T) {
 		}
 	}
 	Reports().Put(dir+"/versions.json", []byte("{")) // unreadable: a report would drop the list
-	if u := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(1)}); u != "" {
+	if u, _ := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(1)}); u != "" {
 		t.Fatal("wrote over an unreadable list:", u)
 	}
 	gl := &forge.Event{Forge: "gitlab"} // a project in a subgroup
 	gl.Repository.FullName, gl.PullRequest.Number, gl.PullRequest.HTMLURL = "g/s/p", 3, "https://gitlab.example.com/g/s/p/-/merge_requests/3"
-	if u := writeReport(gl, key, "", report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/g/s/p/3/"+key {
+	if u, _ := writeReport(gl, key, "", report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/g/s/p/3/"+key {
 		t.Fatal("without the repo's id, by its name:", u)
 	}
 	gl.Repository.ID = 9
-	if u := writeReport(gl, key, "", report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/id:9/3/"+key {
+	if u, _ := writeReport(gl, key, "", report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/id:9/3/"+key {
 		t.Fatal(u)
 	}
 }
@@ -297,7 +300,7 @@ func TestAdoptNamedReports(t *testing.T) {
 		Reports().Put(dir+"/versions.json", fmt.Appendf(nil, `[{"sha":"%s","at":"2026-01-02T00:00:00Z"},{"sha":"%s","at":"2026-01-01T00:00:00Z"}]`, sha(2), sha(1)))
 	}
 	dir := reportPath(e) + "/" + key
-	if u := writeReport(e, key, ReportURL+"/r/"+old, report.Data{SHA: sha(3)}); u != ReportURL+"/r/"+dir {
+	if u, _ := writeReport(e, key, ReportURL+"/r/"+old, report.Data{SHA: sha(3)}); u != ReportURL+"/r/"+dir {
 		t.Fatal(u)
 	}
 	vs, err := Versions(dir)
@@ -373,7 +376,7 @@ func TestAdoptPublishFails(t *testing.T) {
 	link := ReportURL + "/r/" + old
 	for _, block := range []string{dir + "/versions.json", old + "/moved"} { // a folder in the way
 		Reports().Put(block+"/x", nil)
-		if u := writeReport(e, key, link, report.Data{SHA: sha(2)}); u != link {
+		if u, _ := writeReport(e, key, link, report.Data{SHA: sha(2)}); u != link {
 			t.Fatal(block, u)
 		}
 		if b, err := Reports().Get(old + "/" + sha(1) + ".html.gz"); string(b) != "one" {

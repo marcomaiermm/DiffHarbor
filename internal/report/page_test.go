@@ -2,7 +2,10 @@ package report
 
 import (
 	"diffharbor/internal/checks"
+	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
+	"diffharbor/internal/ticket"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -110,8 +113,112 @@ func largeData() Data {
 		},
 		Omitted:   []string{"internal/payments/client.go"},
 		Map:       m,
-		Knowledge: map[string]Know{"internal/orders/orders.go": {Days: 40, People: []string{"dev-one", "dev-two"}}, "internal/catalog/catalog.go": {Days: 120, People: []string{"dev-two"}}, "internal/api/routes.go": {Days: 12, People: []string{"dev-one"}}},
+		Knowledge: map[string]Know{"internal/orders/orders.go": {Days: 40, People: []string{"dev-one", "dev-two"}}, "internal/catalog/catalog.go": {Days: 120, People: []string{"dev-two"}}, "internal/api/routes.go": {Days: 12, People: []string{"dev-one"}}, "internal/util/strings.go": {Days: 400}},
 		Bot:       "shop-review",
+		// Phase 3: the tickets, the passes' terms, CI, the static reads
+		Tickets: []ticket.Ticket{
+			{Key: "SHOP-12", Title: "Charge orders before they save", State: "In Progress", Due: created.AddDate(0, 1, 20), Outcome: "Every placed order is charged once, before it is saved.", DoneWhen: []string{"A failed charge leaves no order.", "The payment URL comes from the environment."}, BlockedBy: []string{"SHOP-11"}, Read: created.AddDate(0, 1, 13)},
+			{Key: "SHOP-11", Title: "Add a payments client", State: "Done", Done: true, DoneWhen: []string{"A client sends charges."}, Blocks: []string{"SHOP-12"}, Read: created.AddDate(0, 1, 13)},
+		},
+		FollowUps:  []ticket.Ticket{{Key: "SHOP-13", State: "Todo"}},
+		TicketErrs: map[string]string{"SHOP-9": `Get "https://tracker.example.com/x": context deadline exceeded`},
+		Split:      &Split{Tickets: []TicketStat{{Key: "SHOP-12", Commits: 4, Files: 3, Own: 2, Steps: 1}, {Key: "SHOP-11", Commits: 2, Files: 2, Own: 1, Steps: 1}, {Key: "SHOP-9", Commits: 1, Files: 1}}, Nameless: 1, Shared: 1},
+		SplitOff:   true,
+		Terms: review.Terms{
+			Gates:  []review.Gate{{Quote: review.Quote{Text: "Do not merge before the payment service is live.", In: "description", Section: "Rollout"}, Name: "the payment service launch", Ticket: "SHOP-12", Waits: true}},
+			Serves: []string{"The payment service accepts EUR charges only, as of 2026-11-01."},
+			Order:  []string{"Run migration 0007 before the new image starts."},
+			Contracts: []review.Contract{{
+				Ticket: "SHOP-12", Evidence: review.CrossCheck,
+				Rows: []review.Row{
+					{Ask: "Outcome: Every placed order is charged once, before it is saved.", Status: review.Met, Evidence: review.CrossCheck, At: []string{"internal/orders/orders.go:2"}},
+					{Ask: "Done when 1: A failed charge leaves no order.", Status: review.Deviates, Evidence: review.CrossCheck, At: []string{"internal/orders/orders.go:2-3", "internal/orders/orders_test.go:1"}, Note: "The caller saves before it charges."},
+					{Ask: "Done when 2: The payment URL comes from the environment.", Status: review.MetInCode, Evidence: review.SearchAtHead, At: []string{"internal/payments/client.go:7"}, Docs: []string{"README.md:1"}},
+					{Ask: "Beyond the ticket", Status: "Beyond the ticket", Evidence: review.CrossCheck, Note: "The catalog lookup takes an id."},
+				},
+				Changed: review.Answer{Text: "Orders charge through the new payments client when they are placed.", At: []string{"internal/orders/orders.go:2"}},
+				Runs:    review.Answer{Text: "The order route, on every POST.", At: []string{"internal/api/routes.go:2"}},
+				Relies:  review.Answer{Text: "`PAYMENTS_API_URL` set where the app runs."},
+				First:   review.Answer{Text: "`orders.go:2`: the charge's error and the save's order.", At: []string{"internal/orders/orders.go:2"}},
+			}},
+			Differences: []review.Difference{
+				{Ticket: "SHOP-12", Status: review.Deviates, Title: "A failed charge still leaves a saved order", Line: "SHOP-12 asks for no order after a failed charge; the caller saves first.", Asks: []review.Quote{{Text: "A failed charge leaves no order.", In: "SHOP-12", Section: "Done when 1"}}, Does: "`Place` charges after the caller saved the order.", At: "internal/orders/orders.go:2", Excerpt: "internal/orders/orders.go:1-3", Evidence: review.CrossCheck},
+				{Status: review.Decided, Title: "Migration 0007 drops the legacy table", Line: "No ticket asks for it; the PR decides the legacy orders go.", Does: "The migration drops `legacy_orders`.", At: "db/migrations/0007_orders.sql:2", Excerpt: "db/migrations/0007_orders.sql:1-2", Evidence: review.Inferred},
+			},
+		},
+		CI: &CI{
+			Checks:    []Check{{Name: "test", Status: "completed", Conclusion: "failure", Workflow: "ci", Path: ".github/workflows/ci.yml", URL: "https://github.com/acme/shop/actions/runs/1"}, {Name: "lint", Status: "completed", Conclusion: "success", Workflow: "ci", Path: ".github/workflows/ci.yml"}},
+			Workflows: []string{".github/workflows/ci.yml"}, Tests: "ci.yml", Edited: true,
+		},
+		Members: &Members{Logins: []string{"dev-one", "dev-two"}},
+		Rules:   Rules{SHA: "0123456789ab", Files: []RuleFile{{Path: "AGENTS.md"}}},
+		Parts:   2,
+		TestChanges: TestChanges{
+			With: []TestFile{{Path: "legacy/a_test.go", Tests: []TestCase{{Title: "TestLegacyCopy", Line: 4}}, Imports: "legacy/a.go"}, {Path: "legacy/c_test.go", Tests: []TestCase{{Title: "TestLegacyIDs", Line: 9}}, Names: []string{"legacyIDs"}}},
+			Kept: []TestFile{{Path: "internal/orders/place_test.go", Tests: []TestCase{{Title: "TestPlaceSavesOnce", Line: 12}}, Names: []string{"Place"}, Found: []string{"internal/orders/orders.go:2"}}},
+			Stay: []TestStay{{Path: "internal/orders/orders_test.go", Flags: []diff.Flag{{At: "internal/orders/orders_test.go: TestPlaceTwice", What: "test deleted"}, {At: "internal/orders/orders_test.go:9", What: "expectation changed: `want(1)` → `want(2)`"}}}},
+		},
+		Kinds: []FileKind{
+			{Kind: "code", Files: []string{"internal/payments/client.go", "internal/orders/orders.go", "internal/catalog/catalog.go", "internal/api/routes.go", "internal/util/strings.go", "db/migrations/0007_orders.sql"}, Add: 16, Del: 4, Read: 5},
+			{Kind: "tests", Files: []string{"internal/orders/orders_test.go"}, Add: 1, Del: 1, Read: 1},
+			{Kind: "tooling", Files: []string{".github/workflows/ci.yml", "README.md"}, Add: 2, Del: 2, Read: 1},
+			{Kind: "gone", Files: []string{"internal/orders/old.go", "legacy/a.go", "legacy/b.go"}, Del: 3, Deleted: 3, Named: 1},
+		},
+		Env:        map[string]EnvVar{"PAYMENTS_API_URL": {Reads: []string{"internal/payments/client.go:7"}}},
+		Migrations: []Migration{{Path: "db/migrations/0007_orders.sql", Docs: []string{"README.md:1"}, Tests: []string{"internal/orders/orders_test.go:1"}}},
+	}
+}
+
+// prevData is the large PR's version before its last push: orders.go read otherwise, no difference yet.
+func prevData() Data {
+	d := largeData()
+	d.SHA = "9876543210fedcba"
+	d.Diff = strings.Replace(d.Diff, "\treturn payments.Charge(id)", "\treturn nil", 1)
+	d.Terms.Differences = d.Terms.Differences[1:]
+	return d
+}
+
+// waitsData is a small PR that waits on the author's word for another ticket, with an open PR on the same lines.
+func waitsData() Data {
+	created := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	diffs := newFile("internal/catalog/price.go", "package catalog\n\n// Price is a list price.\ntype Price struct{ Cents int }\n") +
+		newFile("internal/store/prices.go", "package store\n\nfunc RecordPrice(p catalog.Price) error {\n\treturn nil\n}\n") +
+		editFile("cmd/ingest/main.go", []string{"func main() {}"}, []string{"func main() { store.RecordPrice(catalog.Price{}) }"}) +
+		newFile("internal/store/migrations/0004_prices.sql", "CREATE TABLE prices (cents int);\n") +
+		editFile("docs/ingest.md", []string{"old"}, []string{"new"})
+	m := &Map{
+		Parts: []MapPart{
+			{ID: "internal/catalog", Label: "catalog", Path: "internal/catalog", Files: []string{"internal/catalog/price.go"}, New: true, Col: 1, Row: 0},
+			{ID: "internal/store", Label: "store", Path: "internal/store", Files: []string{"internal/store/prices.go"}, New: true, Col: 2, Row: 0},
+			{ID: "cmd/ingest", Label: "cmd/ingest", Path: "cmd/ingest", Files: []string{"cmd/ingest/main.go"}, Col: 3, Row: 0},
+		},
+		Order: []string{"internal/catalog", "internal/store", "cmd/ingest"},
+		Lines: []MapLine{
+			{From: "internal/catalog", To: "internal/store", Names: []MapName{{Name: "Price", Kind: "named", At: "internal/store/prices.go:3", N: 1}}, Named: 1, Style: "dashed"},
+			{From: "internal/store", To: "cmd/ingest", Names: []MapName{{Name: "RecordPrice", Kind: "calls", At: "cmd/ingest/main.go:2", N: 1}}, Calls: 1, Weight: 1, Width: 1, Style: "solid", Chevron: "from"},
+		},
+		Deploy: []MapDeploy{{Kind: "migration", Label: "Migration 0004", Path: "internal/store/migrations/0004_prices.sql"}, {Kind: "prs", Label: "Open PRs"}},
+		Cols:   3,
+	}
+	return Data{
+		Repo: "acme/catalog", Number: 31, Title: "Track price lists per region (CAT-40)", URL: "https://github.com/acme/catalog/pull/31",
+		SHA: "5e1f2a70000000", Forge: Forge{Name: "GitHub", Ref: "#", Blob: "https://github.com/acme/catalog/blob/5e1f2a7/"},
+		PR:   PR{Created: created, Author: "dev-one", Head: "feat/cat-40-prices", Base: "main", Commits: 4},
+		Diff: diffs, Map: m, Bot: "catalog-review",
+		Brief:   []review.Sentence{{Text: "The ingest now records each new price list once.", At: "cmd/ingest/main.go:2"}},
+		Others:  []Other{{Number: 29, Title: "feat: import price lists", Author: "dev-one", Draft: true, URL: "https://github.com/acme/catalog/pull/29", Files: []string{"cmd/ingest/main.go", "docs/ingest.md"}, Clash: []string{"cmd/ingest/main.go", "docs/ingest.md"}}},
+		Tickets: []ticket.Ticket{{Key: "CAT-40", Title: "Track price lists per region", State: "In Review", Outcome: "Each region lists its prices.", DoneWhen: []string{"A new list adds one row."}, Read: created.AddDate(0, 0, 5)}},
+		Split:   &Split{Tickets: []TicketStat{{Key: "CAT-40", Commits: 4, Files: 5, Own: 5}}},
+		Terms: review.Terms{
+			Gates: []review.Gate{{Quote: review.Quote{Text: "Uses 0004 so it lands after CAT-41's 0003. Merge after CAT-41.", In: "description"}, Name: "CAT-41 to merge", Ticket: "CAT-41", Waits: true}},
+			Contracts: []review.Contract{{Ticket: "CAT-40", Evidence: review.CrossCheck, Rows: []review.Row{
+				{Ask: "Outcome: Each region lists its prices.", Status: review.Met, Evidence: review.CrossCheck, At: []string{"internal/store/prices.go:3"}},
+				{Ask: "Done when 1: A new list adds one row.", Status: review.Met, Evidence: review.CrossCheck, At: []string{"internal/store/prices.go:3", "internal/store/prices_test.go:8"}},
+			}}},
+			Differences: []review.Difference{{Ticket: "CAT-40", Status: review.Deviates, Title: "The lower price wins when a list comes back", Line: "CAT-40 asks for the latest price; the store keeps the lowest.", Asks: []review.Quote{{Text: "A new list adds one row.", In: "CAT-40", Section: "Done when 1"}}, Does: "`RecordPrice` keeps the lower price.", At: "internal/store/prices.go:3", Excerpt: "internal/store/prices.go:1-5", Evidence: review.CrossCheck}},
+		},
+		CI:    &CI{Workflows: []string{".github/workflows/deploy.yml"}, Tests: "deploy.yml"},
+		Rules: Rules{SHA: "aaaabbbbcccc", Files: []RuleFile{{Path: "AGENTS.md"}}},
 	}
 }
 
@@ -140,6 +247,11 @@ func degradedData() Data {
 	m.Parts = parts
 	d.Map = &m
 	d.Conflicts = true
+	d.Tickets, d.FollowUps = nil, nil // no ticket text was read
+	d.Terms.Errs = []string{"gates: timed out", "contract: no JSON"}
+	d.Terms.Gates, d.Terms.Contracts, d.Terms.Differences = nil, nil, nil
+	d.CI = &CI{Err: "403 Resource not accessible by integration", Workflows: []string{".github/workflows/ci.yml"}, Tests: "ci.yml"}
+	d.Members = &Members{Err: "403 Must have admin rights"}
 	return d
 }
 
@@ -160,13 +272,36 @@ func TestPageFixtures(t *testing.T) {
 			`id="before"`, "Migration 0007 drops 1 table", `id="finding-1"`, "A failed charge still saves the order",
 			`id="part-internal-orders"`, "How it connects", "Called from", `Writes <code translate="no">orders</code>`,
 			`id="covered"`, `id="team"`, "2 people committed to these files", "This page posts nothing.",
-			`<h2 id="h-stand" tabindex="-1">7 open items</h2>`, `<li data-rail-box="part:internal/orders">`,
-			`aria-label="orders, 1 open item, 2 files,`, `<span class="says">Calls payments and catalog.`,
+			`<h2 id="h-stand" tabindex="-1">Blocked: test failed at abcdef0</h2>`, `<li data-rail-box="part:internal/orders">`,
+			`aria-label="orders, 3 open items, 2 files,`, `<span class="says">Calls payments and catalog.`,
+			// Phase 3
+			"Also waits for the payment service launch.", `id="the-payment-service-launch-gate"`,
+			"Clears when SHOP-12 is Done. DiffHarbor reads the tracker again on its next run: a run starts on a push, or when someone comments “@shop-review review” on the PR.",
+			"SHOP-12, “Charge orders before they save”, is In Progress, due 2026-11-21. Read 2026-11-14.",
+			`id="difference-1"`, "The ticket asks", "From SHOP-12, Done when 1", `<span class="ev">at abcdef0</span>`, "Open the run on GitHub",
+			"This PR carries 3 tickets. The tracker says SHOP-11 blocks SHOP-12.", "Split suggestions are off for this repo",
+			"Follow-ups the author names: SHOP-13 Todo", "Read from the tracker on 2026-11-14.", "The tracker didn&#39;t answer in time, so this ticket wasn&#39;t read.",
+			"4 commits · 3 files, 2 only its own · in 1 of 2 steps · 2 asks", "1 file carries commits of two or more tickets",
+			"Deleted with their code", "Tests deleted while the code they test stays", "Changed in files that stay", "Expectation changed",
+			"Left to CI (ci.yml), which this PR edits", "This PR edits the CI that judges it", "Where they&#39;re read", "Docs and tests that name it",
+			"What an outside service serves, in the author&#39;s words", "Run migration 0007 before the new image starts.",
+			"as on main at 0123456, read whole.", "which ran in 2 parts", "· not run here", "12 files by kind",
+			"No current member changed or reviewed util in 12 months.", `data-k="[&#34;finding\tinternal/orders/orders.go:2&#34;]"`,
 		}},
 		{"tiny", tinyData(), []string{`id="read"`, "No open items", ">test run here<", `id="part-code"`}},
+		{"waits", waitsData(), []string{
+			`<h2 id="h-stand" tabindex="-1">Waits for CAT-41 to merge</h2>`, "Waits · 4 open items", "CAT-41&#39;s state isn&#39;t on this page.",
+			"Clears when a later run reads CAT-41 as Done, or the description no longer asks to wait.", "Go to the gate",
+			"Clears when a later run reads CAT-41 as Done, or the description no longer asks to wait. A run starts on a push, or when someone comments “@catalog-review review” on the PR.",
+			"#29 changes the same lines", `aria-expanded="true" aria-controls="ticket-cat-40-x"`, "Left to CI (deploy.yml)",
+		}},
 		{"degraded", degradedData(), []string{
 			"Blocked: a conflict with main", "No code graph for this review, so the map has no lines.",
 			"The review didn&#39;t read 3 code files", "No git history reached this review", "A review part failed: 1 code file",
+			"The gate pass failed, so nothing checked whether the description or a ticket asks to wait.",
+			"The contract pass failed, so nothing compared the code with what the tickets ask.",
+			"Commits name 3 tickets: SHOP-12, SHOP-11 and SHOP-9. No ticket text was read.", "tickets named in commits", "None was read for this review",
+			"No ticket was read, so nothing compared the code with what the tickets ask.", "The forge&#39;s checks weren&#39;t read for this review",
 		}},
 	} {
 		b, _, err := Render(c.d)
@@ -179,11 +314,28 @@ func TestPageFixtures(t *testing.T) {
 				t.Errorf("%s: %q missing", c.name, w)
 			}
 		}
+		for _, raw := range []string{"deadline exceeded", "tracker.example.com", "403"} { // a raw error never reaches the page
+			if strings.Contains(s, raw) {
+				t.Errorf("%s: %q on the page", c.name, raw)
+			}
+		}
 		if c.name == "tiny" && strings.Contains(s, `id="map"`) {
 			t.Error("tiny: a map with one part")
 		}
 		if out != "" {
 			if err := os.WriteFile(filepath.Join(out, c.name+".html"), b, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// the versions a server lists beside the page: the large PR has one before this one
+			_, now, _ := Render(c.d)
+			vs := []Version{now}
+			if c.name == "large" {
+				_, prev, _ := Render(prevData())
+				now.At, prev.At = time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC), time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+				vs = []Version{now, prev}
+			}
+			j, _ := json.Marshal(vs)
+			if err := os.WriteFile(filepath.Join(out, c.name+".versions.json"), j, 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -196,7 +348,7 @@ func TestPageOpen(t *testing.T) {
 	v := prepare(largeData())
 	v.build()
 	p := v.Page
-	if p.Open != 7 || countKind(p.Before, "Major finding") != 1 {
+	if p.Open != 14 || countKind(p.Before, "Major finding") != 1 {
 		t.Errorf("open %d, %d major findings before merging", p.Open, countKind(p.Before, "Major finding"))
 	}
 	for _, b := range p.Parts {
@@ -332,7 +484,59 @@ func TestCoveredFindings(t *testing.T) {
 	}
 	l := line(findings(repro, agreed))
 	if len(l) != 2 || l[0].Chip != evAI || l[0].Text != "2 findings: 1 major and 1 minor. A second model agreed with the other one, and neither ran the code." ||
-		l[1] != (mline{evTest, "1 shown by a test run."}) {
+		l[1] != (mline{Chip: evTest, Text: "1 shown by a test run."}) {
 		t.Errorf("one of each: %+v", l)
+	}
+}
+
+// The merge status takes one head by section 4's precedence: a conflict or a failed run blocks, a gate that waits
+// makes the merge wait, else the open items. Minor findings never count, and the gap is one item however many files
+// it holds.
+func TestMergeStatus(t *testing.T) {
+	gate := review.Gate{Quote: review.Quote{Text: "Merge after OPS-2.", In: "description"}, Name: "OPS-2 to merge", Ticket: "OPS-2", Waits: true}
+	failed := &CI{Checks: []Check{{Name: "ci.yml", Status: "completed", Conclusion: "failure"}}, Workflows: []string{".github/workflows/ci.yml"}}
+	for _, c := range []struct {
+		name              string
+		edit              func(*Data)
+		kind, head, short string
+		open              int
+	}{
+		{"none", func(*Data) {}, "none", "No open items", "No open items", 0},
+		{"minors don't count", func(d *Data) {
+			d.Findings = []review.Comment{{Path: "trim.go", Line: 2, Severity: "minor", Title: "m"}}
+		}, "none", "No open items", "No open items", 0},
+		{"the gap is one item", func(d *Data) {
+			d.Diff += editFile("pad.go", []string{"a"}, []string{"b"})
+			d.Failed, d.Omitted = []string{"trim.go"}, []string{"pad.go"}
+		}, "open", "1 open item", "1 open item", 1},
+		{"a gate that no longer waits", func(d *Data) {
+			g := gate
+			g.Waits = false
+			d.Terms.Gates = []review.Gate{g}
+		}, "none", "No open items", "No open items", 0},
+		{"waits", func(d *Data) { d.Terms.Gates = []review.Gate{gate} }, "waits", "Waits for OPS-2 to merge", "Waits · 1 open item", 1},
+		{"a failed check blocks a wait", func(d *Data) { d.Terms.Gates, d.CI = []review.Gate{gate}, failed }, "blocked", "Blocked: ci.yml failed at 1111111", "Blocked · ci.yml failed", 1},
+		{"a conflict comes first", func(d *Data) { d.Terms.Gates, d.CI, d.Conflicts = []review.Gate{gate}, failed, true }, "blocked", "Blocked: a conflict with the base branch", "Blocked · conflict with the base branch", 1},
+		{"a deviation is an item, no wait", func(d *Data) {
+			d.Terms.Differences = []review.Difference{{Status: review.Deviates, Title: "x", At: "trim.go:1", Evidence: review.CrossCheck}}
+		}, "open", "1 open item", "1 open item", 1},
+	} {
+		d := tinyData()
+		d.Tests = checks.Tests{}
+		c.edit(&d)
+		v := prepare(d)
+		v.build()
+		st := v.Page.Status
+		if st.Kind != c.kind || st.Head != c.head || st.Short != c.short || v.Page.Open != c.open {
+			t.Errorf("%s: %s %q %q, %d open", c.name, st.Kind, st.Head, st.Short, v.Page.Open)
+		}
+	}
+	// a wait shows its gate's link, and a blocked one says it also waits
+	d := tinyData()
+	d.Terms.Gates, d.CI = []review.Gate{gate}, failed
+	v := prepare(d)
+	v.build()
+	if st := v.Page.Status; st.Gate != "#ops-2-to-merge-gate" || !slices.ContainsFunc(st.Lines, func(l mline) bool { return l.Text == "Also waits for OPS-2 to merge." }) {
+		t.Errorf("%+v", st)
 	}
 }

@@ -2,7 +2,6 @@ package report
 
 import (
 	"cmp"
-	"diffharbor/internal/review"
 	"path"
 	"slices"
 	"strconv"
@@ -34,6 +33,7 @@ type pblock struct {
 	Minors                  []*card
 	Loose                   []*file
 	Folders                 []MapFolder
+	NoMember                bool // no current member changed or reviewed it in 12 months (team)
 }
 
 // connRow is a row of How it connects: the direction and the other part, its calls' names, more behind "and {j}
@@ -63,6 +63,7 @@ type pstep struct {
 	Files             []*file
 	Tests             []string
 	More              int
+	Ran               bool // a test of Tests ran here: no "not run here"
 	Graph             *flow
 }
 
@@ -163,8 +164,9 @@ func (v *view) blocks() {
 	}
 	// the cards on each part: major findings, minor ones apart; the rest go with the others
 	others := &pblock{ID: "part-others", Label: "Other files", Others: true}
-	for _, k := range v.found {
-		if strings.HasPrefix(k.Box, "deploy:") && review.Blocks(k.Sev) {
+	for _, k := range slices.Concat(v.lead, v.found) {
+		counts := k.Kind != "Minor finding" // a difference, a test group or a major finding: an open item
+		if strings.HasPrefix(k.Box, "deploy:") && counts {
 			continue // read in Before you merge
 		}
 		var b *pblock
@@ -175,11 +177,11 @@ func (v *view) blocks() {
 			b = order[0]
 		}
 		switch {
-		case b == nil && review.Blocks(k.Sev):
+		case b == nil && counts:
 			others.Cards = append(others.Cards, k)
 		case b == nil:
 			p.Minors = append(p.Minors, k)
-		case review.Blocks(k.Sev):
+		case counts:
 			b.Cards = append(b.Cards, k)
 		default:
 			b.Minors = append(b.Minors, k)
@@ -464,7 +466,8 @@ func (v *view) stepsOf(b *pblock) {
 		if len(fs) == 0 {
 			continue
 		}
-		b.Steps = append(b.Steps, pstep{N: i + 1, Title: s.Title, Why: s.Why, Check: s.Check, Files: fs, Tests: s.Tests, More: s.More, Graph: s.Graph})
+		ran := slices.ContainsFunc(s.Tests, func(t string) bool { _, n, _ := strings.Cut(t, " "); return ranOf(v.Data.Tests.Ran, n) != "" })
+		b.Steps = append(b.Steps, pstep{N: i + 1, Title: s.Title, Why: s.Why, Check: s.Check, Files: fs, Tests: s.Tests, More: s.More, Ran: ran, Graph: s.Graph})
 	}
 	for _, f := range b.Kept {
 		if !seen[f] {
