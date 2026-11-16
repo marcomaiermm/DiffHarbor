@@ -38,6 +38,9 @@ var linearURL = "https://api.linear.app/graphql"
 // pattern too, and a description can name dozens.
 const maxReads = 20
 
+// lookupTimeout bounds all reads of one Lookup: a hung tracker costs one wait, not one per key.
+var lookupTimeout = time.Minute
+
 // Active returns the provider tickets come from ("" = none), or an error if the settings leave it open or name one
 // without its credentials.
 func Active() (string, error) {
@@ -104,6 +107,8 @@ func Lookup(ctx context.Context, projects []string, title, branch, body, subject
 	if provider == "" || err != nil {
 		return f
 	}
+	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
 	r := reader{provider: provider, columns: map[string]map[int]column{}}
 	f.Keys = nil
 	reads := 0
@@ -127,10 +132,14 @@ func Lookup(ctx context.Context, projects []string, title, branch, body, subject
 	seen := map[string]bool{} // the tickets' own keys: two names of one ticket read it once
 	var refs strings.Builder
 	nrefs := 0
+	lost := false // a prompted key went unread before the linked ticket was set: the next is no stand-in for it
 	for i, k := range keys {
 		t, prompt, known := read(k)
 		if !known {
 			continue
+		}
+		if t == nil && i < prompted && f.ID == "" {
+			lost = true
 		}
 		f.Keys = append(f.Keys, k)
 		if t == nil || seen[t.Key] {
@@ -140,7 +149,7 @@ func Lookup(ctx context.Context, projects []string, title, branch, body, subject
 		f.Tickets = append(f.Tickets, *t)
 		switch {
 		case i >= prompted:
-		case f.ID == "":
+		case f.ID == "" && !lost:
 			f.ID, f.Section = k, text.Truncate(fmt.Sprintf("## Linked ticket %s: %s", k, prompt), 8000)+"\n\n"
 		case nrefs < 3:
 			nrefs++
@@ -300,6 +309,9 @@ func (r reader) itsaplan(ctx context.Context, key string) (*Ticket, string, erro
 // states reads a project's columns once per review: an issue names only its column.
 func (r reader) states(ctx context.Context, project string) (map[int]column, error) {
 	if cols, ok := r.columns[project]; ok {
+		if cols == nil {
+			return nil, fmt.Errorf("failed earlier in this review")
+		}
 		return cols, nil
 	}
 	var p struct {
@@ -318,6 +330,7 @@ func (r reader) states(ctx context.Context, project string) (map[int]column, err
 		err = fmt.Errorf("not found")
 	}
 	if err != nil {
+		r.columns[project] = nil // read once: an outage of the project costs one call, not one per ticket
 		return nil, err
 	}
 	cols := map[int]column{}

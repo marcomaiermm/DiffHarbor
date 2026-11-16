@@ -125,7 +125,8 @@ The ticket a PR names goes into the review as what the PR must do.
   checklist named "Done when") and `Notes` of the description.
 - Keys under a `## Follow-ups` heading of the description are follow-ups, not the PR's tickets: the report lists them
   with their states.
-- A ticket the tracker fails on is named in the report as not read; the others are still read.
+- A ticket the tracker fails on is named in the report as not read; the others are still read, all within one minute
+  per review. If the linked ticket fails, the review goes without one: no other ticket takes its place.
 - Never for PRs from forks.
 
 ## npm registries

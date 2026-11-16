@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -80,7 +81,7 @@ func TestTicket(t *testing.T) {
 	}
 }
 
-// A ticket the tracker fails on is kept by key; the next is read.
+// A ticket the tracker fails on is kept by key; the next is read, but never stands in as the linked ticket.
 func TestTicketError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -88,8 +89,8 @@ func TestTicketError(t *testing.T) {
 			fmt.Fprint(w, project)
 		case "/projects/WID/issues/1":
 			http.Error(w, "down", http.StatusBadGateway)
-		case "/projects/WID/issues/2":
-			fmt.Fprint(w, `{"identifier":"WID-2","title":"Two","columnId":1}`)
+		case "/projects/WID/issues/2", "/projects/WID/issues/9":
+			fmt.Fprintf(w, `{"identifier":"WID-%s","title":"t","columnId":1}`, r.URL.Path[len("/projects/WID/issues/"):])
 		default:
 			http.Error(w, "", 404)
 		}
@@ -98,8 +99,30 @@ func TestTicketError(t *testing.T) {
 	URL, APIKey = srv.URL, "k"
 	defer func() { APIKey = "" }()
 	f := Lookup(t.Context(), nil, "WID-1 and WID-2", "", "", "")
-	if f.ID != "WID-2" || len(f.Tickets) != 1 || !strings.Contains(f.Failed["WID-1"], "502") || !slices.Equal(f.Keys, []string{"WID-1", "WID-2"}) {
+	if f.ID != "" || len(f.Tickets) != 1 || !strings.Contains(f.Failed["WID-1"], "502") || !slices.Equal(f.Keys, []string{"WID-1", "WID-2"}) ||
+		!strings.HasPrefix(f.Section, "## Referenced ticket WID-2") {
 		t.Fatalf("%+v", f)
+	}
+	if f := Lookup(t.Context(), nil, "WID-1 roles", "", "Needs WID-9 merged first.", ""); f.ID != "" || strings.Contains(f.Section, "Linked") {
+		t.Fatalf("a dependency is no stand-in: %+v", f)
+	}
+}
+
+// One deadline bounds all reads: a hung tracker fails the rest at once, each key in Failed.
+func TestTicketTimeout(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		n.Add(1)
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	URL, APIKey = srv.URL, "k"
+	defer func() { APIKey = "" }()
+	defer func(d time.Duration) { lookupTimeout = d }(lookupTimeout)
+	lookupTimeout = 50 * time.Millisecond
+	f := Lookup(t.Context(), nil, "WID-1 WID-2 WID-3 WID-4", "", "", "")
+	if n.Load() != 1 || len(f.Failed) != 4 || f.ID != "" {
+		t.Fatalf("%d requests: %+v", n.Load(), f)
 	}
 }
 
@@ -125,6 +148,9 @@ func TestTicketCap(t *testing.T) {
 	f := Lookup(t.Context(), nil, strings.Join(title, " "), "", "## Follow-ups\n- WID-99", "")
 	if !f.Capped || n != maxReads || len(f.Tickets) != maxReads || len(f.Keys) != maxReads+2 || f.FollowUps != nil {
 		t.Fatalf("capped: %v, %d reads, %d tickets, %d keys", f.Capped, n, len(f.Tickets), len(f.Keys))
+	}
+	if f.Tickets[1].Key != "WID-2" || f.Tickets[9].Key != "WID-10" {
+		t.Fatalf("by number: %s %s", f.Tickets[1].Key, f.Tickets[9].Key)
 	}
 }
 
