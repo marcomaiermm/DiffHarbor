@@ -730,8 +730,10 @@ func TestTracePath(t *testing.T) {
 	if j := v.tracePath(tr, "", v.hops()).Items[1]; j.Path != "a/a.go" || j.Line != 2 || j.Rel != "iface" || j.Sh != 4 || j.Text == "" {
 		t.Errorf("joint at the entry %+v", j)
 	}
-	// the index names it without a place: the joint has no words, but its relation
+	// the index names it without a place: the joint has no words, but its relation, though the page knows the
+	// declaration at another line
 	v.Symbols["Fetch"][0].Ways[0].Chain[0].At = 0
+	v.Symbols["Fetch"][0].Line = 5
 	if j := v.tracePath(tr, "", v.hops()).Items[1]; j.Line != 0 || j.Text != "" || j.Rel != "iface" || j.Sh != 4 {
 		t.Errorf("joint without a place %+v", j)
 	}
@@ -760,5 +762,27 @@ func TestFindingPath(t *testing.T) {
 	}
 	if s := p.Items[2]; s.Kind != "finding" || s.Find != "#f1" {
 		t.Errorf("finding %+v", s)
+	}
+}
+
+// The joint under a route whose first declaration the page doesn't know (no Symbol): ways gives the row the
+// declaration's place, the hop at the entry's line draws the joint; a hop the index gives no place, no words.
+func TestFindingPathUnknown(t *testing.T) {
+	store := &file{Path: "store.go", Changes: []change{{Name: "Save", State: "new", Sev: "major"}}}
+	v := &view{Data: Data{
+		Diff: newFile("server.go", "package a\n\nr.Get(\"/x\", Handle)\n") + newFile("store.go", "package b\n\n\n\nfunc Save() {}\n"),
+		Symbols: map[string][]Symbol{"Save": {{Path: "store.go", Line: 5, Exact: true, Ways: []Way{{
+			Method: "GET", Route: "/x", Path: "server.go", Line: 3,
+			Chain: []Hop{{Name: "Handle", Path: "api.go", Line: 10, In: "server.go", At: 3, Shape: 2, Rel: "call"}, {Name: "Save", Path: "store.go", Line: 5, In: "api.go", At: 12}},
+		}}}}},
+	}, Steps: []step{{Files: []*file{store}}}, files: map[string]*file{"store.go": store}}
+	w := ways(v, v.Symbols)[0]
+	if j := v.findingPath(w, w.Rows, "", "", "", v.hops()).Items[1]; j.Path != "server.go" || j.Line != 3 || j.Rel != "call" || j.Sh != 2 || j.Text != `r.Get("/x", Handle)` {
+		t.Errorf("joint %+v", j)
+	}
+	v.Symbols["Save"][0].Ways[0].Chain[0].At = 0
+	w = ways(v, v.Symbols)[0]
+	if j := v.findingPath(w, w.Rows, "", "", "", v.hops()).Items[1]; j.Line != 0 || j.Text != "" || j.Rel != "call" || j.Sh != 2 {
+		t.Errorf("joint without a place %+v", j)
 	}
 }

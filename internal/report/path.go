@@ -94,7 +94,7 @@ func (v *view) wayItems(rows []wrow, entry ref, prev, user string, hops map[stri
 		}
 		k := r.Path + "\x00" + r.Name + "\x00"
 		h, ok := hops[k+r.At.Path+"\x00"+strconv.Itoa(r.At.Line)]
-		if !ok && r.At.Path == s.Path && r.At.Line == s.Line {
+		if !ok { // a hop of this declaration named at the entry's line: the way gave the row its declaration's place
 			if h, ok = hops[k+entry.Path+"\x00"+strconv.Itoa(entry.Line)]; ok {
 				j.Path, j.Line = entry.Path, entry.Line
 			}
