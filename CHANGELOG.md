@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.10.0...v0.11.0) (2026-11-16)
+
+
+### Features
+
+* **usage:** log each job's model usage and stage times ([#122](https://github.com/marcomaiermm/DiffHarbor/issues/122)) ([f423546](https://github.com/marcomaiermm/DiffHarbor/commit/f42354608cfce723e9cc315da5d234ea3fcba8ba))
+
+
+### Bug Fixes
+
+* reliability of reviews across restarts, slow forges and stuck processes ([#121](https://github.com/marcomaiermm/DiffHarbor/issues/121)) ([6b849fa](https://github.com/marcomaiermm/DiffHarbor/commit/6b849fa6cf4268c1e2d97979d35b61aa879d19f7))
+* **review:** mark unshown external-service rules as unverified premise ([#126](https://github.com/marcomaiermm/DiffHarbor/issues/126)) ([698f75e](https://github.com/marcomaiermm/DiffHarbor/commit/698f75e8e973406d37e0f3ed2cb4816153aaabcb))
+
 ## [0.10.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.9.0...v0.10.0) (2026-11-14)
 
 
