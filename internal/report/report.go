@@ -12,6 +12,7 @@ import (
 	"diffharbor/internal/proc"
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
+	"diffharbor/internal/ticket"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -68,6 +69,11 @@ type Data struct {
 	Map         *Map              // the map of the change (BuildMap); nil when there is none to draw
 	Bot         string            // the bot's handle: @Bot talks to it
 	Threads     map[string]int64  // the comment id of each finding's inline thread, by ThreadKey; none for one not posted inline
+	Tickets     []ticket.Ticket   // the PR's tickets, read whole: the tickets workpath fills it
+	// The gate and contract passes (review.ReadTerms): Gates feed the merge status's "Waits for {gate}" (spec 4) and
+	// the gate card (5.6), Serves and Order its items, Contracts the ticket cards' rows and four answers (5.9),
+	// Differences the difference cards (5.7, 5.6). Errs names the passes that failed: the page says what wasn't read.
+	review.Terms
 }
 
 // Forge is how the forge hosting the repository names and links what a report points to.
