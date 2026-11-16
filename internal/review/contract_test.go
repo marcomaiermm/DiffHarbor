@@ -53,23 +53,27 @@ func TestReadTerms(t *testing.T) {
 {"text":"Do not merge before the cutover.","in":"ABC-1","gate":"the cutover","ticket":"ABC-1","clears":"ABC-1 is done"},
 {"text":"Merge after the data is moved.","in":"ABC-2","gate":"the data move","ticket":"ABC-2","clears":"ABC-2 is done"},
 {"text":"Merge after the moon landing.","in":"description","gate":"the moon","ticket":"","clears":""}],
-"serves":["The service serves … one raid.","It serves everything."],"order":[]}`
+"serves":["… serves only one raid.","The service serves … one raid.","It serves everything."],"order":[]}`
 	contract := `{"tickets":[{"key":"ABC-1","rows":[
 {"ask":"outcome","status":"Met","at":["a.go:5"],"note":"get pins it"},
 {"ask":"done 1","status":"Met","at":["a.go:99"]},
-{"ask":"done 2","status":"Met","absent":["OLD_PHASE","NOT_IN_ASK"]},
+{"ask":"done 2","status":"Met","absent":["OLD_PHASE","pin"]},
 {"ask":"done 3","status":"Deviates","at":["a.go:2-3"],"note":"no paging test"}],
 "beyond":"adds a retry",
-"answers":{"changed":{"text":"Requests pin the dataset.","at":["a.go:5","gone.go:1"]},"runs":{"text":"The client.","at":["a.go"]},"relies":{"text":"Nothing.","at":[]},"first":{"text":"a.go:5: the pin.","at":["a.go:5"]}}}],
+"answers":{"changed":{"text":"Requests pin the dataset in a.go:5.","at":["a.go:5","gone.go:1"]},"runs":{"text":"The client.","at":["a.go"]},"relies":{"text":"Nothing.","at":[]},"first":{"text":"zzz.go:999: the bug.","at":["a.go:5"]}}}],
 "differences":[
 {"ticket":"ABC-1","status":"Decided in the PR","title":"The PR keeps accounts","line":"ABC-1 left it open; the code keeps accounts.","asks":["Needs confirmation: keep accounts or wipe them."],"does":"Keeps accounts.","at":"a.go:3","excerpt":"a.go:1-4"},
 {"ticket":"ABC-1","status":"Deviates","title":"Made up","line":"x","asks":["Words the ticket never said."],"does":"x","at":"a.go:3"},
 {"ticket":"","status":"Beyond the tickets","title":"Retries were added","line":"No ticket asks.","does":"Retries.","at":"a.go:99"},
 {"ticket":"","status":"Beyond the tickets","title":"one two three four five six seven eight nine ten eleven twelve thirteen","line":"x","at":"a.go:4"},
 {"ticket":"ABC-1","status":"Approved","title":"A status off the list","line":"x","asks":["Every request pins the dataset."],"at":"a.go:5"},
-{"ticket":"","status":"Beyond the tickets","title":"A retry loop was added","line":"No ticket asks for it.","does":"Retries.","at":"a.go:5","excerpt":"a.go:9-12"}]}`
-	// claims: 0 the decided difference, 1 the retry loop, 2 the Met outcome, 3 the Deviates row, 4 the answers
-	check := `{"verdicts":[{"i":0,"keep":true},{"i":1,"keep":false},{"i":2,"keep":true},{"i":3,"keep":false}]}`
+{"ticket":"","status":"Beyond the tickets","title":"A retry loop was added","line":"No ticket asks for it.","does":"Retries.","at":"a.go:5","excerpt":"a.go:1-3"},
+{"ticket":"","status":"Beyond the tickets","title":"Logging was added","line":"No ticket asks for it.","does":"Logs.","at":"a.go:7"},
+{"ticket":"","status":"Beyond the tickets","title":"Paging was added","line":"one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone","does":"Pages.","at":"a.go:7"},
+{"ticket":"","status":"Beyond the tickets","title":"Caching was added","line":"No ticket asks for it.","does":"Caches in zzz.go:4.","at":"a.go:7"}]}`
+	// claims: 0 the decided difference, 1 the retry loop, 2 the logging, 3 the Met outcome, 4 the Deviates row, 5 the
+	// answers; the retry loop gets no verdict
+	check := `{"verdicts":[{"i":0,"keep":true},{"i":2,"keep":false},{"i":3,"keep":true},{"i":4,"keep":false}]}`
 	f := &fakeAgent{replies: map[string][]string{"gates": {gates}, "contract": {contract}, "check": {check}}}
 	r := ReadTerms(context.Background(), TermsInput{
 		Agent: f, Sandbox: sb, Body: "Ships the client. Merge after XYZ-9. The service serves only one raid.",
@@ -89,7 +93,7 @@ func TestReadTerms(t *testing.T) {
 	if !slices.Equal(r.Gates, want) {
 		t.Errorf("gates:\n%+v\nwant\n%+v", r.Gates, want)
 	}
-	if !slices.Equal(r.Serves, []string{"The service serves … one raid."}) {
+	if !slices.Equal(r.Serves, []string{"… serves only one raid."}) {
 		t.Errorf("serves: %q", r.Serves)
 	}
 
@@ -98,7 +102,7 @@ func TestReadTerms(t *testing.T) {
 	}
 	c := r.Contracts[0]
 	rows := []string{
-		"Outcome|Met|AI cross-check|a.go:5", "Done when 1: Requests carry `dataset`.|Not checked||",
+		"Outcome: Every request pins the dataset.|Met|AI cross-check|a.go:5", "Done when 1: Requests carry `dataset`.|Not checked||",
 		"Done when 2: No `OLD_PHASE` remains.|Met in the code|Search at head|", "Done when 3: Tests cover paging.|Not checked||",
 		"Beyond the tickets|Beyond the tickets|Inferred by the review|",
 	}
@@ -115,13 +119,19 @@ func TestReadTerms(t *testing.T) {
 	if !slices.Equal(c.Changed.At, []string{"a.go:5"}) || !slices.Equal(c.Runs.At, []string{"a.go"}) || c.Evidence != Inferred {
 		t.Errorf("answers: places at the head, no verdict stays inferred: %+v", c)
 	}
+	if c.First.Text != "" || c.First.At != nil {
+		t.Errorf("an answer with a place in its text the head lacks is dropped: %+v", c.First)
+	}
 
-	if len(r.Differences) != 1 {
-		t.Fatalf("one difference survives: %+v", r.Differences)
+	if len(r.Differences) != 2 {
+		t.Fatalf("two differences survive: %+v", r.Differences)
 	}
 	d := r.Differences[0]
 	if d.Status != Decided || d.Evidence != CrossCheck || d.Excerpt != "a.go:1-4" || len(d.Asks) != 1 || d.Asks[0].Section != "Notes" {
 		t.Errorf("difference: %+v", d)
+	}
+	if d := r.Differences[1]; d.Title != "A retry loop was added" || d.Evidence != Inferred || d.Excerpt != "a.go:5" {
+		t.Errorf("an excerpt that doesn't hold its place falls back to it; no verdict stays inferred: %+v", d)
 	}
 
 	for name, in := range map[string][]string{
@@ -140,7 +150,8 @@ func TestReadTerms(t *testing.T) {
 	if strings.Contains(f.contTask["contract"], "ABC-2") {
 		t.Error("a ticket without a contract isn't in the contract prompt")
 	}
-	if task := f.tasks["check"]; strings.Contains(task, "Done when 2") || !strings.Contains(task, "4. ABC-1, four answers") {
+	if task := f.tasks["check"]; strings.Contains(task, "Done when 2") || !strings.Contains(task, "Every request pins the dataset.") ||
+		!strings.Contains(task, "5. ABC-1, four answers") {
 		t.Errorf("the check pass checks what a model claimed, not the search:\n%s", task)
 	}
 }
@@ -178,13 +189,39 @@ func TestQuoted(t *testing.T) {
 	const src = "Order matters: **wipe → migrate → start**.\nApp rollback alone does not work."
 	for q, want := range map[string]bool{
 		"Order matters: **wipe → migrate → start**. App rollback": true, // a line break is a space
-		"Order matters: … does not work.":                         true,
-		"does not work. … Order matters":                          false, // pieces in order
-		"Order matters: wipe → migrate":                           false, // bold stays
-		"…":                                                       false,
+		"Order matters: …":                true, // a cut at the end
+		"… does not work.":                true,
+		"Order matters: … does not work.": false, // no stitching across a cut
+		"Do … not":                        false,
+		"Order matters: wipe → migrate":   false, // bold stays
+		"…":                               false,
 	} {
 		if quoted(src, q) != want {
 			t.Errorf("quoted(%q) = %v", q, !want)
+		}
+	}
+}
+
+// A place stands when the head has every line of it, at most 40; a bare path only where one may stand.
+func TestPlaced(t *testing.T) {
+	line := func(p string, n int) (string, bool) { return "", p == "a.go" && n >= 1 && n <= 60 }
+	for _, c := range []struct {
+		at   string
+		bare bool
+		want string
+	}{
+		{"a.go:5", false, "a.go:5"},
+		{"a.go:5–7", false, "a.go:5-7"},
+		{"a.go:1-40", false, "a.go:1-40"},
+		{"a.go:5-99", false, ""}, // its end is past the file
+		{"a.go:1-41", false, ""}, // 41 lines
+		{"a.go:9-5", false, ""},
+		{"gone.go:1", false, ""},
+		{"a.go", true, "a.go"},
+		{"a.go", false, ""},
+	} {
+		if got := placed(line, c.at, c.bare); got != c.want {
+			t.Errorf("placed(%q, %v) = %q, want %q", c.at, c.bare, got, c.want)
 		}
 	}
 }

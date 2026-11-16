@@ -338,7 +338,7 @@ func FallbackFor(model, name string) string {
 			fm = r.Review
 		}
 	}
-	if (strings.HasPrefix(name, "verify") || name == "brief") && fm != "" {
+	if (strings.HasPrefix(name, "verify") || slices.Contains([]string{"brief", "gates", "check"}, name)) && fm != "" {
 		return cmp.Or(FallbackVerifyModel, VerifyFor(fm), fm)
 	}
 	return fm
