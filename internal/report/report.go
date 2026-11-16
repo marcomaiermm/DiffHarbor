@@ -12,6 +12,7 @@ import (
 	"diffharbor/internal/proc"
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
+	"diffharbor/internal/ticket"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -68,6 +69,15 @@ type Data struct {
 	Map         *Map              // the map of the change (BuildMap); nil when there is none to draw
 	Bot         string            // the bot's handle: @Bot talks to it
 	Threads     map[string]int64  // the comment id of each finding's inline thread, by ThreadKey; none for one not posted inline
+	// The tickets section (5.9). Tickets: the cards, open first, then done, by key. FollowUps: the follow-ups line,
+	// with their states. TicketErrs: key -> why the tracker didn't answer, so the page names the tickets it couldn't
+	// read; TicketsCapped: more keys than one review reads. Split: the cards' stats lines and the footer, from git;
+	// its keys are the tickets the commits and texts name, read or not.
+	Tickets       []ticket.Ticket
+	FollowUps     []ticket.Ticket
+	TicketErrs    map[string]string
+	TicketsCapped bool
+	Split         *Split
 }
 
 // Forge is how the forge hosting the repository names and links what a report points to.

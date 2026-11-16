@@ -120,6 +120,12 @@ The ticket a PR names goes into the review as what the PR must do.
 
 - The main ticket is named in title, branch or description: `ABC-12`.
 - Up to 3 more it names (`closes ABC-7`, a link in the description) follow as context.
+- The report reads every ticket that title, branch, description and commit subjects name, at most 20 per review:
+  state, due date, blocking relations, and the sections `Outcome`, `Done when` (its list items, and an itsaplan
+  checklist named "Done when") and `Notes` of the description.
+- Keys under a `## Follow-ups` heading of the description are follow-ups, not the PR's tickets: the report lists them
+  with their states.
+- A ticket the tracker fails on is named in the report as not read; the others are still read.
 - Never for PRs from forks.
 
 ## npm registries

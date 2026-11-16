@@ -162,7 +162,7 @@ type Commit struct {
 	Author          string // its author's name
 	Files, Add, Del int
 	Lines           []string // "+" or "-" and the trimmed line, for each it adds or removes: which commit brought a declaration
-	Paths           []string // Behind's: the files it changes
+	Paths           []string // Behind's and Changes': the files it changes
 }
 
 // maxCommits is the commits a report lists.
@@ -230,10 +230,21 @@ func authorsOf(log string) (ps []string) {
 // Behind lists the base's commits the PR doesn't have yet, newest first, from a Checkout: what moved on under it.
 // nil when git fails.
 func Behind(ctx context.Context, sb *proc.Sandbox) []Commit {
+	return named(ctx, sb, "HEAD..refs/base")
+}
+
+// Changes lists the PR's commits newest first, merges aside, with the files each changes: its tickets' share of the
+// PR. Unlike Commits it reads no patch and keeps every commit. nil when git fails.
+func Changes(ctx context.Context, sb *proc.Sandbox) []Commit {
+	return named(ctx, sb, "refs/base..HEAD")
+}
+
+// named is the commits of rng with their subjects and the files they change.
+func named(ctx context.Context, sb *proc.Sandbox, rng string) []Commit {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "log", "--no-merges", "--no-renames", "--format=%x00%H%x09%s",
-		"--name-only", "HEAD..refs/base"))
+	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "-c", "core.quotepath=off", "log", "--no-merges", "--no-renames",
+		"--format=%x00%H%x09%s", "--name-only", rng))
 	if err != nil {
 		return nil
 	}
@@ -241,7 +252,7 @@ func Behind(ctx context.Context, sb *proc.Sandbox) []Commit {
 	for c := range strings.SplitSeq(string(out), "\x00") {
 		head, files, _ := strings.Cut(c, "\n")
 		if sha, subject, ok := strings.Cut(head, "\t"); ok {
-			cs = append(cs, Commit{SHA: sha, Subject: subject, Paths: strings.Fields(files)})
+			cs = append(cs, Commit{SHA: sha, Subject: subject, Paths: strings.FieldsFunc(files, func(r rune) bool { return r == '\n' })})
 		}
 	}
 	return cs

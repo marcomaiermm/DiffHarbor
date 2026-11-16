@@ -223,12 +223,20 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 
 	started := time.Now()
 	var tid, tk string
+	var tickets ticket.Found
+	var changes []review.Commit // the PR's commits with their files: the tickets' keys and stats
 	var regs []checks.Registry
 	var docs []review.Doc
 	commits := forge.Redact(review.Messages(ctx, sb))
 	cfg.Authors = review.Authors(ctx, sb)
 	if pr.Head.Repo.ID == e.Repository.ID { // a fork's author could name any ticket and read it in the review, or fetch the internal packages
-		tid, tk = ticket.Lookup(ctx, cfg.Tickets, pr.Title, pr.Head.Ref, pr.Body)
+		changes = review.Changes(ctx, sb)
+		var subjects []string
+		for _, c := range changes {
+			subjects = append(subjects, c.Subject)
+		}
+		tickets = ticket.Lookup(ctx, cfg.Tickets, pr.Title, pr.Head.Ref, pr.Body, strings.Join(subjects, "\n"))
+		tid, tk = tickets.ID, tickets.Section
 		regs, _ = checks.Registries(e.Owner()) // main checked them
 		// what a doc says reaches the PR's comments: private repos only unless review.json opts in. Before Analyze:
 		// docs reads the checkout as the merge base left it, its checks run the PR's code there.
@@ -373,6 +381,8 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		d.Knowledge = report.Learn(ctx, sb, raw, pr.CreatedAt)
 		d.Outside = report.Outside(d.Symbols)
 		d.Map = report.BuildMap(sb, d, d.Outside)
+		d.Tickets, d.FollowUps, d.TicketErrs, d.TicketsCapped = tickets.Tickets, tickets.FollowUps, tickets.Failed, tickets.Capped
+		d.Split = report.SplitTickets(tickets.Keys, changes, d.Flow)
 		s.State.Secret = reportSecret(s.State.Secret)
 		s.State.Report = writeReport(e, s.State.Secret, s.State.Report, d)
 		s.Write(banner, reviewed) // again, with the report's link
