@@ -398,6 +398,19 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		d.Map = report.BuildMap(sb, d, d.Outside)
 		d.Tickets, d.FollowUps, d.TicketErrs, d.TicketsCapped = tickets.Tickets, tickets.FollowUps, tickets.Failed, tickets.Capped
 		d.Split = report.SplitTickets(tickets.Keys, changes, d.Flow)
+		var decls []string // the declarations the PR adds or changes: places the contract pass may cite
+		for name, ss := range d.Symbols {
+			for _, sy := range ss {
+				if sy.State != "" {
+					decls = append(decls, fmt.Sprintf("%s:%d %s", sy.Path, sy.Line, name))
+				}
+			}
+		}
+		slices.Sort(decls)
+		d.Terms = review.ReadTerms(ctx, review.TermsInput{
+			Agent: agent.Pi{}, Sandbox: sb, Settings: cfg, Body: forge.Redact(pr.Body),
+			Tickets: d.Tickets, Summary: st.Summary, Flow: st.Flow, Walk: st.Files, Findings: d.Findings, Decls: decls,
+		})
 		s.State.Secret = reportSecret(s.State.Secret)
 		s.State.Report = writeReport(e, s.State.Secret, s.State.Report, d)
 		s.Write(banner, reviewed) // again, with the report's link

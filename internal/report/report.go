@@ -87,6 +87,10 @@ type Data struct {
 	TicketErrs    map[string]string
 	TicketsCapped bool
 	Split         *Split
+	// The gate and contract passes (review.ReadTerms): Gates feed the merge status's "Waits for {gate}" (spec 4) and
+	// the gate card (5.6), Serves and Order its items, Contracts the ticket cards' rows and four answers (5.9),
+	// Differences the difference cards (5.7, 5.6). Errs names the passes that failed: the page says what wasn't read.
+	Terms review.Terms
 }
 
 // Forge is how the forge hosting the repository names and links what a report points to.
