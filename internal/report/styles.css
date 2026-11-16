@@ -676,15 +676,16 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .fu{font-size:13px;color:var(--ink2)}
 /* files-by-kind bar (14) */
 .kinds{display:flex;flex-direction:column;gap:12px}
-.lbar{display:flex;gap:2px;height:14px}
-.lbar span{border-radius:4px;min-width:6px}
-.k-code{background:var(--ink2)}
-.k-tests{background:repeating-linear-gradient(45deg,var(--ink2) 0 2px,var(--raised) 2px 5px)}
-.k-tooling{background:radial-gradient(circle,var(--ink3) 1px,transparent 1.4px) 0 0/6px 6px,var(--raised)}
-.k-gone{border:1px solid var(--ink3)}
+/* one hue in four steps, segments flush in a rounded track, as shadcn's stacked bars; the rows below name each */
+.lbar{display:flex;gap:2px;height:8px;border-radius:9999px;overflow:hidden}
+.lbar span{min-width:4px}
+.k-code{background:var(--primary)}
+.k-tests{background:color-mix(in oklab,var(--primary) 68%,var(--surface))}
+.k-tooling{background:color-mix(in oklab,var(--primary) 42%,var(--surface))}
+.k-gone{background:color-mix(in oklab,var(--primary) 22%,var(--surface))}
 .krows{display:flex;flex-direction:column}
 .krow{display:grid;grid-template-columns:12px 168px 64px 128px minmax(0,1fr);column-gap:12px;row-gap:4px;align-items:baseline;padding:12px 0;border-top:1px solid var(--line);font-size:13px;color:var(--ink2)}
-.krow .sw{width:12px;height:12px;border-radius:3px;position:relative;top:1px}
+.krow .sw{width:10px;height:10px;border-radius:2px;position:relative;top:1px}
 .krow .nm{font-weight:600;color:var(--inkhi)}
 .krow .lc{font:400 12px/1.5 var(--mono)}
 .krow .cp2{grid-column:2/-1;color:var(--ink)}
