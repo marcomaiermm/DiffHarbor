@@ -105,6 +105,10 @@ type PR interface {
 	Posted() map[string]int64
 	// Links is how the forge links what a report points to.
 	Links() report.Forge
+	// Checks are the CI's checks of sha, the latest of each, without our own "diffharbor" status.
+	Checks(sha string) ([]report.Check, error)
+	// Members are the logins of the people with access to the repo, bots left out, sorted.
+	Members() ([]string, error)
 }
 
 // Note is a comment.

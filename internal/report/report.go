@@ -69,6 +69,8 @@ type Data struct {
 	Map         *Map              // the map of the change (BuildMap); nil when there is none to draw
 	Bot         string            // the bot's handle: @Bot talks to it
 	Threads     map[string]int64  // the comment id of each finding's inline thread, by ThreadKey; none for one not posted inline
+	CI          *CI               // the forge's checks at SHA and the CI workflows on the base; nil when the forge reads none
+	Members     *Members          // who has access to the repo now; nil when the forge can't list them
 	// The tickets section (5.9). Tickets: the cards, open first, then done, by key. FollowUps: the follow-ups line,
 	// with their states. TicketErrs: key -> why the tracker didn't answer, so the page names the tickets it couldn't
 	// read; TicketsCapped: more keys than one review reads. Split: the cards' stats lines and the footer, from git;
@@ -644,8 +646,12 @@ func (v view) place(p string, line int) ref {
 
 func testKey(name string) string { return strings.ReplaceAll(name, " ", "_") }
 
-// ranOf is name's outcome in ran: by its full name, or as the one subtest of that name.
+// ranOf is name's outcome in ran: by its name as given (a JS runner's "suite > test"), by its Go name, or as the one
+// subtest of that name.
 func ranOf(ran map[string]string, name string) string {
+	if st, ok := ran[name]; ok {
+		return st
+	}
 	n := testKey(name)
 	if st, ok := ran[n]; ok {
 		return st

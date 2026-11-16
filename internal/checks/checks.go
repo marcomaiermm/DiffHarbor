@@ -15,6 +15,7 @@ import (
 	"log"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -128,8 +129,8 @@ func noScripts(cmd []string, yarnVersion string) []string {
 type Script struct{ Name, File string }
 
 // Tests is what the test runs among the checks report: each test's outcome by its name as the runner prints it
-// ("TestTotal", "TestTotal/discount"), "pass", "fail" or "skip", and the packages that do not build. Empty when
-// no test ran. ponytail: go test only; vitest and jest print no per-test result here, a JSON reporter if wanted.
+// ("TestTotal", "TestTotal/discount"; vitest and jest: "suite > test"), "pass", "fail" or "skip", and the packages
+// (JS: the test files) that do not build. Empty when no test ran.
 type Tests struct {
 	Ran    map[string]string `json:"ran,omitempty"`
 	Broken []string          `json:"broken,omitempty"`
@@ -308,12 +309,18 @@ func Run(ctx context.Context, sb *proc.Sandbox, scripts []Script, patch string, 
 		// Tests that import the changed files; a failure is evidence, the summary is at the end.
 		t := relTo(dir, slices.DeleteFunc(slices.Clone(js), func(f string) bool { return !tests(f) }))
 		vitest, jest := bin("vitest"), bin("jest")
+		// Both write their JSON reporter's results to report, each test's outcome for Tests; the text stays the hint.
+		report := filepath.Join(sb.Dir, "test-results.json")
+		_ = sb.Remove(report)
 		switch {
 		case len(t) == 0:
 		case vitest != "":
-			section("vitest related (tests of changed files)"+where, run(vitest, append([]string{"related", "--run", "--reporter=dot"}, t...)...), -60)
+			section("vitest related (tests of changed files)"+where, run(vitest, append([]string{"related", "--run", "--reporter=dot", "--reporter=json", "--outputFile=" + report}, t...)...), -60)
 		case jest != "":
-			section("jest --findRelatedTests"+where, run(jest, append([]string{"--ci", "--passWithNoTests", "--findRelatedTests"}, t...)...), -60)
+			section("jest --findRelatedTests"+where, run(jest, append([]string{"--ci", "--passWithNoTests", "--json", "--outputFile=" + report, "--findRelatedTests"}, t...)...), -60)
+		}
+		if b, err := sb.ReadFile(ctx, report); err == nil {
+			jsonTests(b, repo, &ran)
 		}
 	}
 
@@ -482,6 +489,45 @@ func testRuns(js string, t *Tests) {
 			}
 			if t.Ran[e.Test] != "fail" {
 				t.Ran[e.Test] = e.Action
+			}
+		}
+	}
+}
+
+// jsonTests adds what vitest's or jest's JSON reporter wrote (one shape) to t: each test by its suites and title
+// joined with " > ", as TestCmd takes a proof, and a test file that failed without a test result (it doesn't
+// build or import), by its path in repo. A name in two files fails if either fails, as testRuns.
+func jsonTests(b []byte, repo string, t *Tests) {
+	var r struct {
+		TestResults []struct {
+			Name             string `json:"name"`
+			Status           string `json:"status"`
+			AssertionResults []struct {
+				AncestorTitles []string `json:"ancestorTitles"`
+				Title          string   `json:"title"`
+				Status         string   `json:"status"`
+			} `json:"assertionResults"`
+		} `json:"testResults"`
+	}
+	if json.Unmarshal(b, &r) != nil {
+		return
+	}
+	for _, f := range r.TestResults {
+		if f.Status == "failed" && len(f.AssertionResults) == 0 {
+			if p := strings.TrimPrefix(f.Name, repo+"/"); !slices.Contains(t.Broken, p) {
+				t.Broken = append(t.Broken, p)
+			}
+		}
+		for _, a := range f.AssertionResults {
+			st := map[string]string{"passed": "pass", "failed": "fail", "skipped": "skip", "pending": "skip", "todo": "skip", "disabled": "skip"}[a.Status]
+			if st == "" {
+				continue
+			}
+			if t.Ran == nil {
+				t.Ran = map[string]string{}
+			}
+			if n := strings.Join(append(slices.Clone(a.AncestorTitles), a.Title), " > "); t.Ran[n] != "fail" {
+				t.Ran[n] = st
 			}
 		}
 	}
@@ -817,25 +863,51 @@ var (
 // review runs them. A workflow counts if a push or pull request starts it, with the reusable workflows it calls.
 func CITests(ctx context.Context, sb *proc.Sandbox) string {
 	repo := sb.Repo()
-	read := func(f string) string {
-		b, _ := sb.ReadFile(ctx, f)
-		return yamlComment.ReplaceAllString(string(b), "")
+	fs, _ := filepath.Glob(filepath.Join(repo, ".github", "workflows", "*.y*ml"))
+	for i, f := range fs {
+		fs[i], _ = filepath.Rel(repo, f)
 	}
-	if ciTest.MatchString(read(filepath.Join(repo, ".gitlab-ci.yml"))) {
+	return ciTests(fs, func(f string) string {
+		b, _ := sb.ReadFile(ctx, filepath.Join(repo, f))
+		return string(b)
+	})
+}
+
+// BaseCI is CITests on the base branch, the refs/base of review.Checkout, read with git: the PR can't change it.
+// files are the CI files there: the workflows and .gitlab-ci.yml.
+func BaseCI(ctx context.Context, sb *proc.Sandbox) (tests string, files []string) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	git := func(args ...string) string {
+		b, _ := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", args...))
+		return string(b)
+	}
+	for f := range strings.SplitSeq(git("ls-tree", "-z", "--name-only", "refs/base", "--", ".gitlab-ci.yml", ".github/workflows/"), "\x00") {
+		if f == ".gitlab-ci.yml" || workflow.MatchString(f) {
+			files = append(files, f)
+		}
+	}
+	return ciTests(slices.DeleteFunc(slices.Clone(files), func(f string) bool { return f == ".gitlab-ci.yml" }), func(f string) string {
+		return git("show", "refs/base:"+f)
+	}), files
+}
+
+// ciTests is CITests over workflows, the paths of .github/workflows/*.yml, with read reading a path of the repo.
+func ciTests(workflows []string, read func(string) string) string {
+	clean := func(f string) string { return yamlComment.ReplaceAllString(read(f), "") }
+	if ciTest.MatchString(clean(".gitlab-ci.yml")) {
 		return ".gitlab-ci.yml"
 	}
-	dir := filepath.Join(repo, ".github", "workflows")
-	fs, _ := filepath.Glob(filepath.Join(dir, "*.y*ml"))
-	for _, f := range fs {
-		w := read(f)
+	for _, f := range workflows {
+		w := clean(f)
 		if on := onBlock.FindStringSubmatch(w); on == nil || !prEvent.MatchString(on[1]) {
 			continue
 		}
 		for _, c := range localCall.FindAllStringSubmatch(w, -1) {
-			w += read(filepath.Join(dir, filepath.Base(c[1])))
+			w += clean(".github/workflows/" + path.Base(c[1]))
 		}
 		if ciTest.MatchString(w) {
-			return filepath.Base(f)
+			return path.Base(f)
 		}
 	}
 	return ""
