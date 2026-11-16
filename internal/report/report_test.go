@@ -601,8 +601,10 @@ func TestSince(t *testing.T) {
 	d.Diff = file("a.go", "one") + file("c.go", "three") // b.go dropped, c.go new, a.go the same
 	d.Findings = []review.Comment{{Path: "c.go", Line: 1, Title: "leak"}}
 	d.Outline.Weakened = []diff.Flag{{At: "c_test.go:4", What: "test deleted"}}
-	if _, v, _ := Render(d); !slices.Contains(v.Findings, "c_test.go: test deleted") || v.Weights["c_test.go: test deleted"] != "major" {
+	if b, v, _ := Render(d); !slices.Contains(v.Findings, "c_test.go: test deleted") || v.Weights["c_test.go: test deleted"] != "test" {
 		t.Errorf("a weakened test is no finding of the version: %+v", v)
+	} else if strings.Contains(string(b), "open items new") {
+		t.Error("a weakened test counts as a new major") // Test changes counts it
 	}
 	d.Outline.Weakened = nil
 	b, now, err := Render(d)
@@ -647,7 +649,7 @@ func TestJudge(t *testing.T) {
 		Weakened: []diff.Flag{{At: "a_test.go:4", What: "skip/only: `t.Skip()`"}, {At: "a_test.go: TestGone", What: "test deleted"}},
 		Removed:  []string{"a_test.go: TestGone"},
 	}})
-	if !slices.Equal(v.now.Findings, []string{"a_test.go: skip/only: `t.Skip()`", "a_test.go: test deleted"}) || v.now.Weights["a_test.go: test deleted"] != "major" {
+	if !slices.Equal(v.now.Findings, []string{"a_test.go: skip/only: `t.Skip()`", "a_test.go: test deleted"}) || v.now.Weights["a_test.go: test deleted"] != "test" {
 		t.Errorf("weakened tests in the version: %q %v", v.now.Findings, v.now.Weights)
 	}
 	// in its step, the file with the blocker comes first

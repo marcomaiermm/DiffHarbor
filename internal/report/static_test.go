@@ -7,6 +7,7 @@ import (
 	"diffharbor/internal/review"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,6 +79,11 @@ func TestStatic(t *testing.T) {
 		"docs/old.md":      "The gone module is gone.\n",
 		"go/total.go":      "package total\n\nfunc totalNet() int { return 1 }\n",
 		"go/total_test.go": "package total\n\nimport \"testing\"\n\nfunc TestTotalNet(t *testing.T) {}\n",
+		// group 2: total.go goes beside it, but barNet stays in bar.go
+		"go/bar.go":      "package total\n\nfunc barNet() int { return 2 }\n",
+		"go/bar_test.go": "package total\n\nimport \"testing\"\n\nfunc TestBarNet(t *testing.T) {}\n",
+		// group 2 by its imports' names: the helper under tests/ is no name it tests
+		"tests/mixed.test.ts": "import { setup } from './helpers'\nimport { router } from '../src/router'\n\nit('routes', () => {})\n",
 		// group 1 by its imports: two blocks, an .each table once
 		"tests/gone.test.ts": "import { gone } from '../src/lib/gone'\n\nit('reads one', () => {})\nit.each([['a'], ['b']])('row %s', (n) => {})\ntest(\"reads two\", () => {})\n",
 		// group 1 by the search: what it tests, its describe title, no code at the head names
@@ -87,6 +93,7 @@ func TestStatic(t *testing.T) {
 		// nothing to search for
 		"tests/plain.test.ts": "import { x } from 'vitest'\n\nit('a', () => {})\n",
 		"tests/stay.test.ts":  "it('one', () => {\n  expect(a).toBe(1)\n})\nit('two', () => {\n  expect(b).toBe(2)\n})\n",
+		"tests/a.test.ts":     "it('one', () => {\n  expect(a).toBe(1)\n})\n",
 		"tests/fixture.json":  "{}\n",
 		"tests/helpers.ts":    "export const setup = 1\n", // no tests: in no group
 	}
@@ -95,6 +102,9 @@ func TestStatic(t *testing.T) {
 		"src/lib/still.ts":                "",
 		"go/total.go":                     "",
 		"go/total_test.go":                "",
+		"go/bar_test.go":                  "",
+		"tests/mixed.test.ts":             "",
+		"tests/a.test.ts":                 "it.skip('one', () => {\n  expect(a).toBe(1)\n})\n",
 		"src/env.ts":                      "export const env = {\n  DATABASE_URL: z.string(),\n  NEW_URL: process.env.NEW_URL,\n}\n",
 		"src/db.ts":                       "const c = 3\n",
 		"src/client.ts":                   "fetch(env.NEW_URL)\n",
@@ -131,10 +141,10 @@ func TestStatic(t *testing.T) {
 	if got := paths(tc.With); !slices.Equal(got, want) {
 		t.Errorf("group 1:\n%q\nwant\n%q", got, want)
 	}
-	if got := paths(tc.Kept); !slices.Equal(got, []string{"tests/quick.test.ts  [quickAdd] 2"}) {
+	if got := paths(tc.Kept); !slices.Equal(got, []string{"go/bar_test.go  [BarNet] 1", "tests/mixed.test.ts  [router] 1", "tests/quick.test.ts  [quickAdd] 2"}) {
 		t.Errorf("group 2: %q", got)
 	}
-	if k := tc.Kept[0]; !slices.Equal(k.Found, []string{"src/router.ts:4"}) || k.Tests[1] != (TestCase{"uses owners", 5}) {
+	if k := tc.Kept[2]; !slices.Equal(k.Found, []string{"src/router.ts:4"}) || k.Tests[1] != (TestCase{"uses owners", 5}) {
 		t.Errorf("group 2's evidence: %+v", k)
 	}
 	if got := paths(tc.Unsorted); !slices.Equal(got, []string{"tests/plain.test.ts  [] 1"}) {
@@ -143,7 +153,7 @@ func TestStatic(t *testing.T) {
 	if g := tc.With[1].Tests; !reflect.DeepEqual(g, []TestCase{{"reads one", 3}, {"row %s", 4}, {"reads two", 5}}) {
 		t.Errorf("cases: %+v", g)
 	}
-	if len(tc.Stay) != 1 || tc.Stay[0].Path != "tests/stay.test.ts" || len(tc.Stay[0].Flags) != 2 {
+	if len(tc.Stay) != 2 || tc.Stay[0].Path != "tests/stay.test.ts" || len(tc.Stay[0].Flags) != 2 || tc.Stay[1].Path != "tests/a.test.ts" {
 		t.Errorf("group 3: %+v", tc.Stay)
 	}
 
@@ -152,12 +162,12 @@ func TestStatic(t *testing.T) {
 		kinds[k.Kind] = fmt.Sprintf("%v +%d -%d read %d deleted %d generated %d named %d cut %v", k.Files, k.Add, k.Del, k.Read, k.Deleted, k.Generated, k.Named, k.Cut)
 	}
 	wantKinds := map[string]string{
-		// src/lib/still.ts: the router at the head still imports it
-		"code":    "[drizzle/0059_drop_items.sql src/client.ts src/db.ts src/env.ts src/lib/still.ts] +3 -3 read 2 deleted 0 generated 0 named 0 cut false",
-		"tests":   "[tests/migrate.test.ts tests/stay.test.ts go/total_test.go tests/gone.test.ts tests/helpers.ts tests/plain.test.ts tests/quick.test.ts tests/vanished.test.ts] +1 -28 read 2 deleted 6 generated 0 named 0 cut false",
+		// src/lib/still.ts: the router at the head still imports it; go/total.go: bar.go is still package total
+		"code":    "[drizzle/0059_drop_items.sql src/client.ts src/db.ts src/env.ts go/total.go src/lib/still.ts] +3 -6 read 2 deleted 0 generated 0 named 0 cut false",
+		"tests":   "[tests/a.test.ts tests/migrate.test.ts tests/stay.test.ts go/bar_test.go go/total_test.go tests/gone.test.ts tests/helpers.ts tests/mixed.test.ts tests/plain.test.ts tests/quick.test.ts tests/vanished.test.ts] +2 -38 read 2 deleted 8 generated 0 named 0 cut false",
 		"tooling": "[.github/workflows/ci.yml docs/runbook.md] +2 -0 read 0 deleted 0 generated 0 named 0 cut false",
 		// the fixture is no test; docs/old.md still names gone
-		"gone": "[drizzle/meta/0059_snapshot.json go/total.go src/lib/gone.ts tests/fixture.json] +1 -5 read 0 deleted 3 generated 1 named 1 cut false",
+		"gone": "[drizzle/meta/0059_snapshot.json src/lib/gone.ts tests/fixture.json] +1 -2 read 0 deleted 2 generated 1 named 1 cut false",
 	}
 	if !reflect.DeepEqual(kinds, wantKinds) {
 		t.Errorf("kinds:\n%q\nwant\n%q", kinds, wantKinds)
@@ -186,6 +196,24 @@ func TestStatic(t *testing.T) {
 	if !slices.Equal(unread, []string{"OLD_URL"}) {
 		t.Errorf("no longer read: %q", unread)
 	}
+	// a search that stopped early, or never ran, says so; one that found a reader drops it
+	for _, e := range []map[string]EnvVar{{"OLD_URL": {Cut: true}}, {"DATABASE_URL": {}}, {"OLD_URL": {Reads: []string{"a.ts:1"}, Cut: true}}} {
+		var notes []string
+		for _, r := range prepare(Data{Diff: d.Diff, Env: e}).Risks {
+			for _, it := range r.Items {
+				if it.What == "OLD_URL" {
+					notes = append(notes, it.Note)
+				}
+			}
+		}
+		want := []string{"no longer read in the diff; the search at the head stopped early"}
+		if len(e["OLD_URL"].Reads) > 0 {
+			want = nil
+		}
+		if !slices.Equal(notes, want) {
+			t.Errorf("OLD_URL with %+v: %q", e, notes)
+		}
+	}
 
 	if m := d.Migrations; len(m) != 1 || m[0].Path != "drizzle/0059_drop_items.sql" || !slices.Equal(m[0].Docs, []string{"docs/runbook.md:1"}) ||
 		!slices.Equal(m[0].Tests, []string{"tests/migrate.test.ts:1"}) || m[0].Cut {
@@ -193,12 +221,22 @@ func TestStatic(t *testing.T) {
 	}
 
 	// router.ts is unchanged: its excerpt, 10 lines around :4, as far as the file goes; db.ts on the base
-	if len(d.Excerpts) != 1 || !reflect.DeepEqual(d.Excerpts[0], Excerpt{Path: "src/router.ts", From: 1, Lines: strings.Split(strings.TrimSuffix(base["src/router.ts"], "\n"), "\n")}) {
+	if len(d.Excerpts) != 2 || d.Excerpts[0].Path != "go/bar.go" || !reflect.DeepEqual(d.Excerpts[1], Excerpt{Path: "src/router.ts", From: 1, Lines: strings.Split(strings.TrimSuffix(base["src/router.ts"], "\n"), "\n")}) {
 		t.Errorf("excerpts: %+v", d.Excerpts)
 	}
 	ex := Excerpts(context.Background(), sb, d, []Span{{Path: "src/db.ts", Base: true, From: 2, To: 2}, {Path: "src/lib/gone.ts", From: 1, To: 1}})
 	if len(ex) != 1 || ex[0].Path != "src/db.ts" || !ex[0].Base || ex[0].Lines[1] != "const b = process.env.OLD_URL" {
 		t.Errorf("base excerpt: %+v", ex) // gone.ts has no head
+	}
+	// a span a model names out of bounds stays out, and so does what passes maxSources
+	router := Span{Path: "src/router.ts", From: 4, To: 4}
+	if ex := Excerpts(context.Background(), sb, d, []Span{{Path: "src/router.ts", From: 1, To: math.MaxInt - 3}, {Path: "src/router.ts", From: math.MaxInt - 3, To: math.MaxInt - 3}, {Path: "src/router.ts", From: 3, To: 2}, router}); len(ex) != 1 {
+		t.Errorf("spans out of bounds: %+v", ex)
+	}
+	full := d
+	full.Sources = map[string]string{"big.ts": strings.Repeat("x", maxSources-50)}
+	if ex := Excerpts(context.Background(), sb, full, []Span{router}); len(ex) != 0 {
+		t.Errorf("past maxSources: %+v", ex)
 	}
 }
 
@@ -259,14 +297,5 @@ func TestVersionItems(t *testing.T) {
 	var old Version
 	if err := json.Unmarshal([]byte(`{"sha":"abc","at":"2026-01-01T00:00:00Z","files":{"a.go":"1"}}`), &old); err != nil || old.Items != nil {
 		t.Errorf("old version: %v %+v", err, old)
-	}
-}
-
-func TestPartOf(t *testing.T) {
-	m := &Map{Parts: []MapPart{{ID: "src", Path: "src", Files: []string{"src/a.ts"}}, {ID: "src/lib", Path: "src/lib"}, {ID: "top", Path: ".", Files: []string{"main.go"}}}}
-	for p, want := range map[string]string{"src/a.ts": "src", "src/lib/x/b.ts": "src/lib", "src/c.ts": "src", "go.mod": "top", "web/x.ts": ""} {
-		if got := m.PartOf(p); got != want {
-			t.Errorf("%s: %q, want %q", p, got, want)
-		}
 	}
 }

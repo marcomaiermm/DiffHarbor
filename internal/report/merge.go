@@ -171,18 +171,23 @@ func (n names) scan(f *file, manifest *regexp.Regexp) {
 }
 
 // vars is the environment variables read and no longer read; one both is only moved. With env (the head's readers,
-// nil when none were searched), one is no longer read only when a search at the head found no reader.
+// nil when none were searched), one is no longer read only when a whole search at the head found nothing that reads
+// or names it; one it found is still read, and one whose search stopped early or didn't run says so.
 func (n names) vars(env map[string]EnvVar) []riskItem {
 	var is []riskItem
 	for _, v := range slices.Sorted(maps.Keys(n.env)) {
 		at := n.env[v]
+		e, searched := env[v]
 		switch {
 		case at[0] != "" && at[1] == "" && n.defaults[v]:
 			is = append(is, riskItem{What: v, Note: "newly read, has a default", ID: at[0]})
 		case at[0] != "" && at[1] == "":
 			is = append(is, riskItem{What: v, Note: "newly read", ID: at[0], Warn: secretName.MatchString(v)})
-		case at[1] != "" && at[0] == "" && env != nil && !unread(env, v): // the head still reads it, or no search said it doesn't
-		case at[1] != "" && at[0] == "":
+		case at[1] == "" || at[0] != "":
+		case len(e.Reads)+len(e.Named) > 0: // the head still reads it
+		case env != nil && (!searched || e.Cut):
+			is = append(is, riskItem{What: v, Note: "no longer read in the diff; the search at the head stopped early", ID: at[1]})
+		default:
 			is = append(is, riskItem{What: v, Note: "no longer read", ID: at[1]})
 		}
 	}
@@ -227,10 +232,4 @@ func baseMoved(behind []review.Commit, files map[string]*file) []review.Commit {
 		}
 	}
 	return out
-}
-
-// unread is whether a search at the head found nothing that reads or names v.
-func unread(env map[string]EnvVar, v string) bool {
-	e, ok := env[v]
-	return ok && !e.Cut && len(e.Reads)+len(e.Named) == 0
 }

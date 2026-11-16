@@ -89,7 +89,7 @@ type FileKind struct {
 
 // EnvVar is an environment variable the diff starts or stops reading, and who reads it at the head (Before you merge,
 // Environment). Before the page calls it no longer read, Reads and Named must be empty and Cut false; the page names
-// each place's part with Map.PartOf.
+// each reader's part with its own part lookup.
 type EnvVar struct {
 	Reads []string // "path:line" of code that reads it: process.env.NAME, getenv("NAME"), a validated env object's env.NAME
 	Named []string // other lines of code that name it, such as its key in an env schema
@@ -120,13 +120,15 @@ type Span struct {
 }
 
 const (
-	staticTime  = time.Minute // what all of Static's searches may take
-	maxHits     = 200         // the lines one search reads
-	maxFound    = 5           // the places a test file's search keeps
-	maxPlaces   = 20          // the places an env variable or a migration keeps per list
-	maxSearches = 200         // the deleted files and test files searched by name; past them no evidence
-	excerptPad  = 10          // the lines an Excerpt takes around a place
-	maxLineLen  = 500         // the bytes of an Excerpt's line
+	staticTime  = time.Minute      // what all of Static's searches may take
+	maxHits     = 200              // the lines one search reads
+	maxFound    = 5                // the places a test file's search keeps
+	maxPlaces   = 20               // the places an env variable or a migration keeps per list
+	maxSearches = 200              // the deleted files and test files searched by name; past them no evidence
+	excerptPad  = 10               // the lines an Excerpt takes around a place
+	maxSpan     = 300              // the lines of a Span: a longer one, or one out of order, stays out
+	excerptTime = 10 * time.Second // what Excerpts may take, apart from the searches
+	maxLineLen  = 500              // the bytes of an Excerpt's line
 )
 
 var (
@@ -196,16 +198,19 @@ func grepHead(ctx context.Context, sb *proc.Sandbox, limit int, args ...string) 
 }
 
 // Static fills what the page takes from the diff, git and path rules, without a model: TestChanges, Kinds, Env,
-// Migrations and Excerpts. entered is the files the review's parts held. Its searches share staticTime.
+// Migrations and Excerpts. entered is the files the review's parts held. Its searches share staticTime, Before you
+// merge's first; Excerpts has its own excerptTime.
 func Static(ctx context.Context, sb *proc.Sandbox, d *Data, entered []string) {
-	ctx, cancel := context.WithTimeout(ctx, staticTime)
+	sctx, cancel := context.WithTimeout(ctx, staticTime)
 	defer cancel()
-	g := func(limit int, args ...string) ([]hit, bool) { return grepHead(ctx, sb, limit, args...) }
-	d.TestChanges = testChanges(g, d.Diff, d.Outline)
-	d.Kinds = fileKinds(g, sb.Repo(), *d, entered)
+	g := func(limit int, args ...string) ([]hit, bool) { return grepHead(sctx, sb, limit, args...) }
 	d.Env = envVars(g, d.Diff)
 	d.Migrations = migrations(g, d.Diff)
-	d.Excerpts = Excerpts(ctx, sb, *d, spans(*d))
+	d.TestChanges = testChanges(g, d.Diff, d.Outline)
+	d.Kinds = fileKinds(g, sb.Repo(), *d, entered)
+	ectx, cancel := context.WithTimeout(ctx, excerptTime)
+	defer cancel()
+	d.Excerpts = Excerpts(ectx, sb, *d, spans(*d))
 }
 
 // code is whether p is code a search counts: no doc, no test.
@@ -369,12 +374,8 @@ func testChanges(g search, raw string, o diff.Outline) TestChanges {
 		for _, s := range specs {
 			tf.Imports = cmp.Or(tf.Imports, resolve(t.path, s, gone))
 		}
-		if tf.Imports == "" && strings.HasSuffix(t.path, "_test.go") { // a Go test imports its package: a deleted file beside it
-			for _, p := range gone {
-				if path.Dir(p) == path.Dir(t.path) && strings.HasSuffix(p, ".go") && (tf.Imports == "" || p < tf.Imports) {
-					tf.Imports = p
-				}
-			}
+		if strings.HasSuffix(t.path, "_test.go") { // a Go test imports its package: its own file, deleted with it
+			tf.Imports = cmp.Or(tf.Imports, gone[strings.TrimSuffix(t.path, "_test.go")+".go"])
 		}
 		if tf.Imports != "" {
 			tc.With = append(tc.With, tf)
@@ -386,7 +387,7 @@ func testChanges(g search, raw string, o diff.Outline) TestChanges {
 			continue
 		}
 		searched++
-		args := []string{"-w"}
+		args := []string{"-w", "-F"}
 		if strings.HasSuffix(t.path, ".go") {
 			args = append(args, "-i") // TestTotalNet tests totalNet
 		}
@@ -474,12 +475,12 @@ func fileKinds(g search, root string, d Data, entered []string) []FileKind {
 	searched := 0
 	diff.EachDeleted(d.Diff, func(p, f string) {
 		k := kindOf(p)
-		if checks.IsTest(p) { // a fixture or helper under tests/ goes as other deleted files do
+		if isTest(p) { // a fixture under tests/ goes as other deleted files do
 			ks[1].Deleted++
 			add(1, p, f)
 			return
 		}
-		name := path.Base(noExt(p))
+		name := strings.TrimSuffix(path.Base(p), path.Ext(p))
 		if name == "index" {
 			name = path.Base(path.Dir(p))
 		}
@@ -525,7 +526,12 @@ func envVars(g search, raw string) map[string]EnvVar {
 	diff.EachFile(raw, scan)
 	diff.EachDeleted(raw, scan)
 	out := map[string]EnvVar{}
-	for _, it := range n.vars(nil) {
+	its := n.vars(nil)
+	unread := slices.DeleteFunc(slices.Clone(its), func(it riskItem) bool { return it.Note != "no longer read" })
+	for _, it := range slices.Concat(unread, its) { // the ones no longer read first: they need the head's word
+		if _, ok := out[it.What]; ok {
+			continue
+		}
 		if len(out) == 2*maxRisks {
 			break
 		}
@@ -566,7 +572,7 @@ func migrations(g search, raw string) []Migration {
 		m := Migration{Path: p}
 		name := path.Base(p)
 		name = strings.TrimSuffix(name, path.Ext(name))
-		if len(name) < 6 || shortName.MatchString(name) { // "001" names too much
+		if len(name) < 6 || shortName.MatchString(name) || !strings.ContainsAny(name, "0123456789") { // "001" and "schema" name too much
 			m.Cut = true
 			out = append(out, m)
 			return
@@ -621,7 +627,8 @@ func spans(d Data) []Span {
 
 // Excerpts reads the lines of spans, excerptPad more on each side, merged per file: at the head from sb's checkout
 // for a file the PR doesn't delete, on the base from the blob the diff names for a file it changes. A file past
-// maxSource and what exceeds maxSources with Sources counted stay out.
+// maxSource, a span out of order or longer than maxSpan (a model may name it) and what exceeds maxSources with Sources
+// counted stay out.
 func Excerpts(ctx context.Context, sb *proc.Sandbox, d Data, want []Span) []Excerpt {
 	if len(want) == 0 {
 		return nil
@@ -647,13 +654,13 @@ func Excerpts(ctx context.Context, sb *proc.Sandbox, d Data, want []Span) []Exce
 	var order []key
 	for _, s := range want {
 		k := key{s.Path, s.Base}
-		if s.Base && blobs[s.Path] == "" || !s.Base && gone[s.Path] {
+		if s.Base && blobs[s.Path] == "" || !s.Base && gone[s.Path] || s.From < 1 || s.To < s.From || s.To-s.From > maxSpan {
 			continue
 		}
 		if by[k] == nil {
 			order = append(order, k)
 		}
-		by[k] = append(by[k], [2]int{max(1, s.From-excerptPad), max(s.From, s.To) + excerptPad})
+		by[k] = append(by[k], [2]int{max(1, s.From-excerptPad), s.To + excerptPad})
 	}
 	var specs []string
 	for _, k := range order {
@@ -677,7 +684,7 @@ func Excerpts(ctx context.Context, sb *proc.Sandbox, d Data, want []Span) []Exce
 				text = string(b)
 			}
 		}
-		if text == "" || strings.IndexByte(text, 0) >= 0 {
+		if text == "" || len(text) > maxSource || strings.IndexByte(text, 0) >= 0 {
 			continue
 		}
 		ls := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
@@ -707,19 +714,4 @@ func Excerpts(ctx context.Context, sb *proc.Sandbox, d Data, want []Span) []Exce
 		}
 	}
 	return out
-}
-
-// PartOf is the ID of the map's part that holds p: a file of it, else the deepest part whose folder holds p. "" when
-// none does.
-func (m *Map) PartOf(p string) string {
-	id, depth := "", -1
-	for _, pt := range m.Parts {
-		if slices.Contains(pt.Files, p) {
-			return pt.ID
-		}
-		if pt.Path != "" && pt.Path != "other" && (pt.Path == "." && !strings.Contains(p, "/") || strings.HasPrefix(p, pt.Path+"/")) && len(pt.Path) > depth {
-			id, depth = pt.ID, len(pt.Path)
-		}
-	}
-	return id
 }

@@ -68,7 +68,7 @@ func stamp(v view, ids map[string]string) Version {
 		now.Items = append(now.Items, Item{"gap", p})
 	}
 	slices.SortFunc(now.Items, func(a, b Item) int { return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Place, b.Place)) })
-	now.Items = slices.Compact(now.Items)
+	now.Items = slices.Compact(now.Items) // findings at one line are one item: New since marks the place
 	return now
 }
 
