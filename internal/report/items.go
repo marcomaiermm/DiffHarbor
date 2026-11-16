@@ -106,10 +106,19 @@ func span(at string) (p string, from, to int) {
 	return p, from, to
 }
 
-// waiting is the gates that make the merge wait.
+// waiting is the gates that make the merge wait, one per name: its card's ID.
 func (v *view) waiting() []review.Gate {
-	return slices.DeleteFunc(slices.Clone(v.Terms.Gates), func(g review.Gate) bool { return !g.Waits })
+	var out []review.Gate
+	for _, g := range v.Terms.Gates {
+		if g.Waits && !slices.ContainsFunc(out, func(o review.Gate) bool { return o.Name == g.Name }) {
+			out = append(out, g)
+		}
+	}
+	return out
 }
+
+// gateKey is a gate's Version.Items place: its ticket, else its exact quote; the model words its name anew each run.
+func gateKey(g review.Gate) string { return cmp.Or(g.Ticket, g.Text) }
 
 // gateLink is what a link to a gate names it: "the cutover gate", else "the gate".
 func gateLink(name string) string {
@@ -144,7 +153,10 @@ func (v *view) gateTracker(g review.Gate, long bool) mline {
 		return mline{Chip: c, Text: s}
 	}
 	if len(v.Tickets) == 0 {
-		return mline{Text: sentenceCase(g.Name) + "'s ticket state isn't on this page: no ticket was read."}
+		if g.Ticket != "" {
+			return mline{Text: g.Ticket + "'s state isn't on this page: no ticket was read."}
+		}
+		return mline{Text: "No ticket was read, so the state of what the gate waits for isn't on this page."}
 	}
 	if g.Ticket == "" {
 		return mline{Text: "No ticket read for this review names " + g.Name + "."}
@@ -155,10 +167,7 @@ func (v *view) gateTracker(g review.Gate, long bool) mline {
 // clears is what ends the wait (rule 2): a later run that reads the ticket as Done, or no longer finds the words.
 func (v *view) clears(g review.Gate) string {
 	ticketRead := slices.ContainsFunc(v.Tickets, func(t ticket.Ticket) bool { return t.Key == g.Ticket && g.Ticket != "" })
-	who := g.Ticket
-	if who == "" {
-		who = g.Name + "'s ticket"
-	}
+	who := cmp.Or(g.Ticket, "the ticket it waits for")
 	if ticketRead {
 		return "Clears when " + who + " is Done. DiffHarbor reads the tracker again on its next run."
 	}
@@ -171,7 +180,7 @@ func (v *view) clears(g review.Gate) string {
 
 // gateCard is a gate in Before you merge (5.6): always open, its quote, the tracker line and how a run starts.
 func (v *view) gateCard(g review.Gate) *card {
-	k := &card{ID: slug(g.Name) + "-gate", Kind: "Before merging", Gate: true, Title: "The merge waits for " + g.Name, Chip: wordChip(g.In), Keys: []string{"gate\t" + g.Name}}
+	k := &card{ID: slug(g.Name) + "-gate", Kind: "Before merging", Gate: true, Title: "The merge waits for " + g.Name, Chip: wordChip(g.In), Keys: []string{"gate\t" + gateKey(g)}}
 	k.Blocks = []cblock{{Chip: k.Chip, Lines: []cline{{Text: g.Text, Quote: true, Cite: cite(g.Quote)}}}}
 	t := v.gateTracker(g, true)
 	k.Blocks = append(k.Blocks, cblock{Chip: t.Chip, Lines: []cline{{Text: t.Text}}})
@@ -253,7 +262,7 @@ func (v *view) orderBlock(path string) *cblock {
 			b.Lines = append(b.Lines, cline{Lead: "Doc:", Code: d, Href: v.placeHref(d)})
 		}
 		for _, t := range m.Tests {
-			b.Lines = append(b.Lines, cline{Lead: "Test:", Code: t, Href: v.placeHref(t), Note: v.notRun()})
+			b.Lines = append(b.Lines, cline{Lead: "Test:", Code: t, Href: v.placeHref(t), Note: v.notRun(t)})
 		}
 		switch {
 		case m.Cut:
@@ -273,17 +282,49 @@ func (v *view) placeHref(at string) string {
 		return ""
 	}
 	if from > 0 {
-		return "#" + p + ":" + strconv.Itoa(from)
+		return lineHref(p, from)
 	}
 	return "#" + p
 }
 
-// notRun is the tests' note: no result for them reached this page, unless a run did (section 4).
-func (v *view) notRun() string {
-	if len(v.Data.Tests.Ran) > 0 {
+// lineHref is the page's link to line n of p. html/template reads a colon before any slash as a URL scheme and drops
+// the link, so a root file's colon is escaped: the script decodes the hash.
+func lineHref(p string, n int) string {
+	if !strings.Contains(p, "/") {
+		return "#" + p + "%3A" + strconv.Itoa(n)
+	}
+	return "#" + p + ":" + strconv.Itoa(n)
+}
+
+// notRun is the note of the test at at: no result for it reached this page, unless a run backs the Go or Python test
+// declared on that line (section 4). A line that declares no test keeps the note.
+func (v *view) notRun(at string) string {
+	p, n, _ := span(at)
+	l := v.headLine(p, n)
+	m := goTestFn.FindStringSubmatch(l)
+	if m == nil {
+		m = pyTestFn.FindStringSubmatch(l)
+	}
+	if m != nil && ranOf(v.Data.Tests.Ran, m[1]) != "" {
 		return ""
 	}
 	return "· not run here"
+}
+
+// headLine is line n of p at the head, from Sources or a head Excerpt; "" when the page has neither.
+func (v *view) headLine(p string, n int) string {
+	if src := v.Sources[p]; src != "" {
+		if ls := strings.Split(src, "\n"); n > 0 && n <= len(ls) {
+			return ls[n-1]
+		}
+		return ""
+	}
+	for _, e := range v.Excerpts {
+		if e.Path == p && !e.Base && n >= e.From && n < e.From+len(e.Lines) {
+			return e.Lines[n-e.From]
+		}
+	}
+	return ""
 }
 
 // envBlock is where the head reads the card's variables (Data.Env), each with its part.
@@ -463,6 +504,7 @@ func (v *view) keptCard() *card {
 	del := cblock{Label: "Deleted", Chip: evDiff}
 	found := cblock{Label: "Still at the head", Chip: evSearch}
 	for _, f := range kp {
+		k.Paths = append(k.Paths, f.Path)
 		del.Lines = append(del.Lines, cline{Code: f.Path, Text: "on the base:"})
 		for _, c := range f.Tests {
 			del.Lines = append(del.Lines, cline{Text: "“" + c.Title + "” (:" + strconv.Itoa(c.Line) + ")"})
@@ -588,7 +630,7 @@ func (v *view) kindBar() *kindsBar {
 			if n == k.Read {
 				r.Text = "The review read all " + strconv.Itoa(n) + "."
 			} else if v.Page.Gap != nil {
-				r.Text += " " + strconv.Itoa(n-k.Read) + " weren't read; they are the gap in the review."
+				r.Text += " " + strconv.Itoa(n-k.Read) + map[bool]string{true: " wasn't read; it is", false: " weren't read; they are"}[n-k.Read == 1] + " the gap in the review."
 			}
 		case "tests":
 			stay := n - k.Deleted
@@ -609,7 +651,7 @@ func (v *view) kindBar() *kindsBar {
 			}
 			r.Text = sentenceCase(join(s)) + ". The review skips them."
 			if k.Named > 0 {
-				r.Text += " " + strconv.Itoa(k.Named) + " of the " + strconv.Itoa(k.Deleted) + " are still named in docs."
+				r.Text += " " + strconv.Itoa(k.Named) + " of the " + strconv.Itoa(k.Deleted) + map[bool]string{true: " is", false: " are"}[k.Named == 1] + " still named in docs."
 			}
 		}
 		if k.Cut {

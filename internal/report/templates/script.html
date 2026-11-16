@@ -296,8 +296,8 @@
   for (const c of $$("input[data-keys]")) c.addEventListener("change", () => keys(c.checked));
 
   // Since (5.13): the version this browser opened before this one, else the previous review; the versions menu picks
-  // another for this visit. Files compare by their patch IDs, open items by Version.Items: a group (the gap, a test
-  // group) is new when the base had none of its kind.
+  // another for this visit. Files compare by their patch IDs, findings by the base's Findings and Weights, the other
+  // open items by Version.Items: a group (the gap, a test group) is new when the base had none of its kind.
   const sha = {{.SHA}}, since = JSON.parse($("#since-data").textContent);
   const seenKey = {{printf "diffharbor:seen:%s#%d" .Repo .Number}};
   let seen = null;
@@ -311,6 +311,7 @@
   let base = null;
   const compare = (b, how) => {
     for (const x of $$("[data-since]")) x.parentNode.removeChild(x);
+    for (const x of $$(".mb .mk")) if (!x.childElementCount) x.hidden = true; // an earlier compare's marks only
     for (const x of $$("[data-changed]")) x.removeAttribute("data-changed");
     for (const x of $$("[data-aria0]")) x.setAttribute("aria-label", x.dataset.aria0);
     base = b;
@@ -320,12 +321,16 @@
     for (const p of changed) { const w = since.where[p] || "other"; if (w in kinds) kinds[w]++; else where[w] = (where[w] || 0) + 1; }
     const said = since.boxes.filter(([k]) => where[k]).map(([k, l, d]) => d ? l : where[k] + " in " + l);
     for (const [k, one, many] of [["code", "code file", "code files"], ["doc", "doc", "docs"], ["test", "test file", "test files"], ["other", "other file", "other files"]]) if (kinds[k]) said.push(count(kinds[k], one, many));
-    const key = i => i.kind + "\t" + i.place, now = new Set(since.items.map(key));
-    const old = b.items ? new Set(b.items.map(key)) : null, oldKinds = new Set((b.items || []).map(i => i.kind)), nowKinds = new Set(since.items.map(i => i.kind));
+    const key = i => i.kind + "\t" + i.place, kindOf = k => k.split("\t")[0], now = new Set(since.items.map(key));
+    // a version from before Items still tells its findings
+    const known = k => kindOf(k) === "finding" || !!b.items, weights = b.weights || {};
+    const old = new Set([...(b.findings || []).filter(f => since.major.includes(weights[f])).map(f => "finding\t" + f),
+      ...(b.items || []).filter(i => i.kind !== "finding").map(key)]);
+    const oldKinds = new Set([...old].map(kindOf)), nowKinds = new Set(since.items.map(i => i.kind));
     let news = 0, fixed = 0;
-    if (old) {
-      for (const k of now) if (!group(k.split("\t")[0]) && !old.has(k)) news++;
-      for (const k of old) if (!group(k.split("\t")[0]) && !now.has(k)) fixed++;
+    for (const k of now) if (known(k) && !group(kindOf(k)) && !old.has(k)) news++;
+    for (const k of old) if (!group(kindOf(k)) && !now.has(k)) fixed++;
+    if (b.items) {
       for (const k of nowKinds) if (group(k) && !oldKinds.has(k)) news++;
       for (const k of oldKinds) if (group(k) && !nowKinds.has(k)) fixed++;
     }
@@ -335,7 +340,14 @@
     $("span", line).textContent = count(changed.length, "file", "files") + " changed since " + s7 + ", " + how + " (" + String(b.at).slice(0, 10) + ")" + (said.length ? ": " + and(said) : "") + "." +
       (news + fixed ? " · " + count(news, "open item", "open items") + " new · " + fixed + " fixed" : "");
     filt.textContent = "Changed since " + s7;
-    const mark = (el, text) => el.insertAdjacentHTML("beforeend", '<span class="chip st2" data-since>' + commit + text + "</span>");
+    const mark = (el, text) => {
+      const c = document.createElement("span");
+      c.className = "chip st2";
+      c.dataset.since = "";
+      c.innerHTML = commit;
+      c.append(text);
+      el.append(c);
+    };
     for (const p of at) {
       const f = document.getElementById(p);
       if (!f?.matches(".file")) continue;
@@ -345,7 +357,7 @@
     for (const c of $$("article[data-k], article[data-paths]")) {
       const ks = JSON.parse(c.dataset.k || "[]"), ps = JSON.parse(c.dataset.paths || "[]"), m = $(".icm", c);
       if (!m) continue;
-      const isNew = old && ks.some(k => group(k) ? !oldKinds.has(k) : !old.has(k));
+      const isNew = ks.some(k => known(k) && (group(k) ? !oldKinds.has(k) : !old.has(k)));
       if (isNew || ps.some(p => at.has(p))) {
         mark(m, (isNew ? "New since " : "Changed since ") + s7);
         const pl = $(":scope > .pl", m);
@@ -365,7 +377,8 @@
     const sk = $("[data-since-key]");
     if (sk) {
       sk.hidden = !Object.keys(where).length;
-      if (!sk.hidden) { sk.parentElement.hidden = false; $("span:last-child", sk).textContent = s7; }
+      sk.parentElement.hidden = sk.hidden && !$$(":scope > :not([data-since-key])", sk.parentElement).length;
+      if (!sk.hidden) $("span:last-child", sk).textContent = s7;
     }
   };
   // the versions next to this page's URL: the menu's rows, each with "Compare with this", and a newer version's banner

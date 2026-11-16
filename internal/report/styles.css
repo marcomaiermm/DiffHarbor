@@ -597,8 +597,9 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .fileln{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
 .fileln .ad{font:400 12px/1.6 var(--mono);color:var(--ink2)}
 .tlist{display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin-top:6px}
-.olinks{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:4px}
 .olinks a{position:relative}
+@media (max-width:767px){.olinks{display:flex;flex-direction:column;align-items:flex-start;gap:4px}.olinks .osep{display:none}.olinks>a{display:inline-flex;align-items:center;min-height:44px;min-width:44px}}
+.pbm{display:inline-flex;align-items:center;gap:4px}
 /* tests (18) */
 .bul{display:flex;flex-direction:column;gap:4px;font-size:15px}
 .bul li{padding-left:14px;position:relative}
@@ -678,9 +679,9 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .lbar{display:flex;gap:2px;height:14px}
 .lbar span{border-radius:4px;min-width:6px}
 .k-code{background:var(--ink2)}
-.k-test{background:repeating-linear-gradient(45deg,var(--ink2) 0 2px,var(--raised) 2px 5px)}
-.k-doc{background:radial-gradient(circle,var(--ink3) 1px,transparent 1.4px) 0 0/6px 6px,var(--raised)}
-.k-del{border:1px solid var(--ink3)}
+.k-tests{background:repeating-linear-gradient(45deg,var(--ink2) 0 2px,var(--raised) 2px 5px)}
+.k-tooling{background:radial-gradient(circle,var(--ink3) 1px,transparent 1.4px) 0 0/6px 6px,var(--raised)}
+.k-gone{border:1px solid var(--ink3)}
 .krows{display:flex;flex-direction:column}
 .krow{display:grid;grid-template-columns:12px 168px 64px 128px minmax(0,1fr);column-gap:12px;row-gap:4px;align-items:baseline;padding:12px 0;border-top:1px solid var(--line);font-size:13px;color:var(--ink2)}
 .krow .sw{width:12px;height:12px;border-radius:3px;position:relative;top:1px}
@@ -704,7 +705,7 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .mlist2{position:absolute;top:56px;right:8px;z-index:35;min-width:220px;background:var(--raised);border:1px solid var(--line2);border-radius:8px;padding:4px}
 /* 44 px (section 3): a control drawn smaller keeps its look and reaches 44 through padding or an invisible extension.
    Links stacked in a list, in a call path, in an excerpt header or in a table row are as tall as their 44 row. */
-:is(.olinks,.fw,.ctab .evd,.exh,.cpath li)>a,.kt .ar>a{display:inline-flex;align-items:center;min-height:44px;min-width:44px}
+:is(.fw,.ctab .evd,.exh,.cpath li)>a,.kt .ar>a{display:inline-flex;align-items:center;min-height:44px;min-width:44px}
 .kt .ar>a{position:relative;z-index:1;margin:-12px 0}
 :is(.stat .slb,.since,.selh .sr)>a.lnk{position:relative;display:inline-block}
 :is(.stat .slb,.since,.selh .sr)>a.lnk::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:44px;transform:translate(-50%,-50%)}

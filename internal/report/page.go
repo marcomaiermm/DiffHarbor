@@ -312,6 +312,9 @@ func (v *view) status() mstatus {
 	n := v.Page.Open
 	items := plural(n, "open item", "open items")
 	waits := v.waiting()
+	failed := func(pass string) bool {
+		return slices.ContainsFunc(v.Terms.Errs, func(e string) bool { return strings.HasPrefix(e, pass+":") })
+	}
 	switch {
 	case v.Conflicts:
 		st.Kind, st.Head, st.Short = "blocked", "Blocked: a conflict with "+base, "Blocked · conflict with "+base
@@ -333,7 +336,9 @@ func (v *view) status() mstatus {
 	default:
 		st.Kind, st.Head, st.Short = "none", "No open items", "No open items"
 		st.Note = []string{"No difference, nothing to finish before merging, no major finding, no test change and no gap in the review."}
-		if len(v.Tickets) == 0 {
+		if failed("contract") { // no comparison ran: no "No difference"
+			st.Note = []string{"Nothing to finish before merging, no major finding, no test change and no gap in the review."}
+		} else if len(v.Tickets) == 0 {
 			st.Note = append(st.Note, "No ticket was read, so nothing compared the code with what the tickets ask.")
 		}
 	}
@@ -343,8 +348,11 @@ func (v *view) status() mstatus {
 			st.Lines = append(st.Lines, mline{Text: "Also waits for " + waits[0].Name + "."})
 		}
 	}
-	if slices.ContainsFunc(v.Terms.Errs, func(e string) bool { return strings.HasPrefix(e, "gates:") }) {
+	if failed("gates") {
 		st.Lines = append(st.Lines, mline{Chip: evRun, Text: "The gate pass failed, so nothing checked whether the description or a ticket asks to wait."})
+	}
+	if failed("contract") {
+		st.Lines = append(st.Lines, mline{Chip: evRun, Text: "The contract pass failed, so nothing compared the code with what the tickets ask."})
 	}
 	// the open items
 	open := stat{N: strconv.Itoa(n), Label: map[bool]string{true: "open item", false: "open items"}[n == 1]}
@@ -402,12 +410,7 @@ func (v *view) status() mstatus {
 		} else {
 			tk := v.Tickets[0] // open tickets come first
 			ts.Second = strings.TrimSpace(tk.Key + " " + tk.State)
-			n := 0
-			for _, d := range v.Terms.Differences {
-				if d.Ticket == tk.Key {
-					n++
-				}
-			}
+			n := len(v.Terms.Differences) // the PR's, not the first ticket's (5.3)
 			ts.Second += " · " + map[bool]string{true: "no difference", false: plural(n, "difference", "differences")}[n == 0]
 		}
 		st.Stats = append(st.Stats, ts)
@@ -553,7 +556,7 @@ func (v *view) findingCard(i int, c review.Comment) *card {
 	}
 	k.Paths = []string{c.Path}
 	if review.Blocks(c.Severity) {
-		k.Keys = []string{"finding\t" + c.Path + ":" + strconv.Itoa(c.Line)}
+		k.Keys = []string{"finding\t" + c.Path + ": " + c.Title}
 	}
 	k.Excerpt = v.excerpt(c.Path, c.Line, c.Line, c.Line)
 	if slices.Contains(v.Omitted, c.Path) || slices.Contains(v.Failed, c.Path) {
@@ -593,7 +596,7 @@ func (v *view) placeOf(p string, line int) (string, string) {
 	if line > 0 {
 		name += ":" + strconv.Itoa(line)
 		if href != "" {
-			href += ":" + strconv.Itoa(line)
+			href = lineHref(p, line)
 		}
 	}
 	return name, href
@@ -637,7 +640,7 @@ func (v *view) cut(p string, lines []string, floor, from, to, cited int) *excerp
 		x.Cited += "–" + strconv.Itoa(to)
 	}
 	if v.files[p] != nil {
-		x.Href = "#" + p + ":" + strconv.Itoa(cited)
+		x.Href = lineHref(p, cited)
 	}
 	for n := a; n <= b; n++ {
 		r := xrow{No: n, Text: strings.ReplaceAll(lines[n-1], "\t", "  "), Cited: n >= cited && n <= to}

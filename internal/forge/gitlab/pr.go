@@ -69,7 +69,7 @@ func (p *pr) Refresh() error {
 	return nil
 }
 
-var states = map[string]string{"pending": "running", "success": "success", "error": "failed"}
+var states = map[string]string{"pending": "running", "success": "success", "error": "failed", "failure": "failed"}
 
 func (p *pr) Status(sha, state, desc string) {
 	if err := call("POST", p.api+"/statuses/"+sha, map[string]string{"state": states[state], "name": "diffharbor", "description": desc}, nil); err != nil {

@@ -169,12 +169,17 @@ func largeData() Data {
 	}
 }
 
-// prevData is the large PR's version before its last push: orders.go read otherwise, no difference yet.
+// prevData is the large PR's version before its last push: orders.go read otherwise, no difference yet, its findings one
+// line down.
 func prevData() Data {
 	d := largeData()
 	d.SHA = "9876543210fedcba"
 	d.Diff = strings.Replace(d.Diff, "\treturn payments.Charge(id)", "\treturn nil", 1)
 	d.Terms.Differences = d.Terms.Differences[1:]
+	d.Findings = slices.Clone(d.Findings)
+	for i := range d.Findings {
+		d.Findings[i].Line++ // the push moved them: still the same findings
+	}
 	return d
 }
 
@@ -286,7 +291,7 @@ func TestPageFixtures(t *testing.T) {
 			"Left to CI (ci.yml), which this PR edits", "This PR edits the CI that judges it", "Where they&#39;re read", "Docs and tests that name it",
 			"What an outside service serves, in the author&#39;s words", "Run migration 0007 before the new image starts.",
 			"as on main at 0123456, read whole.", "which ran in 2 parts", "· not run here", "12 files by kind",
-			"No current member changed or reviewed util in 12 months.", `data-k="[&#34;finding\tinternal/orders/orders.go:2&#34;]"`,
+			"No current member changed or reviewed util in 12 months.", "SHOP-12 In Progress · 2 differences", `data-k="[&#34;finding\tinternal/orders/orders.go: A failed charge still saves the order&#34;]"`,
 		}},
 		{"tiny", tinyData(), []string{`id="read"`, "No open items", ">test run here<", `id="part-code"`}},
 		{"waits", waitsData(), []string{
@@ -314,13 +319,17 @@ func TestPageFixtures(t *testing.T) {
 				t.Errorf("%s: %q missing", c.name, w)
 			}
 		}
-		for _, raw := range []string{"deadline exceeded", "tracker.example.com", "403"} { // a raw error never reaches the page
+		// a raw error never reaches the page, nor a link html/template dropped
+		for _, raw := range []string{"deadline exceeded", "tracker.example.com", "403", "ZgotmplZ"} {
 			if strings.Contains(s, raw) {
 				t.Errorf("%s: %q on the page", c.name, raw)
 			}
 		}
 		if c.name == "tiny" && strings.Contains(s, `id="map"`) {
 			t.Error("tiny: a map with one part")
+		}
+		if c.name == "waits" && strings.Contains(s, "Split suggestions are off") {
+			t.Error("waits: split suggestions are on")
 		}
 		if out != "" {
 			if err := os.WriteFile(filepath.Join(out, c.name+".html"), b, 0o600); err != nil {
@@ -443,7 +452,7 @@ func TestBrief(t *testing.T) {
 		},
 	})
 	v.build()
-	if b := v.Page.Brief; len(b) != 1 || b[0].Text != "A takes a number" || b[0].Place != "a.go:2" || b[0].Href != "#a.go:2" {
+	if b := v.Page.Brief; len(b) != 1 || b[0].Text != "A takes a number" || b[0].Place != "a.go:2" || b[0].Href != "#a.go%3A2" {
 		t.Errorf("brief %+v", b)
 	}
 }
@@ -515,6 +524,7 @@ func TestMergeStatus(t *testing.T) {
 			d.Terms.Gates = []review.Gate{g}
 		}, "none", "No open items", "No open items", 0},
 		{"waits", func(d *Data) { d.Terms.Gates = []review.Gate{gate} }, "waits", "Waits for OPS-2 to merge", "Waits · 1 open item", 1},
+		{"one gate quoted twice is one item", func(d *Data) { d.Terms.Gates = []review.Gate{gate, gate} }, "waits", "Waits for OPS-2 to merge", "Waits · 1 open item", 1},
 		{"a failed check blocks a wait", func(d *Data) { d.Terms.Gates, d.CI = []review.Gate{gate}, failed }, "blocked", "Blocked: ci.yml failed at 1111111", "Blocked · ci.yml failed", 1},
 		{"a conflict comes first", func(d *Data) { d.Terms.Gates, d.CI, d.Conflicts = []review.Gate{gate}, failed, true }, "blocked", "Blocked: a conflict with the base branch", "Blocked · conflict with the base branch", 1},
 		{"a deviation is an item, no wait", func(d *Data) {
@@ -531,12 +541,41 @@ func TestMergeStatus(t *testing.T) {
 			t.Errorf("%s: %s %q %q, %d open", c.name, st.Kind, st.Head, st.Short, v.Page.Open)
 		}
 	}
-	// a wait shows its gate's link, and a blocked one says it also waits
+	// a failed contract pass isn't "No difference": the status says the comparison didn't run
 	d := tinyData()
-	d.Terms.Gates, d.CI = []review.Gate{gate}, failed
+	d.Tests = checks.Tests{}
+	d.Terms.Errs = []string{"contract: no JSON"}
 	v := prepare(d)
+	v.build()
+	if st := v.Page.Status; st.Kind != "none" || strings.Contains(strings.Join(st.Note, " "), "No difference") ||
+		!slices.ContainsFunc(st.Lines, func(l mline) bool { return strings.HasPrefix(l.Text, "The contract pass failed") }) {
+		t.Errorf("contract failed: %+v", st)
+	}
+	// a wait shows its gate's link, and a blocked one says it also waits
+	d = tinyData()
+	d.Terms.Gates, d.CI = []review.Gate{gate}, failed
+	v = prepare(d)
 	v.build()
 	if st := v.Page.Status; st.Gate != "#ops-2-to-merge-gate" || !slices.ContainsFunc(st.Lines, func(l mline) bool { return l.Text == "Also waits for OPS-2 to merge." }) {
 		t.Errorf("%+v", st)
+	}
+}
+
+// A test place reads "not run here" unless a run backs the test declared on its line: an unrelated run backs none.
+func TestNotRun(t *testing.T) {
+	notes := func(ran map[string]string) int {
+		d := largeData()
+		d.Sources = map[string]string{"internal/orders/orders_test.go": "func TestPlace(t *testing.T) {}\n"}
+		d.Tests.Ran = ran
+		b, _, err := Render(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Count(string(b), "· not run here")
+	}
+	// orders_test.go:1 is a contract row's place and the migration's test
+	all, other, placed := notes(nil), notes(map[string]string{"TestOther": "pass"}), notes(map[string]string{"TestPlace": "pass"})
+	if all < 3 || other != all || placed != all-3 {
+		t.Fatalf("notes: %d none ran, %d another ran, %d TestPlace ran", all, other, placed)
 	}
 }

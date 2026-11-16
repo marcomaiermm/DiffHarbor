@@ -405,7 +405,7 @@ func TestWays(t *testing.T) {
 		rows = append(rows, fmt.Sprintf("%d %s %v %v %s %s %v %s:%d %s", r.D, r.Name, r.Cols, r.Kids, r.Tag, r.St, r.Sym, r.At.Path, r.At.Line, r.At.Href))
 	}
 	// Handle is named where the entry is: it shows where it is declared
-	if want := []string{"1 Handle [end] true signature chg true api.go:10 #api.go:10", "2 Save [blank end] false new major true api.go:12 #api.go:12"}; !slices.Equal(rows, want) {
+	if want := []string{"1 Handle [end] true signature chg true api.go:10 #api.go%3A10", "2 Save [blank end] false new major true api.go:12 #api.go%3A12"}; !slices.Equal(rows, want) {
 		t.Errorf("rows\n%q\nwant\n%q", rows, want)
 	}
 	if g.Reach != 2 || g.New != 1 || g.Sev != "major" || g.Finding != "#finding-3" || g.Step != 1 || v.Steps[0].Way != &ws[0] {
@@ -585,7 +585,7 @@ func TestRisks(t *testing.T) {
 }
 
 // A version keeps what a later page's script compares (5.13): each file's change, and the open items by kind and
-// place, a difference by its place and a gate only while it waits; the page embeds this version's and each file's box.
+// place, a finding by its path and title, a difference by its place and a gate, by its ticket or quote, only while it waits; the page embeds this version's and each file's box.
 func TestSince(t *testing.T) {
 	file := func(p, line string) string {
 		return fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1 +1 @@\n-x\n+%s\n", p, p, p, p, line)
@@ -594,7 +594,7 @@ func TestSince(t *testing.T) {
 		Repo: "a/b", SHA: "2222222bbb", Diff: file("a.go", "one") + file("c.go", "three") + file("README.md", "doc"),
 		Findings: []review.Comment{{Path: "c.go", Line: 1, Title: "leak", Severity: "major"}},
 		Terms: review.Terms{
-			Gates:       []review.Gate{{Name: "the cutover", Waits: true}, {Name: "CAT-9 to merge"}},
+			Gates:       []review.Gate{{Name: "the cutover", Waits: true, Quote: review.Quote{Text: "Wait for the cutover."}}, {Name: "CAT-9 to merge"}},
 			Differences: []review.Difference{{Status: review.Deviates, Title: "x", At: "a.go:1"}},
 		},
 	}
@@ -606,12 +606,12 @@ func TestSince(t *testing.T) {
 	if !slices.Contains(v.Findings, "c_test.go: test deleted") || v.Weights["c_test.go: test deleted"] != "test" {
 		t.Errorf("a weakened test is no finding of the version: %+v", v)
 	}
-	want := []Item{{"difference", "a.go:1"}, {"finding", "c.go:1"}, {"gate", "the cutover"}}
+	want := []Item{{"difference", "a.go:1"}, {"finding", "c.go: leak"}, {"gate", "Wait for the cutover."}}
 	if !slices.Equal(v.Items, want) || len(v.Files) != 3 {
 		t.Errorf("items %+v, files %v", v.Items, v.Files)
 	}
 	page := string(b)
-	for _, want := range []string{`"where":{"README.md":"doc","a.go":"code","c.go":"code"}`, `"items":[{"kind":"difference","place":"a.go:1"}`, `data-filter="changed" aria-pressed="false" hidden`, `<p class="since" id="since" hidden>`} {
+	for _, want := range []string{`"where":{"README.md":"doc","a.go":"code","c.go":"code"}`, `"items":[{"kind":"difference","place":"a.go:1"}`, `data-filter="changed" aria-pressed="false" hidden`, `<p class="since" id="since" hidden>`, `"major":["major","critical"]`} {
 		if !strings.Contains(page, want) {
 			t.Error("missing", want)
 		}

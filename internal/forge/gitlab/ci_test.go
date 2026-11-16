@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"diffharbor/internal/report"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +38,21 @@ func TestChecks(t *testing.T) {
 	}
 	if err != nil || !slices.Equal(got, want) {
 		t.Fatalf("%v %v", got, err)
+	}
+}
+
+// A Blocked PR's "failure" posts GitLab's "failed", the state name GitLab accepts.
+func TestStatusFailure(t *testing.T) {
+	var got map[string]string
+	serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/projects/5/statuses/abc" {
+			_ = json.NewDecoder(r.Body).Decode(&got)
+		}
+		fmt.Fprint(w, `{}`)
+	})
+	(&pr{api: "/projects/5"}).Status("abc", "failure", "Blocked")
+	if got["state"] != "failed" || got["description"] != "Blocked" {
+		t.Fatalf("%v", got)
 	}
 }
 

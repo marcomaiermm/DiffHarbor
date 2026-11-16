@@ -282,7 +282,7 @@ func TestReadRules(t *testing.T) {
 func TestVersionItems(t *testing.T) {
 	d := Data{
 		SHA: "1111111aaa", Diff: "diff --git a/.env.example b/.env.example\n--- a/.env.example\n+++ b/.env.example\n@@ -1 +1 @@\n-OLD_A=1\n+NEW_B=1\n",
-		Findings:    []review.Comment{{Path: "a.go", Line: 3, Severity: "major"}, {Path: "a.go", Line: 4, Severity: "minor"}},
+		Findings:    []review.Comment{{Path: "a.go", Line: 3, Severity: "major", Title: "Bad"}, {Path: "a.go", Line: 4, Severity: "minor", Title: "Odd"}},
 		TestChanges: TestChanges{With: []TestFile{{Path: "t1.test.ts"}}, Kept: []TestFile{{Path: "t2.test.ts"}}, Stay: []TestStay{{Path: "t3.test.ts"}}},
 		Omitted:     []string{"big.go"},
 	}
@@ -290,7 +290,7 @@ func TestVersionItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Item{{"before", "NEW_B"}, {"before", "OLD_A"}, {"finding", "a.go:3"}, {"gap", "big.go"}, {"test-kept", "t2.test.ts"}, {"test-stay", "t3.test.ts"}, {"test-with", "t1.test.ts"}}
+	want := []Item{{"before", "NEW_B"}, {"before", "OLD_A"}, {"finding", "a.go: Bad"}, {"gap", "big.go"}, {"test-kept", "t2.test.ts"}, {"test-stay", "t3.test.ts"}, {"test-with", "t1.test.ts"}}
 	if !reflect.DeepEqual(v.Items, want) {
 		t.Errorf("items %+v", v.Items)
 	}

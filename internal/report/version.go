@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"diffharbor/internal/review"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -26,10 +25,11 @@ type Version struct {
 }
 
 // Item is an open item as a Version keeps it, for a later page to mark what is new since (spec 5.13): the page's
-// script compares a version's Items with this one's, and its Files.
+// script compares a version's Items with this one's, and its Files. A base's findings come from its Findings and
+// Weights, which every version has.
 type Item struct {
 	Kind  string `json:"kind"`  // "finding" (major or worse), "before" (Before you merge), "difference", "gate" (a gate that waits), "test-with", "test-kept", "test-stay" (Test changes' groups 1 to 3), "gap"
-	Place string `json:"place"` // a finding's or difference's "path:line", a before-merge item's name or path, a gate's name, a test file's path, a file the review didn't read
+	Place string `json:"place"` // a finding's "path: title" as in Findings, a difference's "path:line", a before-merge item's name or path, a gate's ticket or quote, a test file's path, a file the review didn't read
 }
 
 // stamp is the version v shows, its time unset.
@@ -47,7 +47,7 @@ func stamp(v view, ids map[string]string) Version {
 	}
 	for _, c := range v.Findings {
 		if review.Blocks(c.Severity) {
-			now.Items = append(now.Items, Item{"finding", c.Path + ":" + strconv.Itoa(c.Line)})
+			now.Items = append(now.Items, Item{"finding", c.Path + ": " + c.Title})
 		}
 	}
 	for kind, fs := range map[string][]TestFile{"test-with": v.TestChanges.With, "test-kept": v.TestChanges.Kept} {
@@ -61,16 +61,14 @@ func stamp(v view, ids map[string]string) Version {
 	for _, d := range v.Terms.Differences {
 		now.Items = append(now.Items, Item{"difference", d.At})
 	}
-	for _, g := range v.Terms.Gates {
-		if g.Waits {
-			now.Items = append(now.Items, Item{"gate", g.Name})
-		}
+	for _, g := range v.waiting() {
+		now.Items = append(now.Items, Item{"gate", gateKey(g)})
 	}
 	for _, p := range slices.Concat(v.Failed, v.Omitted) {
 		now.Items = append(now.Items, Item{"gap", p})
 	}
 	slices.SortFunc(now.Items, func(a, b Item) int { return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Place, b.Place)) })
-	now.Items = slices.Compact(now.Items) // findings at one line are one item: New since marks the place
+	now.Items = slices.Compact(now.Items)
 	return now
 }
 
@@ -81,11 +79,13 @@ type sinceData struct {
 	Items []Item            `json:"items"`
 	Where map[string]string `json:"where"` // path -> its box's key, else "code", "test", "doc" or "other"
 	Boxes [][]string        `json:"boxes"` // [key, name, "1" for a box named alone, as "migration 0059"]
+	Major []string          `json:"major"` // the severities that make a finding an open item
 }
 
 // SinceData is the page's since data.
 func (v view) SinceData() sinceData {
 	s := sinceData{Files: v.now.Files, Items: v.now.Items, Where: map[string]string{}, Boxes: [][]string{}}
+	s.Major = slices.DeleteFunc(slices.Clone(review.Severities), func(sev string) bool { return !review.Blocks(sev) })
 	if s.Items == nil {
 		s.Items = []Item{}
 	}

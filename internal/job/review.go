@@ -354,7 +354,9 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if still > 0 {
 		desc += fmt.Sprintf(", %d earlier still open", still)
 	}
-	if len(r.Failed) > 0 { // their part failed: not green, the next push or `@app review` reviews them
+	// their part failed: not green, the next push or `@app review` reviews them; a report's merge status counts them
+	// as the gap in the review instead
+	if len(r.Failed) > 0 {
 		desc, state = desc+", "+text.Count(len(r.Failed), "file")+" not reviewed", "error"
 	}
 	log.Printf("%s %s %s %s: %s", key, sha[:7], kind, stats, desc)
@@ -704,9 +706,9 @@ func writeReport(e *forge.Event, secret, link string, d report.Data) (string, re
 	if err == nil {
 		err = s.Put(dir+"/versions.json", b)
 	}
-	if err != nil {
+	if err != nil { // no page: the commit status keeps the review's own
 		log.Println(e.Key(), "report:", Hide(err, secret))
-		return "", now
+		return "", report.Version{}
 	}
 	for _, v := range vs[len(keep):] {
 		_ = deletePage(s, dir, v.SHA)

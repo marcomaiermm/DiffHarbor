@@ -290,7 +290,7 @@ func (v *view) contractOf(c *tcard, ct review.Contract) {
 			p, _, _ := span(at)
 			l := cline{Code: at, Href: v.placeHref(at)}
 			if diff.Kind(p) == "test" {
-				l.Lead, l.Note = "Test:", v.notRun()
+				l.Lead, l.Note = "Test:", v.notRun(at)
 			}
 			tr.Lines = append(tr.Lines, l)
 		}
