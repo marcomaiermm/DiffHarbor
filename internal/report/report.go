@@ -636,8 +636,12 @@ func (v view) place(p string, line int) ref {
 
 func testKey(name string) string { return strings.ReplaceAll(name, " ", "_") }
 
-// ranOf is name's outcome in ran: by its full name, or as the one subtest of that name.
+// ranOf is name's outcome in ran: by its name as given (a JS runner's "suite > test"), by its Go name, or as the one
+// subtest of that name.
 func ranOf(ran map[string]string, name string) string {
+	if st, ok := ran[name]; ok {
+		return st
+	}
 	n := testKey(name)
 	if st, ok := ran[n]; ok {
 		return st

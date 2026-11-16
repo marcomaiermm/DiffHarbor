@@ -275,6 +275,7 @@ func TestJSONTests(t *testing.T) {
  {"ancestorTitles":[],"title":"top","status":"failed"},
  {"ancestorTitles":["cart"],"title":"later","status":"todo"}]},
 {"name":"/w/repo/web/b.test.ts","status":"failed","message":"Cannot find module","assertionResults":[]},
+{"name":"/w/repo/web/d.test.ts","status":"passed","assertionResults":[]},
 {"name":"/w/repo/web/c.test.ts","status":"passed","assertionResults":[{"ancestorTitles":[],"title":"top","status":"passed"}]}]}`
 	var got Tests
 	jsonTests([]byte(js), "/w/repo", &got)
@@ -321,18 +322,18 @@ func TestBaseCI(t *testing.T) {
 	wf := filepath.Join(repo, ".github", "workflows")
 	os.MkdirAll(wf, 0o755)
 	os.WriteFile(filepath.Join(wf, "lint.yml"), []byte("on: pull_request\njobs:\n  l:\n    steps:\n      - run: pnpm lint\n"), 0o644)
-	os.WriteFile(filepath.Join(wf, "quality.yml"), []byte("on: pull_request\njobs:\n  t:\n    steps:\n      - run: go test ./...\n"), 0o644)
+	os.WriteFile(filepath.Join(wf, "test.yml"), []byte("on: pull_request\njobs:\n  t:\n    steps:\n      - run: go test ./...\n"), 0o644)
 	os.WriteFile(filepath.Join(wf, "notes.md"), nil, 0o644)
 	git("init", "-q")
 	git("add", ".")
 	git("commit", "-qm", "base")
 	git("update-ref", "refs/base", "HEAD")
-	os.WriteFile(filepath.Join(wf, "quality.yml"), []byte("on: pull_request\njobs:\n  t:\n    steps:\n      - run: echo skipped\n"), 0o644)
+	os.WriteFile(filepath.Join(wf, "test.yml"), []byte("on: pull_request\njobs:\n  t:\n    steps:\n      - run: echo skipped\n"), 0o644)
 	os.WriteFile(filepath.Join(wf, "added.yml"), []byte("on: pull_request\njobs:\n  t:\n    steps:\n      - run: go test ./...\n"), 0o644)
 	git("add", ".")
 	git("commit", "-qm", "head")
 	tests, files := BaseCI(t.Context(), sb)
-	if tests != "quality.yml" || !slices.Equal(files, []string{".github/workflows/lint.yml", ".github/workflows/quality.yml"}) {
+	if tests != "test.yml" || !slices.Equal(files, []string{".github/workflows/lint.yml", ".github/workflows/test.yml"}) {
 		t.Errorf("tests %q, files %q", tests, files)
 	}
 	if got := CITests(t.Context(), sb); got != "added.yml" {

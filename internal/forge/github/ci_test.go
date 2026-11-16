@@ -32,7 +32,7 @@ func TestChecks(t *testing.T) {
 			if r.URL.Query().Get("head_sha") != "abc" {
 				t.Errorf("runs of %q", r.URL.RawQuery)
 			}
-			fmt.Fprint(w, `{"total_count":1,"workflow_runs":[{"name":"quality","path":".github/workflows/quality.yml@refs/heads/main","check_suite_id":7}]}`)
+			fmt.Fprint(w, `{"total_count":1,"workflow_runs":[{"name":"ci","path":".github/workflows/ci.yml@refs/heads/main","check_suite_id":7}]}`)
 		case r.URL.Query().Get("page") == "":
 			w.Header().Set("Link", `<`+srv.URL+r.URL.Path+`?per_page=100&page=2>; rel="next"`)
 			fmt.Fprint(w, `{"total_count":3,"check_runs":[{"name":"test","status":"completed","conclusion":"failure","html_url":"https://gh/runs/1","check_suite":{"id":7}},
@@ -46,7 +46,7 @@ func TestChecks(t *testing.T) {
 	p := &pr{e: &forge.Event{}, api: "/repos/o/r", token: "t"}
 	got, err := p.Checks("abc")
 	want := []report.Check{
-		{Name: "test", Status: "completed", Conclusion: "failure", Workflow: "quality", Path: ".github/workflows/quality.yml", URL: "https://gh/runs/1"},
+		{Name: "test", Status: "completed", Conclusion: "failure", Workflow: "ci", Path: ".github/workflows/ci.yml", URL: "https://gh/runs/1"},
 		{Name: "deploy", Status: "pending", URL: "https://ci/2"},
 	}
 	if err != nil || !slices.Equal(got, want) || !strings.Contains(perms, `"checks":"read"`) || !strings.Contains(perms, `"actions":"read"`) {

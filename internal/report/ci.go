@@ -16,7 +16,7 @@ type CI struct {
 	Err       string
 	Workflows []string // the CI files on the base branch, read with git: .github/workflows/*, .gitlab-ci.yml
 	Tests     string   // of Workflows, the one that runs the tests on a pull request (checks.CITests); "" for none
-	Edited    bool     // the PR changes the workflow that runs the tests: "Left to CI (quality.yml), which this PR edits"
+	Edited    bool     // the PR changes the workflow that runs the tests: "Left to CI (test.yml), which this PR edits"
 }
 
 // Check is one check run (GitHub) or pipeline job (GitLab) at the head.
@@ -26,8 +26,8 @@ type Check struct {
 	// Conclusion of a completed check in GitHub's words: success, failure, timed_out, cancelled, skipped, neutral,
 	// action_required; "" while pending.
 	Conclusion string
-	Workflow   string // the workflow or pipeline it ran in: "quality", "#812"; "" when the forge doesn't say
-	Path       string // the workflow's file, ".github/workflows/quality.yml"; "" when the forge doesn't say
+	Workflow   string // the workflow or pipeline it ran in: "ci", "#812"; "" when the forge doesn't say
+	Path       string // the workflow's file, ".github/workflows/test.yml"; "" when the forge doesn't say
 	URL        string // the check's page: the failed run's link
 }
 
