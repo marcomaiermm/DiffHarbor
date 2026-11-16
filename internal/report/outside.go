@@ -116,7 +116,7 @@ func sendersFrom(g map[declKey][]cgEdge, start declKey) []OutsideCall {
 				case at == 0:
 				case e.Kind == "requests":
 					c := outsideCall(g, start, at, s.k, e)
-					if !slices.Contains(out, c) {
+					if !slices.ContainsFunc(out, c.same) {
 						out = append(out, c)
 					}
 				case e.Kind == "calls" && hop < maxHops && e.TPath != "" && !seen[declKey{e.TPath, e.TName}]:
@@ -167,6 +167,11 @@ func systemName(rawURL, env, sender string) string {
 		return strings.ToLower(u.Hostname())
 	}
 	return cmp.Or(env, sender)
+}
+
+// same reports whether o is the same request as c, its path down aside.
+func (c OutsideCall) same(o OutsideCall) bool {
+	return c.System == o.System && c.Path == o.Path && c.Line == o.Line && c.URL == o.URL && c.URLAt == o.URLAt
 }
 
 // StorePath is a query a declaration's code runs (spec 6.13): Kind "reads" or "writes", the table as the store edge
@@ -278,7 +283,7 @@ func Outside(syms map[string][]Symbol) []OutsideCall {
 	for _, ss := range syms {
 		for _, s := range ss {
 			for _, c := range s.Requests {
-				if !slices.Contains(out, c) {
+				if !slices.ContainsFunc(out, c.same) {
 					out = append(out, c)
 				}
 			}

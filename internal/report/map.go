@@ -111,6 +111,7 @@ type OutsideCall struct {
 	System, Path string
 	Line         int
 	URL, URLAt   string
+	Calls        []StoreCall `json:",omitempty"` // the calls from the changed declaration down to the sending one, as StorePath.Calls
 }
 
 // MapSystem is an outside system and the parts that hold its calls, a dotted line to each.

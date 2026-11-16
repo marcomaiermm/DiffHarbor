@@ -49,6 +49,9 @@ type Symbol struct {
 	// within a few calls, see outside.go
 	Requests []OutsideCall `json:"-"`
 	Stores   []StorePath   `json:"-"` // the same, the queries it runs: the map's tables (spec 6.13)
+	// a declaration the PR adds or changes: up to 3 indexes into Data.Nodes, 1-based, the first station below it
+	// toward each table or system it reaches (uses spec 9.2)
+	Reach []int `json:"reach,omitempty"`
 }
 
 // Way is how the code reaches a declaration: from a route it registers ("GET", "/x/{id}", where), or from a
@@ -64,6 +67,8 @@ type Hop struct {
 	Name, Path, In string
 	Line, At       int
 	Call           string `json:"-"` // how that line names it: "inv.Validate()", see callAt; "" unknown
+	Shape          int    `json:"-"` // the structure of the joint at At: a 1-based index into Data.Shapes, 0 none
+	Rel            string `json:"-"` // the joint's relation, as Ref.Rel
 }
 
 // Ref is a line that names a symbol, and the declaration it sits in.
@@ -72,6 +77,85 @@ type Ref struct {
 	Line int    `json:"line"`
 	In   string `json:"in,omitempty"`
 	Text string `json:"text"` // the line, trimmed and cut
+	// uses spec 9.2: the structure the use sits in (1-based into Data.Shapes, 0 none; the lines of one declaration
+	// share one), the relation ("call", "iface", "render", "tie"; "" named), the interface it goes through, the
+	// station of the declaration it sits in (1-based into Data.Nodes), and whether it sits in a test file
+	Shape int    `json:"sh,omitempty"`
+	Rel   string `json:"rel,omitempty"`
+	Via   string `json:"via,omitempty"`
+	Up    int    `json:"up,omitempty"`
+	Test  bool   `json:"t,omitempty"`
+}
+
+// Shape is the code structure from a declaration down to the uses it marks (component 31, uses spec 9.2).
+type Shape struct {
+	Path string     `json:"p"`
+	Span [2]int     `json:"s"` // the declaration's first and last line
+	Rows []ShapeRow `json:"r"`
+}
+
+// ShapeRow is a row of a Shape: a container on the way to a use, the use, a fold of the entries off the way, or a
+// run of levels past the depth bound.
+type ShapeRow struct {
+	Kind  string      `json:"k"` // section 5's kinds, "fold", "levels"
+	Depth int         `json:"d"`
+	Text  string      `json:"t,omitempty"`
+	Line  int         `json:"l,omitempty"`
+	Use   bool        `json:"u,omitempty"` // the row holds a marked use
+	Cond  *ShapeCond  `json:"c,omitempty"` // under an if: where its condition's name comes from
+	N     int         `json:"n,omitempty"` // fold, levels: how many
+	Kept  []ShapeLeaf `json:"e,omitempty"` // fold: the entries kept, nearest the way
+	More  *[2]int     `json:"m,omitempty"` // fold, levels: the first and last line of the others
+}
+
+// ShapeCond is a condition's name and the line and text that give it its value.
+type ShapeCond struct {
+	Name string `json:"n"`
+	Line int    `json:"l"`
+	Text string `json:"t"`
+}
+
+// ShapeLeaf is an entry a fold keeps.
+type ShapeLeaf struct {
+	Kind string `json:"k"`
+	Text string `json:"t"`
+	Line int    `json:"l"`
+	Use  bool   `json:"u,omitempty"`
+}
+
+// Node is a station of a way (component 30, uses spec 9.2): shared by every way through it, so Data.Nodes is a
+// forest. Up and Down are 1-based indexes into Data.Nodes, 0 none.
+type Node struct {
+	Name   string `json:"n"`
+	Kind   string `json:"k"`           // "decl", "route", "call-in", "table", "subquery", "system"
+	Method string `json:"m,omitempty"` // a route's
+	Path   string `json:"p,omitempty"`
+	Line   int    `json:"l,omitempty"`
+	State  string `json:"s,omitempty"`  // "new", "changed", "signature", "outside"
+	Part   string `json:"pt,omitempty"` // the map's part label
+	Sev    string `json:"v,omitempty"`  // the heaviest blocking finding on it
+	Find   string `json:"f,omitempty"`  // that finding's card anchor
+	Up     int    `json:"u,omitempty"`  // the next station toward an entry
+	JUp    *Joint `json:"ju,omitempty"`
+	Down   int    `json:"d,omitempty"` // the next station down from a route, or toward a table or system
+	JDown  *Joint `json:"jd,omitempty"`
+	End    *End   `json:"e,omitempty"` // the way stops here
+}
+
+// Joint is the link between two stations: its relation, the interface it goes through, its place and structure.
+type Joint struct {
+	Rel   string `json:"r"`
+	Via   string `json:"via,omitempty"`
+	Path  string `json:"p"`
+	Line  int    `json:"l"`
+	Shape int    `json:"sh,omitempty"`
+}
+
+// End is why a way stops at a station: section 4's ends ("route", "main", "nocaller", "tests", "table", "subquery",
+// "system", "bound", "cycle", "value", "byname", "nograph") and its argument.
+type End struct {
+	Kind string `json:"k"`
+	Text string `json:"t,omitempty"`
 }
 
 // gofmt prints as gofmt does: tabs indent, spaces align, so a column stays a column at any tab width.
@@ -214,7 +298,7 @@ func (ms mentions) scan(path string, src []byte, wanted map[string]bool) {
 				continue
 			}
 			if len(ms.refs[w]) < maxRefs*2 { // room for the declarations' own lines, dropped later
-				ms.refs[w] = append(ms.refs[w], Ref{path, i, in, cut(strings.TrimSpace(l), maxText)})
+				ms.refs[w] = append(ms.refs[w], Ref{Path: path, Line: i, In: in, Text: cut(strings.TrimSpace(l), maxText)})
 			}
 			ms.uses[w]++
 			if ms.files[w] == nil {

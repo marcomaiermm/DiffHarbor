@@ -373,7 +373,7 @@ func TestMapTrace(t *testing.T) {
 		t.Fatalf("systems %+v", m.Systems)
 	}
 	tr := m.Trace
-	if tr == nil || tr.Call != call || tr.Part != "b" || tr.Route != "Entry" || len(tr.Rows) != 1 || tr.Rows[0].Name != "Fetch" {
+	if tr == nil || !tr.Call.same(call) || tr.Part != "b" || tr.Route != "Entry" || len(tr.Rows) != 1 || tr.Rows[0].Name != "Fetch" {
 		t.Fatalf("trace %+v", tr)
 	}
 	if b := mapPart(m, "b"); b.Col != 1 || b.Alone || !mapPart(m, "a").Alone { // b has the system's dotted line, a none

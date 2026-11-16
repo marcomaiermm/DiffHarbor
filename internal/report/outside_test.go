@@ -73,7 +73,7 @@ func d() { http.Head("x") }
 		"Quiet":  nil,
 		"Far":    nil, // the request is four calls down
 	} {
-		if got := sendersFrom(g, declKey{"changed.go", name}); !slices.Equal(got, want) {
+		if got := sendersFrom(g, declKey{"changed.go", name}); !slices.EqualFunc(got, want, OutsideCall.same) {
 			t.Errorf("%s: got %+v, want %+v", name, got, want)
 		}
 	}
@@ -94,7 +94,7 @@ func TestOutsideWalk(t *testing.T) {
 		g[declKey{e.SPath, e.SName}] = append(g[declKey{e.SPath, e.SName}], e)
 	}
 	got := sendersFrom(g, declKey{"x.go", "start"})
-	if len(got) != 1 || got[0] != (OutsideCall{System: "three", Path: "x.go", Line: 4}) {
+	if len(got) != 1 || !got[0].same(OutsideCall{System: "three", Path: "x.go", Line: 4}) {
 		t.Errorf("a request three calls down, none four: %+v", got)
 	}
 	for _, c := range []struct{ url, env, sender, want string }{
@@ -147,7 +147,7 @@ func TestOutsideTS(t *testing.T) {
 		g[declKey{e.SPath, e.SName}] = append(g[declKey{e.SPath, e.SName}], e)
 	}
 	want := []OutsideCall{{System: "items.example.com", Path: "src/outbound.ts", Line: 11, URL: "https://items.example.com/v1", URLAt: "src/outbound.ts:3"}}
-	if w := sendersFrom(g, declKey{"src/outbound.ts", "pass"}); !slices.Equal(w, want) { // one call down
+	if w := sendersFrom(g, declKey{"src/outbound.ts", "pass"}); !slices.EqualFunc(w, want, OutsideCall.same) { // one call down
 		t.Errorf("pass: got %+v, want %+v", w, want)
 	}
 	for _, g := range got {
@@ -184,7 +184,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 	syms := map[string][]Symbol{"Sync": {{Path: "sync.go", Line: 3, From: 3, To: 7, Exact: true}}, "other": {{Path: "sync.go", Line: 9, From: 9, To: 9, Exact: true}}}
 	idx.outside(sb, nil, map[string]bool{"sync.go": true}, map[string]bool{"sync.go:6": true}, syms)
 	want := []OutsideCall{{System: "blizzard.example.com", Path: "sync.go", Line: 5, URL: "https://blizzard.example.com/roster", URLAt: "sync.go:2"}}
-	if got := Outside(syms); !slices.Equal(got, want) {
+	if got := Outside(syms); !slices.EqualFunc(got, want, OutsideCall.same) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
@@ -199,7 +199,7 @@ func TestOutsideCallPrefersURL(t *testing.T) {
 	}}
 	got := outsideCall(g, declKey{"b.go", "run"}, 9, k, g[k][2])
 	want := OutsideCall{System: "api.example.com", Path: "b.go", Line: 9, URL: "https://api.example.com/x", URLAt: "a.go:4"}
-	if got != want {
+	if !got.same(want) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }

@@ -52,6 +52,8 @@ type Data struct {
 	Diff        string           // the whole PR diff
 	Routine     []review.Routine // hunks the review calls routine: folded
 	Symbols     map[string][]Symbol
+	Shapes      []Shape            // uses spec 9.2: the structures Ref.Shape, Hop.Shape and Joint.Shape index, within its budget
+	Nodes       []Node             // the stations Ref.Up, Symbol.Reach and Node.Up/Down index
 	Themes      review.SyntaxTheme // Shiki's, by color mode; unset: Tokyo Night
 	Others      []Other            // open PRs that change files this one does
 	Behind      []review.Commit    // the base's commits since the fork point (review.Behind)
