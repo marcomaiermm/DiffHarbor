@@ -52,8 +52,10 @@ func main() { backfill(store.DB{}); each(store.DB{}) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := cgEdge{Line: 6, Kind: "calls", By: "vta", SName: "backfill", SKind: "function", SPath: "main.go", SLine: 5, SEnd: 7,
-		TName: "Record", TPath: "store/store.go", TLine: 7}
+	want := cgEdge{
+		Line: 6, Kind: "calls", By: "vta", SName: "backfill", SKind: "function", SPath: "main.go", SLine: 5, SEnd: 7,
+		TName: "Record", TPath: "store/store.go", TLine: 7, Via: "Store",
+	} // through the interface: its name
 	generic := cgEdge{Line: 9, Kind: "calls", By: "vta", SName: "each", SKind: "function", SPath: "main.go", SLine: 9, SEnd: 9,
 		TName: "Record", TPath: "store/store.go", TLine: 7} // through its instance
 	if len(got) != 2 || !slices.Contains(got, want) || !slices.Contains(got, generic) {
@@ -227,21 +229,24 @@ func TestTSEdges(t *testing.T) {
 		}
 	}
 	for _, w := range []string{ // the root tsconfig only references tsconfig.app.json
-		"reads listOrders src/data.ts:5 -> orders src/schema.ts",   // the table in the chain
-		"writes addUser src/data.ts:7 -> users src/schema.ts",      // in a transaction's callback
-		"writes renameUser src/data.ts:9 -> users src/schema.ts",   // update(t).set(…)
-		"writes txCount src/data.ts:13 -> users src/schema.ts",     // const n = db.transaction(…): no route "n"
-		"writes nsWrite src/data.ts:15 -> users src/schema.ts",     // insert(schema.users)
-		"reads findPosts src/data.ts:10 -> post ",                  // client.post.findMany()
-		"reads rawCount src/data.ts:11 -> audit_log ",              // SQL
-		"reads allOrders src/data.ts:12 -> Order src/schema.ts",    // Repository<Order>
-		"handles get /orders src/api.ts:6 -> getOrders src/api.ts", // app.get("/orders", getOrders)
-		"calls post /users src/api.ts:7 -> addUser src/data.ts",    // an inline handler
-		"calls query posts src/api.ts:9 -> findPosts src/data.ts",  // a procedure under its key
-		"calls shout src/api.ts:12 -> send src/notify.ts",          // n.make().send()
-		"calls notifyAll src/notify.ts:4 -> toLabel src/notify.ts", // xs.map(toLabel)
-		"renders List src/App.tsx:2 -> Row src/App.tsx",            // <Row />
-		"reads listRecent src/data.ts:17 -> recentSq src/data.ts",  // a subquery is a table of its own
+		"reads listOrders src/data.ts:5 -> orders src/schema.ts",                     // the table in the chain
+		"writes addUser src/data.ts:7 -> users src/schema.ts",                        // in a transaction's callback
+		"writes renameUser src/data.ts:9 -> users src/schema.ts",                     // update(t).set(…)
+		"writes txCount src/data.ts:13 -> users src/schema.ts",                       // const n = db.transaction(…): no route "n"
+		"writes nsWrite src/data.ts:15 -> users src/schema.ts",                       // insert(schema.users)
+		"reads findPosts src/data.ts:10 -> post ",                                    // client.post.findMany()
+		"reads rawCount src/data.ts:11 -> audit_log ",                                // SQL
+		"reads allOrders src/data.ts:12 -> Order src/schema.ts",                      // Repository<Order>
+		"handles get /orders src/api.ts:6 -> getOrders src/api.ts",                   // app.get("/orders", getOrders)
+		"calls post /users src/api.ts:7 -> addUser src/data.ts",                      // an inline handler
+		"calls query posts src/api.ts:9 -> findPosts src/data.ts",                    // a procedure under its key
+		"calls shout src/api.ts:12 -> send src/notify.ts",                            // n.make().send()
+		"calls notifyAll src/notify.ts:4 -> toLabel src/notify.ts",                   // xs.map(toLabel)
+		"renders List src/App.tsx:2 -> Row src/App.tsx",                              // <Row />
+		"reads listRecent src/data.ts:17 -> recentSq src/data.ts",                    // a subquery is a table of its own
+		"calls query shop.list src/items.ts:27 -> listItems src/data.ts",             // a procedure under its key path
+		"passes query shop.list src/items.ts:27 -> listItems src/data.ts",            // the handler passes its input on
+		"references query shop.list src/items.ts:23 -> listInputSchema src/items.ts", // the procedure's input schema
 	} {
 		if !slices.Contains(got, w) {
 			t.Errorf("no %q in\n%s", w, strings.Join(got, "\n"))

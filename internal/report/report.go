@@ -54,6 +54,7 @@ type Data struct {
 	Symbols     map[string][]Symbol
 	Shapes      []Shape            // uses spec 9.2: the structures Ref.Shape, Hop.Shape and Joint.Shape index, within its budget
 	Nodes       []Node             // the stations Ref.Up, Symbol.Reach and Node.Up/Down index
+	UsesCut     bool               // the budget (uses spec 9.3) left a use's structure out: the sheet's note
 	Themes      review.SyntaxTheme // Shiki's, by color mode; unset: Tokyo Night
 	Others      []Other            // open PRs that change files this one does
 	Behind      []review.Commit    // the base's commits since the fork point (review.Behind)
@@ -524,6 +525,7 @@ func prepare(d Data) view {
 			}
 		}
 	}
+	stations(&v, chs)
 	v.Ways = ways(&v, d.Symbols)
 	if len(d.Tests.Ran) > 0 || len(d.Tests.Broken) > 0 {
 		v.now.Tests = map[string]string{}

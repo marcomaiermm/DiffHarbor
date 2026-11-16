@@ -12,14 +12,20 @@
 //            A bare string only in a chain of calls: `_.get(o, "a.b")`, `createElement("div")` name no store
 //   requests  a call that sends a network request, to no declaration: the global fetch, node:http's and node:https's
 //            request and get, a package's call given a URL constant (below)
+//   passes   a call in an inline route's handler that passes its input on (its first parameter; `input` of a
+//            destructured one) to a function of the project: the way down from a route (uses spec 9.2)
+//   references  a name of the project in the chain that registers an inline route (`p.input(schema).query(…)`),
+//            from the route: the way up from the name ends there
 //   url      a call with an argument that is a URL: a string, `new URL(…)` or a template starting with http:// or
 //            https://, or a const that holds one, or an environment variable (`process.env.X`,
 //            `import.meta.env.X`, a member read of a module-level object made from one). With the URL's text or the
 //            variable, and where it stands
 // All of the project's: a walk goes on from any of them. Test files aside. One checker round trip per file and kind:
-// what a URL needs (urlOf) is asked in the same batch as the calls.
+// what a URL needs (urlOf) is asked in the same batch as the calls. A route under nested keys is named by their path:
+// `shop: { list: q(…) }` is "query shop.list".
+// With "shapes" in the input it reads code structures instead: see shaped below.
 const fs = require("fs");
-const { dir, ts } = JSON.parse(fs.readFileSync(0, "utf8"));
+const { dir, ts, shapes } = JSON.parse(fs.readFileSync(0, "utf8"));
 const { API } = require(ts + "/dist/api/sync/api.js");
 const is = require(ts + "/dist/ast/is.js");
 
@@ -178,7 +184,7 @@ const ambientOf = h => safe(() => {
 });
 
 const done = new Set(); // a file in two projects: once
-for (project of projects()) {
+for (project of shapes ? [] : projects()) {
 program = project.program, checker = project.checker;
 decls.clear(), ambients.clear();
 for (const file of program.getSourceFileNames()) {
@@ -199,8 +205,31 @@ for (const file of program.getSourceFileNames()) {
     const lit = c.arguments.find(a => is.isStringLiteral(a) || is.isNoSubstitutionTemplateLiteral(a));
     if (lit && /^\S+$/.test(lit.text)) return lit.text; // "/orders", "click"; not a message
     for (let p = c.parent; p && !is.isSourceFile(p) && !is.isBlock(p); p = p.parent)
-      if (is.isPropertyAssignment(p) || (is.isVariableDeclaration(p) && is.isIdentifier(p.name))) return atTop(p) ? text(p.name) : "";
+      if (is.isPropertyAssignment(p) || (is.isVariableDeclaration(p) && is.isIdentifier(p.name))) return atTop(p) ? keyPath(p) : "";
     return "";
+  };
+  const keyPath = p => { // a key's path through the object literals it is nested in: "shop.list"
+    let k = text(p.name);
+    for (let q = p; is.isPropertyAssignment(q) && is.isObjectLiteralExpression(q.parent) && is.isPropertyAssignment(q.parent.parent); q = q.parent.parent)
+      k = text(q.parent.parent.name) + "." + k;
+    return k;
+  };
+  const inputOf = f => { // the names a handler's first parameter binds: `input` of ({ input, ctx })
+    const b = f.parameters?.[0]?.name;
+    if (!b) return [];
+    if (is.isIdentifier(b)) return [b.text];
+    const ns = is.isObjectBindingPattern(b) ? b.elements.map(e => text(e.name)).filter(Boolean) : [];
+    return ns.includes("input") ? ["input"] : ns;
+  };
+  const reads = (c, names) => { // whether a call's arguments read one of names, not as a property's name
+    let hit = false;
+    const v = n => {
+      if (hit) return;
+      if (is.isIdentifier(n) && names.includes(n.text) && !(is.isPropertyAccessExpression(n.parent) && n.parent.name === n)) hit = true;
+      else n.forEachChild(v);
+    };
+    for (const a of c.arguments || []) v(a);
+    return hit;
   };
   const atTop = n => { // in no function: `const r = db.transaction(…)` in one names a result, not a route
     for (let p = n.parent; p; p = p.parent) if (isFn(p) || is.isFunctionDeclaration(p) || is.isMethodDeclaration(p)) return false;
@@ -217,7 +246,7 @@ for (const file of program.getSourceFileNames()) {
       else if (is.isVariableDeclaration(p) && is.isIdentifier(p.name)) s = named(p, p.name.text, "function", scope);
       else if (is.isPropertyAssignment(p)) s = named(p, text(p.name), "function", scope);
       else if (is.isCallExpression(p) && p.arguments.includes(n)) {
-        s = { ...named(n, "", "route", scope), inline: true, call: p };
+        s = { ...named(n, "", "route", scope), inline: true, call: p, input: inputOf(n) };
         inlines.push(s);
       }
     }
@@ -251,11 +280,21 @@ for (const file of program.getSourceFileNames()) {
   }
   const line = n => lineOf(n, sf);
   for (const c of calls) {
-    const t = decl(syms[c.at]);
-    if (t && (t.fn || c.jsx)) emit(c.jsx ? "renders" : "calls", eff(c.scope), line(c.n), t);
+    const t = decl(syms[c.at]), r = eff(c.scope);
+    if (t && (t.fn || c.jsx)) emit(c.jsx ? "renders" : "calls", r, line(c.n), t);
+    if (t && t.fn && !c.jsx && r?.route && reads(c.n, r.input)) emit("passes", r, line(c.n), t);
   }
+  const routeOf = new Map(inlines.filter(s => s.route).map(s => [s.call, s]));
+  const chainRoute = c => { // the inline route whose registering chain c is a call of
+    for (let x = c; x; x = x.parent.parent) {
+      if (routeOf.has(x)) return routeOf.get(x);
+      if (!is.isPropertyAccessExpression(x.parent) || x.parent.expression !== x || !is.isCallExpression(x.parent.parent)) return null;
+    }
+    return null;
+  };
   for (const r of refs) {
-    const t = decl(syms[r.at]);
+    const t = decl(syms[r.at]), rt = t && chainRoute(r.call);
+    if (rt) emit("references", rt, line(r.n), t);
     if (!t || !t.fn) continue;
     const at = callAt.get(r.call);
     if (at !== undefined && ext(at) && label(r.call)) { // a handler: from the route the call registers
@@ -336,6 +375,166 @@ for (const file of program.getSourceFileNames()) {
   }
 }
 }
+// shaped is the --shapes mode (uses spec 5 and 9.2): for each {file, line, name, in, ways} of shapes, the declaration of
+// file that holds line (the one named in, else the statement at the module's top), every line in it that names what
+// the name at line resolves to, and with ways the way down to the first 3 of them: shapes.go's synUse, null where
+// the program doesn't hold the file. shapes.go turns the ways into rows.
+function shaped(items) {
+  const out = items.map(() => null), byFile = new Map();
+  items.forEach((it, i) => byFile.set(it.file, [...(byFile.get(it.file) || []), i]));
+  const all = projects();
+  for (const [file, idx] of byFile) {
+    const pr = all.find(p => p.program.getSourceFile(root + file));
+    if (!pr) continue;
+    project = pr, program = pr.program, checker = pr.checker, decls.clear();
+    const sf = program.getSourceFile(root + file), want = new Set(idx.map(i => items[i].name)), ids = new Map();
+    const visit = n => { if (is.isIdentifier(n) && want.has(n.text)) ids.set(n.text, [...(ids.get(n.text) || []), n]); n.forEachChild(visit) };
+    visit(sf);
+    const asks = [];
+    for (const i of idx) {
+      const it = items[i], at = (ids.get(it.name) || []).find(n => lineOf(n, sf) === it.line);
+      if (!at) continue;
+      const d = holder(at, it.in);
+      asks.push({ i, at, d, inside: ids.get(it.name).filter(n => n.pos >= d.pos && n.end <= d.end) });
+    }
+    const nodes = asks.flatMap(a => a.inside), syms = nodes.length ? resolve(nodes) : [];
+    const conds = [];
+    let k = 0;
+    for (const a of asks) {
+      const ss = syms.slice(k, (k += a.inside.length)), me = ss[a.inside.indexOf(a.at)];
+      const uses = me ? a.inside.filter((_, j) => ss[j]?.id === me.id) : [a.at];
+      const lines = [], marked = [];
+      for (const n of uses) if (!lines.includes(lineOf(n, sf))) lines.push(lineOf(n, sf)), marked.push(n);
+      const u = { s: [lineOf(a.d, sf), endOf(a.d, sf)], n: lines, i: is.isInterfaceDeclaration(a.d) || undefined };
+      if (items[a.i].ways) u.w = marked.slice(0, 3).map(n => wayOf(n, a.d, uses, sf, conds));
+      out[a.i] = u;
+    }
+    if (conds.length) { // where an if's name comes from: a variable its function declares before it
+      const cs = resolve(conds.map(c => c.id));
+      conds.forEach((c, j) => {
+        const d = decl(cs[j]), v = d && d.node;
+        if (!v || d.path !== file || !is.isVariableDeclaration(v) || !v.initializer || v.pos > c.at.pos) return;
+        const fn = fnAround(c.at);
+        if (fn && v.pos >= fn.pos && v.end <= fn.end) c.el.c = { n: c.id.text, l: d.line, t: textAt(v.initializer.getStart(sf), sf) };
+      });
+    }
+  }
+  return out;
+}
+const declNamed = n => (is.isFunctionDeclaration(n) || is.isMethodDeclaration(n) || is.isClassDeclaration(n) || is.isInterfaceDeclaration(n) ||
+  is.isTypeAliasDeclaration(n) || is.isEnumDeclaration(n) || is.isVariableDeclaration(n) || is.isPropertyAssignment(n) || is.isPropertyDeclaration(n)) && n.name;
+// holder is the declaration named name around n, a variable's statement with it; else the statement at the module's top
+function holder(n, name) {
+  let top = n;
+  for (let p = n; p && !is.isSourceFile(p); p = p.parent) {
+    top = p;
+    if (declNamed(p) && text(p.name) === name) {
+      const st = is.isVariableDeclaration(p) && p.parent.parent;
+      return st && is.isVariableStatement(st) && st.declarationList.declarations.length === 1 ? st : p;
+    }
+  }
+  return top;
+}
+const fnAround = n => { for (let p = n.parent; p; p = p.parent) if (isFn(p) || is.isFunctionDeclaration(p) || is.isMethodDeclaration(p)) return p; return null };
+const textAt = (pos, sf) => { const e = sf.text.indexOf("\n", pos); return sf.text.slice(pos, e < 0 ? undefined : e).slice(0, 200) };
+const posLine = (pos, sf) => sf.getLineAndCharacterOfPosition(pos).line + 1;
+const stmtsOf = b => (b && is.isBlock(b) ? [...b.statements] : b ? [b] : []);
+// entries is a node's row kind and the entries it holds as a container; null for a node that makes no row
+function entries(n) {
+  if (is.isFunctionDeclaration(n) || is.isMethodDeclaration(n) || is.isConstructorDeclaration(n) || is.isGetAccessorDeclaration(n) ||
+    is.isSetAccessorDeclaration(n) || isFn(n)) return { k: "func", kids: n.body && is.isBlock(n.body) ? [...n.body.statements] : [] };
+  if (is.isClassDeclaration(n) || is.isClassExpression(n) || is.isInterfaceDeclaration(n) || is.isTypeLiteralNode(n) || is.isEnumDeclaration(n))
+    return { k: "object", kids: [...n.members] };
+  if (is.isObjectLiteralExpression(n)) return { k: "object", kids: [...n.properties] };
+  if (is.isArrayLiteralExpression(n)) return { k: "array", kids: [...n.elements] };
+  if (is.isCallExpression(n) || is.isNewExpression(n)) return { k: "call", kids: [...(n.arguments || [])] };
+  if (is.isIfStatement(n)) return { k: "if", kids: [...stmtsOf(n.thenStatement), ...(n.elseStatement ? [n.elseStatement] : [])] };
+  if (is.isSwitchStatement(n)) return { k: "if", kids: [...n.caseBlock.clauses] };
+  if (is.isCaseClause(n) || is.isDefaultClause(n)) return { k: "if", kids: [...n.statements] };
+  if (is.isTryStatement(n)) return { k: "if", kids: [...n.tryBlock.statements, ...(n.catchClause ? [n.catchClause] : []), ...(n.finallyBlock ? [n.finallyBlock] : [])] };
+  if (is.isCatchClause(n)) return { k: "if", kids: [...n.block.statements] };
+  if (is.isForStatement(n) || is.isForOfStatement(n) || is.isForInStatement(n) || is.isWhileStatement(n) || is.isDoStatement(n))
+    return { k: "loop", kids: stmtsOf(n.statement) };
+  if (is.isJsxElement(n)) return { k: "jsx", kids: [...n.openingElement.attributes.properties, ...n.children.filter(c => !is.isJsxText(c) || c.text.trim())] };
+  if (is.isJsxSelfClosingElement(n)) return { k: "jsx", kids: [...n.attributes.properties] };
+  if (is.isJsxFragment(n)) return { k: "jsx", kids: n.children.filter(c => !is.isJsxText(c) || c.text.trim()) };
+  if (is.isBlock(n)) return is.isIfStatement(n.parent) && n.parent.elseStatement === n ? { k: "if", kids: [...n.statements] } : null;
+  if (is.isVariableDeclaration(n) || is.isPropertyAssignment(n) || is.isPropertyDeclaration(n) || is.isPropertySignatureDeclaration(n) ||
+    is.isShorthandPropertyAssignment(n) || is.isJsxAttribute(n) || is.isSpreadAssignment(n)) return { k: "", kids: [] };
+  if (is.isStatement(n)) return { k: "stmt", kids: [] };
+  return null;
+}
+// kindOf is an entry's kind: the value it holds; a call or a chain on one line is a call
+function kindOf(n) {
+  if (is.isPropertyAssignment(n) || is.isPropertyDeclaration(n) || is.isVariableDeclaration(n)) return n.initializer ? kindOf(n.initializer) : "stmt";
+  if (is.isExpressionStatement(n) || is.isReturnStatement(n)) return n.expression ? kindOf(n.expression) : "stmt";
+  if (is.isVariableStatement(n)) return "stmt";
+  if (is.isAwaitExpression(n) || is.isParenthesizedExpression(n)) return kindOf(n.expression);
+  const e = entries(n);
+  return e && e.k ? e.k : "stmt";
+}
+// links is a chain of calls and reads, `z.array(…).max(…)`, outermost n: its head and each link from its dot to its end
+function links(n, sf) {
+  const ls = [];
+  let x = n;
+  for (;;) {
+    const call = is.isCallExpression(x) ? x : null, pa = call ? x.expression : x;
+    if (!is.isPropertyAccessExpression(pa)) break;
+    const dot = sf.text.indexOf(".", pa.expression.end);
+    ls.unshift({ pos: dot < 0 || dot > pa.name.pos ? pa.name.pos : dot, end: x.end, call, spine: [x, pa] });
+    x = pa.expression;
+  }
+  return { head: x, links: ls };
+}
+const chainTop = n => (is.isCallExpression(n) || is.isPropertyAccessExpression(n)) &&
+  !((is.isPropertyAccessExpression(n.parent) || is.isCallExpression(n.parent)) && n.parent.expression === n);
+// wayOf is the way from d down to the name id as synEls; uses, all the names of the subject, mark entries
+function wayOf(id, d, uses, sf, conds) {
+  const up = [];
+  for (let p = id; p; p = p.parent) { up.unshift(p); if (p === d) break }
+  const holds = (pos, end) => uses.some(u => u.pos >= pos && u.end <= end);
+  const kid = (k, node, pos, end) => ({ k, l: posLine(pos, sf), e: posLine(end, sf), t: textAt(pos, sf), u: holds(pos, end) || undefined, pos, end, node });
+  const nodeKid = n => kid(kindOf(n), n, n.getStart(sf), n.end);
+  const way = [], skip = new Set();
+  for (let i = 0; i < up.length; i++) {
+    const n = up[i];
+    if (skip.has(n)) continue;
+    let el = null;
+    if (n === id) el = { k: "", l: lineOf(n, sf), t: textAt(n.getStart(sf), sf), kids: [], pos: n.getStart(sf) };
+    else if (chainTop(n)) {
+      const ch = links(n, sf);
+      if (ch.links.length && ch.links.some(l => posLine(l.pos, sf) > lineOf(n, sf))) { // a chain over lines: its links
+        for (const l of ch.links) l.spine.forEach(x => skip.add(x));
+        way.push({ k: "chain", l: lineOf(n, sf), t: textAt(n.getStart(sf), sf), kids: ch.links.map(l => kid("link", null, l.pos, l.end)), pos: n.getStart(sf) });
+        const l = ch.links.find(l => id.pos >= l.pos && id.end <= l.end);
+        if (l) way.push({ k: "link", l: posLine(l.pos, sf), t: textAt(l.pos, sf), kids: (l.call ? [...l.call.arguments] : []).map(nodeKid), pos: l.pos });
+        continue;
+      }
+    }
+    if (!el) {
+      const e = entries(n);
+      if (!e) continue;
+      el = { k: e.k, l: lineOf(n, sf), t: textAt(n.getStart(sf), sf), kids: e.kids.map(nodeKid), pos: n.getStart(sf) };
+      if (is.isIfStatement(n)) {
+        let c = n.expression;
+        while (c && !is.isIdentifier(c)) c = is.isBinaryExpression(c) ? c.left : c.expression || c.operand;
+        if (c) conds.push({ el, id: c, at: n });
+      }
+    }
+    way.push(el);
+  }
+  for (let j = 0; j < way.length; j++) { // the entry the next sits in; an entry on this line off the way: its own entries
+    const el = way[j], npos = way[j + 1] ? way[j + 1].pos : -1;
+    el.kids = el.kids.flatMap(k => {
+      const sub = k.node && entries(k.node);
+      return k.l === el.l && sub && sub.kids.length && !(npos >= k.pos && npos < k.end) ? sub.kids.map(nodeKid) : [k];
+    });
+    el.w = el.kids.findIndex(k => npos >= k.pos && npos < k.end);
+    el.e = el.kids.map(({ k, l, e, t, u }) => ({ k, l, e, t, u }));
+  }
+  for (const el of way) delete el.kids, delete el.pos;
+  return way;
+}
 function safe(f) { try { return f() } catch { return null } }
 // exit once written: a pipe's write is async, and the checker's process would keep node alive
-process.stdout.write(JSON.stringify(out), () => process.exit(0));
+process.stdout.write(JSON.stringify(shapes ? shaped(shapes) : out), () => process.exit(0));

@@ -97,6 +97,10 @@ func TestOutsideWalk(t *testing.T) {
 	if len(got) != 1 || !got[0].same(OutsideCall{System: "three", Path: "x.go", Line: 4}) {
 		t.Errorf("a request three calls down, none four: %+v", got)
 	}
+	// the way down to it, the sending call last: the traced path's hidden hops (uses spec 8.2)
+	if want := []StoreCall{{"x.go:4", "one"}, {"x.go:20", "two"}, {"x.go:30", "three"}, {"x.go:40", "Do"}}; len(got) == 1 && !slices.Equal(got[0].Calls, want) {
+		t.Errorf("calls %+v, want %+v", got[0].Calls, want)
+	}
 	for _, c := range []struct{ url, env, sender, want string }{
 		{"https://Wago.Tools:443/api", "X", "get", "wago.tools"},
 		{"", "ITEMDB_API_URL", "get", "ITEMDB_API_URL"},

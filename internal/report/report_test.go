@@ -309,7 +309,7 @@ func TestSymbols(t *testing.T) {
 	write("c.go", "package a\n\ntype Rec struct {\n\tID      string `json:\"id\"`\n\tCreated int    `json:\"c\"`\n}\n")
 	write("b.ts", "/** Greets. */\nexport function greet(n: string) {\n  return n\n}\ngreet(\"x\")\n"+
 		"export const KEYS = Object.keys(T) as Array<\n\tkeyof typeof T\n>;\nconst schema = z.object({\n\tq: z.string(), // a < b\n\tn: z.number(),\n});\nconst add = (a: number) => {\n\treturn a\n};\n")
-	s := Symbols(sb, "+x := a.Limit + t.Count + Show(t)\n+greet(y)\n+Rec{}\n+use(KEYS, schema, add)\n")
+	s, _, _, _ := Symbols(sb, "+x := a.Limit + t.Count + Show(t)\n+greet(y)\n+Rec{}\n+use(KEYS, schema, add)\n")
 	// a value over several lines reads whole; a function's value stops at its body
 	for name, want := range map[string]string{
 		"KEYS":   "export const KEYS = Object.keys(T) as Array<\n\tkeyof typeof T\n>;",
@@ -545,11 +545,11 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 	if out, err := exec.Command("node", "-e", db, filepath.Join(dir, ".codegraph", "codegraph.db")).CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
 	}
-	use := Ref{Path: "b.go", Line: 3, In: "Use", Text: "func Use() { Save() }"}
-	s := Symbols(sb, "+++ b/a.go\n+\tSave()\n+\t_ = Max\n+func Handle() {\n")
+	use := Ref{Path: "b.go", Line: 3, In: "Use", Text: "func Use() { Save() }", Rel: "call"} // one line: no structure to open
+	s, _, _, _ := Symbols(sb, "+++ b/a.go\n+\tSave()\n+\t_ = Max\n+func Handle() {\n")
 	want := Symbol{
 		Kind: "function", Pkg: "a", Unit: "package", Sig: "func Save()", Path: "a.go", Line: 5, From: 5, To: 5, Uses: 2, Files: 2, Exact: true,
-		Refs: []Ref{{Path: "a.go", Line: 8, In: "Handle", Text: "Save()"}, use}, Here: []string{"a.go:8"}, HereKind: []string{"calls"},
+		Refs: []Ref{{Path: "a.go", Line: 8, In: "Handle", Text: "Save()", Rel: "call", Shape: 2}, use}, Here: []string{"a.go:8"}, HereKind: []string{"calls"},
 		Outside: []Ref{use}, NOutside: 1, // b.go isn't in the diff
 	}
 	if !reflect.DeepEqual(s["Save"], []Symbol{want}) {
@@ -748,7 +748,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 			t.Fatal(err, string(out))
 		}
 	}
-	s := Symbols(sb, "+++ b/a.go\n+func Save() { helper() }\n+func helper() {}\n+func Lonely() {}\n+func Hidden() {}\n+++ b/lib.rs\n+pub fn wrap() -> i32 { 1 }\n")
+	s, _, _, _ := Symbols(sb, "+++ b/a.go\n+func Save() { helper() }\n+func helper() {}\n+func Lonely() {}\n+func Hidden() {}\n+++ b/lib.rs\n+pub fn wrap() -> i32 { 1 }\n")
 	for name, want := range map[string]struct {
 		tests    []string
 		untested bool

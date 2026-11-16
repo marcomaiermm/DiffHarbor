@@ -95,15 +95,16 @@ func (idx *cgIndex) callGraph(sb *proc.Sandbox, starts []declKey) map[declKey][]
 }
 
 // sendersFrom are the requests start's code sends, itself or through the calls it makes, at most maxHops down: each an
-// OutsideCall at the line of start where that path begins.
+// OutsideCall at the line of start where that path begins, its Calls the path down to the sending call, that one last.
 func sendersFrom(g map[declKey][]cgEdge, start declKey) []OutsideCall {
 	type step struct {
-		k  declKey
-		at int // the line of start that began the path
+		k     declKey
+		at    int // the line of start that began the path
+		calls []StoreCall
 	}
 	var out []OutsideCall
 	seen := map[declKey]bool{start: true}
-	level := []step{{start, 0}}
+	level := []step{{start, 0, nil}}
 	for hop := 0; hop <= maxHops && len(level) > 0 && len(out) < maxPer; hop++ {
 		var next []step
 		for _, s := range level {
@@ -117,11 +118,12 @@ func sendersFrom(g map[declKey][]cgEdge, start declKey) []OutsideCall {
 				case e.Kind == "requests":
 					c := outsideCall(g, start, at, s.k, e)
 					if !slices.ContainsFunc(out, c.same) {
+						c.Calls = append(slices.Clip(s.calls), callOf(e))
 						out = append(out, c)
 					}
 				case e.Kind == "calls" && hop < maxHops && e.TPath != "" && !seen[declKey{e.TPath, e.TName}]:
 					seen[declKey{e.TPath, e.TName}] = true
-					next = append(next, step{declKey{e.TPath, e.TName}, at})
+					next = append(next, step{declKey{e.TPath, e.TName}, at, append(slices.Clip(s.calls), callOf(e))})
 				}
 			}
 		}
@@ -188,6 +190,11 @@ type StorePath struct {
 // StoreCall is a call on a store path: its place (path:line) and its callee.
 type StoreCall struct{ At, Callee string }
 
+// callOf is the call e makes, at its line, else the first of its source.
+func callOf(e cgEdge) StoreCall {
+	return StoreCall{e.SPath + ":" + strconv.Itoa(cmp.Or(e.Line, e.SLine)), e.TName}
+}
+
 // storesFrom are the queries start's code runs, its own and those within maxHops calls: a walk per call it makes, so
 // each of its calls keeps the paths it begins. Each declaration once per walk, the first path to it; the first
 // maxStores in all.
@@ -201,9 +208,7 @@ func storesFrom(g map[declKey][]cgEdge, start declKey) []StorePath {
 		}
 	}
 	store := func(e cgEdge) bool { return e.Kind == "reads" || e.Kind == "writes" }
-	call := func(e cgEdge) StoreCall {
-		return StoreCall{e.SPath + ":" + strconv.Itoa(cmp.Or(e.Line, e.SLine)), e.TName}
-	}
+	call := callOf
 	type step struct {
 		k     declKey
 		calls []StoreCall
@@ -263,6 +268,7 @@ func (idx *cgIndex) outside(sb *proc.Sandbox, root *os.Root, changed, added map[
 	}
 	starts := slices.SortedFunc(maps.Keys(at), func(a, b declKey) int { return cmp.Or(cmp.Compare(a.Path, b.Path), cmp.Compare(a.Name, b.Name)) })
 	g := idx.callGraph(sb, starts)
+	idx.calls = g
 	lines := sources(root)
 	for k, ss := range at {
 		reqs, stores := sendersFrom(g, k), storesFrom(g, k)

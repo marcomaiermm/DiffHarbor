@@ -420,7 +420,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 	if out, err := exec.Command("node", "-e", db, filepath.Join(dir, ".codegraph", "codegraph.db")).CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
 	}
-	s := Symbols(sb, "+++ b/client.ts\n@@ -1,0 +2 @@\n+  fetch() {\n+++ b/use.ts\n@@ -2,0 +3 @@\n+new Client().fetch()\n")
+	s, _, _, _ := Symbols(sb, "+++ b/client.ts\n@@ -1,0 +2 @@\n+  fetch() {\n+++ b/use.ts\n@@ -2,0 +3 @@\n+new Client().fetch()\n")
 	got := s["Client.fetch"]
 	if len(got) != 1 || got[0].Kind != "method" || got[0].From != 2 || got[0].To != 4 || !got[0].Exact ||
 		!slices.Equal(got[0].Here, []string{"use.ts:3", "use.ts:4"}) || !slices.Equal(got[0].HereKind, []string{"calls", "calls"}) {
@@ -433,7 +433,7 @@ db.exec("create table nodes (id text, kind text, name text, file_path text, star
 		t.Error("Client.idle has no added line")
 	}
 	// a change below the method's first lines: git's hunk header names the class, so the name scan never sees "fetch"
-	s = Symbols(sb, "+++ b/client.ts\n@@ -3 +3 @@ export class Client {\n+    return 2\n")
+	s, _, _, _ = Symbols(sb, "+++ b/client.ts\n@@ -3 +3 @@ export class Client {\n+    return 2\n")
 	if got := s["Client.fetch"]; len(got) != 1 || got[0].From != 2 || got[0].To != 4 || !got[0].Exact || got[0].NOutside != 3 {
 		t.Errorf("a method changed in its body: %+v", got)
 	}

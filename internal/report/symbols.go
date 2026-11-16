@@ -193,8 +193,10 @@ func Declared(diffText string) []string {
 
 // Symbols indexes sb's checkout for the names the diff shows: their declarations (Go parsed, other languages
 // by the line that declares them) and who names them: codegraph's resolved edges where the review indexed the
-// checkout, else the lines that name them, by name. The index's queries run in sb, as the repo's user.
-func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
+// checkout, else the lines that name them, by name. The index's queries run in sb, as the repo's user. With an index,
+// also how each use connects (uses spec 9.2): the structures, the stations of the ways, and whether the page's budget
+// cut a structure (Data.Shapes, Data.Nodes, Data.UsesCut).
+func Symbols(sb *proc.Sandbox, diffText string) (syms map[string][]Symbol, shapes []Shape, nodes []Node, over bool) {
 	wanted := map[string]bool{}
 	for l := range strings.SplitSeq(diffText, "\n") {
 		if strings.HasPrefix(l, "@@") { // the declaration a hunk is in
@@ -206,12 +208,12 @@ func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
 			}
 		}
 	}
-	syms := map[string][]Symbol{}
+	syms = map[string][]Symbol{}
 	ms := mentions{refs: map[string][]Ref{}, uses: map[string]int{}, files: map[string]map[string]bool{}}
 	n := 0
 	root, err := sb.Pinned() // as root, in the PR's checkout: its symlinks don't reach out of it
 	if err != nil {
-		return syms
+		return syms, nil, nil, false
 	}
 	defer root.Close()
 	_ = fs.WalkDir(root.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
@@ -269,8 +271,9 @@ func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
 		idx.exact(root, changed, added, syms)
 		idx.tests(sb, root, changed, syms)
 		idx.outside(sb, root, changed, added, syms)
+		shapes, nodes, over = idx.uses(sb, root, changed, added, syms)
 	}
-	return syms
+	return syms, shapes, nodes, over
 }
 
 // mentions is the lines that name what the diff shows, by name: the first few, how many, in which files.

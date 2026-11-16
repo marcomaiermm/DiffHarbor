@@ -41,7 +41,8 @@ type cgEdge struct {
 	// requests: a call that sends a network request, its TName the callee (TPath ""); url: a call that passes a URL
 	// on. The URL's text or the environment variable it is read from, and where that stands (path:line); see outside.go.
 	URL, Env, URLAt string
-	Sub             bool // reads, writes: the store is a subquery the project declares (tsEdges)
+	Sub             bool   // reads, writes: the store is a subquery the project declares (tsEdges)
+	Via             string // calls (VTA): the interface the call goes through
 }
 
 // vtaTimeout bounds VTA on one module: loading and type-checking a large repo takes long and much memory.
@@ -198,6 +199,11 @@ func vtaCalls(dir string, names []string) ([]cgEdge, error) {
 			seen[k] = true
 			c, _ := decl(s, at)
 			c.Kind, c.TName, c.TPath, c.TLine = "calls", t.Name(), rel(tp), tp.Line
+			if e.Site != nil && e.Site.Common().IsInvoke() {
+				if n, ok := types.Unalias(e.Site.Common().Value.Type()).(*types.Named); ok {
+					c.Via = n.Obj().Name()
+				}
+			}
 			out = append(out, c)
 		}
 	}

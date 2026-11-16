@@ -385,12 +385,13 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 			Summary: st.Summary, Diagram: st.Diagram, Effort: st.Effort, Decisions: st.Decisions, Story: st.Story, Flow: st.Flow,
 			Brief:       st.Brief,
 			Walkthrough: st.Files, Commits: review.Commits(ctx, sb), Outline: outline, Findings: openFindings(threads, open, r),
-			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(sb, raw), Themes: cfg.SyntaxTheme,
+			Diff: raw, Routine: r.Routine, Themes: cfg.SyntaxTheme,
 			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, sb),
 			Conflicts: pr.Mergeable != nil && !*pr.Mergeable, Forge: p.Links(),
 			Bot: f.Bot(), Threads: threadIDs(threads, p.Posted()),
 			Docs: docs, Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(sb, raw),
 		}
+		d.Symbols, d.Shapes, d.Nodes, d.UsesCut = report.Symbols(sb, raw)
 		d.PR = report.Header(ctx, sb, report.PR{Created: pr.CreatedAt, Author: pr.User.Login, Head: pr.Head.Ref, Base: pr.Base.Ref, Body: forge.Redact(pr.Body)})
 		d.Knowledge = report.Learn(ctx, sb, raw, pr.CreatedAt)
 		d.CI = ciOf(ctx, p, sb, key, sha, prFiles)
