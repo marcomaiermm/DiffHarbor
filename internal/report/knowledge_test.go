@@ -35,6 +35,7 @@ func TestLearn(t *testing.T) {
 	sh := func(script string) {
 		c := exec.Command("sh", "-c", "set -e\n"+script)
 		c.Dir = dir
+		c.Env = append(c.Environ(), "GIT_AUTHOR_NAME=o", "GIT_AUTHOR_EMAIL=o@x", "GIT_COMMITTER_NAME=o", "GIT_COMMITTER_EMAIL=o@x") // no git identity in a build container
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Fatalf("%v\n%s", err, out)
 		}
