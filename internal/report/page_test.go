@@ -92,7 +92,7 @@ func largeData() Data {
 		},
 		Cols: 3,
 	}
-	return Data{
+	d := Data{
 		Repo: "acme/shop", Number: 42, Title: "Charge orders through the payment service", URL: "https://github.com/acme/shop/pull/42",
 		SHA: "abcdef0123456789", Forge: Forge{Name: "GitHub", Ref: "#", Blob: "https://github.com/acme/shop/blob/abcdef0123456789/", Files: "https://github.com/acme/shop/pull/42/files"},
 		PR:   PR{Created: created, Author: "dev-one", Head: "feat/charge", Base: "main", Commits: 6},
@@ -167,6 +167,8 @@ func largeData() Data {
 		Env:        map[string]EnvVar{"PAYMENTS_API_URL": {Reads: []string{"internal/payments/client.go:7"}}},
 		Migrations: []Migration{{Path: "db/migrations/0007_orders.sql", Docs: []string{"README.md:1"}, Tests: []string{"internal/orders/orders_test.go:1"}}},
 	}
+	usesData(&d)
+	return d
 }
 
 // prevData is the large PR's version before its last push: orders.go read otherwise, no difference yet, its findings one
@@ -291,7 +293,12 @@ func TestPageFixtures(t *testing.T) {
 			"Left to CI (ci.yml), which this PR edits", "This PR edits the CI that judges it", "Where they&#39;re read", "Docs and tests that name it",
 			"What an outside service serves, in the author&#39;s words", "Run migration 0007 before the new image starts.",
 			"as on main at 0123456, read whole.", "which ran in 2 parts", "· not run here", "12 files by kind",
-			"No current member changed or reviewed util in 12 months.", "SHOP-12 In Progress · 2 differences", `data-k="[&#34;finding\tinternal/orders/orders.go: A failed charge still saves the order&#34;]"`,
+			"No current member changed or reviewed util in 12 months.",
+			// the uses page (uses spec): the data the script draws from, the traced path's items, the sheet
+			`<script type="application/json" id="shapes">[{"p":"internal/api/routes.go","s":[1,1],"r":[{"k":"decl"`,
+			`<script type="application/json" id="nodes">[{"n":"routes","k":"decl"`, `"ju":{"r":"call","p":"web/form.ts","l":30}`, `"e":{"k":"cycle","t":"submit"}`,
+			`<ol class="pa" aria-label="Path from POST /orders to PAYMENTS_API_URL" data-items="[{&#34;t&#34;:&#34;s&#34;,&#34;n&#34;:&#34;/orders&#34;,&#34;k&#34;:&#34;route&#34;`,
+			`&#34;r&#34;:&#34;request&#34;`, `<dialog id="uses" class="us" aria-labelledby="uses-title">`, "SHOP-12 In Progress · 2 differences", `data-k="[&#34;finding\tinternal/orders/orders.go: A failed charge still saves the order&#34;]"`,
 		}},
 		{"tiny", tinyData(), []string{`id="read"`, "No open items", ">test run here<", `id="part-code"`}},
 		{"waits", waitsData(), []string{
@@ -606,5 +613,91 @@ func TestNotRun(t *testing.T) {
 	all, other, placed := notes(nil), notes(map[string]string{"TestOther": "pass"}), notes(map[string]string{"TestPlace": "pass"})
 	if all < 3 || other != all || placed != all-3 {
 		t.Fatalf("notes: %d none ran, %d another ran, %d TestPlace ran", all, other, placed)
+	}
+}
+
+// usesData gives the large PR what the uses page draws (uses spec): the names the diff declares, their uses, the
+// structures at those uses and the stations of their ways. An object-and-chain structure with two marked lines and
+// folds, a Go if with its condition, a way up to a route and down to a table, one ending at a system, a cycle, a
+// bound, a use drawn as its line alone, one found by name.
+func usesData(d *Data) {
+	d.Shapes = []Shape{
+		{Path: "internal/api/routes.go", Span: [2]int{1, 1}, Rows: []ShapeRow{{Kind: "decl", Text: "func routes()", Line: 1}, {Kind: "call", Depth: 1, Text: `orders.Place("x")`, Line: 1, Use: true}}},
+		{Path: "cmd/shop/main.go", Span: [2]int{10, 16}, Rows: []ShapeRow{
+			{Kind: "decl", Text: "func main()", Line: 10},
+			{Kind: "if", Depth: 1, Text: "if ok", Line: 12, Cond: &ShapeCond{Name: "ok", Line: 11, Text: "id, ok := parse(os.Args)"}},
+			{Kind: "call", Depth: 2, Text: "orders.Place(id)", Line: 14, Use: true},
+		}},
+		{Path: "web/checkout.ts", Span: [2]int{10, 20}, Rows: []ShapeRow{
+			{Kind: "decl", Text: "function submit(form)", Line: 10},
+			{Kind: "object", Depth: 1, Text: "const req = {", Line: 11},
+			{Kind: "call", Depth: 2, Text: "pay: Charge(form.total),", Line: 12, Use: true},
+			{Kind: "fold", Depth: 2, N: 3, Kept: []ShapeLeaf{{Kind: "stmt", Text: `currency: "EUR",`, Line: 13}}, More: &[2]int{15, 16}},
+			{Kind: "chain", Depth: 1, Text: "client", Line: 17},
+			{Kind: "link", Depth: 2, Text: ".retry(3)", Line: 17},
+			{Kind: "call", Depth: 2, Text: ".then(() => Charge(rest))", Line: 18, Use: true},
+			{Kind: "levels", Depth: 2, N: 2, More: &[2]int{19, 20}},
+		}},
+		{Path: "internal/orders/orders.go", Span: [2]int{1, 3}, Rows: []ShapeRow{{Kind: "decl", Text: "func Place(id string) error", Line: 1}, {Kind: "call", Depth: 1, Text: "return payments.Charge(id)", Line: 2, Use: true}}},
+		{Path: "internal/jobs/worker.go", Span: [2]int{4, 8}, Rows: []ShapeRow{
+			{Kind: "decl", Text: "func run(ctx context.Context)", Line: 4},
+			{Kind: "if", Depth: 1, Text: "if due", Line: 5, Cond: &ShapeCond{Name: "due", Line: 4, Text: "due := time.Now().After(next)"}},
+			{Kind: "call", Depth: 2, Text: "payments.Charge(job.ID)", Line: 6, Use: true},
+		}},
+	}
+	call := func(p string, l, sh int) *Joint { return &Joint{Rel: "call", Path: p, Line: l, Shape: sh} }
+	d.Nodes = []Node{
+		/* 1 */ {Name: "routes", Kind: "decl", Path: "internal/api/routes.go", Line: 1, State: "changed", Part: "api", Up: 4, JUp: &Joint{Path: "internal/api/routes.go", Line: 1}},
+		/* 2 */ {Name: "Place", Kind: "decl", Path: "internal/orders/orders.go", Line: 1, State: "signature", Part: "orders", Sev: "major", Find: "#finding-1", Up: 1, JUp: call("internal/api/routes.go", 1, 1)},
+		/* 3 */ {Name: "main", Kind: "decl", Path: "cmd/shop/main.go", Line: 10, State: "outside", End: &End{Kind: "main"}},
+		/* 4 */ {Name: "/orders", Kind: "route", Method: "POST", Path: "internal/api/routes.go", Line: 1, Down: 1, JDown: &Joint{Path: "internal/api/routes.go", Line: 1}, End: &End{Kind: "route"}},
+		/* 5 */ {Name: "Charge", Kind: "decl", Path: "internal/payments/client.go", Line: 6, State: "new", Part: "payments", Up: 2, JUp: call("internal/orders/orders.go", 2, 4), Down: 6, JDown: &Joint{Rel: "request", Path: "internal/payments/client.go", Line: 7}},
+		/* 6 */ {Name: "PAYMENTS_API_URL", Kind: "system", Up: 5, JUp: &Joint{Rel: "request", Path: "internal/payments/client.go", Line: 7}, End: &End{Kind: "system"}},
+		/* 7 */ {Name: "submit", Kind: "decl", Path: "web/checkout.ts", Line: 10, State: "outside", Up: 8, JUp: call("web/form.ts", 30, 0)},
+		/* 8 */ {Name: "onSave", Kind: "decl", Path: "web/form.ts", Line: 28, State: "outside", Up: 7, JUp: call("web/checkout.ts", 19, 0), End: &End{Kind: "cycle", Text: "submit"}},
+		/* 9 */ {Name: "orders", Kind: "table", Path: "db/schema.go", Line: 12, End: &End{Kind: "table"}},
+		/* 10 */ {Name: "Save", Kind: "decl", Path: "internal/orders/store.go", Line: 5, State: "outside", Up: 2, JUp: call("internal/orders/orders.go", 2, 0), Down: 9, JDown: &Joint{Rel: "write", Path: "internal/orders/store.go", Line: 8}},
+		/* 11 */ {Name: "run", Kind: "decl", Path: "internal/jobs/worker.go", Line: 4, State: "outside", Up: 12, JUp: call("internal/jobs/loop.go", 6, 0)},
+		/* 12 */ {Name: "loop", Kind: "decl", Path: "internal/jobs/loop.go", Line: 3, State: "outside", Up: 16, JUp: call("internal/jobs/sched.go", 9, 0)},
+		/* 13 */ {Name: "notify", Kind: "decl", Path: "hooks/notify.py", Line: 5, State: "outside", End: &End{Kind: "value", Text: "notify.py:9"}},
+		/* 14 */ {Name: "legacy", Kind: "decl", Path: "vendor/legacy/x.go", Line: 2, State: "outside", End: &End{Kind: "nograph", Text: "vendor/legacy/x.go"}},
+		/* 15 */ {Name: "show", Kind: "decl", Path: "internal/api/view.go", Line: 3, State: "outside", End: &End{Kind: "byname"}},
+		/* 16 */ {Name: "sched", Kind: "decl", Path: "internal/jobs/sched.go", Line: 7, State: "outside", Up: 17, JUp: call("internal/jobs/boot.go", 4, 0)},
+		/* 17 */ {Name: "boot", Kind: "decl", Path: "internal/jobs/boot.go", Line: 2, State: "outside", Up: 18, JUp: call("internal/jobs/start.go", 3, 0)},
+		/* 18 */ {Name: "start", Kind: "decl", Path: "internal/jobs/start.go", Line: 1, State: "outside", End: &End{Kind: "bound"}},
+	}
+	item := "type Item struct {\n\tID string\n\tName string\n\tPrice int\n\tCurrency string\n\tStock int\n\tTags []string\n\tCreated time.Time\n\tUpdated time.Time\n\tOwner string\n\tHidden bool\n\tNote string\n…"
+	d.Symbols = map[string][]Symbol{
+		"Place": {{
+			Kind: "function", Pkg: "orders", Unit: "package", Sig: "func Place(id string) error", Doc: "Place charges an order and returns the charge's error.", Path: "internal/orders/orders.go", Line: 1,
+			Exact: true, State: "signature", Sev: "major", Uses: 3, Files: 3, Reach: []int{5, 10},
+			Refs: []Ref{
+				{Path: "internal/api/routes.go", Line: 1, In: "routes", Text: `func routes() { orders.Place("x") }`, Shape: 1, Rel: "call", Up: 1},
+				{Path: "cmd/shop/main.go", Line: 14, In: "main", Text: "orders.Place(id)", Shape: 2, Rel: "call", Up: 3},
+				{Path: "internal/orders/orders_test.go", Line: 1, In: "TestPlace", Text: "Place(\"x\")", Test: true},
+			},
+			Ways: []Way{{Method: "POST", Route: "/orders", Path: "internal/api/routes.go", Line: 2, Chain: []Hop{{Name: "Place", Path: "internal/orders/orders.go", Line: 1, In: "internal/api/routes.go", At: 2, Shape: 1, Rel: "call"}}}},
+		}},
+		"Charge": {{
+			Kind: "function", Pkg: "payments", Unit: "package", Sig: "func Charge(id string) error", Doc: "Charge sends a charge to the payment service.", Path: "internal/payments/client.go", Line: 6,
+			Exact: true, State: "new", Uses: 9, Files: 7, Reach: []int{6},
+			Refs: []Ref{
+				{Path: "internal/orders/orders.go", Line: 2, In: "Place", Text: "return payments.Charge(id)", Shape: 4, Rel: "call", Up: 2},
+				{Path: "web/checkout.ts", Line: 12, In: "submit", Text: "pay: Charge(form.total),", Shape: 3, Rel: "call", Up: 7},
+				{Path: "web/checkout.ts", Line: 18, In: "submit", Text: ".then(() => Charge(rest))", Shape: 3, Rel: "call", Up: 7},
+				{Path: "internal/api/routes.go", Line: 1, In: "routes", Text: `func routes() { orders.Place("x") }`, Rel: "iface", Via: "Charger", Up: 1},
+				{Path: "internal/api/wire.go", Line: 5, In: "wire", Text: "var _ Charger = payments.Charge", Rel: "tie", Via: "Charger"},
+				{Path: "internal/jobs/worker.go", Line: 6, In: "run", Text: "payments.Charge(job.ID)", Shape: 5, Rel: "call", Up: 11},
+				{Path: "hooks/notify.py", Line: 7, In: "notify", Text: "client.Charge(order)", Up: 13},
+				{Path: "vendor/legacy/x.go", Line: 3, In: "legacy", Text: "payments.Charge(old)", Up: 14},
+				{Path: "internal/payments/client_test.go", Line: 4, In: "TestCharge", Text: "Charge(\"x\")", Test: true},
+			},
+		}},
+		"Lookup": {{
+			Kind: "function", Pkg: "catalog", Sig: "func Lookup(id string) Item", Path: "internal/catalog/catalog.go", Line: 1, Uses: 1, Files: 1,
+			Refs: []Ref{{Path: "internal/api/view.go", Line: 3, In: "show", Text: "item := catalog.Lookup(id)", Up: 15}},
+		}},
+		"Item": {{Kind: "type", Pkg: "catalog", Sig: item, Path: "internal/catalog/item.go", Line: 3, Exact: true, Uses: 0}},
+		"Trim": {{Kind: "function", Pkg: "util", Sig: "func Trim(s string) string", Path: "internal/util/strings.go", Line: 1, Exact: true}},
 	}
 }

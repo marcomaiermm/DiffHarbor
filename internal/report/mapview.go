@@ -81,15 +81,10 @@ type reachPart struct {
 
 // traceView is the traced path under the map (6.12, component 30).
 type traceView struct {
-	Label, System, Entry, EntryPart string
-	Rows                            []prow
-	Call, Foot                      string
-	Boxes, Lines                    []string
-}
-
-// prow is a row of a call path: the declaration, its part where it changes, what the PR did to it, where it's named.
-type prow struct {
-	Name, Part, State, Word, At, Href string
+	Label        string
+	Path         *pathView
+	Foot         string
+	Boxes, Lines []string
 }
 
 // panel is the selection panel of a box (component 26).
@@ -1002,22 +997,18 @@ func (mv *mapView) trace(v *view) {
 	if t == nil || len(t.Rows) == 0 {
 		return
 	}
-	tv := &traceView{System: t.Call.System}
-	entry := t.At.Path
-	if pb := v.partOf(entry); pb != nil {
-		tv.EntryPart = pb.Label
+	tv := &traceView{}
+	entryPart := ""
+	if pb := v.partOf(t.At.Path); pb != nil {
+		entryPart = pb.Label
 	} else if pb := v.partOf(t.Rows[0].Path); pb != nil {
-		tv.EntryPart = pb.Label
+		entryPart = pb.Label
 	}
 	if t.Method == "CALL" || t.Method == "" {
-		tv.Entry = "Call in"
 		tv.Foot = "The path starts where the code graph finds no caller."
-	} else {
-		tv.Entry = t.Method + " " + t.Route
 	}
-	tv.Call = entry
-	tv.Label = "Follow one path from " + cmp.Or(tv.EntryPart, path.Base(entry)) + " to `" + tv.System + "`"
-	tv.Rows = v.pathRows(t.Rows, tv.EntryPart)
+	tv.Label = "Follow one path from " + cmp.Or(entryPart, path.Base(t.At.Path)) + " to `" + t.Call.System + "`"
+	tv.Path = v.tracePath(t, entryPart, v.hops())
 	var boxes []string
 	for _, r := range t.Rows {
 		if pb := v.partOf(r.Path); pb != nil {
@@ -1037,32 +1028,7 @@ func (mv *mapView) trace(v *view) {
 			}
 		}
 	}
-	tv.Rows = append(tv.Rows, prow{Name: tv.System, Word: "called at", At: path.Base(t.Call.Path) + ":" + strconv.Itoa(t.Call.Line), State: "outside the repo", Href: v.fileHref(t.Call.Path) + ":" + strconv.Itoa(t.Call.Line)})
 	mv.Trace = tv
-}
-
-// pathRows is a way's rows as a call path: each with its part where it differs from the row above.
-func (v *view) pathRows(rows []wrow, prev string) []prow {
-	var out []prow
-	for _, r := range rows {
-		pr := prow{Name: r.Call, State: cmp.Or(r.Tag, "not in the diff"), At: path.Base(r.At.Path), Href: r.At.Href}
-		if r.At.Line > 0 {
-			pr.At += ":" + strconv.Itoa(r.At.Line)
-		}
-		if r.Call != r.Name {
-			pr.Word = "called at"
-		} else {
-			pr.Word = "at"
-		}
-		if pb := v.partOf(r.Path); pb != nil && pb.Label != prev {
-			pr.Part, prev = pb.Label, pb.Label
-		}
-		if v.files[r.Path] == nil {
-			pr.State = "outside the PR"
-		}
-		out = append(out, pr)
-	}
-	return out
 }
 
 // partOf is the map's part that holds p: by its files, else by its folder; nil without a map or a part.

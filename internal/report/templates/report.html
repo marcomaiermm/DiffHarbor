@@ -7,8 +7,8 @@
 {{favicons}}
 <!-- shadcn-html's components sit in @layer components: before Tailwind's base, or its preflight would win -->
 <style>@layer theme, base, components, utilities;</style>
-<!-- shadcn-html: the components the diff, the symbol popover and the uses sheet draw with, one request -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/combine/gh/codylindley/shadcn-html@0.7.13-alpha/dist/theme/default-semantic-tokens.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/checkbox/checkbox.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/collapsible/collapsible.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/sheet/sheet.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/scroll-area/scroll-area.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/button/button.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/button-group/button-group.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/context-menu/context-menu.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/popover/popover.css">
+<!-- shadcn-html: the components the diff and the graphs draw with, one request -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/combine/gh/codylindley/shadcn-html@0.7.13-alpha/dist/theme/default-semantic-tokens.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/checkbox/checkbox.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/collapsible/collapsible.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/scroll-area/scroll-area.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/button/button.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/button-group/button-group.css,gh/codylindley/shadcn-html@0.7.13-alpha/dist/components/context-menu/context-menu.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.3.0/index.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@5.3.0/index.css">
 {{template "theme" .}}
@@ -35,24 +35,38 @@
 </div>
 <div class="blockw" style="padding-top: 0;">{{template "pagefoot" .}}</div>
 {{template "sheets" .}}
-<div id="sym" popover="manual" class="popover sym-pop" data-blob="{{.Forge.Blob}}" data-forge="{{.Forge.Name}}" data-search="{{.Forge.Search}}"></div>
-<dialog id="uses" class="sheet" data-side="right" aria-labelledby="uses-title">
-  <div class="sheet-content">
-    <button type="button" class="sheet-close-x" data-sheet-close aria-label="Close">{{icon "x" "size-4"}}</button>
-    <div class="sheet-header">
-      <div class="sheet-kicker"></div>
-      <h2 class="sheet-title" id="uses-title"></h2>
-      <p class="sheet-description"></p>
-    </div>
-    <div class="sheet-body"></div>
-  </div>
+<div id="sym" popover="manual" class="sym-pop" data-blob="{{.Forge.Blob}}" data-forge="{{.Forge.Name}}" data-search="{{.Forge.Search}}"></div>
+{{/* component 17, variant Uses: every place a name is used and how it connects (uses spec 7) */}}
+<dialog id="uses" class="us" aria-labelledby="uses-title">
+  <div class="us-h"><button class="us-bk" type="button" data-back hidden>{{ico "arrow-left" 16}}<span class="us-bn"></span><span class="vh"></span></button><span class="us-k"></span><h2 class="us-t" id="uses-title" tabindex="-1" translate="no"></h2><button class="ibtn us-x" type="button" data-sheet-close aria-label="Close">{{ico "x" 16}}</button></div>
+  <div class="us-b"></div>
 </dialog>
 <script type="application/json" id="symbols">{{.Symbols}}</script>
+<script type="application/json" id="shapes">{{.Shapes}}</script>
+<script type="application/json" id="nodes">{{.Nodes}}</script>
 {{template "script" .}}
 
 <template id="i-file">{{icon "file" ""}}</template>
 <template id="i-search">{{icon "search" ""}}</template>
 <template id="i-enter">{{icon "corner-down-left" ""}}</template>
+<template id="p-chevron-right">{{ico "chevron-right" 12}}</template>
+<template id="p-plus">{{ico "plus" 12}}</template>
+<template id="p-minus">{{ico "minus" 12}}</template>
+<template id="p-braces">{{ico "braces" 16}}</template>
+<template id="p-brackets">{{ico "brackets" 16}}</template>
+<template id="p-parentheses">{{ico "parentheses" 16}}</template>
+<template id="p-link-2">{{ico "link-2" 16}}</template>
+<template id="p-code-xml">{{ico "code-xml" 16}}</template>
+<template id="p-square-function">{{ico "square-function" 16}}</template>
+<template id="p-git-branch">{{ico "git-branch" 16}}</template>
+<template id="p-repeat">{{ico "repeat" 16}}</template>
+<template id="p-ellipsis-vertical">{{ico "ellipsis-vertical" 16}}</template>
+<template id="p-variable">{{ico "variable" 16}}</template>
+<template id="p-triangle-alert">{{ico "triangle-alert" 14}}</template>
+<template id="p-octagon">{{ico "octagon" 14}}</template>
+<template id="p-database">{{ico "database" 14}}</template>
+<template id="p-eye">{{ico "eye" 12}}</template>
+<template id="p-chevron-down">{{ico "chevron-down" 16}}</template>
 {{if .Graphs}}<template id="i-arrow-up-right">{{icon "arrow-up-right" ""}}</template>
 <template id="i-focus">{{icon "focus" ""}}</template>
 <template id="i-eye-off">{{icon "eye-off" ""}}</template>

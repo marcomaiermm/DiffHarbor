@@ -1,0 +1,835 @@
+{{/* How a name connects (uses spec): the name card (component 32), the path (component 30) in its four places, the
+code structure at a joint (component 31) and the uses sheet (component 17, variant Uses). Part of the syntax module:
+it shares its helpers. Built with textContent, never markup: the repo's text is the PR author's. */}}
+{{define "usesjs"}}
+const syms = JSON.parse(document.getElementById("symbols").textContent) || {};
+const shapes = JSON.parse(document.getElementById("shapes").textContent) || [];
+const nodes = JSON.parse(document.getElementById("nodes").textContent) || [];
+const pop = document.getElementById("sym"), sheet = document.getElementById("uses"), sbody = sheet.querySelector(".us-b");
+const el = (tag, cls, ...kids) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  e.append(...kids);
+  return e;
+};
+const ic = name => document.getElementById("i-" + name).content.firstElementChild.cloneNode(true);
+const pi = name => document.getElementById("p-" + name).content.firstElementChild.cloneNode(true);
+const vh = text => el("span", "vh", text);
+const plural = (n, one, many = one + "s") => `${n} ${n === 1 ? one : many}`;
+const base = p => p.split("/").pop();
+const touch = matchMedia("(hover: none)");
+// a Mono name that breaks where section 3 lets it: after . / _, before a capital in a camel-cased name
+const breaks = s => {
+  const out = [];
+  let cur = "";
+  for (let i = 0; i < s.length; i++) {
+    if (cur && /[A-Z]/.test(s[i]) && /[a-z]/.test(s[i - 1])) { out.push(cur, el("wbr")); cur = ""; }
+    cur += s[i];
+    if ("./_".includes(s[i])) { out.push(cur, el("wbr")); cur = ""; }
+  }
+  if (cur) out.push(cur);
+  return out;
+};
+// the row of the diff that shows a line, if the page shows it
+const rowOf = (path, line) => {
+  const t = [...document.querySelectorAll("table[data-path]")].find(t => t.dataset.path === path);
+  return t && [...t.querySelectorAll("tr.ctx, tr.add")].find(r => r.cells[0].textContent === String(line));
+};
+// go to a line of the diff when the page shows it; false when it doesn't
+const jump = (path, line) => {
+  const row = rowOf(path, line);
+  if (!row) return false;
+  row.id ||= path + "~L" + line;
+  go(row.id);
+  return true;
+};
+const go = id => {
+  if (location.hash === "#" + id) dispatchEvent(new HashChangeEvent("hashchange"));
+  else location.hash = id;
+};
+// a link to a line: in the diff when the diff shows it (the sheet closes), else the file at head on the forge
+const link = (path, line, cls, ...kids) => {
+  const a = el("a", cls, ...kids);
+  a.title = path + ":" + line;
+  if (rowOf(path, line)) a.href = "#" + path + ":" + line;
+  else if (pop.dataset.blob) {
+    a.href = pop.dataset.blob + path + "#L" + line;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.append(vh(" (opens in a new tab)"));
+  } else a.href = "#" + path;
+  a.addEventListener("click", e => {
+    if (!jump(path, line)) return;
+    e.preventDefault();
+    hide();
+    if (sheet.open) { leaving = true; sheet.close(); }
+  });
+  return a;
+};
+const at = (path, line) => link(path, line, "nc-pl", el("span", "", base(path) + ":" + line));
+const kindIcon = k => pi(/^(func|method)/.test(k || "") ? "square-function" : k === "type" ? "braces" : "variable");
+// what the PR did to it and the finding on it, as the diff's chips say it
+const chip = (text, data, cls = "") => {
+  const c = el("span", ("dchip " + cls).trim(), text);
+  Object.assign(c.dataset, data);
+  return c;
+};
+const head = (s, name) => el("div", "nc-h", el("span", "nc-k", kindIcon(s.kind), vh(s.kind + " ")),
+  el("span", "nc-nm", ...(s.pkg ? [el("span", "nc-pk", s.pkg + ".")] : []), name),
+  ...(s.state === "new" ? [chip("new", { new: "" })] : s.state ? [chip(s.state === "signature" ? "signature changed" : s.state, {}, "changed")] : []),
+  ...(s.sev ? [chip(s.sev === "critical" ? "Blocker" : "Major", { sev: s.sev })] : []),
+  at(s.path, s.line));
+const doc = s => s.doc.replace(/(?<!\n)\n(?!\n)/g, " "); // source line breaks go, paragraphs stay
+const toks = ts => ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; });
+// a signature as component 7's body: up to 10 lines whole, else the first 8 and "Show {n} more lines"; one the server
+// cut ends in "⋯ goes on in the file"
+const sig = async s => {
+  const ls = await colored(s.sig, s.path);
+  const cut = ls.length > 1 && s.sig.split("\n").at(-1).trim() === "…";
+  const rows = (cut ? ls.slice(0, -1) : ls).map((ts, i) => el("div", "cr", el("i", "", String(s.line + i)), ...toks(ts)));
+  const inner = el("div", "", ...rows.slice(0, rows.length > 10 ? 8 : rows.length));
+  const box = el("div", "xcode sig", inner), out = [box];
+  if (rows.length > 10) {
+    const more = el("div", "xmore", ...rows.slice(8));
+    more.hidden = true;
+    inner.append(more);
+    const n = rows.length - 8, b = el("button", "dlink sig-more", `Show ${n} more lines`);
+    b.type = "button";
+    b.setAttribute("aria-expanded", "false");
+    b.addEventListener("click", () => {
+      const on = more.hidden;
+      more.hidden = !on;
+      b.setAttribute("aria-expanded", on);
+      b.textContent = on ? `Hide ${n} lines` : `Show ${n} more lines`;
+    });
+    out.push(b);
+  }
+  if (cut) inner.append(el("div", "cr gap", el("i", "", "⋯"), link(s.path, s.line, "lnk", "goes on in the file")));
+  box.tabIndex = 0;
+  box.setAttribute("role", "region");
+  box.setAttribute("aria-label", `${s.path}:${s.line}, scrolls sideways`);
+  return out;
+};
+
+// ---- component 31: the code structure at a joint
+const glyphs = { object: "braces", array: "brackets", call: "parentheses", chain: "link-2", jsx: "code-xml", func: "square-function", if: "git-branch", loop: "repeat", levels: "ellipsis-vertical" };
+const kindWords = { decl: "declaration", object: "object", array: "array", call: "call", chain: "chain", link: "link", jsx: "JSX element", func: "function", if: "if", loop: "loop", stmt: "statement", levels: "levels" };
+const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// text with every occurrence of name marked
+const marked = (text, name) => {
+  if (!name) return [text];
+  return text.split(new RegExp(`(?<![\\w$])(${esc(name)})(?![\\w$])`)).flatMap((p, i) => !p ? [] : i % 2 ? [el("mark", "cs-um", p)] : [p]);
+};
+// a structure draws when it holds more than the declaration's own first line
+const drawable = sh => sh && sh.r.length > 1;
+let uid = 0;
+const glyph = (k, decl, t) => k === "stmt" ? el("span", "cs-sd") : k === "decl" ? kindIcon(decl || (/^(func|function|async|def)\b/.test(t) ? "function" : "")) : glyphs[k] ? pi(glyphs[k]) : "";
+const structure = (sh, name, decl) => {
+  const [a, b] = sh.s, id = "cs" + ++uid;
+  const frame = el("div", "cs", el("p", "cs-hd", link(sh.p, a, "", ...breaks(`${base(sh.p)}:${a}–${b}`))));
+  frame.setAttribute("role", "region");
+  frame.setAttribute("aria-label", `Code at ${sh.p} lines ${a} to ${b}`);
+  const root = { kids: [] }, stack = [{ d: -1, n: root }];
+  for (const r of sh.r) {
+    const n = { r, kids: [] };
+    while (stack.at(-1).d >= r.d) stack.pop();
+    stack.at(-1).n.kids.push(n);
+    stack.push({ d: r.d, n });
+  }
+  const on = n => n.on ??= !!n.r.u || n.kids.some(on);
+  const num = l => el("span", "cs-n", vh("line "), String(l));
+  const lines = (li, o) => {
+    li.append(el("i", `cs-v v1${o.s ? " s" : ""}${o.later ? " on" : ""}`));
+    if (!o.last) li.append(el("i", `cs-v v2${o.s ? " s" : ""}${o.after ? " on" : ""}`));
+  };
+  const item = (n, o) => {
+    const r = n.r, li = el("li", "cs-i");
+    if (r.k === "fold") return fold(n, o);
+    const use = !!r.u, way = on(n);
+    li.classList.toggle("on", way);
+    li.classList.toggle("t", use);
+    lines(li, { ...o, s: o.chain });
+    li.append(o.chain ? el("i", "cs-bd" + (use ? " u" : "")) : el("i", `cs-a${way ? " on" : ""}${use ? " u" : ""}`));
+    const text = el("span", "cs-t", vh((kindWords[r.k] || r.k) + " "));
+    text.translate = false;
+    let row;
+    if (r.k === "levels") {
+      row = el("div", "cs-r cs-lv", el("span", "cs-g", pi("ellipsis-vertical")), el("span", "cs-t", `${r.n} levels`, " ", ...(r.m ? [link(sh.p, r.m[0], "cs-ml", `lines ${r.m[0]}–${r.m[1]}`)] : [])));
+    } else if (use) {
+      text.append(...marked(r.t, name), el("span", "cs-n2", ":" + r.l));
+      row = link(sh.p, r.l, "cs-r", el("span", "cs-g", ...(o.chain ? [] : [el("span", "cs-ud")])), text, el("span", "cs-n", String(r.l)));
+      row.setAttribute("aria-label", `${r.t}, line ${r.l}, the use`);
+    } else {
+      text.append(r.t);
+      row = el("div", "cs-r", el("span", "cs-g", ...(o.chain || r.k === "link" ? [] : [glyph(r.k, decl, r.t)])), text, num(r.l));
+    }
+    const h = el("div", "cs-h", row);
+    if (r.c) h.append(el("p", "cs-cn", `At :${r.c.l}, ${r.c.n} comes from `, el("code", "", r.c.t)));
+    if (n.kids.length) h.append(el("i", `cs-dn${n.kids.some(on) ? " on" : ""}${use ? " u" : ""}`));
+    li.append(h);
+    if (n.kids.length) li.append(list(n.kids, r.k === "chain", "cs-u", r.t));
+    return [li];
+  };
+  // a fold: the pill, and under it the kept entries one level deep with "and {n} more" past them
+  const fold = (n, o) => {
+    const r = n.r, fid = id + "f" + ++uid, li = el("li", "cs-i t cs-fr" + (o.last ? " lx" : ""));
+    li.append(el("i", "cs-v v1 s" + (o.later ? " on" : "")), el("i", "cs-v v2 s" + (o.after ? " on" : "")), el("i", "cs-st"));
+    const b = el("button", "cs-fp");
+    b.type = "button";
+    b.setAttribute("aria-expanded", "false");
+    b.setAttribute("aria-controls", fid);
+    const label = open => b.replaceChildren(pi(open ? "minus" : "plus"), ...(open ? [`Hide ${r.n}`] : [`${r.n} more`, vh(" in " + o.parent)]));
+    label(false);
+    li.append(el("div", "cs-h", el("div", "cs-r", el("span", "cs-fc", b))));
+    const kept = r.e || [], more = r.m && r.n > kept.length ? r.n - kept.length : 0;
+    const ul = el("ul", "cs-rl");
+    ul.id = fid;
+    ul.hidden = true;
+    ul.setAttribute("aria-live", "off");
+    kept.forEach((e, i) => {
+      const x = el("li", "cs-i cs-rv");
+      const last = o.last && i === kept.length - 1 && !more;
+      x.append(el("i", "cs-v v1" + (o.chain ? " s" : "") + (o.after ? " on" : "")));
+      if (!last) x.append(el("i", "cs-v v2" + (o.chain ? " s" : "") + (o.after ? " on" : "")));
+      x.append(o.chain ? el("i", "cs-bd") : el("i", "cs-a"));
+      const t = el("span", "cs-t", vh((kindWords[e.k] || e.k) + " "), e.t);
+      t.translate = false;
+      x.append(el("div", "cs-h", el("div", "cs-r", el("span", "cs-g" + (e.u ? " cs-ur" : ""), ...(o.chain || e.k === "link" ? [] : [glyph(e.k, decl, e.t)])), t, num(e.l))));
+      ul.append(x);
+    });
+    if (more) {
+      const x = el("li", "cs-i t cs-rv cs-mo");
+      x.append(el("i", "cs-v v1 s" + (o.after ? " on" : "")));
+      if (!o.last) x.append(el("i", "cs-v v2 s" + (o.after ? " on" : "")));
+      x.append(el("i", "cs-st"), el("div", "cs-h", el("div", "cs-r", el("span", "cs-g"),
+        link(sh.p, r.m[0], "cs-ml", more === 1 ? `and 1 more, line ${r.m[0]}` : `and ${more} more, lines ${r.m[0]}–${r.m[1]}`))));
+      ul.append(x);
+    }
+    b.addEventListener("click", () => {
+      const open = ul.hidden;
+      ul.hidden = !open;
+      li.classList.toggle("open", open);
+      b.setAttribute("aria-expanded", open);
+      label(open);
+    });
+    return [li, el("li", "cs-rw", ul)];
+  };
+  const list = (kids, chain, cls, parent) => {
+    const ul = el("ul", cls);
+    kids.forEach((n, i) => ul.append(...item(n, { chain, parent, later: kids.slice(i).some(on), after: kids.slice(i + 1).some(on), last: i === kids.length - 1 })));
+    return ul;
+  };
+  const top = el("ul", "cs-u0");
+  for (const n of root.kids) { // row 0, and anything the data puts at its depth
+    const [li] = item(n, { chain: false, parent: "", later: false, after: false, last: true });
+    li.querySelectorAll(":scope > .cs-v, :scope > .cs-a, :scope > .cs-bd").forEach(x => x.remove());
+    top.append(li);
+  }
+  frame.append(top);
+  return frame;
+};
+
+// ---- component 30: the path
+const rails = { call: "call", iface: "iface", tie: "tie", render: "render", read: "read", write: "write", request: "request" };
+const rail = j => rails[j.r] || "named";
+const relWords = { call: "called at", iface: "called through", tie: "listed in", render: "rendered at", read: "read at", write: "written at", request: "called at" };
+const verbs = { call: "calls", iface: "calls", tie: "lists", render: "renders", read: "reads", write: "writes", request: "calls" };
+const chevAt = { call: "user", iface: "user", read: "user", request: "user", render: "used", write: "used" };
+const edge = { subject: 7, decl: 4.75, finding: 4.75, out: 4.5, route: 5.75, callin: 5.75, table: 7, subquery: 7, system: 5.5, sysrepo: 5.5 };
+const NSV = "http://www.w3.org/2000/svg";
+const sv = (tag, a) => { const e = document.createElementNS(NSV, tag); for (const k in a) e.setAttribute(k, a[k]); return e; };
+const marker = (k, top, bottom) => {
+  const s = sv("svg", { class: "pa-m", viewBox: "0 0 24 24", "aria-hidden": "true" });
+  if (k === "subject") s.append(sv("circle", { class: "bg", cx: 12, cy: 12, r: 7 }), sv("circle", { class: "sub", cx: 12, cy: 12, r: 5 }));
+  else if (k === "route" || k === "callin") s.append(sv("rect", { class: "dc", x: 7, y: 7, width: 10, height: 10, rx: 2 }));
+  else if (k === "table" || k === "subquery") {
+    const d = pi("database");
+    for (const [a, v] of [["x", 5], ["y", 5], ["class", "db"]]) d.setAttribute(a, v);
+    s.append(sv("rect", { class: "bg", x: 4, y: 4, width: 16, height: 16 }), d);
+  } else if (k === "system" || k === "sysrepo") s.append(sv("rect", { class: "sy", x: 6, y: 7, width: 12, height: 10, rx: 2 }));
+  else s.append(sv("circle", { class: k === "out" ? "ot" : "dc", cx: 12, cy: 12, r: 4 }));
+  const e = edge[k] ?? 4.75;
+  if (top) s.append(sv("polyline", { class: "cv", points: `9,${8 - e - 3} 12,${8 - e} 15,${8 - e - 3}` }));
+  if (bottom) s.append(sv("polyline", { class: "cv", points: `9,${16 + e + 3} 12,${16 + e} 15,${16 + e + 3}` }));
+  return s;
+};
+// a joint's place, the lines of one declaration in the page's place-list style
+const places = j => {
+  const ls = j.ls || [j.l], f = base(j.p);
+  const out = [el("span", "pa-jp", f + ":" + ls[0])];
+  const rest = ls.slice(1, ls.length > 3 ? 3 : ls.length);
+  rest.forEach((l, i) => out.push(i === rest.length - 1 && ls.length <= 3 ? " and " : ", ", el("span", "pa-jp", ":" + l)));
+  if (ls.length > 3) out.push(` and ${plural(ls.length - 3, "more line")}`);
+  out.forEach(x => { if (x.classList) x.translate = false; });
+  return out;
+};
+const sentence = j => {
+  const ls = j.ls || [j.l], where = `${base(j.p)} ${ls.map(l => "line " + l).join(" and ")}`;
+  if (j.r === "iface") return `${j.u} calls ${j.d} through ${j.via} at ${where}`;
+  return `${j.u} ${verbs[j.r] || "names"} ${j.d} at ${where}`;
+};
+// a joint's second line: the use's line, cut so the name stays in view
+const line2 = j => {
+  if (!j.x) return null;
+  const s = el("span", "pa-j2", el("i", "", String(j.l)));
+  s.translate = false;
+  const m = j.mk && new RegExp(`(?<![\\w$])${esc(j.mk)}(?![\\w$])`).exec(j.x);
+  if (m) s.append(el("span", "pa-ja", el("span", "", j.x.slice(0, m.index).replace(/ +$/, s => "\u00a0".repeat(s.length)))), el("span", "pa-jm", el("mark", "cs-um", j.mk)), el("span", "pa-jz", "​" + j.x.slice(m.index + j.mk.length)));
+  else s.append(el("span", "pa-jz", j.x));
+  return s;
+};
+let note = null; // the uses sheet's notes, while it draws
+const langs3 = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|go)$/;
+const joint = (j, b0) => {
+  const li = el("li", "pa-j", el("i", `pa-r ${rail(j)}${b0 ? " b0" : ""}`));
+  if (!j.l) { li.classList.add("pa-j0"); return li; }
+  li.append(vh(sentence(j)));
+  const sh = j.sh && shapes[j.sh - 1];
+  if (note && !drawable(sh) && !langs3.test(j.p)) note.lang = true;
+  const words = el("span", "pa-jw", relWords[j.r] || "named at", " ");
+  if (j.r === "iface" || j.r === "tie") words.append(el("span", "pa-jp", j.via || ""), " at ");
+  words.append(...places(j));
+  if (!drawable(sh)) {
+    li.append(link(j.p, j.l, "pa-jc", el("span", "pa-j1", words), ...[line2(j)].filter(Boolean)));
+    return li;
+  }
+  const id = "pj" + ++uid, x = el("div", "pa-x");
+  x.id = id;
+  x.hidden = true;
+  const b = el("button", "pa-jc", el("span", "pa-j1", pi("chevron-right"), words), ...[line2(j)].filter(Boolean));
+  b.type = "button";
+  b.setAttribute("aria-expanded", "false");
+  b.setAttribute("aria-controls", id);
+  b.addEventListener("click", () => {
+    const open = x.hidden;
+    if (open && !x.firstChild) x.append(structure(sh, j.mk, j.dk));
+    x.hidden = !open;
+    b.setAttribute("aria-expanded", open);
+  });
+  li.append(b, x);
+  return li;
+};
+const sevLink = s => {
+  const a = el("a", "pa-sev", pi(s.v === "critical" ? "octagon" : "triangle-alert"), s.v === "critical" ? "Blocker" : "Major", vh(" finding"));
+  a.href = s.f;
+  if (s.v === "critical") a.classList.add("crit");
+  return a;
+};
+let onName = null; // in the uses sheet: a station's name shows its declaration there
+const station = (s, up, dn) => {
+  const li = el("li", "pa-s pa-k-" + s.k);
+  if (up) li.append(el("i", "pa-r up " + up));
+  if (dn) li.append(el("i", "pa-r dn " + dn));
+  li.append(marker(s.k, s.ct, s.cb));
+  const nm = el("span", "pa-nm");
+  if (s.k === "callin") nm.append(el("span", "pa-ci", "Call in"), el("span", "pa-n", ...breaks(s.n)));
+  else if (s.k === "sysrepo") nm.append(el("span", "pa-ci", "Outside the repo"));
+  else {
+    if (s.k === "route") nm.append(el("span", "pa-meth", s.m));
+    let n;
+    if (onName && s.sym && syms[s.sym]) {
+      n = el("button", "pa-n", ...breaks(s.n));
+      n.type = "button";
+      const f = onName;
+      n.addEventListener("click", () => f(s.sym, s.p));
+    } else if (!onName && s.sym && syms[s.sym]) {
+      n = el("span", "pa-n sym", ...breaks(s.n));
+      Object.assign(n.dataset, { sym: s.sym, at: s.p || "" });
+      n.tabIndex = 0;
+    } else n = el("span", "pa-n", ...breaks(s.n));
+    nm.append(n);
+  }
+  [...nm.querySelectorAll(".pa-n")].forEach(n => { n.translate = false; });
+  const sd = el("span", "pa-sd");
+  if (s.s) sd.append(el("span", "pa-w", s.s));
+  if (s.v && s.f) sd.append(sevLink(s));
+  if (s.pt) sd.append(el("span", "pa-p", s.pt));
+  if (s.p && s.l) { const pl = el("span", "pa-pl", ...breaks(base(s.p) + ":" + s.l)); pl.translate = false; sd.append(pl); }
+  li.append(el("div", "pa-sl", nm, sd));
+  return li;
+};
+const branchTurn = (li, last, dash) => {
+  li.querySelectorAll(":scope > .pa-bt, :scope > .pa-sp").forEach(x => x.remove());
+  const turn = (cls, w) => {
+    const s = sv("svg", { class: `pa-sp ${cls} ${dash}`, "aria-hidden": "true" });
+    s.append(sv("path", { d: last ? `M1 0 A4 4 0 0 0 5 4 H${w - 4} A4 4 0 0 1 ${w} 8` : `M1 4 H${w - 4} A4 4 0 0 1 ${w} 8` }));
+    return s;
+  };
+  li.prepend(...(last ? [] : [el("i", "pa-bt")]), turn("dk", 21), turn("ph", 13));
+};
+// the items of one run of the rail into list items: rails from the joints around each station, chevrons where data
+// goes, a fold's stations in place but hidden behind "{n} in between"
+const draw = (items, ol, inBranch) => {
+  const flat = [];
+  for (const it of items) {
+    if (it.t === "f") {
+      flat.push({ t: "fold", n: it.items.filter(x => x.t === "s").length, items: it.items });
+      for (const x of it.items) flat.push({ ...x, hid: true });
+    } else flat.push(it);
+  }
+  const seq = flat.filter(x => x.t !== "fold");
+  seq.forEach((it, i) => {
+    if (it.t !== "j") return;
+    const above = seq.slice(0, i).findLast(x => x.t === "s"), below = seq.slice(i + 1).find(x => x.t === "s");
+    const where = chevAt[it.r];
+    if (!where) return;
+    const userBelow = !!it.bl, target = (where === "user") === userBelow ? below : above;
+    if (target) target === below ? (below.ct = true) : (above.cb = true);
+  });
+  let first = true;
+  flat.forEach((it, i) => {
+    let li;
+    const next = flat.slice(i + 1).find(x => x.t !== "fold" || it.t === "fold");
+    if (it.t === "fold") {
+      li = el("li", "pa-f", el("i", "pa-r fold"));
+      for (let k = 0; k < Math.min(it.n, 5); k++) { const d = el("i", "pa-fd"); d.style.top = (44 / (Math.min(it.n, 5) + 1)) * (k + 1) - 2 + "px"; li.append(d); }
+      const b = el("button", "pa-fb", pi("chevron-right"), `${it.n} in between`);
+      b.type = "button";
+      b.setAttribute("aria-expanded", "false");
+      b.addEventListener("click", () => {
+        const hid = [];
+        for (let x = li.nextElementSibling; x?.dataset.fold === "1"; x = x.nextElementSibling) hid.push(x);
+        hid.forEach(x => { x.hidden = false; delete x.dataset.fold; });
+        li.remove();
+        hid.find(x => x.matches(".pa-j"))?.querySelector(".pa-jc")?.focus();
+      });
+      li.append(b);
+      ol.append(li);
+      return;
+    }
+    const k = seq.indexOf(it), prev = seq[k - 1], nx = seq[k + 1];
+    if (it.t === "s") {
+      const up = prev?.t === "j" ? rail(prev) : null;
+      let dn = null;
+      if (nx?.t === "j") dn = rail(nx);
+      else if (nx?.t === "e") dn = nx.k === "bound" ? "fold" : "end";
+      else if (nx?.t === "g" || nx?.t === "b") dn = nx.inl || "trunk";
+      li = station(it, up, dn);
+    } else if (it.t === "j") {
+      li = joint(it, inBranch && first);
+    } else if (it.t === "g") {
+      li = el("li", "pa-g", el("i", "pa-r " + (it.inl || "trunk")), it.n);
+    } else if (it.t === "e") {
+      if (!it.n) return;
+      li = el("li", "pa-e", el("i", `pa-r ${it.k === "bound" ? "fold" : "end"} st`), el("i", "pa-tk"), el("span", "", it.n));
+    } else if (it.t === "b") {
+      it.bs.forEach((bi, n) => {
+        const bl = el("li", "pa-bl"), b = el("ol", "pa-b");
+        draw(bi, b, true);
+        bl.append(b);
+        if (n >= (it.show ?? it.bs.length)) bl.hidden = true;
+        const j = bi.find(x => x.t === "j");
+        bl.dataset.dash = j && rail(j) !== "call" && !["render", "read", "write"].includes(rail(j)) ? (rail(j) === "request" ? "request" : "dash") : "";
+        ol.append(bl);
+      });
+      if (it.show < it.bs.length) {
+        const m = el("li", "pa-more", el("i", "pa-r trunk"));
+        const b = el("button", "pa-fb", `${it.bs.length - it.show} more declarations use it`);
+        b.type = "button";
+        b.addEventListener("click", () => {
+          ol.querySelectorAll(":scope > .pa-bl[hidden]").forEach(x => { x.hidden = false; });
+          m.remove();
+          turns(ol);
+          ol.querySelector(":scope > .pa-bl:nth-child(" + (it.show + 1) + ") .pa-jc")?.focus();
+        });
+        m.append(b);
+        ol.append(m);
+      }
+      return;
+    }
+    if (it.hid) { li.hidden = true; li.dataset.fold = "1"; }
+    if (it.t === "j") first = false;
+    ol.append(li);
+  });
+  turns(ol);
+  return ol;
+};
+// each branch turns off the rail; the last shown one ends it
+const turns = ol => {
+  const bls = [...ol.querySelectorAll(":scope > .pa-bl:not([hidden])")];
+  const more = !!ol.querySelector(":scope > .pa-more");
+  bls.forEach((b, i) => branchTurn(b, i === bls.length - 1 && !more, b.dataset.dash));
+};
+// a path from its items, into ol (one the page holds) or a new one
+const path = (items, label, ol = el("ol", "pa")) => {
+  if (label) ol.setAttribute("aria-label", label);
+  return draw(items, ol, false);
+};
+// the traced path and the call paths to a finding: the server gives their items
+for (const ol of document.querySelectorAll("ol.pa[data-items]")) path(JSON.parse(ol.dataset.items), "", ol);
+
+// ---- the uses variant: from Data.Nodes, the subject at the top, the way out to its entry
+const nodeAt = i => i > 0 ? nodes[i - 1] : null;
+const kindOf = n => n.k === "call-in" ? "callin" : n.k !== "decl" ? n.k : n.v ? "finding" : n.s === "outside" ? "out" : "decl";
+const stationOf = (n, called, prev) => {
+  const s = { t: "s", k: kindOf(n), n: n.n, m: n.m, p: n.p, l: n.l, v: n.v, f: n.f };
+  if (n.k === "call-in") s.n = n.p || n.n;
+  if (n.k === "decl" && called) s.n += "(…)";
+  if (n.k === "decl" && syms[n.n]) s.sym = n.n;
+  s.s = { decl: { new: "new", changed: "changed", signature: "signature", outside: "outside the PR" }[n.s], route: "route" + (n.s === "outside" ? " · outside the PR" : ""), table: "table", subquery: "subquery", system: "outside the repo" }[n.k];
+  if (n.pt && n.pt !== prev.pt) s.pt = prev.pt = n.pt;
+  return s;
+};
+const jointOf = (j, u, d, below, decl) => j ? { t: "j", r: j.r, via: j.via, p: j.p, l: j.l, sh: j.sh, x: useLine(j.sh, j.l), mk: d, u, d, bl: below, dk: decl } : { t: "j", u, d };
+// the use's line in its structure: the row that holds it
+const useLine = (sh, l) => shapes[sh - 1]?.r.find(r => r.u && r.l === l)?.t || "";
+const ends = {
+  route: () => "A request enters here.", main: () => "The program starts here.",
+  nocaller: () => "The path starts where the code graph finds no caller.", tests: n => `Only tests call ${n.n}.`,
+  subquery: () => "A subquery the project declares. The scan doesn't follow it to the tables it reads.",
+  cycle: (n, e) => `This comes back to ${e.t || n.n}.`,
+  value: (n, e) => `Passed on as a value at ${e.t}. The code graph doesn't follow it from there.`,
+  name: () => "Found by name, so the way isn't followed.", byname: () => "Found by name, so the way isn't followed.",
+  nograph: (n, e) => `The code graph doesn't hold ${e.t || n.p}.`,
+};
+const endOf = (n, down) => {
+  const e = n.e;
+  if (!e || e.k === "table" || e.k === "system") return null;
+  if (e.k === "bound") return { t: "e", k: "bound", n: down ? `The drawing stops here, ${+e.t || 3} calls below the route.` : `The drawing stops here, ${+e.t || 8} declarations up.` };
+  return { t: "e", k: e.k, n: ends[e.k]?.(n, e) || "" };
+};
+// the way from station i: up through its users to an entry, then from a route down to its table or system
+const way = (i, items, prev) => {
+  let n = nodeAt(i), at = i, ups = 1, down = false;
+  const seen = new Set([i]);
+  while (n.u && !seen.has(n.u) && ups < 8) {
+    const u = nodeAt(n.u);
+    if (!u) break;
+    items.push(jointOf(n.ju, u.n, n.n, true, u.k), stationOf(u, false, prev));
+    seen.add(n.u);
+    n = u;
+    ups++;
+  }
+  for (let k = 0; n.d && !seen.has(n.d) && k < 3; k++) {
+    const d = nodeAt(n.d);
+    if (!d) break;
+    items.push(jointOf(n.jd, n.n, d.n, false, n.k), stationOf(d, /call|iface/.test(n.jd?.r || ""), prev));
+    seen.add(n.d);
+    n = d;
+    down = true;
+  }
+  const e = endOf(n, down);
+  if (e) items.push(e);
+  return items;
+};
+// with three branches or more, a long one folds the stations between its first and the last before its end
+const folded = (items, many) => {
+  if (!many) return items;
+  const st = items.map((x, i) => x.t === "s" ? i : -1).filter(i => i >= 0);
+  const after = st.length - 1;
+  if (after <= 3) return items;
+  const last = items[st.at(-1)], keep = ["callin", "route", "table", "subquery", "system", "sysrepo"].includes(last.k) ? 2 : 1;
+  const from = st[0] + 1, to = st[st.length - keep] - 1; // the joint into the first kept station stays
+  if (st.length - 1 - keep < 2) return items;
+  return [...items.slice(0, from), { t: "f", items: items.slice(from, to) }, ...items.slice(to)];
+};
+const usesModel = (name, s) => {
+  const subject = { t: "s", k: "subject", n: name, s: [s.kind, s.state === "signature" ? "signature changed" : s.state].filter(Boolean).join(" · "), p: s.path, l: s.line };
+  const refs = (s.refs || []).filter(r => !r.t);
+  const prev = {};
+  const reach = (s.reach || []).slice(0, 3).flatMap(i => {
+    const n = nodeAt(i);
+    if (!n) return [];
+    const items = [jointOf(n.ju, name, n.n, false, s.kind), stationOf(n, /call|iface/.test(n.ju?.r || ""), {})];
+    return [way2(n, i, items)];
+  });
+  const groups = new Map();
+  for (const r of refs) {
+    const k = r.up ? "n" + r.up : "i" + r.path + "\0" + (r.in || "");
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  const ifaces = new Set(refs.filter(r => r.rel === "iface").map(r => r.via));
+  const used = [];
+  for (const rs of groups.values()) {
+    if (rs.every(r => r.rel === "tie" && ifaces.has(r.via))) continue; // the listing is the call's via
+    const r0 = rs[0], n = nodeAt(r0.up), lines = [...new Set(rs.map(r => r.line))];
+    const j = { t: "j", r: r0.rel, via: r0.via, p: r0.path, l: r0.line, ls: lines, sh: r0.sh, x: r0.text, mk: name, u: n?.n || r0.in || base(r0.path), d: name, bl: true, dk: n?.k === "decl" ? syms[n.n]?.[0]?.kind : "" };
+    const items = [j];
+    const p = {};
+    if (!n) items.push({ t: "s", k: "decl", n: r0.in || base(r0.path), p: r0.path });
+    else if (!s.exact) items.push(stationOf(n, false, p), { t: "e", k: "name", n: ends.name() });
+    else items.push(stationOf(n, false, p)), way(r0.up, items, p);
+    const pr = n && ["new", "changed", "signature"].includes(n.s) ? 0 : 1, fd = items.some(x => x.v) ? 0 : 1;
+    used.push({ items, key: [pr, fd, r0.path, r0.line] });
+  }
+  used.sort((a, b) => a.key[0] - b.key[0] || a.key[1] - b.key[1] || a.key[2].localeCompare(b.key[2]) || a.key[3] - b.key[3]);
+  const all = used.slice(0, 20).map(u => u.items), many = reach.length + all.length >= 3;
+  return { subject, reach: reach.map(b => folded(b, many)), used: all.map(b => folded(b, many)), tests: (s.refs || []).filter(r => r.t) };
+};
+// a reach branch goes on down from its first station
+const way2 = (n, i, items) => {
+  const seen = new Set([i]);
+  for (let k = 0; n.d && !seen.has(n.d) && k < 3; k++) {
+    const d = nodeAt(n.d);
+    if (!d) break;
+    items.push(jointOf(n.jd, n.n, d.n, false, n.k), stationOf(d, /call|iface/.test(n.jd?.r || ""), {}));
+    seen.add(n.d);
+    n = d;
+  }
+  const e = endOf(n, true);
+  if (e) items.push(e);
+  return items;
+};
+// the model as path items: one branch inline under the subject, more as branches
+const usesItems = m => {
+  const out = [m.subject], n = m.reach.length + m.used.length;
+  const first = b => rail(b.find(x => x.t === "j") || {});
+  if (n === 1) {
+    const b = m.reach[0] || m.used[0];
+    out.push({ t: "g", n: m.reach.length ? "Reaches" : "Used in 1 declaration", inl: first(b) }, ...b);
+    return out;
+  }
+  if (m.reach.length) out.push({ t: "g", n: "Reaches" }, { t: "b", bs: m.reach });
+  if (m.used.length) out.push({ t: "g", n: m.used.length === 1 ? "Used in 1 declaration" : `Used in ${m.used.length} declarations` }, { t: "b", bs: m.used, show: Math.min(8, m.used.length) });
+  return out;
+};
+
+// ---- component 32: the name card
+// the compact path: the first branch's first station, a dot per station between, its last station
+const compact = m => {
+  const b = m.used[0] || m.reach[0];
+  if (!b) return null;
+  const st = b.flatMap(x => x.t === "f" ? x.items : [x]).filter(x => x.t === "s");
+  if (st.length < 2) return null;
+  const cutm = s => s.length > 24 ? s.slice(0, 11) + "…" + s.slice(-12) : s;
+  const nm = s => s.k === "callin" ? s.n : s.k === "sysrepo" ? "Outside the repo" : s.n.replace(/\(…\)$/, "");
+  const line = el("span", "pa-cl", ...st.slice(1, -1).slice(0, 5).map(() => el("i")));
+  const c = el("div", "pa-c", marker(st[0].k), el("span", "pa-cn", cutm(nm(st[0]))), line, marker(st.at(-1).k), el("span", "pa-cn", cutm(nm(st.at(-1)))));
+  c.setAttribute("aria-hidden", "true");
+  return c;
+};
+// a renamed or re-signed declaration in an API row: its declaring line as it was, then turning into the new one
+const cut = (ts, a, b) => {
+  const out = [];
+  let at = 0;
+  for (const t of ts) {
+    const x = Math.max(a, at), y = Math.min(b, at + t.content.length);
+    if (x < y) { const s = el("span", "", t.content.slice(x - at, y - at)); if (t.color) s.style.color = t.color; out.push(s); }
+    at += t.content.length;
+  }
+  return out;
+};
+const morph = async (before, after, path) => {
+  [before, after] = [before, after].map(l => l.replace(/\s*\{$/, ""));
+  const [[o = []], [n = []]] = await Promise.all([colored(before, path), colored(after, path)]);
+  const [[p, ea], [, eb]] = changed(before, after) ?? [[0, before.length], [0, after.length]];
+  const cur = (cls, on, off) => {
+    const c = el("span", "m-cur " + cls);
+    c.style.setProperty("--on", on + "ms");
+    c.style.setProperty("--for", off - on + "ms");
+    return c;
+  };
+  const step = Math.min(55, 900 / Math.max(1, eb - p)), typed = 750 + (eb - p) * step, ins = el("ins", "");
+  for (let at = p; at < eb; at++) for (const k of cut(n, at, at + 1)) { k.style.setProperty("--d", 750 + (at - p) * step + "ms"); ins.append(k); }
+  const gone = el("del", "", cur("", 0, 300), ...cut(o, p, ea - 1), cur("", 300, 750), ...cut(o, Math.max(p, ea - 1), ea));
+  const now = el("span", "m-now", ...cut(n, 0, p), gone, ins, cur("bar", 750, typed + 150), cur("esc", typed + 150, typed + 750), ...cut(n, eb, after.length));
+  gone.ariaHidden = "true";
+  const pre = el("pre", "sym-sig sym-morph scroll-area",
+    el("span", "m-was", ...cut(o, 0, p), el("del", "", ...cut(o, p, ea)), ...cut(o, ea, before.length)), now);
+  pre.style.setProperty("--t", typed + 150 + "ms");
+  return pre;
+};
+// the new file's line a name of the diff is on; null on a removed one
+const newLine = span => {
+  const tr = span.closest("tr");
+  if (tr) return tr.matches(".add, .ctx") ? tr.cells[0].textContent : null;
+  const sl = span.closest(".sl"), pane = sl?.parentElement;
+  return sl && pane === pane.parentElement.lastElementChild ? sl.firstChild.textContent : null;
+};
+// which declarations a name means: a path's station its own; the one codegraph resolved this line to, or declared
+// on it; else, by name, pkg.Name's package, a member after a dot, then the file's own directory
+const pick = (span, list) => {
+  const own = span.dataset.at ? list.filter(s => s.path === span.dataset.at) : [];
+  if (own.length) return own;
+  const path = span.closest("[data-path]")?.dataset.path || "", no = newLine(span);
+  if (no) {
+    const here = list.filter(s => s.here?.includes(path + ":" + no) || s.path === path && String(s.line) === no);
+    if (here.length) return here;
+    const guessed = list.filter(s => !s.exact); // resolved ones the index doesn't see here aren't meant
+    if (guessed.length) list = guessed;
+  }
+  const prev = span.previousSibling?.textContent === "." ? span.previousSibling.previousSibling?.textContent : null;
+  let c = list;
+  if (prev) {
+    const pkg = c.filter(s => s.pkg === prev);
+    const member = c.filter(s => /^(method|field)/.test(s.kind));
+    c = pkg.length ? pkg : member.length ? member : c;
+  }
+  const dir = path.replace(/[^/]*$/, "");
+  const near = c.filter(s => s.path.startsWith(dir) && !s.path.slice(dir.length).includes("/"));
+  return (near.length ? near : c).slice(0, 3);
+};
+let anchor = null, timer = 0;
+const hide = () => { clearTimeout(timer); anchor = null; if (pop.matches(":popover-open")) pop.hidePopover(); };
+const show = async span => {
+  clearTimeout(timer);
+  if (touch.matches || anchor === span || !syms[span.dataset.sym]) return; // touch screens get no card: a tap opens the sheet
+  anchor = span;
+  const name = span.dataset.sym, list = pick(span, syms[name]);
+  const item = span.closest(".arow"), turn = item?.dataset.oldHead; // an API row's: what it was
+  const cards = await Promise.all(list.map(async (s, i) => {
+    const card = el("div", "nc", head(s, name), ...(i || !turn ? await sig(s) : [await morph(turn, item.dataset.head, s.path)]));
+    if (s.doc) card.append(el("p", "nc-d", doc(s)));
+    return card;
+  }));
+  if (anchor !== span) return; // the pointer moved on while the signature was colored
+  const s = list[0], pre = compact(usesModel(name, s));
+  if (pre) {
+    pre.addEventListener("click", () => open(span));
+    cards[0].append(pre);
+  }
+  const all = el("button", "gb nc-eu", "Every use", el("kbd", "", ic("enter")));
+  all.type = "button";
+  all.addEventListener("click", () => open(span));
+  const foot = el("div", "nc-f",
+    s.uses ? el("span", "", el("strong", "", String(s.uses)), ` ${s.uses === 1 ? "use" : "uses"} in `, el("strong", "", String(s.files)), ` ${s.files === 1 ? "file" : "files"}`) : el("span", "", "Named nowhere else"), all);
+  pop.replaceChildren(...cards, foot);
+  pop.scrollTop = 0;
+  if (!pop.matches(":popover-open")) pop.showPopover();
+  const r = span.getBoundingClientRect(), h = pop.offsetHeight;
+  pop.style.left = Math.max(8, Math.min(r.left, document.documentElement.clientWidth - pop.offsetWidth - 8)) + "px";
+  pop.style.top = Math.max(8, r.bottom + 8 + h > innerHeight - 8 && r.top - 8 - h > 8 ? r.top - 8 - h : r.bottom + 8) + "px";
+};
+
+// ---- the uses sheet: the declaration, the count, how it connects, the tests, the notes; a back stack of 10
+const title = document.getElementById("uses-title"), back = sheet.querySelector("[data-back]");
+let cur = null, stack = [], opener = null, leaving = false;
+const chipEv = text => el("span", "chip ev-shown", pi("eye"), vh("Evidence: "), text);
+const view = async (name, list) => {
+  const s = list[0], v = el("div", "us-v");
+  for (const d of list) {
+    const box = el("div", "us-d", head(d, name)), x = el("div", "us-dx", ...await sig(d));
+    if (d.doc) x.append(el("p", "us-doc", doc(d)));
+    x.id = "usx" + ++uid;
+    const t = d.doc ? "signature and doc" : "signature", b = el("button", "gb us-dt", `Show ${t}`);
+    b.type = "button";
+    b.setAttribute("aria-expanded", "false");
+    b.setAttribute("aria-controls", x.id);
+    b.addEventListener("click", () => {
+      const on = !box.classList.contains("open");
+      box.classList.toggle("open", on);
+      b.setAttribute("aria-expanded", on);
+      b.textContent = `${on ? "Hide" : "Show"} ${t}`;
+    });
+    box.append(b, x);
+    v.append(box);
+  }
+  const refs = s.refs || [];
+  v.append(el("p", "us-cnt", s.uses
+    ? `Named in ${plural(s.uses, "place")} across ${plural(s.files, "file")}${s.uses > refs.length ? `, the first ${refs.length} below` : ""}.${s.exact ? "" : " Found by name: lines that say it, not resolved."}`
+    : "Named nowhere but where it is declared."));
+  const m = usesModel(name, s);
+  note = {};
+  onName = (n, p) => { const l = syms[n] || [], own = l.filter(x => x.path === p); to(n, own.length ? own : l); };
+  const only = !m.used.length && m.tests.length > 0;
+  if (m.reach.length || m.used.length) {
+    v.append(el("div", "us-lh", el("h3", "", "How it connects"), chipEv(s.exact ? "Call graph" : "Code at head")),
+      path(usesItems(m), `How ${name} connects`));
+    if (only) v.lastChild.append(el("li", "pa-e", "Only tests name it."));
+  } else if (only) v.append(el("p", "us-cnt", "Only tests name it."));
+  onName = null;
+  if (m.tests.length) {
+    const id = "ust" + ++uid, n = m.tests.length;
+    const b = el("button", "disc", pi("chevron-down"), el("span", "", n === 1 ? "1 place in tests" : `${n} places in tests`));
+    b.type = "button";
+    b.dataset.disc = "";
+    b.setAttribute("aria-expanded", only);
+    b.setAttribute("aria-controls", id);
+    const ul = el("ul", "us-tl", ...m.tests.map(r => el("li", "", el("span", "us-tn", r.in || base(r.path)), link(r.path, r.line, "path", ...breaks(base(r.path) + ":" + r.line)))));
+    ul.id = id;
+    ul.hidden = !only;
+    v.append(el("div", "", b, ul));
+  }
+  if (s.uses > refs.length && pop.dataset.search) { // a forge without code search: none
+    const a = el("a", "us-all", ic("search"), `All ${s.uses} on ${pop.dataset.forge}`, vh(" (opens in a new tab)"));
+    a.href = pop.dataset.search + encodeURIComponent(name);
+    a.target = "_blank";
+    a.rel = "noopener";
+    v.append(a);
+  }
+  if (note.lang) v.append(el("p", "us-nt", "Structure is drawn for TypeScript, JavaScript and Go."));
+  note = null;
+  // the sheet opens on a drawn structure: the first branch's joint
+  v.querySelector(".pa-b .pa-jc[aria-expanded], .pa > .pa-j .pa-jc[aria-expanded]")?.click();
+  return { name, list, v };
+};
+const showView = (e, top) => {
+  const s = e.list[0];
+  sbody.replaceChildren(e.v);
+  sheet.querySelector(".us-k").replaceChildren(kindIcon(s.kind));
+  title.replaceChildren(...(s.pkg ? [el("span", "nc-pk", s.pkg + ".")] : []), e.name);
+  const p = stack.at(-1);
+  back.hidden = !p;
+  if (p) {
+    back.querySelector(".us-bn").textContent = p.name.length > 24 ? p.name.slice(0, 23) + "…" : p.name;
+    back.setAttribute("aria-label", "Back to " + p.name);
+  }
+  sheet.scrollTop = top;
+  title.focus();
+};
+// Every use: the sheet on this declaration, a fresh back stack
+const uses = async (name, list, from) => {
+  hide();
+  opener = from || document.activeElement;
+  stack = [];
+  cur = await view(name, list);
+  if (!sheet.open) sheet.showModal();
+  showView(cur, 0);
+};
+// a station's name: its declaration in the same sheet, Back returns
+const to = async (name, list) => {
+  const next = await view(name, list);
+  stack.push({ ...cur, top: sheet.scrollTop });
+  if (stack.length > 10) stack.shift();
+  cur = next;
+  showView(cur, 0);
+};
+back.addEventListener("click", () => {
+  const p = stack.pop();
+  if (!p) return;
+  cur = p;
+  showView(p, p.top);
+});
+sheet.addEventListener("close", () => {
+  if (!leaving) opener?.focus?.();
+  leaving = false;
+});
+const open = async span => syms[span.dataset.sym] && uses(span.dataset.sym, pick(span, syms[span.dataset.sym]), span);
+// a graph's "Every use" and the reach list's: its declaration by name and file
+document.addEventListener("sym:uses", e => {
+  const list = syms[e.detail.name] || [], own = list.filter(s => s.path === e.detail.path);
+  if (list.length) uses(e.detail.name, own.length ? own : list);
+});
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-uses]");
+  if (b?.closest("summary")) e.preventDefault(); // the sheet, not the row
+  if (b) document.dispatchEvent(new CustomEvent("sym:uses", { detail: { name: b.dataset.uses, path: b.dataset.path } }));
+});
+sheet.addEventListener("click", e => { if (e.target === sheet || e.target.closest("[data-sheet-close]")) sheet.close(); });
+document.addEventListener("mouseover", e => {
+  const s = e.target.closest?.(".sym");
+  clearTimeout(timer);
+  if (s) timer = setTimeout(() => show(s), 300);
+  else if (anchor && !pop.contains(e.target)) timer = setTimeout(hide, 300);
+});
+document.addEventListener("focusin", e => { // a name the keyboard reaches shows its card, Enter its uses
+  const s = e.target.closest?.(".sym");
+  if (s?.matches(":focus-visible")) show(s);
+  else if (anchor && !pop.contains(e.target)) hide();
+});
+document.addEventListener("click", e => {
+  const s = e.target.closest(".sym");
+  if (s?.closest("summary")) e.preventDefault(); // the sheet, not the row
+  if (s && !s.closest("a")) open(s);
+  else if (!pop.contains(e.target)) hide();
+});
+addEventListener("keydown", e => {
+  if (e.key === "Escape") hide();
+  else if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229 && !e.target.closest?.("a, button, input, textarea")) {
+    const s = anchor && pop.matches(":popover-open") ? anchor : e.target.closest?.(".pa .sym");
+    if (s) { e.preventDefault(); open(s); }
+  }
+});
+addEventListener("scroll", e => { if (anchor && !pop.contains(e.target)) hide(); }, { passive: true, capture: true }); // the inventory's list scrolls too
+{{end}}

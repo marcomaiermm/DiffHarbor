@@ -1,6 +1,7 @@
 package report
 
 import (
+	"cmp"
 	"context"
 	"diffharbor/internal/review"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -686,5 +688,46 @@ func TestMapStores(t *testing.T) {
 	}
 	if bc := mapLine(m, "b", "c"); bc == nil || bc.Chevron != "to" || bc.Names[0].Writes != nil {
 		t.Errorf("b-c %+v", bc)
+	}
+}
+
+// The traced path as the script draws it (uses spec 4): a hop's relation and structure on its joint, a hop the index
+// gives no place a joint without words, the calls down to the request, and a system named after the declaration
+// that sends drawn as "Outside the repo".
+func TestTracePath(t *testing.T) {
+	v := &view{Data: Data{
+		Diff: newFile("a/a.go", "package a\nfunc Entry() { Fetch() }\n") + newFile("b/b.go", "package b\n\nfunc Fetch() {\n\tsend()\n}\n\nfunc send() {\n\thttp.Get(u)\n}\n"),
+		Symbols: map[string][]Symbol{
+			"Fetch": {{Path: "b/b.go", Line: 3, Exact: true, Ways: []Way{{
+				Method: "CALL", Route: "Entry", Path: "a/a.go", Line: 2,
+				Chain: []Hop{{Name: "Fetch", Path: "b/b.go", Line: 3, In: "a/a.go", At: 2, Shape: 4, Rel: "iface"}},
+			}}}},
+			"send": {{Path: "b/b.go", Line: 7, Exact: true}},
+		},
+	}}
+	tr := &MapTrace{
+		Method: "CALL", Route: "Entry", At: ref{Path: "a/a.go", Line: 2},
+		Rows: []wrow{{Name: "Fetch", Path: "b/b.go", Call: "Fetch(…)", At: ref{Path: "a/a.go", Line: 2}}},
+		Call: OutsideCall{System: "send", Path: "b/b.go", Line: 8, Calls: []StoreCall{{At: "b/b.go:4", Callee: "send"}}},
+	}
+	p := v.tracePath(tr, "", v.hops())
+	var got []string
+	for _, it := range p.Items {
+		got = append(got, it.T+":"+cmp.Or(it.Kind, it.Rel)+":"+it.Name+":"+strconv.Itoa(it.Line))
+	}
+	want := []string{"s:callin:a/a.go:0", "j:iface::2", "s:out:Fetch(…):3", "j:call::4", "s:out:send(…):7", "j:request::8", "s:sysrepo:send:0"}
+	if !slices.Equal(got, want) {
+		t.Errorf("items\n got %q\nwant %q", got, want)
+	}
+	if j := p.Items[1]; j.Sh != 4 || j.Text != "func Entry() { Fetch() }" || j.Mark != "Fetch" {
+		t.Errorf("joint %+v", j)
+	}
+	if p.Label != "Path from a/a.go to send" {
+		t.Errorf("label %q", p.Label)
+	}
+	// the way gives the declaration's own place: the joint has no words
+	tr.Rows[0].At = ref{Path: "b/b.go", Line: 3}
+	if j := v.tracePath(tr, "", v.hops()).Items[1]; j.Line != 0 || j.Text != "" {
+		t.Errorf("joint at the declaration %+v", j)
 	}
 }
