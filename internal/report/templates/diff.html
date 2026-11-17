@@ -33,7 +33,7 @@
 
 {{define "finding"}}<div class="fnote"{{with .ID}} id="{{.}}"{{end}} role="note">
   <div class="fnote-h">{{template "sev" .Severity}}{{with .Proof}}<span class="dchip" data-{{if $.Shown}}shown{{else}}dash{{end}}{{with $.Evidence}} title="Verified: {{.}}"{{end}}>{{.}}</span>{{end}}{{with .Title}}<span class="fnote-t">{{.}}</span>{{end}}</div>
-  {{with .Body}}<p class="fnote-b">{{.}}</p>{{end}}
+  {{with .Body}}<p class="fnote-b">{{md .}}</p>{{end}}
 </div>{{end}}
 
 {{/* A finding's weight as its dchip: Blocker, Major, Minor, Nit. */}}

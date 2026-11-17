@@ -117,9 +117,15 @@ func ParseRun(body string) Run {
 	return Run{}
 }
 
-// Parse reads severity, title and the verifier's evidence back from a finding Format posted. A body Format
-// did not write comes back as the body alone.
+// appendix is where Format's additions after the body start: the suggestion's fence or the first fold.
+var appendix = regexp.MustCompile("\n\n(?:```+suggestion|<details>\n<summary>)")
+
+// Parse reads severity, title and the verifier's evidence back from a finding Format posted, without the fix and
+// the prompt Format added. A body Format did not write comes back as the body alone.
 func Parse(body string) review.Comment {
+	if at := appendix.FindStringIndex(body); at != nil {
+		body = body[:at[0]]
+	}
 	c := review.Comment{Body: body}
 found:
 	for sev := range badge {

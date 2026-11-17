@@ -500,6 +500,12 @@ func TestMarkdown(t *testing.T) {
 	if got != want {
 		t.Errorf("md\n got %s\nwant %s", got, want)
 	}
+	// a finding's labels read as GitHub shows them; an underscore inside a line stays
+	if got := string(md("b\n\n_Verified:_ x_y:_ `_A:_`")); got != `b
+
+<em>Verified:</em> x_y:_ <code class="cd" translate="no">_A:_</code>` {
+		t.Errorf("md labels %s", got)
+	}
 	if got := wbr(`a&"b/c.d<`); got != `a&amp;&#34;b/<wbr>c<wbr>.d&lt;` {
 		t.Errorf("wbr %s", got)
 	}

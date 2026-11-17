@@ -200,8 +200,13 @@ func TestFormat(t *testing.T) {
 		t.Fatalf("allPrompts: %q", p)
 	}
 	c.Body += "\n\n" + review.Verified + "the map is nil on line 3\n"
-	if p := Parse(Format(c, "suggestion")); p.Severity != "major" || p.Title != "t" || !strings.HasPrefix(p.Body, "b\n") || p.Evidence != "the map is nil on line 3" {
-		t.Fatalf("parse: %+v", p)
+	// Read back without the fix and the prompt: in a suggestion (GitHub, GitLab) or folded.
+	placed := c
+	placed.Start, placed.End = 3, 3
+	for _, f := range []string{Format(c, "suggestion"), Format(placed, "suggestion"), Format(placed, "suggestion:-1+0")} {
+		if p := Parse(f); p.Severity != "major" || p.Title != "t" || p.Body != "b\n\n"+review.Verified+"the map is nil on line 3" || p.Evidence != "the map is nil on line 3" {
+			t.Fatalf("parse %q: %+v", f, p)
+		}
 	}
 	// Threads still open from before keep their severity and title.
 	for _, old := range []string{"_🟠 Major_ · **t**\n\nb", "_🔵 Nit_ · **t**\n\nb"} {

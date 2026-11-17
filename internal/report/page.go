@@ -500,16 +500,21 @@ func (v *view) majors() int {
 	return n
 }
 
-// codeSpan is a `code` span of the copy.
-var codeSpan = regexp.MustCompile("`([^`\n]+)`")
+// mdSpan is a `code` span of the copy, or a finding's label at a line's start ("_Verified:_", "_Trigger:_").
+var mdSpan = regexp.MustCompile("`([^`\n]+)`|(?m:^)_([A-Z][^_\n]{0,40}:)_")
 
-// md is text with its `code` spans as code tokens, the rest escaped; a slash in a code span may break the line.
+// md is text with its `code` spans as code tokens and its labels in italics, the rest escaped; a slash in a code span
+// may break the line.
 func md(s string) template.HTML {
 	var b strings.Builder
 	last := 0
-	for _, m := range codeSpan.FindAllStringSubmatchIndex(s, -1) {
+	for _, m := range mdSpan.FindAllStringSubmatchIndex(s, -1) {
 		b.WriteString(template.HTMLEscapeString(s[last:m[0]]))
-		b.WriteString(`<code class="cd" translate="no">` + wbr(s[m[2]:m[3]]) + `</code>`)
+		if m[2] >= 0 {
+			b.WriteString(`<code class="cd" translate="no">` + wbr(s[m[2]:m[3]]) + `</code>`)
+		} else {
+			b.WriteString("<em>" + template.HTMLEscapeString(s[m[4]:m[5]]) + "</em>")
+		}
 		last = m[1]
 	}
 	b.WriteString(template.HTMLEscapeString(s[last:]))
