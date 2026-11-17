@@ -7,6 +7,7 @@
   const set = (k, on) => { try { on ? localStorage.setItem(k, on === true ? "1" : on) : localStorage.removeItem(k); } catch {} };
   const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const body = document.body;
+  const kept = new Map(), $$k = s => kept.get(s) || kept.set(s, $$(s)).get(s); // lists the page never changes
   // What a keydown means, as TanStack Hotkeys reads it: nothing while an input method composes; the letter typed, else
   // the one on that key's place (a Cyrillic layout still has its J)
   const composing = e => e.isComposing || e.keyCode === 229 || e.key === "Process" || e.key === "Unidentified";
@@ -34,6 +35,12 @@
       if (on && sel) select(null);
       trace(on, b);
     }
+    if (b.matches(".sbtn")) allLabel(b.closest(".pgp"));
+  };
+  // a part's steps open or close together: the button says what it does next
+  const allLabel = g => {
+    const a = $("[data-all-steps]", g);
+    if (a) a.textContent = $$(".sbtn", g).every(x => x.getAttribute("aria-expanded") === "true") ? "Close all steps" : "Open all steps";
   };
   const discButtons = ".icb, .pbb, .sbtn, .tch, button[data-disc]";
   // a region inside closed ones: open each, outermost last, and a closed file too
@@ -105,20 +112,52 @@
     for (const x of [b, ...ids(b.dataset.nb), ...ids(b.dataset.ln), ...ids(b.dataset.keep)]) x.classList.toggle(cls, on);
   };
   let sel = null, opener = null;
+  // a box the selection lights says how it touches the selected one: it calls it, is called by it, only names it;
+  // its lines run marks the way the data goes, as their arrows say
+  const role = (rel, up, n) => {
+    if (rel === "both") return "both ways" + n;
+    if (rel === "named") return up ? "names it" : "named";
+    return (up ? "calls it" : "called") + n;
+  };
+  const roles = b => {
+    for (const g of ids(b.dataset.ln)) {
+      const up = g.dataset.callee === b.id, o = document.getElementById(up ? g.dataset.caller : g.dataset.callee), c = g.dataset.chev;
+      if (o) o.dataset.role = role(g.dataset.rel, up, g.dataset.n ? " ×" + g.dataset.n : "");
+      if (c) for (const rev of c === "both" ? [false, true] : [c === "a"]) {
+        const f = g.firstElementChild.cloneNode();
+        f.setAttribute("class", "flow" + (rev ? " rev" : ""));
+        g.append(f);
+      }
+    }
+  };
+  const unrole = () => {
+    for (const x of $$(".mb[data-role]", map)) delete x.dataset.role;
+    for (const x of $$(".nb2", map)) x.classList.remove("nb2");
+    for (const x of $$(".ml .flow", map)) x.remove();
+  };
+  // the blast radius a step further: who calls the parts that call it, each with the caller it goes through
+  const callers = b => ids(b.dataset.ln).filter(g => g.dataset.callee === b.id && g.dataset.rel !== "named").map(g => [g, document.getElementById(g.dataset.caller)]).filter(([, o]) => o);
+  const second = b => {
+    const near = new Set([b, ...ids(b.dataset.nb)]), far = []; // a direct neighbour keeps the role it has
+    for (const [, o] of callers(b)) for (const [g, c] of callers(o)) if (!near.has(c)) far.push([g, c, o]);
+    return far;
+  };
   const select = (key, quiet) => {
-    if (sel) light(fig(sel), "nb", false);
-    for (const m of $$(".mb.on")) m.classList.remove("on");
-    for (const m of $$(".mb[aria-pressed=true]")) m.setAttribute("aria-pressed", false);
-    for (const p of $$("[data-panel]")) p.hidden = true;
+    if (sel && fig(sel)) light(fig(sel), "nb", false);
+    unrole();
+    for (const m of $$(".mb.on", map)) m.classList.remove("on");
+    for (const m of $$(".mb[aria-pressed=true]", map)) m.setAttribute("aria-pressed", false);
+    for (const p of $$k("[data-panel]")) p.hidden = true;
     sel = key;
     const b = key && fig(key);
     if (!b) {
       sel = null;
       delete body.dataset.sel;
+      if (map) delete map.dataset.pick;
       $("#fchip").hidden = true;
-      for (const x of $$("[data-item], .pb, [data-rail-box], .kt tr")) { x.classList.remove("on"); x.removeAttribute("data-off"); }
-      for (const x of $$("[data-item], .pb")) x.hidden = false;
-      for (const x of $$("[data-rail-box]")) x.hidden = false;
+      for (const x of $$k("[data-item], .pb, [data-rail-box], .kt tr")) { x.classList.remove("on"); x.removeAttribute("data-off"); }
+      for (const x of $$k("[data-item], .pb")) x.hidden = false;
+      for (const x of $$k("[data-rail-box]")) x.hidden = false;
       for (const s of $$("#before, #read, #tests")) { const e = $(":scope > [data-empty], .sbody > [data-empty]", s); if (e) e.hidden = true; }
       counts();
       if (!quiet && /^#(part|table|box)=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
@@ -126,13 +165,22 @@
       return;
     }
     body.dataset.sel = key;
+    map.dataset.pick = key; // its own attribute: body's would restyle the page (perf report A)
     const tb = $("#trace-b");
     if (tb?.getAttribute("aria-expanded") === "true") disclose(tb, false);
     light(b, "nb", true);
+    roles(b);
     b.classList.add("on");
     for (const m of $$(`.mb[data-box="${CSS.escape(key)}"]`)) m.setAttribute("aria-pressed", true);
     const panel = $(`[data-panel="${CSS.escape(key)}"]`);
     if (panel) panel.hidden = false;
+    const r2 = panel && $("[data-reach2]", panel);
+    if (r2) {
+      const n = new Set(second(b).map(x => x[1])).size;
+      r2.hidden = !n;
+      r2.setAttribute("aria-pressed", false);
+      r2.textContent = "Who calls those · " + n + (n === 1 ? " part" : " parts");
+    }
     // the name may break after a slash, before a dot or an inner capital: <wbr>, never U+200B, so a copy stays clean
     const fname = $("#fname");
     fname.replaceChildren();
@@ -140,15 +188,15 @@
     $("#fchip").hidden = false;
     // what stays: the box's items, and for a table the parts that write or read it and its migrations' items
     const keep = new Set([key, ...ids(b.dataset.keep).map(x => x.dataset.box)]);
-    for (const c of $$("[data-item]")) c.hidden = !keep.has(c.dataset.box);
-    for (const p of $$(".pb")) {
+    for (const c of $$k("[data-item]")) c.hidden = !keep.has(c.dataset.box);
+    for (const p of $$k(".pb")) {
       p.hidden = !keep.has(p.dataset.box);
       if (!p.hidden && key.startsWith("part:")) disclose($(".pbb", p), true);
     }
-    for (const r of $$("[data-rail-box]")) r.hidden = !keep.has(r.dataset.railBox);
-    for (const r of $$(".kt tr[data-block]")) r.classList.toggle("on", keep.has($("#" + CSS.escape(r.dataset.block))?.dataset.box));
+    for (const r of $$k("[data-rail-box]")) r.hidden = !keep.has(r.dataset.railBox);
+    for (const r of $$k(".kt tr[data-block]")) r.classList.toggle("on", keep.has($("#" + CSS.escape(r.dataset.block))?.dataset.box));
     for (const s of $$("#before, #read")) {
-      const e = $(":scope > [data-empty], .sbody > [data-empty]", s), any = $$("[data-item], .pb", s).some(x => !x.hidden);
+      const e = $(":scope > [data-empty], .sbody > [data-empty]", s), any = $$k("[data-item], .pb").some(x => !x.hidden && s.contains(x));
       if (e) { e.hidden = any; e.textContent = key.startsWith("table:") ? "Nothing here sits on the parts that write or read " + b.dataset.label + "." : "Nothing here sits on " + b.dataset.label + "."; }
     }
     counts();
@@ -159,7 +207,7 @@
   };
   // a section's count chip reads "{k} of {n}" while a selection hides some of its items
   const counts = () => {
-    for (const c of $$("[data-count]")) {
+    for (const c of $$k("[data-count]")) {
       const all = $$("[data-item]", c.closest("section"));
       c.dataset.n ??= c.textContent;
       const shown = all.filter(x => !x.hidden).length;
@@ -168,10 +216,27 @@
   };
   if (map) {
     const tip = $("#mtip");
+    // a row of the panel's How it connects and its box and line light each other
+    const peek = (r, on) => { r.classList.toggle("pk", on); for (const x of [...ids(r.dataset.hl), ...ids(r.dataset.hlLn)]) x.classList.toggle("pk", on); };
+    const rowsOf = (attr, id) => $$(`[${attr}="${CSS.escape(id)}"]`, map);
+    for (const t of ["pointerover", "focusin"]) map.addEventListener(t, e => { const r = e.target.closest("[data-hl]"); if (r) peek(r, true); });
+    for (const t of ["pointerout", "focusout"]) map.addEventListener(t, e => { const r = e.target.closest("[data-hl]"); if (r && !r.contains(e.relatedTarget)) peek(r, false); });
+    map.addEventListener("click", e => {
+      const r = e.target.closest("[data-reach2]");
+      if (!r || !sel) return;
+      const on = r.getAttribute("aria-pressed") !== "true";
+      r.setAttribute("aria-pressed", on);
+      for (const [g, c, o] of second(fig(sel))) {
+        g.classList.toggle("nb2", on);
+        c.classList.toggle("nb2", on);
+        if (on) c.dataset.role = "calls " + o.dataset.label; else delete c.dataset.role;
+      }
+    });
     map.addEventListener("pointerover", e => {
       const b = e.target.closest(".mb[data-box]"), p = e.target.closest(".mhit path");
-      if (b) light(fig(b.dataset.box) || b, "hl", true);
+      if (b) { light(fig(b.dataset.box) || b, "hl", true); for (const r of rowsOf("data-hl", b.id)) r.classList.add("pk"); }
       if (p) {
+        for (const r of rowsOf("data-hl-ln", p.dataset.ln)) r.classList.add("pk");
         document.getElementById(p.dataset.ln)?.classList.add("hl");
         if (p.dataset.tip) { tip.textContent = p.dataset.tip; tip.hidden = false; }
       }
@@ -179,8 +244,8 @@
     map.addEventListener("pointermove", e => { if (!tip.hidden) { tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = e.clientY + 16 + "px"; } });
     map.addEventListener("pointerout", e => {
       const b = e.target.closest(".mb[data-box]"), p = e.target.closest(".mhit path");
-      if (b) light(fig(b.dataset.box) || b, "hl", false);
-      if (p) { document.getElementById(p.dataset.ln)?.classList.remove("hl"); tip.hidden = true; }
+      if (b) { light(fig(b.dataset.box) || b, "hl", false); for (const r of rowsOf("data-hl", b.id)) r.classList.remove("pk"); }
+      if (p) { for (const r of rowsOf("data-hl-ln", p.dataset.ln)) r.classList.remove("pk"); document.getElementById(p.dataset.ln)?.classList.remove("hl"); tip.hidden = true; }
     });
     map.addEventListener("focusin", e => { const b = e.target.closest(".mb[data-box]"); if (b) light(fig(b.dataset.box) || b, "hl", true); });
     map.addEventListener("focusout", e => { const b = e.target.closest(".mb[data-box]"); if (b) light(fig(b.dataset.box) || b, "hl", false); });
@@ -457,6 +522,8 @@
     if (t.closest("[data-show-changed]")) { e.preventDefault(); setMode("changed"); $("#h-read").focus(); return $("#read").scrollIntoView({ block: "start" }); }
     const ft = t.closest(".file-toggle");
     if (ft) return fileOpen(ft.closest(".file"), !ft.closest(".file").hasAttribute("open"));
+    const as = t.closest("button[data-all-steps]");
+    if (as) { const on = as.textContent.startsWith("Open"); for (const x of $$(".sbtn", as.closest(".pgp"))) disclose(x, on); return; }
     const b = t.closest(discButtons);
     if (b) return disclose(b, b.getAttribute("aria-expanded") !== "true");
     const rv = t.closest("[data-reveal]");
@@ -590,20 +657,22 @@
   addEventListener("hashchange", reveal);
   reveal();
 
-  // keys: j and k the next and previous file, n the next open item, v the file at the top viewed; Esc closes the
-  // topmost sheet, popover or list, else clears the selection
+  // keys: j and k the next and previous file, n the next open item, o all steps of the part at the top, v the file at
+  // the top viewed; Esc closes the topmost sheet, popover or list, else clears the selection
   const head = 80;
   const shown = sel => $$(sel).filter(x => x.getClientRects().length);
   let last, lastAt = 0; // the smooth scroll to the last jump may still run: a key right after it goes on from there
   addEventListener("keydown", e => {
     if (e.key === "Escape") {
       if (closeSheet()) return;
+      const dock = $("dialog[open]:not(:modal)");
+      if (dock) return dock.close();
       const open = pops.find(([, p]) => !document.getElementById(p).hidden);
       if (open) { closePops(); return document.getElementById(open[0]).focus(); }
       if (sel) select(null);
       return;
     }
-    if (!keysOn() || composing(e) || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.target.closest?.("input, textarea, select, [contenteditable], [role=textbox], [role=searchbox]") || $("dialog[open]") || !sheet.hidden) return;
+    if (!keysOn() || composing(e) || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.target.closest?.("input, textarea, select, [contenteditable], [role=textbox], [role=searchbox]") || $("dialog:modal") || !sheet.hidden) return;
     const key = letter(e);
     const y = el => el.getBoundingClientRect().top - head;
     const files = shown(".file"), i = performance.now() - lastAt < 700 ? files.indexOf(last) : -1;
@@ -622,6 +691,13 @@
         b.focus({ preventScroll: true });
       }
       return;
+    }
+    else if (key === "o") {
+      const a = shown(".pb").findLast(p => y(p) <= 8)?.querySelector("[data-all-steps]");
+      if (!a) return;
+      e.preventDefault();
+      openUp(a);
+      return a.click();
     }
     else if (key === "v" && e.repeat) return; // held, it would mark the file and unmark it again
     else if (key === "v") shown(".file").find(f => f.getBoundingClientRect().bottom > head + 8)?.querySelector("input[data-key]").click();

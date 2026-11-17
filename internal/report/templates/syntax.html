@@ -102,13 +102,20 @@ const paint = async table => {
     // each hunk on its own and each side on its own: a string or comment that one hunk or the removed side
     // leaves open must not color the rest
     const inside = st => st.getScopes().some(s => /^(string|comment)\b/.test(s));
-    const side = rs => {
+    // 400 lines at a time, the grammar state carried over: a long file is no long task (perf report Z)
+    const side = async rs => {
       const text = rs.map(r => r.cells[2].textContent), opts = { lang: l, theme };
-      let ts = hl.codeToTokens(text.join("\n"), opts).tokens;
+      let ts = [], last;
+      for (let i = 0; i < text.length; i += 400) {
+        if (i) await new Promise(res => setTimeout(res));
+        const res = hl.codeToTokens(text.slice(i, i + 400).join("\n"), { ...opts, grammarState: last });
+        ts.push(...res.tokens);
+        last = res.grammarState;
+      }
       // a hunk that starts inside a string or comment opened above it: its closing delimiter reads as an opening
       // one and colors the rest. When the hunk ends inside one opened by a line that is only the delimiter
       // (a lone ` or */), the lines up to that one are the string, the rest code.
-      if (inside(hl.getLastGrammarState(text.join("\n"), opts))) {
+      if (last && inside(last)) {
         let st, at = -1, open;
         for (const [i, t] of text.entries()) {
           st = hl.getLastGrammarState(t, { ...opts, grammarState: st });
@@ -123,13 +130,14 @@ const paint = async table => {
     try {
       await hl.loadLanguage(l);
       let hunk = [];
-      const flush = () => {
-        side(hunk.filter(r => !r.classList.contains("add")));
-        side(hunk.filter(r => !r.classList.contains("del"))); // context lines take the new side's colors
+      const flush = async () => {
+        const h = hunk;
         hunk = [];
+        await side(h.filter(r => !r.classList.contains("add")));
+        await side(h.filter(r => !r.classList.contains("del"))); // context lines take the new side's colors
       };
-      for (const r of rows) r.classList.contains("hunk") ? flush() : hunk.push(r);
-      flush();
+      for (const r of rows) r.classList.contains("hunk") ? await flush() : hunk.push(r);
+      await flush();
     } catch {}
   }
   const m = marks(rows);
@@ -194,11 +202,17 @@ const splitOn = () => document.documentElement.dataset.diff === "split";
 const lineOf = new WeakMap(); // a row of the table -> what shows it side by side
 let keep = null; // the gap button clicked side by side, to focus again once it is drawn anew
 const clone = node => [...node.childNodes].map(n => n.cloneNode(true));
+// a segment's rows as the table has them, under its header: what a screen reader reads, in order, for the two sides
+const linear = (table, rows) => el("table", "vh", table.tHead.cloneNode(true), el("tbody", "", ...rows.map(r => {
+  const c = r.cloneNode(true);
+  c.removeAttribute("id");
+  return c;
+})));
 const split = table => {
   if (!table.querySelector("tr.ctx") && !(table.querySelector("tr.del") && table.querySelector("tr.add"))) return; // a new or a deleted file: one side, read whole
   const box = el("div", "split");
   box.dataset.path = table.dataset.path;
-  let l = [], r = [], blocks = [], cur = null;
+  let l = [], r = [], rows = [], blocks = [], cur = null;
   const close = () => { if (cur) { blocks.push({ ...cur, l1: l.length, r1: r.length }); cur = null; } };
   const flush = () => {
     close();
@@ -217,11 +231,13 @@ const split = table => {
       p.setAttribute("d", `M0 ${y0}C${m} ${y0} ${m} ${z0} ${GW} ${z0}L${GW} ${z1}C${m} ${z1} ${m} ${y1} 0 ${y1}Z`);
       svg.append(p);
     }
-    box.append(el("div", "split-seg", el("div", "split-pane", ...l), svg, el("div", "split-pane", ...r)));
-    l = []; r = []; blocks = [];
+    const seg = el("div", "split-seg", el("div", "split-pane", ...l), svg, el("div", "split-pane", ...r));
+    seg.setAttribute("aria-hidden", "true");
+    box.append(seg, linear(table, rows));
+    l = []; r = []; rows = []; blocks = [];
   };
   const line = (row, no) => el("div", "sl", el("span", "no", no || ""), el("span", "code", ...clone(row.cells[2])));
-  for (const row of table.rows) {
+  for (const row of [...table.tBodies].flatMap(b => [...b.rows])) {
     const fold = row.closest("tbody.fold");
     if (row.matches("tr.fold-head")) {
       flush();
@@ -251,6 +267,7 @@ const split = table => {
       lineOf.set(row, bar);
     } else if (row.matches("tr.ctx")) {
       close();
+      rows.push(row);
       const n = line(row, row.cells[0].textContent);
       l.push(line(row, row.dataset.old));
       r.push(n);
@@ -258,22 +275,26 @@ const split = table => {
     } else if (row.matches("tr.del")) {
       if (cur && r.length > cur.r0) close(); // removed after added: the next change
       cur ||= { l0: l.length, r0: r.length };
+      rows.push(row);
       const n = line(row, row.dataset.old);
       l.push(n);
       lineOf.set(row, n);
     } else if (row.matches("tr.add")) {
       cur ||= { l0: l.length, r0: r.length };
+      rows.push(row);
       const n = line(row, row.cells[0].textContent);
       r.push(n);
       lineOf.set(row, n);
     } else { // a finding
       flush();
       const n = el("div", "split-note", ...clone(row.cells[0]));
+      for (const x of n.querySelectorAll("[id]")) x.removeAttribute("id"); // the table's note keeps it: a link lands there
       box.append(n);
       lineOf.set(row, n);
     }
   }
   flush();
+  built.add(table);
   table.parentElement.querySelector(":scope > .split")?.remove();
   table.after(box);
   if (keep?.table === table) {
@@ -287,17 +308,28 @@ const split = table => {
     keep = null;
   }
 };
-const tables = [...document.querySelectorAll("table[data-path]")];
-const wideEnough = matchMedia("(min-width: 1024px)");
+// whether Split shows is the stylesheet's to say (the width, the docked sheet): the jump asks it
 window.inSplit = el => {
   const t = el.closest?.("table[data-path]");
-  if (!t || !splitOn() || !wideEnough.matches) return null;
+  if (!t || !splitOn()) return null;
   split(t); // what reveal opened shows
-  return lineOf.get(el.matches("tbody") ? el.rows[0] : el) || null;
+  const s = t.parentElement.querySelector(":scope > .split");
+  return s && getComputedStyle(s).display !== "none" && lineOf.get(el.matches("tbody") ? el.rows[0] : el) || null;
 };
-document.addEventListener("click", e => { if (e.target.closest("button[data-diff]") && splitOn()) tables.forEach(split); });
+// Split is drawn near the viewport, like the colors: a table further off shows unified until it nears (perf report C)
+let built = new WeakSet();
+const near = new IntersectionObserver(es => {
+  if (splitOn()) for (const e of es) if (e.isIntersecting) { const t = e.target.querySelector("table"); if (t && !built.has(t)) split(t); }
+}, { rootMargin: "800px" });
+const lazySplit = () => {
+  built = new WeakSet();
+  near.disconnect();
+  for (const s of document.querySelectorAll(".diff > .split")) s.remove(); // drawn before the last toggle: stale
+  for (const d of document.querySelectorAll(".diff")) near.observe(d);
+};
+document.addEventListener("click", e => { if (e.target.closest("button[data-diff]") && splitOn()) lazySplit(); });
 if (splitOn()) {
-  tables.forEach(split);
+  lazySplit();
   if (location.hash) dispatchEvent(new HashChangeEvent("hashchange")); // the jump on load hit the hidden table
 }
 

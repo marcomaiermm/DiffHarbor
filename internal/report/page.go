@@ -332,9 +332,9 @@ func (v *view) status() mstatus {
 		st.Lines = append(st.Lines, mline{Chip: wordChip(g.In), Text: "“" + g.Text + "”"}, v.gateTracker(g, false))
 		st.Clears = v.clears(g)
 	case n > 0:
-		st.Kind, st.Head, st.Short, st.Note = "open", items, items, []string{"Nothing blocks the merge, and nothing says to wait."}
+		st.Kind, st.Head, st.Short, st.Note = "open", "Nothing blocks · "+items, items, []string{"No failed run, no conflict, and nothing says to wait."}
 	default:
-		st.Kind, st.Head, st.Short = "none", "No open items", "No open items"
+		st.Kind, st.Head, st.Short = "none", "Nothing blocks · no open items", "No open items"
 		st.Note = []string{"No difference, nothing to finish before merging, no major finding, no test change and no gap in the review."}
 		if failed("contract") { // no comparison ran: no "No difference"
 			st.Note = []string{"Nothing to finish before merging, no major finding, no test change and no gap in the review."}

@@ -289,6 +289,23 @@ type file struct {
 	SrcN             int        // its lines
 }
 
+// Rows is the 20 px rows its diff shows at first: the placeholder height while the diff sits off screen. A folded
+// run shows its head only.
+func (f *file) Rows() int {
+	n := 0
+	for _, p := range f.Parts {
+		switch {
+		case p.ID == 0:
+			n += len(p.Lines)
+		case p.Open:
+			n += 1 + len(p.Lines)
+		default:
+			n++
+		}
+	}
+	return n
+}
+
 // change is a declaration a file's diff touches: State "new", "gone" or "" (changed), ID its first changed line.
 type change struct {
 	Name, State, ID string

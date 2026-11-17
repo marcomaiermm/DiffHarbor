@@ -40,6 +40,8 @@ type pblock struct {
 // more". A table row has Table set and no Part.
 type connRow struct {
 	Dir, Part, Href, Via, Table, Count string
+	ID                                 string // the other part's
+	Box, Ln                            string // in a selection panel: the other end's box and the line between, lit with the row
 	Names, More, NoCall                []nameN
 }
 
@@ -285,7 +287,7 @@ func (v *view) connects(b *pblock) {
 	}
 	add := func(dir, other string, ns []MapName, via []string) {
 		lb, href := label(other)
-		r := connRow{Dir: dir, Part: lb, Href: href}
+		r := connRow{Dir: dir, Part: lb, Href: href, ID: other}
 		calls, nocall, n := names(ns)
 		if len(via) > 0 && strings.HasPrefix(dir, "Call") {
 			r.Via = "through " + viaWords(via, true)
@@ -606,6 +608,28 @@ func (mv *mapView) panel(v *view, b *mbox, ks []*card) *panel {
 	case "part":
 		files = plural(b.Files, "file", "files")
 		pn.Read, pn.ReadHref = "Read "+b.Label, "#part-"+slug(b.part.ID)
+		for _, pb := range v.Page.Parts {
+			if pb.Key == b.Key {
+				pn.Conn = slices.Concat(pb.Conn, pb.Tables)
+				break
+			}
+		}
+		for i := range pn.Conn {
+			c := &pn.Conn[i]
+			o := mv.partBox[c.ID]
+			if c.Table != "" {
+				o = mv.byKey["table:"+c.Table]
+			}
+			if o == nil {
+				continue
+			}
+			c.Box = o.El
+			for _, r := range mv.Lines {
+				if r.a == b && r.b == o || r.a == o && r.b == b {
+					c.Ln = r.El
+				}
+			}
+		}
 	case "system":
 		pn.Code = true
 		for _, s := range mv.src.Systems {

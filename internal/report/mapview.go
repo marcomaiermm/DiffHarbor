@@ -65,9 +65,14 @@ type mbox struct {
 // mroute is a line of the figure (component 25): its path, chevrons and pointer label.
 type mroute struct {
 	El, D, Chev, Style, Tip string
-	Width, ChevW            float64
-	a, b                    *mbox
-	pts                     [][2]float64
+	// Callee is the box whose code the line's calls reach, Caller the box they come from (their element ids); Rel is
+	// "calls", "named" (no call) or "both" (each calls the other), N the calls. A selection says on each box it lights
+	// how that box touches it.
+	Callee, Caller, Rel string
+	N                   int
+	Width, ChevW        float64
+	a, b                *mbox
+	pts                 [][2]float64
 }
 
 // offLink is an item off the map, as the legend's items line names it.
@@ -93,6 +98,7 @@ type panel struct {
 	Kind, Key                         string // its box's
 	Code                              bool   // the head is a table's name
 	Rows                              []prow2
+	Conn                              []connRow // a part's How it connects: who calls it, what it calls, its tables
 	More                              int
 	Subs                              []psub
 }
@@ -110,7 +116,6 @@ type psub struct {
 // figure geometry (6.3)
 const (
 	colStep, boxW, sysW, boxH, rowStep, rowTop = 176, 136, 96, 52, 62, 16
-	figW                                       = 976
 	maxTableBoxes                              = 12
 )
 
@@ -345,7 +350,7 @@ func (mv *mapView) route(m *Map, sys bool) {
 		maxY = max(maxY, b.Y+boxH)
 		mv.W = max(mv.W, b.X+b.W)
 	}
-	mv.W, mv.H = max(mv.W, figW), maxY+8
+	mv.H = maxY + 8 // the figure is as wide as its boxes: from 1,600 the selection panel sits beside it
 	var es []*wire
 	n := 0
 	for i := range m.Lines {
@@ -358,6 +363,13 @@ func (mv *mapView) route(m *Map, sys bool) {
 		r := &mroute{El: "l" + strconv.Itoa(n), Style: l.Style, Width: float64(max(l.Width, 1)), Tip: tipOf(l, m.NoKinds)}
 		if l.Style == "dashed" {
 			r.Width = 1
+		}
+		r.Callee, r.Caller, r.Rel, r.N = from.El, to.El, "calls", l.Calls+l.Through
+		switch {
+		case l.TwoWay:
+			r.Rel = "both"
+		case r.N == 0:
+			r.Rel = "named"
 		}
 		a, b := from, to
 		if col(to) < col(from) {
@@ -389,7 +401,7 @@ func (mv *mapView) route(m *Map, sys bool) {
 					break
 				}
 			}
-			r := &mroute{El: "l" + strconv.Itoa(n), Style: "dotted", Width: 1.5, Chev: "b", Tip: tip, a: sb, b: pb}
+			r := &mroute{El: "l" + strconv.Itoa(n), Style: "dotted", Width: 1.5, Chev: "b", Tip: tip, a: sb, b: pb, Callee: sb.El, Caller: pb.El, Rel: "calls"}
 			es = append(es, &wire{r: r, a: sb, b: pb})
 		}
 	}

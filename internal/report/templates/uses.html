@@ -770,12 +770,17 @@ const showView = (e, top) => {
   title.focus();
 };
 // Every use: the sheet on this declaration, a fresh back stack
+const docked = matchMedia("(min-width: 1920px)");
 const uses = async (name, list, from) => {
   hide();
   opener = from || document.activeElement;
   stack = [];
   cur = await view(name, list);
-  if (!sheet.open) sheet.showModal();
+  if (!sheet.open) { // wide, it docks beside the page and the diff stays usable; html[data-dock] makes room for it
+    if (docked.matches) sheet.show();
+    else sheet.showModal();
+    document.documentElement.toggleAttribute("data-dock", docked.matches);
+  }
   showView(cur, 0);
 };
 // a station's name: its declaration in the same sheet, Back returns
@@ -793,11 +798,13 @@ back.addEventListener("click", () => {
   showView(p, p.top);
 });
 sheet.addEventListener("close", () => {
+  document.documentElement.removeAttribute("data-dock");
   if (!leaving) opener?.focus?.();
   leaving = false;
 });
 const open = async span => syms[span.dataset.sym] && uses(span.dataset.sym, pick(span, syms[span.dataset.sym]), span);
 // a graph's "Every use" and the reach list's: its declaration by name and file
+for (const b of document.querySelectorAll("button[data-uses]")) if (!syms[b.dataset.uses]) b.disabled = true; // no uses embedded: a name, not a button
 document.addEventListener("sym:uses", e => {
   const list = syms[e.detail.name] || [], own = list.filter(s => s.path === e.detail.path);
   if (list.length) uses(e.detail.name, own.length ? own : list);

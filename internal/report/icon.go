@@ -23,6 +23,7 @@ func images(logo, svg, png []byte) (img, links template.HTML) {
 // icons are Lucide's (lucide.dev, ISC license, lucide-static 0.577.0): what goes inside each 24×24 svg.
 var icons = map[string]string{
 	"arrow-down":            `<path d="M12 5v14" /><path d="m19 12-7 7-7-7" />`,
+	"arrow-up":              `<path d="m5 12 7-7 7 7" /><path d="M12 19V5" />`,
 	"arrow-left":            `<path d="m12 19-7-7 7-7" /><path d="M19 12H5" />`,
 	"arrow-right":           `<path d="M5 12h14" /><path d="m12 5 7 7-7 7" />`,
 	"arrow-right-left":      `<path d="m16 3 4 4-4 4" /><path d="M20 7H4" /><path d="m8 21-4-4 4-4" /><path d="M4 17h16" />`,

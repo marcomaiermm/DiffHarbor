@@ -99,6 +99,9 @@
 /* the unchanged lines between hunks: a band that shows them. The diff is its container: the band keeps to the
    width in view and stays put while a wide file scrolls, its buttons at the right edge. */
 .diff { container-type: inline-size; }
+/* a diff off screen skips style, layout and paint (perf report B); find-in-page, jumps and screen readers still reach
+   it. Until first shown its height is its rows, then the one it had */
+.diff { content-visibility: auto; contain-intrinsic-size: auto calc(var(--rows, 20) * 20px); }
 .diff tr.gap > td { @apply p-0; }
 /* the code theme's light ink is 4.25:1 on the band, less hovered: the page's text color is mixed in */
 .gap-bar { @apply sticky left-0 flex min-h-[30px] w-[100cqw] cursor-pointer items-center gap-2 border-t py-[3px] pr-2 pl-4 font-mono text-xs; background: var(--diff-hunk); color: var(--gap-ink); border-color: color-mix(in oklab, var(--diff-fg) 12%, transparent); }
@@ -117,20 +120,31 @@
 .hunk-seen { @apply shrink-0; }
 .hunk-seen[aria-pressed="true"] { color: var(--verified); border-color: color-mix(in oklab, var(--verified) 45%, transparent); }
 /* JetBrains' side by side: old left, new right, a ribbon from what went to what came; blue changed, green added,
-   gray removed. Lines keep one height, so a ribbon is drawn from line numbers. */
+   gray removed. Lines keep one height, so a ribbon is drawn from line numbers. Only from 1,440, where a side is about
+   520 px (64 columns); narrower, the toggle is gone and the diff is unified.
+   It pauses (unified, the toggle still pressed) while the uses sheet is docked and a side would be under 520: below
+   2,144. This is the one rule; the line jump asks it. The split's lines are aria-hidden, a copy of the rows reads. */
 .diff > .split { display: none; }
-@media (min-width: 1024px) {
+.dvnote { display: none; font: 400 12px/1.4 var(--sans); color: var(--ink3); white-space: nowrap; }
+@media (min-width: 1440px) {
+  html[data-diff="split"]:not([data-dock]) .diff > .split { display: block; }
+  html[data-diff="split"]:not([data-dock]) .diff:has(> .split) > table { display: none; }
+  html[data-diff="split"][data-dock] .dvnote { display: inline; }
+}
+@media (min-width: 2144px) {
   html[data-diff="split"] .diff > .split { display: block; }
   html[data-diff="split"] .diff:has(> .split) > table { display: none; }
+  html[data-diff="split"] .dvnote { display: none; }
 }
-@media (max-width: 1023px) { .view-toggle { display: none; } }
+@media (max-width: 1439px) { .dview { display: none !important; } }
 .split { @apply font-mono text-[12.5px]; }
 .split-fold { @apply flex h-7 w-full cursor-pointer items-center gap-2 px-3 font-sans text-xs; color: var(--diff-muted); }
 .split-fold:hover { color: var(--diff-fg); }
 .split-fold.open .trace-chevron { rotate: 90deg; }
 .split-seg { display: grid; grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr); }
-/* a pane scrolls on its own, its column as wide as its widest line so every line's tint runs to the end */
-.split-pane { @apply overflow-x-auto; display: grid; grid-template-columns: minmax(max-content, 1fr); scrollbar-width: thin; }
+/* a pane scrolls on its own, its column as wide as its widest line so every line's tint runs to the end; the shorter
+   side ends where its lines do (stretched rows would leave the ribbon's 20 px grid) */
+.split-pane { @apply overflow-x-auto; display: grid; grid-template-columns: minmax(max-content, 1fr); align-content: start; scrollbar-width: thin; }
 .split-gutter { display: block; background: var(--diff-hunk); }
 .sl { @apply flex h-5 leading-5 whitespace-pre; }
 .sl > .no { @apply left-0 w-12 shrink-0 pr-3 text-right select-none; }
@@ -297,7 +311,7 @@ a.path:hover,.lnk:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .ibtn:hover{background:var(--hover);color:var(--inkhi)}
 a,button,input,label,summary,[role="button"]{touch-action:manipulation}
 /* top bar */
-.top{position:sticky;top:0;z-index:20;height:56px;display:flex;align-items:center;gap:16px;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--line)}
+.top{position:sticky;top:0;z-index:20;height:56px;display:flex;align-items:center;gap:16px;padding:0 max(24px,calc((100% - var(--bw))/2));background:var(--surface);border-bottom:1px solid var(--line)}
 .tb-l{display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 0;font-size:13px}
 .tb-repo{color:var(--ink2);white-space:nowrap}
 .tb-pr{color:var(--inkhi);font-weight:600;white-space:nowrap}
@@ -333,9 +347,16 @@ a,button,input,label,summary,[role="button"]{touch-action:manipulation}
 .mrow{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;border-radius:6px;font:400 13px/1.4 var(--sans);color:var(--ink)}
 a.mrow:hover,button.mrow:hover{background:var(--hover)}
 button.mrow{width:100%;border:0;background:transparent;text-align:left;cursor:pointer}
-/* the 1,024 block and the rail grid (section 3) */
-.blockw{max-width:1072px;margin:0 auto;padding:24px 24px 0}
-.lay{display:grid;grid-template-columns:232px minmax(0,760px);column-gap:32px;justify-content:center;align-items:start;padding:64px 24px 48px}
+/* the block and the rail grid (section 3): 1,024 wide, 760 below 1,024, and from 1,440 it grows with the window to 1,680;
+   the top bar's ends line up with it */
+:root{--bw:1024px}
+@media (max-width:1023px){:root{--bw:760px}}
+@media (min-width:1440px){:root{--bw:min(calc(100vw - 96px),1680px)}}
+/* from 1,920 the uses sheet docks at the right: the page makes room beside it */
+:root[data-dock]{--bw:min(calc(100vw - 44rem - 96px),1680px)}
+:root[data-dock]>body{padding-right:44rem}
+.blockw{max-width:calc(var(--bw) + 48px);margin:0 auto;padding:24px 24px 0}
+.lay{display:grid;grid-template-columns:232px minmax(0,760px);column-gap:32px;justify-content:center;max-width:calc(var(--bw) + 48px);margin:0 auto;align-items:start;padding:64px 24px 48px}
 .rail{position:sticky;top:80px;min-width:0}
 .rrow{display:flex;align-items:center;gap:8px;height:44px;padding:0 12px;border-radius:6px;font:500 13px/1 var(--sans);color:var(--ink2);position:relative}
 .rrow.rsub{padding-left:28px;font-weight:400}
@@ -369,6 +390,10 @@ button.mrow{width:100%;border:0;background:transparent;text-align:left;cursor:po
 .shd{display:flex;align-items:center;gap:12px;min-height:26px}
 .shd svg{flex:none}
 .shd h2{font:600 20px/1.3 var(--sans);letter-spacing:-.02em;color:var(--inkhi)}
+.rend{margin-top:-8px}
+/* headings balance their lines, prose avoids a lone last word; the style only, so a diff cell stays unwrapped */
+.pg :is(h1,h2,h3,h4){text-wrap-style:balance}
+.pg :is(p,li,dd,td){text-wrap-style:pretty}
 .slines{margin-top:8px;display:flex;flex-direction:column;gap:4px}
 .clears{font-size:13px;line-height:1.55;color:var(--ink2)}
 .glink{position:relative;display:inline-flex;align-items:center;gap:6px;min-height:28px;font:500 13px/1.4 var(--sans);color:var(--ink);text-decoration:underline;text-decoration-color:var(--line3);text-underline-offset:4px;white-space:nowrap;flex:none}
@@ -446,6 +471,17 @@ button.mrow{width:100%;border:0;background:transparent;text-align:left;cursor:po
 .rdecl .rp{padding-left:16px}
 .cfoot{font-size:12px;line-height:1.5;color:var(--ink3)}
 .selp{margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+/* from 1,600 the side of the figure holds the selection panel, then the legend as a list (decision 30); a selection
+   sits beside the lines that drew it. The rows under the figure stay under it: a taller side grows the last row */
+@media (min-width:1600px){
+.mtop:has(.mscr){display:grid;grid-template-columns:minmax(0,max(var(--fw),560px)) minmax(360px,1fr);grid-template-rows:auto 1fr;column-gap:40px;align-items:start}
+.mtop:has(.mscr)>.mscr{grid-area:1/1}
+.mtop:has(.mscr)>.mrest{grid-area:2/1}
+.mtop:has(.mscr)>.mside{grid-area:1/2/3/3;display:flex;flex-direction:column;gap:16px;padding-top:16px;min-width:0;max-width:720px}
+.mside .mleg{margin-top:0}
+.mtop:has(.mscr) .selp{order:-1;margin-top:0;padding:0 0 16px;border-top:0;border-bottom:1px solid var(--line)}
+.mtop:has(.mscr) .mkeys{flex-direction:column;align-items:flex-start}
+}
 .selh{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}
 .selh .sn1{font:600 13px/1.5 var(--sans);color:var(--inkhi)}
 .selh .sc{font-size:13px;color:var(--ink2)}
@@ -529,7 +565,7 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .pb3{display:flex;align-items:center;gap:8px;font-weight:400;font-size:13px;line-height:1.55;color:var(--ink)}
 .pb3 svg{flex:none;color:var(--ink2)}
 .pbr{display:flex;align-items:center;gap:10px;margin-top:2px}
-.pbx{padding:8px 0 24px 16px;display:flex;flex-direction:column;gap:24px}
+.pbx{padding:8px 0 24px;display:flex;flex-direction:column;gap:24px}
 .pgp{display:flex;flex-direction:column;gap:8px;min-width:0}
 .pgp>.pmuted{font-size:13px;color:var(--ink2)}
 .hc{display:flex;flex-direction:column;font-size:13px;line-height:20px;color:var(--ink2)}
@@ -542,7 +578,8 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .hc .cd{background:transparent;border:0;padding:0;font-size:12.5px;color:var(--ink)}
 .icards{display:flex;flex-direction:column;gap:8px}
 /* steps (15) */
-.steps{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;background:var(--surface);overflow:hidden}
+.steps{display:flex;flex-direction:column;border-block:1px solid var(--line)}
+.bh .glink{margin-left:auto}
 .step{border-top:1px solid var(--line)}
 .step:first-child{border-top:0}
 .sbtn{display:grid;grid-template-columns:32px minmax(0,1fr) auto auto auto;column-gap:12px;row-gap:2px;align-items:center;width:100%;min-height:56px;padding:12px 16px;background:transparent;border:0;text-align:left;cursor:pointer;color:var(--ink)}
@@ -553,7 +590,7 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .sbtn .sw{grid-column:2/4;font-size:13px;line-height:1.5;color:var(--ink2)}
 .sbtn>svg{color:var(--ink2);transition:transform .16s ease-out}
 .sbtn[aria-expanded="true"]>svg{transform:rotate(180deg)}
-.sexp{padding:16px 20px 20px 60px;display:flex;flex-direction:column;gap:16px;border-top:1px solid var(--line)}
+.sexp{padding:4px 0 24px;display:flex;flex-direction:column;gap:16px}
 .fileln{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
 .fileln .ad{font:400 12px/1.6 var(--mono);color:var(--ink2)}
 .tlist{display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin-top:6px}
@@ -584,8 +621,7 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .hint>p{font-size:13px;color:var(--ink2)}
 .hint .hl{display:flex;flex-direction:column;gap:8px;color:var(--ink2)}
 .pfoot{margin-top:64px;border-top:1px solid var(--line);padding:24px 0 48px;font-size:13px;line-height:1.55;color:var(--ink3)}
-.warn{position:relative;overflow:hidden;background:var(--raised);border-radius:8px;padding:16px 16px 16px 20px;display:flex;gap:10px;align-items:flex-start;color:var(--ink)}
-.warn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--line3)}
+.warn{background:var(--raised);border:1px solid var(--line2);border-radius:8px;padding:16px;display:flex;gap:10px;align-items:flex-start;color:var(--ink)}
 .warn svg{flex:none;margin-top:4px;color:var(--ink2)}
 /* gate (6), status chips (2), quotes in blocks */
 .gate{padding:20px}
@@ -676,7 +712,8 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 @media (prefers-reduced-motion:reduce){.vsheet{animation:none}.pg *{transition:none!important}}
 
 @media (max-width:1071px){.blockw{max-width:none}.ovr{grid-template-columns:minmax(0,1fr);row-gap:24px}}
-@media (max-width:1023px){.blockw{max-width:808px}.lay{grid-template-columns:minmax(0,760px)}.rail{display:none}.secbtn{display:inline-flex}.w-only{display:none!important}.t-only{display:revert}.tb-c{display:none}.tb-r{flex:0 0 auto}.m-repo{display:block}}
+@media (min-width:1440px){.lay{grid-template-columns:232px minmax(0,1fr)}.ovr{grid-template-columns:minmax(0,1fr) minmax(360px,32%)}}
+@media (max-width:1023px){.lay{grid-template-columns:minmax(0,760px)}.rail{display:none}.secbtn{display:inline-flex}.w-only{display:none!important}.t-only{display:revert}.tb-c{display:none}.tb-r{flex:0 0 auto}.m-repo{display:block}}
 @media (max-width:767px){
 .top{padding:0 8px 0 16px;gap:8px}
 .tb-l:has(.fchip:not([hidden]),.short:not([hidden])) .popwrap{display:none}
@@ -712,8 +749,6 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .sbtn{grid-template-columns:24px minmax(0,1fr) auto auto;padding:12px}
 .sbtn .sf{grid-column:2/3;grid-row:2}
 .sbtn .sw{grid-column:2/3;grid-row:3}
-.sexp{padding:16px}
-.pbx{padding-left:0}
 .tbl thead,.ctab thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .tbl,.tbl tbody,.tbl tr,.tbl td,.ctab,.ctab tbody,.ctab tr,.ctab td{display:block;width:auto}
 .tbl tr,.ctab tr{padding:12px 0;border-top:1px solid var(--line)}
@@ -733,10 +768,35 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 [hidden]{display:none!important}
 .pg .mb.hl,.pg[data-sel] .mb.nb,.pg[data-trace] .mb.tr{border-color:var(--ink)}
 .pg .ml.hl,.pg[data-sel] .ml.nb,.pg[data-trace] .ml.tr{stroke:var(--ink)}
-.pg[data-sel] .mb:not(.nb,.on,.hl),.pg[data-trace]:not([data-sel]) .mb:not(.tr,.hl){border-color:var(--line)}
-.pg[data-sel] .ml:not(.nb,.hl),.pg[data-trace]:not([data-sel]) .ml:not(.tr,.hl){stroke:var(--line)}
+.pg[data-sel] .mb:not(.nb,.nb2,.on,.hl,.pk),.pg[data-trace]:not([data-sel]) .mb:not(.tr,.hl){border-color:var(--line)}
+/* what a selection doesn't touch steps back: its text at --ink3 (still 4.5:1); a box it touches says how instead of its
+   second line */
+.pg[data-sel] .mb:not(.nb,.nb2,.on,.hl,.pk),#map[data-pick] .mb:not(.nb,.nb2,.on,.hl,.pk) *{color:var(--ink3)}
+.pg[data-sel] .mb[data-role] .mb2{display:none}
+.pg[data-sel] .mb[data-role]::after{content:attr(data-role);display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;font:500 12px/1.3 var(--sans);color:var(--inkhi);white-space:nowrap}
+/* the second step of the blast radius: dashed, a step quieter */
+.pg[data-sel] .mb.nb2{border-color:var(--ink2);border-style:dashed}
+.pg[data-sel] .ml.nb2{stroke:var(--ink2)}
+/* a panel row and its box and line, lit together */
+.pg .mb.pk{border-color:var(--inkhi);box-shadow:inset 0 0 0 1px var(--inkhi)}
+.pg .ml.pk{stroke:var(--inkhi)}
+.selp .hc>p{margin-inline:-8px;padding:2px 8px;border-radius:6px}
+.selp .hc>p.pk{background:var(--hover)}
+/* marks run along a selected part's lines the way the data goes */
+.ml .flow{fill:none;stroke:var(--acc);stroke-dasharray:2 14;stroke-linecap:round;animation:mflow 1.2s linear infinite}
+.ml .flow.rev{animation-direction:reverse}
+@keyframes mflow{to{stroke-dashoffset:-16}}
+@media (prefers-reduced-motion:reduce){.ml .flow{display:none}}
+/* a name in How it connects opens Every use */
+.cn{position:relative;padding:0;border:0;background:transparent;font:inherit;color:inherit;cursor:pointer}
+.cn code{text-decoration:underline;text-decoration-color:var(--line3);text-underline-offset:3px}
+.cn:hover code{text-decoration-color:var(--ink2)}
+.cn::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:44px;transform:translate(-50%,-50%)}
+.cn:disabled{cursor:default}
+.cn:disabled code{text-decoration:none}
+.pg[data-sel] .ml:not(.nb,.nb2,.hl,.pk),.pg[data-trace]:not([data-sel]) .ml:not(.tr,.hl){stroke:var(--line)}
 .pg .mb.on{border-color:var(--acc)!important;box-shadow:inset 0 0 0 1px var(--acc)}
-.pg[data-sel] .kt tr.on td{background:var(--hover)}
+.kt tr.on td{background:var(--hover)}
 .pbx h4,.selsub h4{font:600 13px/1.55 var(--sans);color:var(--ink2)}
 .dfiles{display:flex;flex-direction:column;gap:2px}
 .mlist{display:none}
@@ -917,6 +977,7 @@ a.cs-r:hover{background:var(--hover)}
 .sig-more{margin-top:4px;font-size:13px}
 .xcode .gap .lnk{font:400 12px/22px var(--sans);color:var(--ink3)}
 dialog.us{position:fixed;inset:0 0 0 auto;margin:0;padding:0;width:min(44rem,100vw);height:100dvh;max-width:none;max-height:none;overflow:auto;overscroll-behavior:contain;background:var(--surface);color:var(--ink);border:0;border-left:1px solid var(--line2);animation:usin .16s ease-out}
+dialog.us:not(:modal){z-index:30}
 dialog.us::backdrop{background:color-mix(in srgb,var(--ground) 70%,transparent)}
 @keyframes usin{from{transform:translateX(100%)}}
 @media (max-width:1023px){dialog.us{inset:auto 0 0 0;width:100%;height:auto;max-height:85dvh;border-left:0;border-top:1px solid var(--line2);border-radius:12px 12px 0 0;animation-name:usup}@keyframes usup{from{transform:translateY(100%)}}.us-h{border-radius:12px 12px 0 0}}

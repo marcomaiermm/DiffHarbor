@@ -552,26 +552,26 @@ func TestMergeStatus(t *testing.T) {
 		kind, head, short string
 		open              int
 	}{
-		{"none", func(*Data) {}, "none", "No open items", "No open items", 0},
+		{"none", func(*Data) {}, "none", "Nothing blocks · no open items", "No open items", 0},
 		{"minors don't count", func(d *Data) {
 			d.Findings = []review.Comment{{Path: "trim.go", Line: 2, Severity: "minor", Title: "m"}}
-		}, "none", "No open items", "No open items", 0},
+		}, "none", "Nothing blocks · no open items", "No open items", 0},
 		{"the gap is one item", func(d *Data) {
 			d.Diff += editFile("pad.go", []string{"a"}, []string{"b"})
 			d.Failed, d.Omitted = []string{"trim.go"}, []string{"pad.go"}
-		}, "open", "1 open item", "1 open item", 1},
+		}, "open", "Nothing blocks · 1 open item", "1 open item", 1},
 		{"a gate that no longer waits", func(d *Data) {
 			g := gate
 			g.Waits = false
 			d.Terms.Gates = []review.Gate{g}
-		}, "none", "No open items", "No open items", 0},
+		}, "none", "Nothing blocks · no open items", "No open items", 0},
 		{"waits", func(d *Data) { d.Terms.Gates = []review.Gate{gate} }, "waits", "Waits for OPS-2 to merge", "Waits · 1 open item", 1},
 		{"one gate quoted twice is one item", func(d *Data) { d.Terms.Gates = []review.Gate{gate, gate} }, "waits", "Waits for OPS-2 to merge", "Waits · 1 open item", 1},
 		{"a failed check blocks a wait", func(d *Data) { d.Terms.Gates, d.CI = []review.Gate{gate}, failed }, "blocked", "Blocked: ci.yml failed at 1111111", "Blocked · ci.yml failed", 1},
 		{"a conflict comes first", func(d *Data) { d.Terms.Gates, d.CI, d.Conflicts = []review.Gate{gate}, failed, true }, "blocked", "Blocked: a conflict with the base branch", "Blocked · conflict with the base branch", 1},
 		{"a deviation is an item, no wait", func(d *Data) {
 			d.Terms.Differences = []review.Difference{{Status: review.Deviates, Title: "x", At: "trim.go:1", Evidence: review.CrossCheck}}
-		}, "open", "1 open item", "1 open item", 1},
+		}, "open", "Nothing blocks · 1 open item", "1 open item", 1},
 	} {
 		d := tinyData()
 		d.Tests = checks.Tests{}
