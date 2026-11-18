@@ -889,15 +889,20 @@ func TestUpStatements(t *testing.T) {
 	}
 	for _, c := range []struct {
 		line, want string
-		in, out    int
+		in, out    string
 	}{
-		{"a /* b */ c -- /* d", "a  c -- /* d", inCode, inCode},
-		{"x text DEFAULT '/*', y int /* z", "x text DEFAULT '/*', y int ", inCode, inBlock},
-		{"still */ CREATE $$ /* kept", " CREATE $$ /* kept", inBlock, inDollar},
-		{"'it''s -- no' -- yes", "'it''s -- no' -- yes", inCode, inCode},
+		{"a /* b */ c -- /* d", "a  c -- /* d", "", ""},
+		{"x text DEFAULT '/*', y int /* z", "x text DEFAULT '/*', y int ", "", "*/"},
+		{"still */ CREATE $$ /* kept", " CREATE $$ /* kept", "*/", "$$"},
+		{"'it''s -- no' -- yes", "'it''s -- no' -- yes", "", ""},
+		{"AS $fn$/*$$ x $fn$ /* gone */ y $1", "AS $fn$/*$$ x $fn$  y $1", "", ""},
+		{"$body$ open", "$body$ open", "", "$body$"},
 	} {
 		if s, out := uncomment(c.line, c.in); s != c.want || out != c.out {
-			t.Errorf("uncomment(%q) = %q %d, want %q %d", c.line, s, out, c.want, c.out)
+			t.Errorf("uncomment(%q) = %q %q, want %q %q", c.line, s, out, c.want, c.out)
 		}
+	}
+	if sts := statements([]sqlLine{{text: "CREATE FUNCTION f() AS $fn$ a; $$ b; $fn$;"}, {text: "CREATE TABLE t (x int);"}}); len(sts) != 2 {
+		t.Errorf("statements across a tagged body: %+v", sts)
 	}
 }

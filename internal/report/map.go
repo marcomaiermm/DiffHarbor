@@ -1430,9 +1430,9 @@ func migrationLines(d Data, f func(p string, l sqlLine)) {
 				lines = append(lines, sqlLine{text: t, line: i + 1, add: added[i+1], gone: gone[i+1]})
 			}
 		}
-		in := inCode
+		in := ""
 		for _, l := range lines {
-			if in == inCode && downMark.MatchString(l.text) {
+			if in == "" && downMark.MatchString(l.text) {
 				break
 			}
 			l.text, in = uncomment(l.text, in)
@@ -1441,48 +1441,46 @@ func migrationLines(d Data, f func(p string, l sqlLine)) {
 	})
 }
 
-// Where a line of SQL starts: in code, a /* */ comment, a quoted string or a $$ body.
-const (
-	inCode = iota
-	inBlock
-	inQuote
-	inDollar
-)
+// dollarOpen is what opens a dollar-quoted body, $$ or $tag$; the same text closes it.
+var dollarOpen = regexp.MustCompile(`^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$`)
 
-// uncomment is a line of SQL without its /* */ comments, outside quotes and $$ bodies; in where it starts, and the
-// result where the next line does. A -- comment stays: statements cuts it.
-func uncomment(t string, in int) (string, int) {
+// uncomment is a line of SQL without its /* */ comments, outside quotes and dollar-quoted bodies. in is what closes
+// where the line starts ("" in code, "*/" in a comment, "'" in a string, the tag of a dollar-quoted body), and the
+// result what closes where the next line does. A -- comment stays: statements cuts it.
+func uncomment(t, in string) (string, string) {
 	var b strings.Builder
-	for i := 0; i < len(t); i++ {
+	for i := 0; i < len(t); {
+		if in != "" {
+			j := strings.Index(t[i:], in)
+			if j < 0 {
+				if in != "*/" {
+					b.WriteString(t[i:])
+				}
+				return b.String(), in
+			}
+			if in != "*/" {
+				b.WriteString(t[i : i+j+len(in)])
+			}
+			i, in = i+j+len(in), ""
+			continue
+		}
 		switch {
-		case in == inBlock:
-			if strings.HasPrefix(t[i:], "*/") {
-				in, i = inCode, i+1
-			}
-			continue
-		case in == inQuote:
-			if t[i] == '\'' {
-				in = inCode
-			}
-		case in == inDollar:
-			if strings.HasPrefix(t[i:], "$$") {
-				in = inCode
-				b.WriteByte('$')
-				i++
-			}
 		case strings.HasPrefix(t[i:], "--"):
-			return b.String() + t[i:], in
+			return b.String() + t[i:], ""
 		case strings.HasPrefix(t[i:], "/*"):
-			in, i = inBlock, i+1
-			continue
+			in, i = "*/", i+2
 		case t[i] == '\'':
-			in = inQuote
-		case strings.HasPrefix(t[i:], "$$"):
-			in = inDollar
-			b.WriteByte('$')
+			in = "'"
+			b.WriteByte('\'')
+			i++
+		case t[i] == '$' && dollarOpen.MatchString(t[i:]):
+			in = dollarOpen.FindString(t[i:])
+			b.WriteString(in)
+			i += len(in)
+		default:
+			b.WriteByte(t[i])
 			i++
 		}
-		b.WriteByte(t[i])
 	}
 	return b.String(), in
 }

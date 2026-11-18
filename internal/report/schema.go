@@ -565,9 +565,9 @@ func baseSchema(ctx context.Context, sb *proc.Sandbox, names []string) (db sdb, 
 // read runs the statements of one migration's text, up to its Down part.
 func (db sdb) read(text string) {
 	var lines []sqlLine
-	in := inCode
+	in := ""
 	for i, l := range strings.Split(text, "\n") {
-		if in == inCode && downMark.MatchString(l) {
+		if in == "" && downMark.MatchString(l) {
 			break
 		}
 		l, in = uncomment(l, in)
@@ -578,12 +578,12 @@ func (db sdb) read(text string) {
 	}
 }
 
-// statements joins lines into statements at the semicolons outside quotes and $$ bodies, comments cut; each starts at
-// the line of its first word, or of the PR's first change to it.
+// statements joins lines into statements at the semicolons outside quotes and dollar-quoted bodies, comments cut;
+// each starts at the line of its first word, or of the PR's first change to it.
 func statements(lines []sqlLine) []sqlLine {
 	var out []sqlLine
 	var b strings.Builder
-	start, quote, dollar, add := 0, false, false, false
+	start, in, add := 0, "", false // in: what closes the quote or dollar-quoted body the text is in
 	for _, l := range lines {
 		if l.gone != "" && b.Len() > 0 && !add { // lines removed inside the statement
 			add, start = true, l.line
@@ -592,23 +592,19 @@ func statements(lines []sqlLine) []sqlLine {
 		for i := 0; i < len(t); i++ {
 			c := t[i]
 			switch {
-			case dollar:
-				if strings.HasPrefix(t[i:], "$$") {
-					dollar = false
-					b.WriteString("$$")
-					i++
+			case in != "":
+				if strings.HasPrefix(t[i:], in) {
+					b.WriteString(in)
+					i += len(in) - 1
+					in = ""
 					continue
 				}
-			case quote:
-				if c == '\'' {
-					quote = false
-				}
 			case c == '\'':
-				quote = true
-			case strings.HasPrefix(t[i:], "$$"):
-				dollar = true
-				b.WriteString("$$")
-				i++
+				in = "'"
+			case c == '$' && dollarOpen.MatchString(t[i:]):
+				in = dollarOpen.FindString(t[i:])
+				b.WriteString(in)
+				i += len(in) - 1
 				continue
 			case strings.HasPrefix(t[i:], "--"):
 				i = len(t)
