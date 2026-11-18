@@ -288,6 +288,39 @@ refunds changed base=true db/migrations/0010_keys.sql:3
   id "bigserial"  was="" ref= [] @0
   order_id "bigint" changed was="references orders.id" ref=orders.id [] @3 by name
 `,
+	}, {
+		name: "an edited CREATE TABLE a later base migration altered",
+		diff: edit("@@ -3,3 +3,4 @@\n   body text,\n   legacy text\n+  , pinned boolean\n );\n"),
+		src:  "CREATE TABLE IF NOT EXISTS notes (\n  id bigserial PRIMARY KEY,\n  body text,\n  legacy text\n  , pinned boolean\n);\n",
+		base: notes + "ALTER TABLE notes ADD COLUMN later int;\nALTER TABLE notes ALTER COLUMN body TYPE varchar(80);\n",
+		want: `notes changed base=true db/schema.sql:5
+  id "bigserial"  was="" ref= [primary key] @0
+  body "varchar(80)"  was="" ref= [] @0
+  legacy "text"  was="" ref= [] @0
+  later "int"  was="" ref= [] @0
+  pinned "boolean" new was="" ref= [] @5
+`,
+	}, {
+		name: "table constraints before the columns, a composite foreign key",
+		diff: newFile("db/migrations/0011_lines.sql", "CREATE TABLE lines (\n  PRIMARY KEY (tenant_id, id),\n"+
+			"  FOREIGN KEY (tenant_id, order_id) REFERENCES orders (tenant_id, id),\n  tenant_id bigint,\n  id bigint,\n  order_id bigint\n);\n"),
+		base: schemaBase,
+		want: `lines created base=false db/migrations/0011_lines.sql:1
+  tenant_id "bigint"  was="" ref=orders.tenant_id [primary key] @1 part
+  id "bigint"  was="" ref= [primary key] @1 part
+  order_id "bigint"  was="" ref=orders.id [] @1
+  risk: No index on 'order_id': Postgres doesn't create one for a foreign key.
+orders context base=true :0
+  id "bigserial"  was="" ref= [primary key] @0
+`,
+	}, {
+		name: "a constraint dropped while another keeps the key",
+		diff: newFile("db/migrations/0012_uq.sql", "ALTER TABLE users DROP CONSTRAINT users_email_key;\n"),
+		base: "CREATE TABLE users (\n  id bigserial PRIMARY KEY,\n  email text NOT NULL UNIQUE,\n  CONSTRAINT users_email_uq UNIQUE (email)\n);\n",
+		want: `users changed base=true db/migrations/0012_uq.sql:1
+  id "bigserial"  was="" ref= [primary key] @0
+  email "text"  was="" ref= [not null unique] @0
+`,
 	}}
 	for _, c := range cases {
 		d := Data{Diff: c.diff}

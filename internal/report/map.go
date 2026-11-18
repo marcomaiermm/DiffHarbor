@@ -909,7 +909,7 @@ func (b *mapper) storeParts(st *MapStore, uses map[int]map[storeUse]*MapStoreUse
 }
 
 // storeMigrations adds to the tables the PR's migrations name (6.13): CREATE TABLE, ALTER TABLE, CREATE INDEX … ON
-// and DROP TABLE in what runs on migrate (upLines). A migration that creates a table created it, also when it changes
+// and DROP TABLE in what runs on migrate (upStatements). A migration that creates a table created it, also when it changes
 // it; else one that drops it dropped it; else it changed it.
 func (b *mapper) storeMigrations(table func(name string) (int, bool)) {
 	type key struct {
@@ -1375,27 +1375,23 @@ const (
 	tableTime               = time.Minute
 )
 
-// upLines calls f with each line of d's SQL files that the PR adds and that runs on migrate, comments aside: a
-// goose file's Down part, a .down.sql file and a test's SQL don't count. A file's text is its head's, the diff's lines
-// without it.
-func upLines(d Data, f func(p string, no int, text string)) {
-	migrationLines(d, func(p string, l sqlLine) {
-		if t := strings.TrimSpace(l.text); l.add && t != "" && !strings.HasPrefix(t, "--") {
-			f(p, l.line, l.text)
-		}
-	})
-}
-
-// upStatements calls f with each statement of d's migrations that the PR adds a line to or removes one inside, whole:
-// a column added inside a CREATE TABLE comes with its table. Its line is the PR's first change to it.
-func upStatements(d Data, f func(p string, st sqlLine)) {
+// upStatements calls f with each statement of d's migrations, what runs on migrate (a goose file's Down part, a
+// .down.sql file and a test's SQL don't), that the PR adds a line to or removes one inside, whole:
+// a column added inside a CREATE TABLE comes with its table. Its line is the PR's first change to it. before is each
+// file's text before the PR, as far as the diff shows it.
+func upStatements(d Data, f func(p string, st sqlLine)) (before map[string]string) {
 	var files []string
 	byFile := map[string][]sqlLine{}
+	before = map[string]string{}
 	migrationLines(d, func(p string, l sqlLine) {
 		if _, ok := byFile[p]; !ok {
 			files = append(files, p)
 		}
 		byFile[p] = append(byFile[p], l)
+		before[p] += l.gone
+		if !l.add {
+			before[p] += l.text + "\n"
+		}
 	})
 	for _, p := range files {
 		for _, st := range statements(byFile[p]) {
@@ -1404,10 +1400,11 @@ func upStatements(d Data, f func(p string, st sqlLine)) {
 			}
 		}
 	}
+	return before
 }
 
-// migrationLines calls f with each line of d's SQL files that runs on migrate, add when the PR adds it, cut when it
-// removes lines right before it, its /* */ comments cut: what upLines reads, with the unchanged lines around for a
+// migrationLines calls f with each line of d's SQL files that runs on migrate, add when the PR adds it, gone the lines
+// it removes right before it, its /* */ comments cut, with the unchanged lines around for a
 // statement the PR edits. The changed lines come from the whole diff, not the page's capped view of it.
 func migrationLines(d Data, f func(p string, l sqlLine)) {
 	diff.EachFile(d.Diff, func(p, fd string) {
@@ -1416,56 +1413,78 @@ func migrationLines(d Data, f func(p string, l sqlLine)) {
 		}
 		src := d.Sources[p]
 		var lines []sqlLine
-		added, cut := map[int]bool{}, map[int]bool{}
+		added, gone := map[int]bool{}, map[int]string{}
 		diff.EachLine(fd, func(at, l string) {
 			n, _ := strconv.Atoi(at[strings.LastIndexByte(at, ':')+1:])
 			if l[0] == '-' {
-				cut[n] = true
+				gone[n] += l[1:] + "\n"
 				return
 			}
 			added[n] = l[0] == '+'
 			if src == "" {
-				lines = append(lines, sqlLine{text: l[1:], line: n, add: added[n], cut: cut[n]})
+				lines = append(lines, sqlLine{text: l[1:], line: n, add: added[n], gone: gone[n]})
 			}
 		})
 		if src != "" {
 			for i, t := range strings.Split(src, "\n") {
-				lines = append(lines, sqlLine{text: t, line: i + 1, add: added[i+1], cut: cut[i+1]})
+				lines = append(lines, sqlLine{text: t, line: i + 1, add: added[i+1], gone: gone[i+1]})
 			}
 		}
-		block := false
+		in := inCode
 		for _, l := range lines {
-			if !block && downMark.MatchString(l.text) {
+			if in == inCode && downMark.MatchString(l.text) {
 				break
 			}
-			l.text, block = uncomment(l.text, block)
+			l.text, in = uncomment(l.text, in)
 			f(p, l)
 		}
 	})
 }
 
-// uncomment is a line of SQL without its /* */ comments, block when one is open at its start; open, one is at its end.
-// A -- comment stays: statements cuts it.
-func uncomment(t string, block bool) (string, bool) {
+// Where a line of SQL starts: in code, a /* */ comment, a quoted string or a $$ body.
+const (
+	inCode = iota
+	inBlock
+	inQuote
+	inDollar
+)
+
+// uncomment is a line of SQL without its /* */ comments, outside quotes and $$ bodies; in where it starts, and the
+// result where the next line does. A -- comment stays: statements cuts it.
+func uncomment(t string, in int) (string, int) {
 	var b strings.Builder
-	for t != "" {
-		if block {
-			i := strings.Index(t, "*/")
-			if i < 0 {
-				return b.String(), true
+	for i := 0; i < len(t); i++ {
+		switch {
+		case in == inBlock:
+			if strings.HasPrefix(t[i:], "*/") {
+				in, i = inCode, i+1
 			}
-			t, block = t[i+2:], false
 			continue
+		case in == inQuote:
+			if t[i] == '\'' {
+				in = inCode
+			}
+		case in == inDollar:
+			if strings.HasPrefix(t[i:], "$$") {
+				in = inCode
+				b.WriteByte('$')
+				i++
+			}
+		case strings.HasPrefix(t[i:], "--"):
+			return b.String() + t[i:], in
+		case strings.HasPrefix(t[i:], "/*"):
+			in, i = inBlock, i+1
+			continue
+		case t[i] == '\'':
+			in = inQuote
+		case strings.HasPrefix(t[i:], "$$"):
+			in = inDollar
+			b.WriteByte('$')
+			i++
 		}
-		i := strings.Index(t, "/*")
-		if j := strings.Index(t, "--"); i < 0 || j >= 0 && j < i {
-			b.WriteString(t)
-			break
-		}
-		b.WriteString(t[:i])
-		t, block = t[i+2:], true
+		b.WriteByte(t[i])
 	}
-	return b.String(), block
+	return b.String(), in
 }
 
 // bareName is a table's name in SQL without its schema and quotes: public."items" is items.
@@ -1473,12 +1492,13 @@ func bareName(s string) string {
 	return strings.Trim(s[strings.LastIndexByte(s, '.')+1:], "\"`'[]")
 }
 
-// drops is the tables the migrations of the diff drop: a DROP TABLE in upLines.
+// drops is the tables the migrations of the diff drop: a DROP TABLE the PR writes, over lines or not.
 func (b *mapper) drops() []MapTable {
 	var out []MapTable
 	seen := map[[2]string]bool{}
-	upLines(b.d, func(p string, no int, text string) {
-		m := dropTable.FindStringSubmatch(text)
+	upStatements(b.d, func(p string, st sqlLine) {
+		no := st.line
+		m := dropTable.FindStringSubmatch(st.text)
 		if m == nil {
 			return
 		}

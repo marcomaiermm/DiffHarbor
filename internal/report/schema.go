@@ -79,6 +79,7 @@ type stab struct {
 	idx           []Index
 	named         map[string]named // a constraint's name, lower case, as declared or as Postgres names it
 	created, gone bool
+	partial       bool // the base has more migrations naming it than baseSchema reads
 }
 
 // named is a constraint by name: kind "p" primary key, "u" unique, "f" foreign key, and its columns.
@@ -93,12 +94,11 @@ type sqlLine struct {
 	text string
 	line int
 	add  bool // the PR adds the line; a statement: it adds a line of it or removes one inside it
-	cut  bool // the PR removes lines right before the line
-	edit bool // a statement of the PR's: it was there before, the PR changes it
+	gone string // the lines the PR removes right before the line, each with its newline
 }
 
 // schema is the tables the PR's migrations name (decision 42): the base's migrations that name them (base, nil for
-// none), then the PR's statements in what runs on migrate (upLines).
+// none), then the PR's statements in what runs on migrate (upStatements).
 func schema(d Data, base func(names []string) sdb) []Table {
 	type site struct {
 		path string
@@ -108,7 +108,7 @@ func schema(d Data, base func(names []string) sdb) []Table {
 	first := map[string]site{}
 	var files []string
 	pr := map[string][]sqlLine{} // the statements the PR changes, whole: a column added to a CREATE TABLE too
-	upStatements(d, func(p string, st sqlLine) {
+	old := upStatements(d, func(p string, st sqlLine) {
 		if _, ok := pr[p]; !ok {
 			files = append(files, p)
 		}
@@ -152,10 +152,15 @@ func schema(d Data, base func(names []string) sdb) []Table {
 	if len(order) == 0 {
 		return nil
 	}
-	head := was.clone()
+	head, before := was.clone(), sdb{}
+	for _, p := range files {
+		before.read(old[p])
+	}
 	for _, p := range files {
 		for _, st := range pr[p] {
-			head.apply(st, true, func(string) {})
+			if !head.recreate(st, before) {
+				head.apply(st, true, func(string) {})
+			}
 		}
 	}
 	out := make([]Table, 0, len(order))
@@ -163,6 +168,9 @@ func schema(d Data, base func(names []string) sdb) []Table {
 		t := compare(was[name], head[name])
 		t.Name, t.Path, t.Line = name, first[name].path, first[name].line
 		t.Risks = schemaRisks(t, was[name], head[name], head)
+		if was[name] != nil && was[name].partial {
+			t.Risks = append(t.Risks, fmt.Sprintf("More than %d of the base's migrations name `%s`: only the first %d were read, so later changes to it may be missing here.", maxTableFiles, name, maxTableFiles))
+		}
 		t.Joins = head[name].joins()
 		out = append(out, t)
 	}
@@ -536,7 +544,8 @@ func baseSchema(ctx context.Context, sb *proc.Sandbox, names []string) sdb {
 		}
 	}
 	slices.Sort(specs)
-	if len(specs) > maxTableFiles {
+	partial := len(specs) > maxTableFiles
+	if partial {
 		specs = specs[:maxTableFiles]
 	}
 	texts := catFiles(ctx, sb, specs)
@@ -544,18 +553,21 @@ func baseSchema(ctx context.Context, sb *proc.Sandbox, names []string) sdb {
 	for _, sp := range specs {
 		db.read(texts[sp])
 	}
+	for _, t := range db {
+		t.partial = partial
+	}
 	return db
 }
 
 // read runs the statements of one migration's text, up to its Down part.
 func (db sdb) read(text string) {
 	var lines []sqlLine
-	block := false
+	in := inCode
 	for i, l := range strings.Split(text, "\n") {
-		if !block && downMark.MatchString(l) {
+		if in == inCode && downMark.MatchString(l) {
 			break
 		}
-		l, block = uncomment(l, block)
+		l, in = uncomment(l, in)
 		lines = append(lines, sqlLine{text: l, line: i + 1})
 	}
 	for _, st := range statements(lines) {
@@ -568,13 +580,10 @@ func (db sdb) read(text string) {
 func statements(lines []sqlLine) []sqlLine {
 	var out []sqlLine
 	var b strings.Builder
-	start, quote, dollar, add, edit := 0, false, false, false, false
+	start, quote, dollar, add := 0, false, false, false
 	for _, l := range lines {
-		if l.cut && b.Len() > 0 { // lines removed inside the statement
-			if !add {
-				start = l.line
-			}
-			add, edit = true, true
+		if l.gone != "" && b.Len() > 0 && !add { // lines removed inside the statement
+			add, start = true, l.line
 		}
 		t := l.text
 		for i := 0; i < len(t); i++ {
@@ -603,10 +612,10 @@ func statements(lines []sqlLine) []sqlLine {
 				continue
 			case c == ';':
 				if s := strings.TrimSpace(b.String()); s != "" {
-					out = append(out, sqlLine{text: s, line: start, add: add, edit: edit})
+					out = append(out, sqlLine{text: s, line: start, add: add})
 				}
 				b.Reset()
-				add, edit = false, false
+				add = false
 				continue
 			}
 			if b.Len() == 0 && (c == ' ' || c == '\t') {
@@ -618,7 +627,6 @@ func statements(lines []sqlLine) []sqlLine {
 			if l.add && !add {
 				add, start = true, l.line
 			}
-			edit = edit || !l.add
 			b.WriteByte(c)
 		}
 		if b.Len() > 0 {
@@ -626,7 +634,7 @@ func statements(lines []sqlLine) []sqlLine {
 		}
 	}
 	if s := strings.TrimSpace(b.String()); s != "" {
-		out = append(out, sqlLine{text: s, line: start, add: add, edit: edit})
+		out = append(out, sqlLine{text: s, line: start, add: add})
 	}
 	return out
 }
@@ -641,30 +649,24 @@ func (db sdb) apply(s sqlLine, pr bool, touch func(string)) {
 	if m := ddlCreate.FindStringSubmatchIndex(text); m != nil {
 		name := bareName(text[m[4]:m[5]])
 		touch(name)
-		edit := pr && s.edit // the PR edits the base's CREATE: it runs instead, not after
-		old := db[name]
-		if old != nil && !old.gone && m[2] >= 0 && !edit { // IF NOT EXISTS
+		if old := db[name]; old != nil && !old.gone && m[2] >= 0 { // IF NOT EXISTS
 			return
 		}
 		body, _ := inParens(text, m[1]-1)
 		t := &stab{name: name, created: pr}
 		db[name] = t
-		for _, def := range splitTop(body) {
-			ws := words(def)
-			if len(ws) == 0 || t.constraint(ws, line) {
-				continue
+		var keys [][]string
+		for _, def := range splitTop(body) { // the columns first: a table constraint may come before them
+			switch ws := words(def); {
+			case len(ws) == 0:
+			case isConstraint(ws):
+				keys = append(keys, ws)
+			default:
+				t.add(ws, line)
 			}
-			t.add(ws, line)
 		}
-		if edit && old != nil { // what the edit removes, the PR drops
-			t.idx = old.idx
-			for _, c := range old.cols {
-				if t.find(c.name) == nil && !c.gone {
-					x := *c
-					x.gone, x.line = true, line
-					t.cols = append(t.cols, &x)
-				}
-			}
+		for _, ws := range keys {
+			t.constraint(ws, line)
 		}
 		return
 	}
@@ -853,6 +855,9 @@ func (t *stab) alter(ws []string, line int, pr bool) {
 
 // constraint reads a table constraint (PRIMARY KEY, UNIQUE, FOREIGN KEY) onto its columns; false: ws is a column.
 func (t *stab) constraint(ws []string, line int) bool {
+	if !isConstraint(ws) {
+		return false
+	}
 	name := ""
 	if strings.EqualFold(ws[0], "CONSTRAINT") {
 		if len(ws) < 3 {
@@ -860,10 +865,7 @@ func (t *stab) constraint(ws []string, line int) bool {
 		}
 		name, ws = bareName(ws[1]), ws[2:]
 	}
-	kw := strings.ToUpper(ws[0])
-	if i := strings.IndexByte(kw, '('); i > 0 {
-		kw = kw[:i]
-	}
+	kw := constraintWord(ws)
 	cols, rest := firstList(ws)
 	pr := line > 0
 	switch kw {
@@ -878,14 +880,39 @@ func (t *stab) constraint(ws []string, line int) bool {
 		t.keep(pick(kw == "PRIMARY", "p", "u"), name, cols)
 	case "FOREIGN":
 		if len(cols) > 0 && len(rest) > 1 && strings.EqualFold(rest[0], "REFERENCES") {
-			t.col(cols[0], line, pr).fk(rest[1:])
-			t.keep("f", name, cols[:1])
+			to, refs := refsOf(rest[1:])
+			for i, n := range cols { // a composite key: each column to its own
+				c := t.col(n, line, pr)
+				c.fk(rest[1:])
+				if i < len(refs) {
+					c.ref = to + "." + refs[i]
+				}
+			}
+			t.keep("f", name, cols)
 		}
-	case "CHECK", "INDEX", "KEY", "EXCLUDE", "FULLTEXT", "SPATIAL":
-	default:
-		return false
 	}
 	return true
+}
+
+// isConstraint tells a table constraint from a column definition.
+func isConstraint(ws []string) bool {
+	if strings.EqualFold(ws[0], "CONSTRAINT") {
+		return true
+	}
+	switch constraintWord(ws) {
+	case "PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "INDEX", "KEY", "EXCLUDE", "FULLTEXT", "SPATIAL":
+		return true
+	}
+	return false
+}
+
+// constraintWord is a table constraint's first word, upper case, without a list that follows it unspaced.
+func constraintWord(ws []string) string {
+	kw := strings.ToUpper(ws[0])
+	if i := strings.IndexByte(kw, '('); i > 0 {
+		kw = kw[:i]
+	}
+	return kw
 }
 
 // colDef is a column's definition: its name, its type up to the first constraint, then the constraints, and the
@@ -972,17 +999,71 @@ func (t *stab) unname(name string, line int, pr bool) {
 		return
 	}
 	delete(t.named, strings.ToLower(name))
+	still := func(kind, col string) bool { // another constraint keeps the key
+		for _, o := range t.named {
+			if o.kind == kind && slices.ContainsFunc(o.cols, func(x string) bool { return strings.EqualFold(x, col) }) {
+				return true
+			}
+		}
+		return false
+	}
 	for _, n := range k.cols {
+		if still(k.kind, n) {
+			continue
+		}
 		c := t.col(n, line, pr)
 		switch k.kind {
 		case "p":
-			c.pk, c.keyPos = false, 0
+			c.pk = false
 		case "u":
-			c.unique, c.keyPos = false, 0
+			c.unique = false
 		case "f":
 			c.ref, c.onDelete, c.onUpdate = "", "", ""
 		}
+		if !c.pk && !c.unique {
+			c.keyPos = 0
+		}
 	}
+}
+
+// recreate runs the PR's edit of a CREATE TABLE the base ran, before the tables as the PR's files declared them
+// first: what the edit adds, changes and removes lands on the table as the base's later migrations left it. false:
+// s is no such edit.
+func (db sdb) recreate(s sqlLine, before sdb) bool {
+	m := ddlCreate.FindStringSubmatchIndex(s.text)
+	if m == nil {
+		return false
+	}
+	name := bareName(s.text[m[4]:m[5]])
+	h, was := db[name], before[name]
+	if h == nil || h.gone || was == nil {
+		return false
+	}
+	now := sdb{}
+	now.apply(sqlLine{text: s.text}, false, func(string) {})
+	for _, c := range now[name].cols {
+		if w := was.find(c.name); w != nil && w.differs(c) == "" {
+			continue
+		}
+		x := *c
+		x.line = s.line
+		if old := h.find(c.name); old != nil {
+			*old = x
+		} else {
+			h.cols = append(h.cols, &x)
+		}
+	}
+	for _, c := range was.cols {
+		if now[name].find(c.name) == nil {
+			if old := h.find(c.name); old != nil {
+				old.gone, old.line = true, s.line
+			}
+		}
+	}
+	for n, k := range now[name].named {
+		h.keep(k.kind, n, k.cols)
+	}
+	return true
 }
 
 // fk reads what REFERENCES names and its ON DELETE and ON UPDATE actions; the number of words it read.
@@ -1020,8 +1101,17 @@ func typeOf(ws []string) string {
 
 // refOf is what REFERENCES names: users(id) or users (id) is users.id.
 func refOf(ws []string) string {
+	t, cols := refsOf(ws)
+	if len(cols) > 0 {
+		return t + "." + cols[0]
+	}
+	return t
+}
+
+// refsOf is the table and the columns REFERENCES names.
+func refsOf(ws []string) (string, []string) {
 	if len(ws) == 0 {
-		return ""
+		return "", nil
 	}
 	t, cols := ws[0], ""
 	if i := strings.IndexByte(t, '('); i > 0 {
@@ -1029,11 +1119,7 @@ func refOf(ws []string) string {
 	} else if len(ws) > 1 && strings.HasPrefix(ws[1], "(") {
 		cols = ws[1]
 	}
-	r := bareName(t)
-	if cs := listOf(cols); len(cs) > 0 {
-		r += "." + cs[0]
-	}
-	return r
+	return bareName(t), listOf(cols)
 }
 
 // firstList is the names in the first parenthesized list of ws, and the words after it.

@@ -261,7 +261,7 @@ func TestMapReach(t *testing.T) {
 }
 
 func TestMapDrops(t *testing.T) {
-	sql := "-- +goose Up\nDROP TABLE \"items\";\nDROP TABLE IF EXISTS public.\"tags\", old_things CASCADE;\n-- DROP TABLE commented;\n-- +goose Down\nDROP TABLE \"back\";\n"
+	sql := "-- +goose Up\nDROP TABLE \"items\";\nDROP TABLE IF EXISTS public.\"tags\", old_things CASCADE;\n-- DROP TABLE commented;\nDROP TABLE\n  multi;\n-- +goose Down\nDROP TABLE \"back\";\n"
 	d := Data{
 		Diff:    newFile("db/migrations/0059_drop.sql", sql) + newFile("a/a.go", "package a\n") + newFile("b/b.go", "package b\n"),
 		Sources: map[string]string{"db/migrations/0059_drop.sql": sql},
@@ -271,15 +271,15 @@ func TestMapDrops(t *testing.T) {
 	for _, tb := range m.Tables {
 		got = append(got, fmt.Sprintf("%s:%d", tb.Name, tb.Line))
 	}
-	if want := []string{"items:2", "tags:3", "old_things:3"}; !slices.Equal(got, want) {
+	if want := []string{"items:2", "tags:3", "old_things:3", "multi:5"}; !slices.Equal(got, want) {
 		t.Errorf("tables %v", got)
 	}
-	if k := slices.IndexFunc(m.Deploy, func(x MapDeploy) bool { return x.Kind == "migration" }); k < 0 || m.Deploy[k].Label != "Migration 0059" || len(m.Deploy[k].Drops) != 3 {
+	if k := slices.IndexFunc(m.Deploy, func(x MapDeploy) bool { return x.Kind == "migration" }); k < 0 || m.Deploy[k].Label != "Migration 0059" || len(m.Deploy[k].Drops) != 4 {
 		t.Errorf("deploy %+v", m.Deploy)
 	}
 	// no source: the diff's own lines, a Down marker above them still counts
 	d.Sources = nil
-	if got := BuildMap(nil, d, nil).Tables; len(got) != 3 {
+	if got := BuildMap(nil, d, nil).Tables; len(got) != 4 {
 		t.Errorf("without the source %+v", got)
 	}
 }
@@ -874,20 +874,30 @@ func TestMapWritesByDecl(t *testing.T) {
 }
 
 // What runs on migrate: a statement past the page's diff cap, not one in a /* */ comment, not a test's SQL.
-func TestUpLines(t *testing.T) {
+func TestUpStatements(t *testing.T) {
 	big := strings.Repeat("SELECT 1;\n", 3500) + "DROP TABLE far;\n/*\nDROP TABLE commented;\n*/ DROP TABLE after; /* x */\n"
 	const fx = "testdata/seed.sql"
 	d := Data{Diff: newFile("db/m.sql", big) + newFile(fx, "DROP TABLE fixture;\n"), Sources: map[string]string{"db/m.sql": big}}
 	var got []string
-	upLines(d, func(p string, no int, text string) {
-		if strings.Contains(text, "DROP") {
-			got = append(got, fmt.Sprintf("%s:%d %s", p, no, strings.TrimSpace(text)))
+	upStatements(d, func(p string, st sqlLine) {
+		if strings.Contains(st.text, "DROP") {
+			got = append(got, fmt.Sprintf("%s:%d %s", p, st.line, st.text))
 		}
 	})
-	if want := []string{"db/m.sql:3501 DROP TABLE far;", "db/m.sql:3504 DROP TABLE after;"}; !slices.Equal(got, want) {
+	if want := []string{"db/m.sql:3501 DROP TABLE far", "db/m.sql:3504 DROP TABLE after"}; !slices.Equal(got, want) {
 		t.Errorf("up lines: %q, want %q", got, want)
 	}
-	if s, open := uncomment("a /* b */ c -- /* d", false); s != "a  c -- /* d" || open {
-		t.Errorf("uncomment: %q %v", s, open)
+	for _, c := range []struct {
+		line, want string
+		in, out    int
+	}{
+		{"a /* b */ c -- /* d", "a  c -- /* d", inCode, inCode},
+		{"x text DEFAULT '/*', y int /* z", "x text DEFAULT '/*', y int ", inCode, inBlock},
+		{"still */ CREATE $$ /* kept", " CREATE $$ /* kept", inBlock, inDollar},
+		{"'it''s -- no' -- yes", "'it''s -- no' -- yes", inCode, inCode},
+	} {
+		if s, out := uncomment(c.line, c.in); s != c.want || out != c.out {
+			t.Errorf("uncomment(%q) = %q %d, want %q %d", c.line, s, out, c.want, c.out)
+		}
 	}
 }
