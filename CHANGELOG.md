@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.11.0...v0.12.0) (2026-11-18)
+
+
+### Features
+
+* **report:** the v4 PR report ([#127](https://github.com/marcomaiermm/DiffHarbor/issues/127)) ([56ad233](https://github.com/marcomaiermm/DiffHarbor/commit/56ad23365fe4cb724dddf45467c6a399fe99bcd4))
+* **review:** max_parts "auto" reviews every file ([#128](https://github.com/marcomaiermm/DiffHarbor/issues/128)) ([cc64095](https://github.com/marcomaiermm/DiffHarbor/commit/cc64095ef864c9a56328f4aa4aa16d557ec16d7c))
+* **server:** answers run beside a long review of the same repo ([#129](https://github.com/marcomaiermm/DiffHarbor/issues/129)) ([eb4ae77](https://github.com/marcomaiermm/DiffHarbor/commit/eb4ae7775becd76ff6d77bc28e1616146e00c1f5))
+
 ## [0.11.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.10.0...v0.11.0) (2026-11-16)
 
 
