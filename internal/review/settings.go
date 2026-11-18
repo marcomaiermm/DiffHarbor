@@ -33,8 +33,8 @@ type Settings struct {
 	// A diff past diff.Max reviews in parts of up to diff.Max, one review and verify pass each, at most MaxParts.
 	// "all" (default): always in parts; "ask": code first up to diff.Max, the walkthrough offers a box to tick for
 	// all parts; "off": never.
-	LargePR  string `json:"large_pr"`
-	MaxParts int    `json:"max_parts"` // default 4, at most 8
+	LargePR  string   `json:"large_pr"`
+	MaxParts MaxParts `json:"max_parts"` // default 4, at most 8, or "auto"
 	// The finders per part, each with tools and then its second look, their findings verified together. Unset: one,
 	// the review model's. At most 3; the first is the review model's and always runs.
 	Passes []Pass `json:"passes"`
@@ -246,9 +246,35 @@ func (cfg Settings) Finders(lines int) []Pass {
 // Parts returns the parts a review may split into; confirmed: someone asked for all of them (the box, `review all`).
 func (cfg Settings) Parts(confirmed bool) int {
 	if cfg.LargePR == "" || cfg.LargePR == "all" || confirmed && cfg.LargePR == "ask" {
-		return cmp.Or(cfg.MaxParts, 4)
+		if cfg.MaxParts == MaxPartsAuto {
+			return AutoParts
+		}
+		return int(cmp.Or(cfg.MaxParts, 4))
 	}
 	return 1
+}
+
+// MaxParts is max_parts: 1 to 8, or "auto" (MaxPartsAuto).
+type MaxParts int
+
+// MaxPartsAuto is "auto": as many parts as the diff needs, up to AutoParts.
+const MaxPartsAuto MaxParts = -1
+
+// AutoParts is the parts of "auto": 1.9 MB of diff to review, after generated files and ignore.
+// ponytail: a ceiling so a job fits the server's jobDeadline; files past it are left out as with a number. raise
+// both together if a PR ever needs more.
+const AutoParts = 32
+
+// UnmarshalJSON takes 0 to 8 or "auto".
+func (m *MaxParts) UnmarshalJSON(b []byte) error {
+	if string(b) == `"auto"` {
+		*m = MaxPartsAuto
+		return nil
+	}
+	if err := json.Unmarshal(b, (*int)(m)); err != nil || *m < 0 || *m > 8 {
+		return fmt.Errorf("max_parts %s: want 1 to 8 or \"auto\"", b)
+	}
+	return nil
 }
 
 // SuggestsSplit reports whether a PR with diff d is asked whether it should be several: its changed lines or files
@@ -432,9 +458,6 @@ func LoadSettings(s string) (Settings, error) {
 	}
 	if f := cfg.GitLabFindings; f != "" && f != "review" && f != "discussions" {
 		return Settings{}, fmt.Errorf("gitlab_findings %q: want review or discussions", f)
-	}
-	if cfg.MaxParts < 0 || cfg.MaxParts > 8 {
-		return Settings{}, fmt.Errorf("max_parts %d: want 1 to 8", cfg.MaxParts)
 	}
 	if l := cfg.Learnings; l.Limit() < 0 || l.Limit() > MaxLearnings || l.MaxAgeDays < 0 {
 		return Settings{}, fmt.Errorf("learnings: max %d, max_age_days %d: want max 0 to %d, max_age_days 0 (any) or more", l.Limit(), l.MaxAgeDays, MaxLearnings)

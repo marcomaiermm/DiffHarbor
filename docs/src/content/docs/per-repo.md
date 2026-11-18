@@ -138,7 +138,9 @@ A diff over 60k characters can be reviewed in parts. Each part costs about one n
 | `ask` | Code up to 60k first. On GitHub the walkthrough offers a checkbox to review all files in parts. On both forges `@<bot> review all` does the same. Later pushes keep reviewing in parts. |
 | `off` | Never. |
 
-`max_parts`: default 4, at most 8.
+`max_parts`: default 4, at most 8, or `"auto"`. Files past the last part are left out of the review.
+
+`"auto"` reviews as many parts as the diff needs, so every file gets reviewed. It costs more tokens and time: about one normal review per part, and parts run 2 at a time. A 1 MB diff is about 17 parts, so about 17 reviews' worth of tokens. `"auto"` stops at 32 parts (about 1.9 MB of diff), so a review ends within the server's 9-hour job limit.
 
 ## Passes
 
