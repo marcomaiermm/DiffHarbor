@@ -290,15 +290,16 @@ refunds changed base=true db/migrations/0010_keys.sql:4
 `,
 	}, {
 		name: "an edited CREATE TABLE a later base migration altered",
-		diff: edit("@@ -3,3 +3,4 @@\n   body text,\n   legacy text\n+  , pinned boolean\n );\n"),
-		src:  "CREATE TABLE IF NOT EXISTS notes (\n  id bigserial PRIMARY KEY,\n  body text,\n  legacy text\n  , pinned boolean\n);\n",
+		diff: edit("@@ -2,4 +2,5 @@\n   id bigserial PRIMARY KEY,\n-  body text,\n-  legacy text\n+  body char(9) NOT NULL,\n+  legacy int\n+  , pinned boolean\n );\n"),
+		src:  "CREATE TABLE IF NOT EXISTS notes (\n  id bigserial PRIMARY KEY,\n  body char(9) NOT NULL,\n  legacy int\n  , pinned boolean\n);\n",
 		base: notes + "ALTER TABLE notes ADD COLUMN later int;\nALTER TABLE notes ALTER COLUMN body TYPE varchar(80);\n",
-		want: `notes changed base=true db/schema.sql:5
+		want: `notes changed base=true db/schema.sql:3
   id "bigserial"  was="" ref= [primary key] @0
-  body "varchar(80)"  was="" ref= [] @0
-  legacy "text"  was="" ref= [] @0
+  body "varchar(80)" changed was="nullable" ref= [not null] @3
+  legacy "int" changed was="text" ref= [] @3
   later "int"  was="" ref= [] @0
-  pinned "boolean" new was="" ref= [] @5
+  pinned "boolean" new was="" ref= [] @3
+  risk: Setting 'body' NOT NULL fails while any row holds a null.
 `,
 	}, {
 		name: "table constraints before the columns, a composite foreign key",

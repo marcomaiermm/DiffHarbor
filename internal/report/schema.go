@@ -1040,6 +1040,24 @@ func (t *stab) unname(name string, line int, pr bool) {
 	}
 }
 
+// edit applies what changed from was to now to each part of c a later migration left as was; true when one did.
+func (c *scol) edit(was, now *scol) bool {
+	return slices.Contains([]bool{ // every part, not up to the first that changed
+		take(&c.typ, was.typ, now.typ), take(&c.def, was.def, now.def), take(&c.notNull, was.notNull, now.notNull),
+		take(&c.pk, was.pk, now.pk), take(&c.unique, was.unique, now.unique), take(&c.keyPos, was.keyPos, now.keyPos),
+		take(&c.ref, was.ref, now.ref), take(&c.onDelete, was.onDelete, now.onDelete), take(&c.onUpdate, was.onUpdate, now.onUpdate),
+	}, true)
+}
+
+// take sets *v to now when it is still was and now differs; true when it did.
+func take[T comparable](v *T, was, now T) bool {
+	if *v != was || was == now {
+		return false
+	}
+	*v = now
+	return true
+}
+
 // recreate runs the PR's edit of a CREATE TABLE the base ran, before the tables as the PR's files declared them
 // first: what the edit adds, changes and removes lands on the table as the base's later migrations left it. false:
 // s is no such edit.
@@ -1056,15 +1074,17 @@ func (db sdb) recreate(s sqlLine, before sdb) bool {
 	now := sdb{}
 	now.apply(sqlLine{text: s.text}, false, func(string) {})
 	for _, c := range now[name].cols {
-		if w := was.find(c.name); w != nil && w.differs(c) == "" {
-			continue
-		}
-		x := *c
-		x.line = s.line
-		if old := h.find(c.name); old != nil {
-			*old = x
-		} else {
+		w, old := was.find(c.name), h.find(c.name)
+		switch {
+		case w == nil && old == nil: // the edit adds it
+			x := *c
+			x.line = s.line
 			h.cols = append(h.cols, &x)
+		case w == nil:
+			*old = *c
+			old.line = s.line
+		case old != nil && old.edit(w, c): // a later migration that drops it, or changes the same part, wins
+			old.line = s.line
 		}
 	}
 	for _, c := range was.cols {
