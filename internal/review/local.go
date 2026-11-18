@@ -58,7 +58,7 @@ func Tree(ctx context.Context, sb *proc.Sandbox, cwd, title string, closed []Com
 			scripts = append(scripts, checks.Script{Name: p, File: f})
 		}
 	}
-	parts, _ := diff.Filter(string(out), cwd, nil, cfg.Ignored, cfg.Parts(large))
+	parts, _ := diff.Filter(diff.Unquote(string(out)), cwd, nil, cfg.Ignored, cfg.Parts(large))
 	return Analyze(ctx, Input{Agent: agent.Pi{}, Sandbox: sb, Title: title, Parts: parts, Trusted: TrustedContext(rules, "", ""), Checks: scripts, Closed: closed, Settings: cfg})
 }
 
@@ -120,7 +120,8 @@ func Checkout(ctx context.Context, sb *proc.Sandbox, cloneURL, head, base, token
 			return "", err
 		}
 	}
-	return git("diff", "-M", strings.TrimSpace(mb), head)
+	d, err := git("diff", "-M", strings.TrimSpace(mb), head)
+	return diff.Unquote(d), err
 }
 
 // gitAuth is the env that lets git read the repo with token; none through the vault: the checkout's config sends its
@@ -153,7 +154,7 @@ func Since(ctx context.Context, sb *proc.Sandbox, from, token string) (string, e
 	if err != nil {
 		return "", fmt.Errorf("git diff since %s: %w", from, err)
 	}
-	return out, nil
+	return diff.Unquote(out), nil
 }
 
 // Commit is one commit of the PR: its subject and size.
