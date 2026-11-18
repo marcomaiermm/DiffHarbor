@@ -250,6 +250,7 @@ type mapper struct {
 	other map[string]bool // the folders "Other" joins
 	box   map[string]*MapDeploy
 	gen   map[string]bool
+	cut   map[string]bool // "path:line" of the head lines the diff removes lines right before
 	added map[string]bool
 	drawn []drawnCall          // the calls the map draws: the store walk starts at them too
 	wrote map[*Symbol][]string // the tables a declaration writes, for its callers' chevrons
@@ -261,8 +262,13 @@ type mapper struct {
 func BuildMap(sb *proc.Sandbox, d Data, outside []OutsideCall) *Map {
 	b := &mapper{
 		d: d, v: prepare(d), m: &Map{}, part: map[string]int{}, box: map[string]*MapDeploy{}, gen: map[string]bool{},
-		added: diff.RightLines(d.Diff, false), other: map[string]bool{},
+		added: diff.RightLines(d.Diff, false), other: map[string]bool{}, cut: map[string]bool{},
 	}
+	diff.EachLine(d.Diff, func(at, l string) {
+		if l[0] == '-' {
+			b.cut[at] = true
+		}
+	})
 	root := ""
 	if sb != nil {
 		root = sb.Repo()
@@ -406,8 +412,8 @@ func partLabel(key string, parent bool) string {
 	return last
 }
 
-// stated is whether the PR adds or changes s: the page's State, or a method whose lines the diff adds to (the
-// class methods the code graph knows have no State).
+// stated is whether the PR adds or changes s: the page's State, or a method whose lines the diff adds to or removes
+// lines inside of (the class methods the code graph knows have no State).
 func (b *mapper) stated(s *Symbol) bool {
 	if s.State != "" {
 		return true
@@ -416,7 +422,7 @@ func (b *mapper) stated(s *Symbol) bool {
 		return false
 	}
 	for l := s.From; l <= s.To; l++ {
-		if b.added[s.Path+":"+strconv.Itoa(l)] {
+		if at := s.Path + ":" + strconv.Itoa(l); b.added[at] || l > s.From && b.cut[at] {
 			return true
 		}
 	}
@@ -1695,6 +1701,7 @@ func findImporters(git func(args ...string) []byte, read func(specs []string) ma
 	maps.Copy(mods, seed)
 	texts, cut := map[string]string{}, false
 	var im importing
+	done := false
 	for range 2 {
 		var names []string
 		for m := range mods {
@@ -1734,11 +1741,12 @@ func findImporters(git func(args ...string) []byte, read func(specs []string) ma
 		maps.Copy(texts, got)
 		im = importers(texts, d.file, d.id, tag, seed)
 		if len(im.mods) == len(mods) {
+			done = true
 			break
 		}
 		mods = im.mods
 	}
-	return im, cut
+	return im, cut || !done // a barrel the last round found went unsearched
 }
 
 // byFolder is the part that holds folder k, "Other" when it joins it.

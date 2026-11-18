@@ -4,8 +4,10 @@ import (
 	"cmp"
 	"context"
 	"diffharbor/internal/proc"
+	"errors"
 	"fmt"
 	"maps"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
@@ -71,6 +73,7 @@ type scol struct {
 	from                string
 	line                int
 	gone, guess         bool
+	auto                bool // its value fills itself: GENERATED, AUTO_INCREMENT
 }
 
 type stab struct {
@@ -430,7 +433,7 @@ func schemaRisks(t Table, b, h *stab, head sdb) []string {
 				out = append(out, fmt.Sprintf("`%s` is dropped while %s still references it.", c.name, by))
 			}
 			continue
-		case !h.created && was == nil && !c.guess && c.notNull && (c.def == "" || strings.EqualFold(c.def, "null")) && !c.pk:
+		case !h.created && was == nil && !c.guess && (c.notNull || c.pk) && (c.def == "" || strings.EqualFold(c.def, "null")) && !c.auto && !strings.Contains(c.typ, "serial"):
 			out = append(out, fmt.Sprintf("`%s` is NOT NULL with no default: adding it fails while `%s` has rows.", c.name, t.Name))
 		case was != nil && !was.notNull && c.notNull:
 			out = append(out, fmt.Sprintf("Setting `%s` NOT NULL fails while any row holds a null.", c.name))
@@ -487,7 +490,8 @@ func (db sdb) refsTo(table, col string) string {
 		}
 		for _, c := range t.cols {
 			ref, rc, _ := strings.Cut(c.ref, ".")
-			if !c.gone && strings.EqualFold(ref, table) && (col == "" && n != table || col != "" && strings.EqualFold(rc, col) && !strings.EqualFold(c.name, col)) {
+			self := strings.EqualFold(n, table)
+			if !c.gone && strings.EqualFold(ref, table) && (col == "" && !self || col != "" && strings.EqualFold(rc, col) && !(self && strings.EqualFold(c.name, col))) {
 				by = append(by, "`"+n+"."+c.name+"`")
 			}
 		}
@@ -557,12 +561,17 @@ func compare(b, h *stab) Table {
 // baseSchema is the tables names as the base's .sql files that name them declare them, read at refs/base: the files
 // in path order, which is the order migration tools number them in. partial: some files that name them went unread.
 func baseSchema(ctx context.Context, sb *proc.Sandbox, names []string) (db sdb, partial bool) {
+	failed := false // a search git didn't finish
 	naming := func(names []string) []string {
 		args := []string{"grep", "-l", "-i", "-w", "-I"}
 		for _, n := range names {
 			args = append(args, "-e", n)
 		}
-		out, _ := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", append(args, "refs/base", "--", "*.sql")...)) // exit 1: nothing found
+		out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", append(args, "refs/base", "--", "*.sql")...))
+		var exit *exec.ExitError
+		if err != nil && (!errors.As(err, &exit) || exit.ExitCode() != 1) { // exit 1: nothing found
+			failed = true
+		}
 		var specs []string
 		for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			if l != "" && !strings.HasSuffix(l, ".down.sql") {
@@ -603,7 +612,7 @@ func baseSchema(ctx context.Context, sb *proc.Sandbox, names []string) (db sdb, 
 			read(all)
 		}
 	}
-	return db, partial
+	return db, partial || failed
 }
 
 // read runs the statements of one migration's text, up to its Down part.
@@ -727,7 +736,9 @@ func (db sdb) apply(s sqlLine, pr bool, touch func(string)) {
 			return
 		}
 		for _, a := range splitTop(m[2]) {
-			t.alter(words(a), line, pr)
+			if from, to := t.alter(words(a), line, pr); from != "" {
+				db.retarget(t.name, from, to)
+			}
 		}
 		return
 	}
@@ -781,15 +792,26 @@ func (db sdb) move(t *stab, to string, pr bool) {
 	if pr && t.from == "" {
 		t.from = t.name
 	}
-	delete(db, t.name)
-	for _, o := range db {
+	for _, o := range db { // its own keys too
 		for _, c := range o.cols {
 			if ref, col, _ := strings.Cut(c.ref, "."); strings.EqualFold(ref, t.name) {
 				c.ref = strings.TrimSuffix(to+"."+col, ".")
 			}
 		}
 	}
+	delete(db, t.name)
 	t.name, db[to] = to, t
+}
+
+// retarget points the keys that reference table.from at table.to: the column was renamed.
+func (db sdb) retarget(table, from, to string) {
+	for _, o := range db {
+		for _, c := range o.cols {
+			if strings.EqualFold(c.ref, table+"."+from) {
+				c.ref = table + "." + to
+			}
+		}
+	}
 }
 
 func (db sdb) table(name string) *stab {
@@ -842,7 +864,8 @@ func (t *stab) col(name string, line int, pr bool) *scol {
 }
 
 // alter runs one action of an ALTER TABLE: ADD, DROP, ALTER, MODIFY, CHANGE, RENAME.
-func (t *stab) alter(ws []string, line int, pr bool) {
+// from and to: the column it renames.
+func (t *stab) alter(ws []string, line int, pr bool) (from, to string) {
 	if len(ws) < 2 {
 		return
 	}
@@ -906,8 +929,11 @@ func (t *stab) alter(ws []string, line int, pr bool) {
 		}
 		n, _ := colDef(ws)
 		c := t.col(cmp.Or(old, n.name), line, pr)
-		if pr && c.from == "" && !strings.EqualFold(c.name, n.name) {
-			c.from = c.name
+		if !strings.EqualFold(c.name, n.name) {
+			if pr && c.from == "" {
+				c.from = c.name
+			}
+			from, to = c.name, n.name
 		}
 		t.rename(c, n.name)
 		c.typ, c.def, c.notNull, c.pk, c.unique = n.typ, n.def, n.notNull, n.pk, n.unique
@@ -919,8 +945,10 @@ func (t *stab) alter(ws []string, line int, pr bool) {
 		if pr && c.from == "" {
 			c.from = c.name
 		}
-		t.rename(c, bareName(ws[2]))
+		from, to = c.name, bareName(ws[2])
+		t.rename(c, to)
 	}
+	return from, to
 }
 
 // rename renames column c, in the constraints that name it too. The lists are replaced, not changed: a clone shares
@@ -1023,6 +1051,8 @@ func colDef(ws []string) (*scol, [][2]string) {
 			continue
 		case "NOT":
 			c.notNull = c.notNull || next == "NULL"
+		case "GENERATED", "AUTO_INCREMENT", "AUTOINCREMENT":
+			c.auto = true
 		case "PRIMARY":
 			c.pk = true
 			keys = append(keys, [2]string{"p", name})

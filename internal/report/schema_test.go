@@ -348,6 +348,33 @@ accounts changed base=true db/migrations/0013_mix.sql:6
   email "text"  was="" ref= [not null unique] @0
   risk: Renamed from 'users': code and SQL that still name it break.
 `,
+	}, {
+		name: "same-named keys elsewhere, a self-referencing table renamed, a new primary key, a referenced column renamed",
+		diff: newFile("db/migrations/0014_keys.sql", "ALTER TABLE parent DROP COLUMN id;\nALTER TABLE nodes RENAME TO tree;\n"+
+			"ALTER TABLE plain ADD COLUMN id integer PRIMARY KEY;\nALTER TABLE plain ADD COLUMN n bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY;\n"+
+			"ALTER TABLE orders2 RENAME COLUMN oid TO order_id;\n"),
+		base: "CREATE TABLE parent (\n  id bigint PRIMARY KEY\n);\nCREATE TABLE child (\n  id bigint REFERENCES parent (id)\n);\n" +
+			"CREATE TABLE nodes (\n  id bigserial PRIMARY KEY,\n  up bigint REFERENCES nodes (id)\n);\nCREATE TABLE plain (\n  x int\n);\n" +
+			"CREATE TABLE orders2 (\n  oid bigint PRIMARY KEY\n);\nCREATE TABLE inv (\n  o bigint REFERENCES orders2 (oid)\n);\n",
+		want: `parent changed base=true db/migrations/0014_keys.sql:1
+  id "bigint" dropped was="" ref= [primary key] @1
+  risk: 'id' is dropped while 'child.id' still references it.
+tree changed base=true db/migrations/0014_keys.sql:2
+  id "bigserial"  was="" ref= [primary key] @0
+  up "bigint" changed was="references nodes.id" ref=tree.id [] @0
+  risk: Renamed from 'nodes': code and SQL that still name it break.
+plain changed base=true db/migrations/0014_keys.sql:3
+  x "int"  was="" ref= [] @0
+  id "integer" new was="" ref= [primary key] @3
+  n "bigint" new was="" ref= [primary key] @4
+  risk: 'id' is NOT NULL with no default: adding it fails while 'plain' has rows.
+orders2 changed base=true db/migrations/0014_keys.sql:5
+  order_id "bigint" renamed was="oid" ref= [primary key] @5
+child context base=true :0
+  id "bigint"  was="" ref=parent.id [] @0
+inv context base=true :0
+  o "bigint"  was="" ref=orders2.order_id [] @0
+`,
 	}}
 	for _, c := range cases {
 		d := Data{Diff: c.diff}

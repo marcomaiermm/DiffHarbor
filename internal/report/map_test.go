@@ -920,3 +920,14 @@ func TestUpStatements(t *testing.T) {
 		t.Errorf("statements across a tagged body: %+v", sts)
 	}
 }
+
+// A method the PR only removes lines inside of is changed; lines removed right above it are not.
+func TestStatedRemovals(t *testing.T) {
+	m := &Symbol{Kind: "method", Path: "a.ts", From: 3, To: 6}
+	if b := (&mapper{cut: map[string]bool{"a.ts:5": true}}); !b.stated(m) {
+		t.Error("lines removed inside the method")
+	}
+	if b := (&mapper{cut: map[string]bool{"a.ts:3": true}}); b.stated(m) {
+		t.Error("lines removed above the method")
+	}
+}
