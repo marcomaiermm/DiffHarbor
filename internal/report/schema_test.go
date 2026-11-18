@@ -385,6 +385,23 @@ inv context base=true :0
 kid context base=true :0
   pid "bigint"  was="" ref=parent [] @0
 `,
+	}, {
+		name: "MySQL's ALTER TABLE DROP INDEX, an index dropped and re-created, DROP TABLE CASCADE",
+		diff: newFile("db/migrations/0015_idx.sql", "ALTER TABLE logs2 DROP INDEX logs2_at;\nDROP INDEX orders_x;\n"+
+			"CREATE INDEX orders_x ON orders (a, b);\nDROP TABLE parent CASCADE;\n"),
+		base: "CREATE TABLE logs2 (\n  at int\n);\nCREATE INDEX logs2_at ON logs2 (at);\nCREATE TABLE orders (\n  a int,\n  b int\n);\n" +
+			"CREATE INDEX orders_x ON orders (a);\nCREATE TABLE parent (\n  id bigint PRIMARY KEY\n);\n" +
+			"CREATE TABLE child (\n  pid bigint REFERENCES parent (id)\n);\n",
+		want: `logs2 changed base=true db/migrations/0015_idx.sql:1
+  at "int"  was="" ref= [] @0
+  index logs2_at (at) unique=false dropped @1
+orders changed base=true db/migrations/0015_idx.sql:3
+  a "int"  was="" ref= [] @0
+  b "int"  was="" ref= [] @0
+  index orders_x (a, b) unique=false new @3
+parent dropped base=true db/migrations/0015_idx.sql:4
+  id "bigint"  was="" ref= [primary key] @0
+`,
 	}}
 	for _, c := range cases {
 		d := Data{Diff: c.diff}
@@ -399,5 +416,20 @@ kid context base=true :0
 		if got != c.want {
 			t.Errorf("%s:\n%s\nwant:\n%s", c.name, got, c.want)
 		}
+	}
+}
+
+// TestDatabaseItems: only items in a migration's own file join the database section, not every item because a
+// context card has no path.
+func TestDatabaseItems(t *testing.T) {
+	v := &view{}
+	v.Schema = []Table{{Name: "orders", Path: "db/m/1.sql", Kind: "changed"}, {Name: "users", Kind: "context"}}
+	v.found = []*card{{ID: "a", Place: "db/m/1.sql:3"}, {ID: "b", Place: "api/x.go:1"}, {ID: "c", Place: "db/m/1.sqlx:1"}}
+	var got []string
+	for _, it := range v.database().Items {
+		got = append(got, it.Href)
+	}
+	if !slices.Equal(got, []string{"#a"}) {
+		t.Errorf("items %v", got)
 	}
 }

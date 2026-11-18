@@ -54,7 +54,7 @@ var (
 	ddlAlter     = regexp.MustCompile(`(?is)^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(\S+)\s+(.+)$`)
 	ddlIndex     = regexp.MustCompile(`(?is)^CREATE\s+(UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(\S+?\s+)?ON\s+(?:ONLY\s+)?([^\s(]+)\s*(?:USING\s+\w+\s*)?\(`)
 	ddlDropIndex = regexp.MustCompile(`(?is)^DROP\s+INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+EXISTS\s+)?([^\s,;]+)`)
-	ddlDrop      = regexp.MustCompile(`(?is)^DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(.+?)(?:\s+(?:CASCADE|RESTRICT))?$`)
+	ddlDrop      = regexp.MustCompile(`(?is)^DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(.+?)(?:\s+(CASCADE|RESTRICT))?$`)
 	// colStop ends a column's type: what follows is a constraint
 	colStop = map[string]bool{
 		"NOT": true, "NULL": true, "DEFAULT": true, "PRIMARY": true, "REFERENCES": true, "UNIQUE": true, "CHECK": true,
@@ -556,8 +556,10 @@ func compare(b, h *stab) Table {
 		case ix.Line == 0:
 			continue
 		case ix.State == "dropped":
-		case b != nil && slices.ContainsFunc(b.idx, func(x Index) bool { return x.Name == ix.Name && ix.Name != "" }):
-			continue // the PR re-creates it
+		case b != nil && slices.ContainsFunc(b.idx, func(x Index) bool {
+			return x.Name == ix.Name && ix.Name != "" && x.Cols == ix.Cols && x.Unique == ix.Unique
+		}):
+			continue // the PR re-creates it as it was
 		default:
 			ix.State = "new"
 		}
@@ -759,22 +761,14 @@ func (db sdb) apply(s sqlLine, pr bool, touch func(string)) {
 			ix.Name = bareName(strings.TrimSpace(text[m[4]:m[5]]))
 		}
 		t := db.table(name)
+		t.idx = slices.DeleteFunc(t.idx, func(x Index) bool { return ix.Name != "" && x.Name == ix.Name && x.State == "dropped" })
 		t.idx = append(t.idx, ix)
 		return
 	}
 	if m := ddlDropIndex.FindStringSubmatch(text); m != nil {
-		n := bareName(m[1])
 		for name, t := range db {
-			for i := range t.idx {
-				if t.idx[i].Name != n || t.idx[i].State == "dropped" {
-					continue
-				}
+			if t.dropIndex(bareName(m[1]), line, pr) {
 				touch(name)
-				if pr {
-					t.idx[i].State, t.idx[i].Line = "dropped", line
-				} else {
-					t.idx = slices.Delete(t.idx, i, i+1)
-				}
 				return
 			}
 		}
@@ -790,6 +784,20 @@ func (db sdb) apply(s sqlLine, pr bool, touch func(string)) {
 				} else {
 					delete(db, name)
 				}
+				if strings.EqualFold(m[2], "CASCADE") {
+					db.unref(name)
+				}
+			}
+		}
+	}
+}
+
+// unref drops the keys that reference table, as DROP TABLE ... CASCADE does.
+func (db sdb) unref(table string) {
+	for _, o := range db {
+		for _, c := range o.cols {
+			if ref, _, _ := strings.Cut(c.ref, "."); strings.EqualFold(ref, table) {
+				c.ref, c.onDelete, c.onUpdate = "", "", ""
 			}
 		}
 	}
@@ -844,6 +852,22 @@ func (db sdb) clone() sdb {
 		out[n] = &c
 	}
 	return out
+}
+
+// dropIndex drops the table's index n: marked dropped at line in the PR, gone from the base; false: it has none.
+func (t *stab) dropIndex(n string, line int, pr bool) bool {
+	for i := range t.idx {
+		if t.idx[i].Name != n || t.idx[i].State == "dropped" {
+			continue
+		}
+		if pr {
+			t.idx[i].State, t.idx[i].Line = "dropped", line
+		} else {
+			t.idx = slices.Delete(t.idx, i, i+1)
+		}
+		return true
+	}
+	return false
 }
 
 func (t *stab) find(name string) *scol {
@@ -901,7 +925,12 @@ func (t *stab) alter(ws []string, line int, pr bool) (from, to string) {
 		case "PRIMARY":
 			t.unname(t.name+"_pkey", line, pr)
 			return
-		case "INDEX", "KEY", "CHECK":
+		case "INDEX", "KEY": // MySQL's ALTER TABLE ... DROP INDEX name
+			if ws = skip(ws[1:], "IF", "EXISTS"); len(ws) > 0 {
+				t.dropIndex(bareName(ws[0]), line, pr)
+			}
+			return
+		case "CHECK":
 			return
 		}
 		c := t.col(bareName(ws[0]), line, pr)
@@ -1519,7 +1548,7 @@ func (v *view) database() *dbView {
 	seen := map[string]bool{}
 	for _, k := range slices.Concat(v.Page.Before, v.lead, v.found) {
 		at := cmp.Or(k.GHPlace, k.Place)
-		if seen[k.ID] || k.ID == "" || !slices.ContainsFunc(v.Schema, func(t Table) bool { return strings.HasPrefix(at, t.Path) }) {
+		if seen[k.ID] || k.ID == "" || !slices.ContainsFunc(v.Schema, func(t Table) bool { return t.Path != "" && (at == t.Path || strings.HasPrefix(at, t.Path+":")) }) {
 			continue
 		}
 		seen[k.ID] = true
