@@ -90,7 +90,7 @@ func TestSchema(t *testing.T) {
   memo "text" renamed was="note" ref= [] @4
   legacy_code "text" dropped was="" ref= [] @5
   status "text" new was="" ref= [not null default 'open'] @2
-  index orders_note_idx (note) unique=false dropped @13
+  index orders_note_idx (memo) unique=false dropped @13
   risk: Setting 'total' NOT NULL fails while any row holds a null.
 refunds created base=false db/migrations/0008_status.sql:6
   id "bigserial"  was="" ref= [primary key] @6
@@ -352,11 +352,13 @@ accounts changed base=true db/migrations/0013_mix.sql:6
 		name: "same-named keys elsewhere, a self-referencing table renamed, a new primary key, a referenced column renamed",
 		diff: newFile("db/migrations/0014_keys.sql", "ALTER TABLE parent DROP COLUMN id;\nALTER TABLE nodes RENAME TO tree;\n"+
 			"ALTER TABLE plain ADD COLUMN id integer PRIMARY KEY;\nALTER TABLE plain ADD COLUMN n bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY;\n"+
-			"ALTER TABLE orders2 RENAME COLUMN oid TO order_id;\nALTER TABLE loose ADD PRIMARY KEY (k);\n"),
+			"ALTER TABLE orders2 RENAME COLUMN oid TO order_id;\nALTER TABLE loose ADD PRIMARY KEY (k);\n"+
+			"ALTER TABLE logs RENAME COLUMN uid TO user_id;\nALTER TABLE logs ADD FOREIGN KEY (user_id) REFERENCES users (id);\n"),
 		base: "CREATE TABLE parent (\n  id bigint PRIMARY KEY\n);\nCREATE TABLE child (\n  id bigint REFERENCES parent (id)\n);\n" +
 			"CREATE TABLE nodes (\n  id bigserial PRIMARY KEY,\n  up bigint REFERENCES nodes (id)\n);\nCREATE TABLE plain (\n  x int\n);\n" +
 			"CREATE TABLE orders2 (\n  oid bigint PRIMARY KEY\n);\nCREATE TABLE inv (\n  o bigint REFERENCES orders2 (oid)\n);\n" +
-			"CREATE TABLE kid (\n  pid bigint REFERENCES parent\n);\nCREATE TABLE loose (\n  k int\n);\n",
+			"CREATE TABLE kid (\n  pid bigint REFERENCES parent\n);\nCREATE TABLE loose (\n  k int\n);\n" +
+			"CREATE TABLE logs (\n  uid bigint\n);\nCREATE INDEX logs_uid ON logs (uid);\n",
 		want: `parent changed base=true db/migrations/0014_keys.sql:1
   id "bigint" dropped was="" ref= [primary key] @1
   risk: 'id' is dropped while 'child.id', 'kid.pid' still references it.
@@ -374,6 +376,8 @@ orders2 changed base=true db/migrations/0014_keys.sql:5
 loose changed base=true db/migrations/0014_keys.sql:6
   k "int" changed was="not unique" ref= [primary key] @6
   risk: Setting 'k' NOT NULL fails while any row holds a null.
+logs changed base=true db/migrations/0014_keys.sql:7
+  user_id "bigint" renamed was="uid" ref=users.id [] @8
 child context base=true :0
   id "bigint"  was="" ref=parent.id [] @0
 inv context base=true :0

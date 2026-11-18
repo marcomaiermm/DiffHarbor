@@ -969,6 +969,10 @@ func (t *stab) rename(c *scol, to string) {
 			t.named[n] = k
 		}
 	}
+	word := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(c.name) + `\b`)
+	for i := range t.idx {
+		t.idx[i].Cols = word.ReplaceAllLiteralString(t.idx[i].Cols, to)
+	}
 	c.name = to
 }
 
