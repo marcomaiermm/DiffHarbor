@@ -2,6 +2,7 @@ package server
 
 import (
 	"diffharbor/internal/forge"
+	"maps"
 	"slices"
 	"testing"
 )
@@ -100,8 +101,10 @@ func TestSchedulerAnswersFirst(t *testing.T) {
 		got = append(got, e.Kind+" "+e.Key())
 		s.free("a")
 	}
-	want := []string{"issue_comment a#1", "pull_request a#1", "pull_request a#3", "pull_request_review_comment a#2",
-		"issue_comment a#4", "pull_request a#5"}
+	want := []string{
+		"issue_comment a#1", "pull_request a#1", "pull_request a#3", "pull_request_review_comment a#2",
+		"issue_comment a#4", "pull_request a#5",
+	}
 	if !slices.Equal(got, want) {
 		t.Fatal(got)
 	}
@@ -169,5 +172,46 @@ func TestSchedulerReplaces(t *testing.T) {
 	queued(s, closed, ev("a", 2, ""))
 	if started(s); started(s) != "" || len(s.waiting["a"]) != 1 {
 		t.Fatal("a close was replaced")
+	}
+}
+
+// An answer runs beside its repo's review, in its own lane, one at a time; not beside a job of its PR. A comment that
+// asks for a review, or the ticked box, waits with the reviews.
+func TestSchedulerAnswersBeside(t *testing.T) {
+	mentions[""] = forge.MentionOf("bot")
+	t.Cleanup(func() { delete(mentions, "") })
+	say := func(n int, body string) *forge.Event {
+		e := ev("a", n, "issue_comment")
+		e.Comment.Body = body
+		return e
+	}
+	s := newScheduler(4, 100)
+	queued(s, ev("a", 1, ""))
+	reviewLane, _, _ := s.next()
+	tick := say(4, "")
+	tick.Action = "edited"
+	queued(s, say(1, "@bot why?"), say(2, "@bot why?"), say(3, "@bot review all"), tick, say(5, "@bot why?"))
+	answerLane, e, _ := s.next()
+	if e.Key() != "a#2" || answerLane == reviewLane { // a#1's answer waits for a#1's review
+		t.Fatal(answerLane, e.Key())
+	}
+	if none := started(s); none != "" {
+		t.Fatal("two answers, or a review beside a review:", none)
+	}
+	s.free(answerLane)
+	if a := started(s); a != "a#5" {
+		t.Fatal(a)
+	}
+	s.free(answerLane)
+	s.free(reviewLane)
+	var got []string
+	for e := started(s); e != ""; e = started(s) {
+		got = append(got, e)
+	}
+	if !slices.Equal(got, []string{"a#3", "a#1"}) { // the review lane's command, the answer lane's a#1
+		t.Fatal(got)
+	}
+	if !slices.Equal(slices.Sorted(maps.Keys(s.waiting)), []string{"a"}) || len(s.waiting["a"]) != 1 { // the box after a#3
+		t.Fatal(s.waiting)
 	}
 }

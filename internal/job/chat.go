@@ -67,6 +67,22 @@ func command(mention *regexp.Regexp, body string) string {
 	return strings.ToLower(strings.TrimSpace(mention.ReplaceAllString(body, " ")))
 }
 
+// bareCommand is body's command without the punctuation around it: "(@bot review)" is a review.
+func bareCommand(mention *regexp.Regexp, body string) string {
+	return strings.Trim(command(mention, body), "()[]{}.,:;!? ")
+}
+
+// AsksReview reports whether e, a comment, asks for a review rather than an answer: `@bot review …` or the
+// walkthrough's ticked box (an edit). Chat runs it as a review, so the server queues it with the repo's reviews.
+func AsksReview(mention *regexp.Regexp, e *forge.Event) bool {
+	_, _, ok := reviewCommand(bareCommand(mention, e.Comment.Body))
+	return e.Kind == "issue_comment" && (ok || e.Action == "edited")
+}
+
+// AnswersUID marks the repo id of the uid answers run as: their own, so they run beside the repo's reviews, whose
+// start and end clear the reviews' uid.
+const AnswersUID = "#answers"
+
 // thanks reports whether body is an ack to @bot. A ? anywhere asks, also where the mention took it: "agreed @bot?".
 func thanks(mention *regexp.Regexp, body string) bool {
 	return !strings.Contains(body, "?") && ack.MatchString(command(mention, body))
@@ -436,9 +452,8 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	var finding int64   // the first comment of our thread, our finding: a decision is filed under it
 
 	if e.Kind == "issue_comment" {
-		cmd := command(mention, c.Body)
-		bare := strings.Trim(cmd, "()[]{}.,:;!? ") // "(@bot review)" is a review
-		ticked := e.Action == "edited"             // the walkthrough's box for a review in parts
+		cmd, bare := command(mention, c.Body), bareCommand(mention, c.Body)
+		ticked := e.Action == "edited" // the walkthrough's box for a review in parts
 		if ticked {
 			// GitHub lets only users with write access edit our comment; asked once more, the cost is on the server.
 			ok, err := p.CanWrite(e.Sender.Login)
@@ -518,7 +533,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	if err != nil {
 		return err
 	}
-	sb, err := agent.Workspace(ctx, id)
+	sb, err := agent.Workspace(ctx, id+AnswersUID)
 	if err != nil {
 		if errors.Is(err, proc.ErrCleanup) { // a chat isn't kept to retry: the asker is
 			_ = p.Reply("⚠️ Couldn't start: preparing the workspace failed. Ask again in a while.\n\n" + forge.Mark)
@@ -527,7 +542,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 	}
 	defer sb.Close()
 	sp := Spend{Time: start, Job: "chat", Key: e.Key(), Result: "failed"} // ok once answered: a panic stays failed
-	defer func() { logUsage(ctx, sb, sp, err) }()                              // before sb.Close: it reads the sessions
+	defer func() { logUsage(ctx, sb, sp, err) }()                         // before sb.Close: it reads the sessions
 	read, err := p.ReadToken()
 	if err != nil {
 		return err
