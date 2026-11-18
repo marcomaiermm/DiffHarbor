@@ -265,14 +265,19 @@ const MaxPartsAuto MaxParts = -1
 // both together if a PR ever needs more.
 const AutoParts = 32
 
-// UnmarshalJSON takes 0 to 8 or "auto".
+// UnmarshalJSON takes 1 to 8 or "auto"; 0 and null keep the default, as before "auto".
 func (m *MaxParts) UnmarshalJSON(b []byte) error {
-	if string(b) == `"auto"` {
+	var s string
+	if json.Unmarshal(b, &s) == nil && s == "auto" {
 		*m = MaxPartsAuto
 		return nil
 	}
-	if err := json.Unmarshal(b, (*int)(m)); err != nil || *m < 0 || *m > 8 {
+	var n *int
+	if err := json.Unmarshal(b, &n); err != nil || n != nil && (*n < 0 || *n > 8) {
 		return fmt.Errorf("max_parts %s: want 1 to 8 or \"auto\"", b)
+	}
+	if n != nil {
+		*m = MaxParts(*n)
 	}
 	return nil
 }

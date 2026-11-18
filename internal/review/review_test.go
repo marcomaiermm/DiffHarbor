@@ -174,7 +174,7 @@ func TestSettings(t *testing.T) {
 	if _, err := LoadSettings(`{"min_severity":"high"}`); err == nil {
 		t.Error("min_severity high accepted")
 	}
-	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"max_parts":-1}`, `{"max_parts":"lots"}`, `{"max_parts":2.5}`, `{"gitlab_findings":"each"}`, `{"suggest_split":{"files":-1}}`, `{"suggest_split":{"count":["tests"]}}`, `{"suggest_split":{"skip":["a/{b"]}}`, `{"learnings":{"max":-1}}`, `{"learnings":{"max":101}}`, `{"learnings":{"max_age_days":-1}}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
+	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"max_parts":-1}`, `{"max_parts":"lots"}`, `{"max_parts":2.5}`, `{"max_parts":"6"}`, `{"gitlab_findings":"each"}`, `{"suggest_split":{"files":-1}}`, `{"suggest_split":{"count":["tests"]}}`, `{"suggest_split":{"skip":["a/{b"]}}`, `{"learnings":{"max":-1}}`, `{"learnings":{"max":101}}`, `{"learnings":{"max_age_days":-1}}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
 		if _, err := LoadSettings(bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
@@ -210,6 +210,19 @@ func TestSettings(t *testing.T) {
 	}
 	if parts, left := diff.Filter(big, "", nil, nil, auto.Parts(false)); len(parts) != 12 || len(left) != 0 {
 		t.Errorf("max_parts auto: %d parts, %d left", len(parts), len(left))
+	}
+	var ceiling []string // 33 files of 48k in 33 folders: "auto" stops at 32 parts
+	for k := range 33 {
+		ceiling = append(ceiling, fmt.Sprintf("p%d/a.go", k))
+	}
+	if parts, left := diff.Filter(pr(16000, ceiling...), "", nil, nil, auto.Parts(false)); len(parts) != 32 || len(left) != 1 {
+		t.Errorf("max_parts auto ceiling: %d parts, %d left", len(parts), len(left))
+	}
+	escaped, err1 := LoadSettings(`{"max_parts":"\u0061uto"}`)
+	zero, err2 := LoadSettings(`{"max_parts":0}`)
+	null, err3 := LoadSettings(`{"max_parts":null}`)
+	if escaped.Parts(false) != AutoParts || zero.Parts(false) != 4 || null.Parts(false) != 4 || err1 != nil || err2 != nil || err3 != nil {
+		t.Error("max_parts escaped, 0, null", err1, err2, err3)
 	}
 	lines, _ := LoadSettings(`{"suggest_split":{"lines":300}}`)
 	either, _ := LoadSettings(`{"suggest_split":{"lines":300,"files":20}}`)

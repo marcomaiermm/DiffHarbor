@@ -140,7 +140,7 @@ A diff over 60k characters can be reviewed in parts. Each part costs about one n
 
 `max_parts`: default 4, at most 8, or `"auto"`. Files past the last part are left out of the review.
 
-`"auto"` reviews as many parts as the diff needs, so every file gets reviewed. It costs more tokens and time: about one normal review per part, and parts run 2 at a time. A 1 MB diff is about 17 parts, so about 17 reviews' worth of tokens. `"auto"` stops at 32 parts (about 1.9 MB of diff), so a review ends within the server's 9-hour job limit.
+`"auto"` reviews as many parts as the diff needs, up to 32. It costs more tokens and time: about one normal review per part, and parts run 2 at a time. A 1 MB diff is about 17 parts, so about 17 reviews' worth of tokens. While it runs, other reviews and answers in the same repo wait. 32 parts keep a review within the server's 9-hour job limit and hold at most about 1.9 MB of diff, less when files don't pack well: whatever doesn't fit is left out.
 
 ## Passes
 
