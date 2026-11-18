@@ -250,6 +250,11 @@ func TestReportVersions(t *testing.T) {
 	if _, now := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(5), Conflicts: true}); now.Short != "Blocked · conflict with the base branch" || !now.Blocked {
 		t.Errorf("%+v", now)
 	}
+	// a failed CI check blocks the page, not the commit status: GitHub shows the check, and a rerun would leave it stale
+	failedCI := &report.CI{Checks: []report.Check{{Name: "test", Status: "completed", Conclusion: "failure"}}}
+	if _, now := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(5), CI: failedCI}); now.Blocked || strings.Contains(now.Short, "failed") {
+		t.Errorf("CI in the commit status: %+v", now)
+	}
 	vs, err := Versions(dir)
 	if err != nil || len(vs) != maxVersions || vs[0].SHA != sha(5) || vs[1].SHA != sha(maxVersions+1) || vs[0].At.IsZero() {
 		t.Fatalf("%+v", vs)

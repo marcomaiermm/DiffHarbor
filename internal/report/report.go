@@ -394,7 +394,13 @@ func Render(d Data) ([]byte, Version, error) {
 	if err := tmpl.ExecuteTemplate(&b, "report.html", v); err != nil {
 		return nil, Version{}, fmt.Errorf("report: %w", err)
 	}
-	v.now.Short, v.now.Blocked = v.Page.Status.Short, v.Page.Status.Kind == "blocked"
+	// the commit status leaves the forge's CI out: GitHub shows those checks beside it, and a rerun starts no review,
+	// so a status that took them in would go stale (decision 6)
+	ci := v.CI
+	v.CI = nil
+	own := v.status()
+	v.CI = ci
+	v.now.Short, v.now.Blocked = own.Short, own.Kind == "blocked"
 	return b.Bytes(), v.now, nil
 }
 

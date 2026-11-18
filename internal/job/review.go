@@ -361,6 +361,9 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	}
 	log.Printf("%s %s %s %s: %s", key, sha[:7], kind, stats, desc)
 	s.State = s.State.Update(r, sha, prFiles, only == nil)
+	left := slices.Concat(omitted, r.Failed)
+	slices.Sort(left)
+	s.State.Unreviewed = slices.Compact(left)
 	risk := forge.Risked(stillOpen(threads, open, r, post, seen, lines, posted), failing(r.Tests))
 	s.State.Risk = &risk
 	// a file with a piece left out isn't reviewed: the next push reviews it again

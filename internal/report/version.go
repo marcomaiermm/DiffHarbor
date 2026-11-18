@@ -19,7 +19,7 @@ type Version struct {
 	Tests    map[string]string `json:"tests,omitempty"`    // the tests the page names -> pass, fail, skip or none (not run); unset when none ran
 	Broken   bool              `json:"broken,omitempty"`   // a changed package did not build
 	Items    []Item            `json:"items,omitempty"`    // the open items by kind and place; none in a version from before them
-	// The merge status's short form and whether it blocks, for the commit status (decision 6); the page keeps them.
+	// The merge status's short form and whether it blocks, without the forge's CI, for the commit status (decision 6).
 	Short   string `json:"-"`
 	Blocked bool   `json:"-"`
 }

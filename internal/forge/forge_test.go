@@ -291,6 +291,7 @@ func TestStickyOutline(t *testing.T) {
 		Story: review.Story{Problem: "p", Before: "a 429 failed the review", After: "the fallback reviews"},
 	}, "abcdef1234", []string{"api/a.go", "api/a_test.go", "README.md", "p1/x.go", "p2/x.go", "p3/x.go"}, true)
 	st.Report = "https://review.example/r/o/r/1"
+	st.Unreviewed = []string{"p2/x.go", "p3/x.go"}
 	o := &diff.Outline{
 		Added:      []string{"api/a_test.go: TestA"},
 		Weakened:   []diff.Flag{{At: "api/a_test.go:9", What: "skip/only: `t.Skip()`"}},
@@ -301,7 +302,10 @@ func TestStickyOutline(t *testing.T) {
 	if !ok {
 		t.Fatalf("no walkthrough:\n%s", body)
 	}
-	for _, w := range []string{"(https://review.example/r/o/r/1)", "- Retry on failure?", "**Before:** a 429 failed the review\n**After:** the fallback reviews", "**⚠️ Tests to check**\n- `api/a_test.go:9` skip/only"} {
+	for _, w := range []string{
+		"(https://review.example/r/o/r/1)", "- Retry on failure?", "**Before:** a 429 failed the review\n**After:** the fallback reviews", "**⚠️ Tests to check**\n- `api/a_test.go:9` skip/only",
+		"⚠️ <strong>Not reviewed: 2 files</strong>, past the size one review reads or in a part that failed: no finding covers them</summary>\n<dl>\n<dd>\n<br>\n\n- `p2/x.go`\n- `p3/x.go`",
+	} {
 		if !strings.Contains(top, w) {
 			t.Errorf("above the walkthrough, want %q:\n%s", w, body)
 		}
@@ -316,7 +320,7 @@ func TestStickyOutline(t *testing.T) {
 			t.Errorf("folded sections lack %q:\n%s", w, walk)
 		}
 	}
-	if got := parseState(body); len(got.Flow) != 1 || got.Decisions[0].Text != "Retry on failure?" || got.Story.After != "the fallback reviews" || got.Report == "" {
+	if got := parseState(body); len(got.Flow) != 1 || got.Decisions[0].Text != "Retry on failure?" || got.Story.After != "the fallback reviews" || got.Report == "" || len(got.Unreviewed) != 2 {
 		t.Errorf("state: %+v", got)
 	}
 }
