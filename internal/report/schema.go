@@ -79,7 +79,6 @@ type stab struct {
 	idx           []Index
 	named         map[string]named // a constraint's name, lower case, as declared or as Postgres names it
 	created, gone bool
-	partial       bool // the base has more migrations naming it than baseSchema reads
 }
 
 // named is a constraint by name: kind "p" primary key, "u" unique, "f" foreign key, and its columns.
@@ -168,9 +167,6 @@ func schema(d Data, base func(names []string) sdb) []Table {
 		t := compare(was[name], head[name])
 		t.Name, t.Path, t.Line = name, first[name].path, first[name].line
 		t.Risks = schemaRisks(t, was[name], head[name], head)
-		if was[name] != nil && was[name].partial {
-			t.Risks = append(t.Risks, fmt.Sprintf("More than %d of the base's migrations name `%s`: only the first %d were read, so later changes to it may be missing here.", maxTableFiles, name, maxTableFiles))
-		}
 		t.Joins = head[name].joins()
 		out = append(out, t)
 	}
@@ -224,6 +220,16 @@ func lostIndexes(files []string, pr map[string][]sqlLine, probe, was sdb, base f
 		}
 	}
 	return more
+}
+
+// capped notes on each card of the PR's tables that the base had more migrations naming them than were read: a
+// table they declare, or a change they make to one, may be missing.
+func capped(ts []Table) {
+	for i := range ts {
+		if ts[i].Kind != "context" {
+			ts[i].Risks = append(ts[i].Risks, fmt.Sprintf("More than %d of the base's migrations name these tables: only the first %d were read, so what later ones declare or change may be missing here.", maxTableFiles, maxTableFiles))
+		}
+	}
 }
 
 // maxContext caps the cards of tables outside the PR.
@@ -530,8 +536,8 @@ func compare(b, h *stab) Table {
 }
 
 // baseSchema is the tables names as the base's .sql files that name them declare them, read at refs/base: the files
-// in path order, which is the order migration tools number them in.
-func baseSchema(ctx context.Context, sb *proc.Sandbox, names []string) sdb {
+// in path order, which is the order migration tools number them in. partial: more files name them than it reads.
+func baseSchema(ctx context.Context, sb *proc.Sandbox, names []string) (db sdb, partial bool) {
 	args := []string{"grep", "-l", "-i", "-w", "-I"}
 	for _, n := range names {
 		args = append(args, "-e", n)
@@ -544,19 +550,16 @@ func baseSchema(ctx context.Context, sb *proc.Sandbox, names []string) sdb {
 		}
 	}
 	slices.Sort(specs)
-	partial := len(specs) > maxTableFiles
+	partial = len(specs) > maxTableFiles
 	if partial {
 		specs = specs[:maxTableFiles]
 	}
 	texts := catFiles(ctx, sb, specs)
-	db := sdb{}
+	db = sdb{}
 	for _, sp := range specs {
 		db.read(texts[sp])
 	}
-	for _, t := range db {
-		t.partial = partial
-	}
-	return db
+	return db, partial
 }
 
 // read runs the statements of one migration's text, up to its Down part.

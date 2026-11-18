@@ -206,7 +206,15 @@ func Static(ctx context.Context, sb *proc.Sandbox, d *Data, entered []string) {
 	g := func(limit int, args ...string) ([]hit, bool) { return grepHead(sctx, sb, limit, args...) }
 	d.Env = envVars(g, d.Diff)
 	d.Migrations = migrations(g, d.Diff)
-	d.Schema = schema(*d, func(names []string) sdb { return baseSchema(sctx, sb, names) })
+	cut := false
+	d.Schema = schema(*d, func(names []string) sdb {
+		db, partial := baseSchema(sctx, sb, names)
+		cut = cut || partial
+		return db
+	})
+	if cut {
+		capped(d.Schema)
+	}
 	d.TestChanges = testChanges(g, d.Diff, d.Outline)
 	d.Kinds = fileKinds(g, sb.Repo(), *d, entered)
 	ectx, cancel := context.WithTimeout(ctx, excerptTime)
