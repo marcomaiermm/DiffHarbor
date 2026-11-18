@@ -66,23 +66,17 @@ func (s *scheduler) add(repo string, e *forge.Event) bool {
 
 // next takes the job to start and its lane, if a slot is free and a lane without a running job has one waiting
 // whose name and PR run nothing; the lane is busy until free. A job of a PR that runs one waits, the lane's others
-// may go first.
+// may go first. A repo's answers go before its reviews, as when they shared a queue: a human waits for them.
 func (s *scheduler) next() (string, *forge.Event, bool) {
 	if len(s.busy) >= s.limit {
 		return "", nil, false
 	}
 	for i, repo := range s.turns {
-		if _, ok := s.busy[repo]; ok {
+		j := s.first(repo)
+		if j < 0 || isReview(s.waiting[repo][j]) && s.first(repo+job.AnswersUID) >= 0 {
 			continue // keeps its place: its turn comes once its job is done
 		}
-		q, running := s.waiting[repo], slices.Collect(maps.Values(s.busy))
-		j := slices.IndexFunc(q, func(e *forge.Event) bool {
-			b := busyOf(e)
-			return !slices.ContainsFunc(running, func(o busy) bool { return o.name == b.name || o.pr == b.pr })
-		})
-		if j < 0 {
-			continue
-		}
+		q := s.waiting[repo]
 		e := q[j]
 		s.turns = slices.Delete(s.turns, i, i+1)
 		if q = slices.Delete(q, j, j+1); len(q) > 0 {
@@ -95,6 +89,19 @@ func (s *scheduler) next() (string, *forge.Event, bool) {
 		return repo, e, true
 	}
 	return "", nil, false
+}
+
+// first is the index of the first job of lane repo that may start now, -1 for none: the lane runs nothing, nor do
+// the job's name and PR.
+func (s *scheduler) first(repo string) int {
+	if _, ok := s.busy[repo]; ok {
+		return -1
+	}
+	running := slices.Collect(maps.Values(s.busy))
+	return slices.IndexFunc(s.waiting[repo], func(e *forge.Event) bool {
+		b := busyOf(e)
+		return !slices.ContainsFunc(running, func(o busy) bool { return o.name == b.name || o.pr == b.pr })
+	})
 }
 
 // isReview is a push's review, not a closed PR's delete or an answer.

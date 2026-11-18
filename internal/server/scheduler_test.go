@@ -215,3 +215,26 @@ func TestSchedulerAnswersBeside(t *testing.T) {
 		t.Fatal(s.waiting)
 	}
 }
+
+// With one slot, a repo's answer still goes before its review queued earlier, as in one queue; not before a close.
+func TestSchedulerAnswersFirstOneSlot(t *testing.T) {
+	mentions[""] = forge.MentionOf("bot")
+	t.Cleanup(func() { delete(mentions, "") })
+	answer := ev("a", 2, "issue_comment")
+	answer.Comment.Body = "@bot why?"
+	closed := ev("a", 3, "")
+	closed.Action = "closed"
+	s := newScheduler(1, 100)
+	queued(s, ev("b", 1, ""))
+	other, _, _ := s.next()
+	queued(s, ev("a", 1, ""), answer)
+	s.free(other)
+	if got := started(s); got != "a#2" {
+		t.Fatal("review before the answer:", got)
+	}
+	s = newScheduler(1, 100)
+	queued(s, closed, answer)
+	if got := started(s); got != "a#3" {
+		t.Fatal("answer before an earlier close:", got)
+	}
+}
