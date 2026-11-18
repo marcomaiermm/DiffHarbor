@@ -491,7 +491,8 @@ func (db sdb) refsTo(table, col string) string {
 		for _, c := range t.cols {
 			ref, rc, _ := strings.Cut(c.ref, ".")
 			self := strings.EqualFold(n, table)
-			if !c.gone && strings.EqualFold(ref, table) && (col == "" && !self || col != "" && strings.EqualFold(rc, col) && !(self && strings.EqualFold(c.name, col))) {
+			itself := self && strings.EqualFold(c.name, col) // the dropped column referencing itself
+			if !c.gone && strings.EqualFold(ref, table) && (col == "" && !self || col != "" && strings.EqualFold(rc, col) && !itself) {
 				by = append(by, "`"+n+"."+c.name+"`")
 			}
 		}
