@@ -70,7 +70,7 @@ Runners for both:
 - Jobs run one at a time, or up to [`MAX_JOBS`](../configuration/#storage-and-docker) at once.
 - A repo's reviews never run at the same time, nor its answers, nor those of a repo recreated under its name. With `MAX_JOBS` above `1`, an answer runs beside a review of another PR, so a long review doesn't hold up answers. A comment that asks for a review (`@bot review`, the walkthrough's box) waits with the reviews.
 - A PR's jobs run one at a time.
-- A repo's reviews and its answers take turns with the other repos' as two lanes, so a repo with many PRs doesn't hold up the others.
+- Lanes take turns, not repos: a repo's reviews and its answers are two lanes, so a repo can take two free slots in a row. A repo with many PRs doesn't hold up the others.
 - Within a repo, answers and comments that ask for a review go before reviews, not before an earlier close.
 - A newer push replaces a waiting review of the same PR and stops a running one.
 - Up to 100 jobs wait. Past that the webhook gets a 503.

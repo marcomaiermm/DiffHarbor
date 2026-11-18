@@ -92,16 +92,22 @@ func (s *scheduler) next() (string, *forge.Event, bool) {
 }
 
 // first is the index of the first job of lane repo that may start now, -1 for none: the lane runs nothing, nor do
-// the job's name and PR.
+// the job's name and PR. Nothing passes a waiting close: later jobs don't hold up its delete.
 func (s *scheduler) first(repo string) int {
 	if _, ok := s.busy[repo]; ok {
 		return -1
 	}
 	running := slices.Collect(maps.Values(s.busy))
-	return slices.IndexFunc(s.waiting[repo], func(e *forge.Event) bool {
+	for j, e := range s.waiting[repo] {
 		b := busyOf(e)
-		return !slices.ContainsFunc(running, func(o busy) bool { return o.name == b.name || o.pr == b.pr })
-	})
+		if !slices.ContainsFunc(running, func(o busy) bool { return o.name == b.name || o.pr == b.pr }) {
+			return j
+		}
+		if closing(e) {
+			break
+		}
+	}
+	return -1
 }
 
 // isReview is a push's review, not a closed PR's delete or an answer.

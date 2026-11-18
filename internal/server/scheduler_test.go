@@ -238,3 +238,24 @@ func TestSchedulerAnswersFirstOneSlot(t *testing.T) {
 		t.Fatal("answer before an earlier close:", got)
 	}
 }
+
+// A job of another PR doesn't pass a close that waits for its PR's answer.
+func TestSchedulerCloseBarrier(t *testing.T) {
+	mentions[""] = forge.MentionOf("bot")
+	t.Cleanup(func() { delete(mentions, "") })
+	answer := ev("a", 1, "issue_comment")
+	answer.Comment.Body = "@bot why?"
+	closed := ev("a", 1, "")
+	closed.Action = "closed"
+	s := newScheduler(4, 100)
+	queued(s, answer)
+	answers, _, _ := s.next()
+	queued(s, closed, ev("a", 2, ""))
+	if got := started(s); got != "" {
+		t.Fatal("passed the close:", got)
+	}
+	s.free(answers)
+	if got := started(s); got != "a#1" {
+		t.Fatal(got)
+	}
+}
