@@ -13,3 +13,9 @@ export async function allOrders(r: Repository<Order>) { return r.find(); }
 export async function txCount() { const n = await db.transaction(async (tx) => tx.insert(users).values(1)); return n; }
 import * as schema from "./schema";
 export async function nsWrite(v: unknown) { await db.insert(schema.users).values(v); }
+export const recentSq = db.select().from(orders).as("recent");
+export async function listRecent() { return db.select().from(recentSq); }
+export async function listItems(team: string) { return db.select().from(orders).where(team); }
+export async function deepItems(team: string) { return listItems(team); }
+export async function deepList(team: string) { return deepUsers(team); }
+export async function deepUsers(team: string) { return db.select().from(users).where(team); }

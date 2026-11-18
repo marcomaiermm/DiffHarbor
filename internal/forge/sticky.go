@@ -25,10 +25,14 @@ type State struct {
 	Patches map[string]string `json:"patches"`          // diff.PatchIDs at SHA: what a push has to change to get reviewed
 	Large   bool              `json:"large,omitempty"`  // someone asked for all parts: later pushes get them too
 	Drafts  bool              `json:"drafts,omitempty"` // someone asked for a review of the draft: drafts opt_in reviews its pushes
+	// Unreviewed is the files the last review left out: past its size limit, or in a part that failed. Each review
+	// gets every file not reviewed yet, so its own list is the whole of them.
+	Unreviewed []string `json:"unreviewed,omitempty"`
 	// The report's reading order and the questions for a person, from the last full review that asked for them.
 	Flow      []review.Step     `json:"flow,omitempty"`
 	Decisions []review.Decision `json:"decisions,omitempty"`
 	Story     review.Story      `json:"story,omitzero"`
+	Brief     []review.Sentence `json:"brief,omitempty"`
 	Report    string            `json:"report,omitempty"` // the report's URL, "" = none
 	// The report folder's secret in its URL. Here, as only who can read the PR sees this comment; kept across pushes,
 	// restarts and a close, so a reopened PR's report comes back at its old link.
@@ -189,6 +193,10 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 		if len(o.Weakened) > 0 {
 			b.WriteString("**⚠️ Tests to check**\n" + list(o.Weakened, func(f diff.Flag) string { return "`" + f.At + "` " + f.What }) + "\n\n")
 		}
+		if n := len(st.Unreviewed); n > 0 { // findings cover only part of the PR: said before anything reads as whole
+			b.WriteString(fold("⚠️ <strong>Not reviewed: "+text.Count(n, "file")+"</strong>, past the size one review reads or in a part that failed: no finding covers them",
+				list(st.Unreviewed, func(f string) string { return "`" + f + "`" }), false, false) + "\n\n")
+		}
 		var w strings.Builder // the walkthrough
 		w.WriteString(st.Summary + "\n\n")
 		skip := o.Skippable()
@@ -289,6 +297,9 @@ func (st State) Update(r review.Result, sha string, prFiles []string, full bool)
 	}
 	if full || st.Flow == nil {
 		st.Flow, st.Decisions, st.Story = r.Flow, r.Decisions, r.Story
+	}
+	if full {
+		st.Brief = r.Brief
 	}
 	st.SHA, st.Files = sha, files
 	return st

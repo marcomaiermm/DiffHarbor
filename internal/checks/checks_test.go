@@ -131,7 +131,7 @@ func TestMonorepoChecks(t *testing.T) {
 	out, _ := Run(context.Background(), sb, nil, patch, []string{"svc/cmd/a.go", "svc/b.go", "apps/web/src/a.ts"}, func(f string) bool { return f != "svc/b.go" }, false, nil)
 	for _, want := range []string{
 		"pnpm @" + filepath.Base(repo) + " install", "gofmt @svc -l cmd/a.go b.go", "go @svc vet ./. ./cmd",
-		"go @svc test -json -short -count=1 -timeout=4m ./cmd", "vitest @web related --run --reporter=dot src/a.ts",
+		"go @svc test -json -short -count=1 -timeout=4m ./cmd", "vitest @web related --run --reporter=dot --reporter=json --outputFile=" + filepath.Join(sb.Dir, "test-results.json") + " src/a.ts",
 		"### golangci-lint (added lines) in svc/ (paths relative to it)\nb.go:1:1: golangci run", "b.go:1:6: unreachable func: x",
 	} {
 		if !strings.Contains(out, want) {
@@ -264,5 +264,91 @@ func TestLineWriter(t *testing.T) {
 	}
 	if !slices.Equal(got, []string{"a", "bc"}) {
 		t.Errorf("lines %q", got)
+	}
+}
+
+// vitest's and jest's JSON reporters write one shape: tests by "suite > test", a file that ran no test is broken.
+func TestJSONTests(t *testing.T) {
+	js := `{"numTotalTests":4,"testResults":[
+{"name":"/w/repo/web/a.test.ts","status":"failed","assertionResults":[
+ {"ancestorTitles":["cart","total"],"title":"adds tax","status":"passed"},
+ {"ancestorTitles":[],"title":"top","status":"failed"},
+ {"ancestorTitles":["cart"],"title":"later","status":"todo"}]},
+{"name":"/w/repo/web/b.test.ts","status":"failed","message":"Cannot find module","assertionResults":[]},
+{"name":"/w/repo/web/d.test.ts","status":"passed","assertionResults":[]},
+{"name":"/w/repo/web/c.test.ts","status":"passed","assertionResults":[{"ancestorTitles":[],"title":"top","status":"passed"}]}]}`
+	var got Tests
+	jsonTests([]byte(js), "/w/repo", &got)
+	want := map[string]string{"cart > total > adds tax": "pass", "top": "fail", "cart > later": "skip"}
+	if !maps.Equal(got.Ran, want) || !slices.Equal(got.Broken, []string{"web/b.test.ts"}) {
+		t.Errorf("ran %v, broken %v", got.Ran, got.Broken)
+	}
+	jsonTests([]byte("not json"), "/w/repo", &got)
+	if len(got.Ran) != 3 {
+		t.Error("bad json changed the results")
+	}
+}
+
+// A file that fails after its tests passed (an afterAll that throws) is broken; one a failed test explains is not.
+func TestJSONTestsHookFails(t *testing.T) {
+	js := `{"testResults":[
+{"name":"/w/repo/web/a.test.ts","status":"failed","assertionResults":[{"ancestorTitles":[],"title":"a","status":"passed"}]},
+{"name":"/w/repo/web/b.test.ts","status":"failed","assertionResults":[{"ancestorTitles":[],"title":"b","status":"failed"}]}]}`
+	var got Tests
+	jsonTests([]byte(js), "/w/repo", &got)
+	if got.Ran["a"] != "pass" || got.Ran["b"] != "fail" || !slices.Equal(got.Broken, []string{"web/a.test.ts"}) {
+		t.Errorf("ran %v, broken %v", got.Ran, got.Broken)
+	}
+}
+
+// The checks take vitest's results from its JSON reporter's file, the dot reporter's text stays the hint.
+func TestVitestJSON(t *testing.T) {
+	defer func(pi bool) { proc.AsPi = pi }(proc.AsPi)
+	proc.AsPi = false
+	sb, repo := sandbox(t)
+	os.WriteFile(filepath.Join(repo, "package.json"), []byte("{}"), 0o644)
+	os.WriteFile(filepath.Join(repo, "a.ts"), nil, 0o644)
+	os.MkdirAll(filepath.Join(repo, "node_modules", ".bin"), 0o755)
+	os.WriteFile(filepath.Join(repo, "node_modules", ".bin", "vitest"), []byte(`#!/bin/sh
+for a; do case "$a" in --outputFile=*) out="${a#--outputFile=}";; esac; done
+echo '{"testResults":[{"name":"a.test.ts","assertionResults":[{"ancestorTitles":["a"],"title":"works","status":"passed"}]}]}' > "$out"
+echo "dot output"
+`), 0o755)
+	out, ran := Run(context.Background(), sb, nil, "", []string{"a.ts"}, func(string) bool { return true }, false, nil)
+	if ran.Ran["a > works"] != "pass" || !strings.Contains(out, "dot output") {
+		t.Errorf("ran %v, out:\n%s", ran.Ran, out)
+	}
+}
+
+// BaseCI reads the base branch with git: a workflow the head adds or edits doesn't count.
+func TestBaseCI(t *testing.T) {
+	defer func(pi bool) { proc.AsPi = pi }(proc.AsPi)
+	proc.AsPi = false
+	sb, repo := sandbox(t)
+	git := func(args ...string) {
+		c := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	wf := filepath.Join(repo, ".github", "workflows")
+	os.MkdirAll(wf, 0o755)
+	os.WriteFile(filepath.Join(wf, "lint.yml"), []byte("on: pull_request\njobs:\n  l:\n    steps:\n      - run: pnpm lint\n"), 0o644)
+	os.WriteFile(filepath.Join(wf, "test.yml"), []byte("on: pull_request\njobs:\n  t:\n    steps:\n      - run: go test ./...\n"), 0o644)
+	os.WriteFile(filepath.Join(wf, "notes.md"), nil, 0o644)
+	git("init", "-q")
+	git("add", ".")
+	git("commit", "-qm", "base")
+	git("update-ref", "refs/base", "HEAD")
+	os.WriteFile(filepath.Join(wf, "test.yml"), []byte("on: pull_request\njobs:\n  t:\n    steps:\n      - run: echo skipped\n"), 0o644)
+	os.WriteFile(filepath.Join(wf, "added.yml"), []byte("on: pull_request\njobs:\n  t:\n    steps:\n      - run: go test ./...\n"), 0o644)
+	git("add", ".")
+	git("commit", "-qm", "head")
+	tests, files := BaseCI(t.Context(), sb)
+	if tests != "test.yml" || !slices.Equal(files, []string{".github/workflows/lint.yml", ".github/workflows/test.yml"}) {
+		t.Errorf("tests %q, files %q", tests, files)
+	}
+	if got := CITests(t.Context(), sb); got != "added.yml" {
+		t.Errorf("the head's: %q", got)
 	}
 }

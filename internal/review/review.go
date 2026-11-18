@@ -153,6 +153,7 @@ type Comment struct {
 	// review model's JSON: it must not vouch for itself.
 	Evidence string     `json:"-"`
 	Fold     bool       `json:"-"`               // Settings.Fold: in the review's summary, folded, not inline
+	Earlier  bool       `json:"-"`               // a finding of an earlier review, still open: the report flags it
 	Again    *int       `json:"again,omitempty"` // the fixed earlier finding it brings back, an index into Input.Addressed
 	pass     int        // the reviewer pass that reported it: capped's limits hold per pass
 	noCause  bool       // the verifier named nothing that reaches it in normal operation: Settings.Fold folds it
@@ -220,6 +221,7 @@ type Result struct {
 	Split       []string          `json:"split,omitempty"`       // changes that could each merge on their own, with Input.Guide
 	Story       Story             `json:"story,omitzero"`        // the problem and one case before and after, with Input.Guide
 	Routine     []Routine         `json:"routine,omitempty"`     // hunks a person can skip, with Input.Guide
+	Brief       []Sentence        `json:"brief,omitempty"`       // 2-3 sentences, each with a place that exists at the head, with Input.Guide
 	Fixed       []int             `json:"fixed,omitempty"`       // indexes into input.prior
 	Comments    []Comment         `json:"comments"`
 	Failed      []string          `json:"-"` // files of parts whose review failed: not reviewed
@@ -409,6 +411,9 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 		wg.Wait()
 	}
 	r, tag, err := merge(ps, m, vm, ci)
+	if err == nil && in.Guide {
+		addBrief(ctx, in, ps, &r, cmp.Or(agent.VerifyFor(rm), vm))
+	}
 	if why := in.Settings.Inversion(); why != "" {
 		tag += " · " + why // the reviewer isn't the default's: say why
 	}
@@ -693,6 +698,7 @@ func merge(ps []part, m, vm, ci string) (Result, string, error) {
 		r.Split = append(r.Split, p.r.Split...)
 		r.Story = cmp.Or(r.Story, p.r.Story) // the first part that tells one: a second case would only repeat it
 		r.Routine = append(r.Routine, p.r.Routine...)
+		r.Brief = append(r.Brief, p.r.Brief...) // a single part's only
 		r.Effort = max(r.Effort, p.r.Effort)
 		r.Fixed = append(r.Fixed, p.r.Fixed...)
 		r.Comments = append(r.Comments, p.r.Comments...)
@@ -749,6 +755,9 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string, again boo
 	system := reviewSystem + sch + in.Trusted
 	if in.Guide {
 		prompt += guideSchema
+		if len(in.Parts) == 1 {
+			prompt += briefSchema
+		}
 	}
 	if in.Guide && in.split {
 		prompt += splitSchema

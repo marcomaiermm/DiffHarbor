@@ -15,13 +15,14 @@ import (
 
 // fakeAgent answers each pass from a queue of replies per pass name and records the passes it ran.
 type fakeAgent struct {
-	mu      sync.Mutex // parts run at once
-	replies map[string][]string
-	calls   []string
-	systems map[string]string // the last system prompt per pass name
-	tasks   map[string]string // the last task per pass name
-	cont    [][2]string       // the name and system prompt of each Continue
-	panics  []string          // the passes whose Run panics
+	mu       sync.Mutex // parts run at once
+	replies  map[string][]string
+	calls    []string
+	systems  map[string]string // the last system prompt per pass name
+	tasks    map[string]string // the last task per pass name
+	cont     [][2]string       // the name and system prompt of each Continue
+	contTask map[string]string // the last task per Continue's pass name
+	panics   []string          // the passes whose Run panics
 }
 
 func (f *fakeAgent) reply(name string) (string, error) {
@@ -56,6 +57,10 @@ func (f *fakeAgent) Continue(_ context.Context, _ *proc.Sandbox, name, system, t
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cont = append(f.cont, [2]string{name, system})
+	if f.contTask == nil {
+		f.contTask = map[string]string{}
+	}
+	f.contTask[name] = task
 	if strings.HasPrefix(task, repeatsTask[:30]) {
 		f.calls = append(f.calls, name+" repeats")
 		return f.reply(name + " repeats")
@@ -282,17 +287,6 @@ func TestAnalyze(t *testing.T) {
 	}
 	if r, _, _ = merge([]part{{r: Result{Split: []string{"cache"}}}}, "m", "m", ""); len(r.Decisions) != 0 {
 		t.Fatalf("one change: %+v", r.Decisions)
-	}
-}
-
-func TestExplain(t *testing.T) {
-	f := &fakeAgent{replies: map[string][]string{"explain": {`{"1":"parses the flag","3":"ignored"}`}}}
-	got := Explain(context.Background(), f, &proc.Sandbox{Dir: t.TempDir()}, "openai/m:low", "t", []string{"a.go\nfunc A()", "b.go\nfunc B()"})
-	if !slices.Equal(got, []string{"parses the flag", ""}) || !slices.Equal(f.calls, []string{"explain repair"}) {
-		t.Errorf("explain %q, calls %q", got, f.calls)
-	}
-	if got := Explain(context.Background(), f, nil, "m", "t", nil); len(got) != 0 || len(f.calls) != 1 {
-		t.Error("no declarations, still a call")
 	}
 }
 

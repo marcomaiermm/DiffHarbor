@@ -58,7 +58,7 @@ func Tree(ctx context.Context, sb *proc.Sandbox, cwd, title string, closed []Com
 			scripts = append(scripts, checks.Script{Name: p, File: f})
 		}
 	}
-	parts, _ := diff.Filter(string(out), cwd, nil, cfg.Ignored, cfg.Parts(large))
+	parts, _ := diff.Filter(diff.Unquote(string(out)), cwd, nil, cfg.Ignored, cfg.Parts(large))
 	return Analyze(ctx, Input{Agent: agent.Pi{}, Sandbox: sb, Title: title, Parts: parts, Trusted: TrustedContext(rules, "", ""), Checks: scripts, Closed: closed, Settings: cfg})
 }
 
@@ -120,7 +120,8 @@ func Checkout(ctx context.Context, sb *proc.Sandbox, cloneURL, head, base, token
 			return "", err
 		}
 	}
-	return git("diff", "-M", strings.TrimSpace(mb), head)
+	d, err := git("diff", "-M", strings.TrimSpace(mb), head)
+	return diff.Unquote(d), err
 }
 
 // gitAuth is the env that lets git read the repo with token; none through the vault: the checkout's config sends its
@@ -153,7 +154,7 @@ func Since(ctx context.Context, sb *proc.Sandbox, from, token string) (string, e
 	if err != nil {
 		return "", fmt.Errorf("git diff since %s: %w", from, err)
 	}
-	return out, nil
+	return diff.Unquote(out), nil
 }
 
 // Commit is one commit of the PR: its subject and size.
@@ -162,7 +163,7 @@ type Commit struct {
 	Author          string // its author's name
 	Files, Add, Del int
 	Lines           []string // "+" or "-" and the trimmed line, for each it adds or removes: which commit brought a declaration
-	Paths           []string // Behind's: the files it changes
+	Paths           []string // Behind's and Changes': the files it changes
 }
 
 // maxCommits is the commits a report lists.
@@ -230,18 +231,42 @@ func authorsOf(log string) (ps []string) {
 // Behind lists the base's commits the PR doesn't have yet, newest first, from a Checkout: what moved on under it.
 // nil when git fails.
 func Behind(ctx context.Context, sb *proc.Sandbox) []Commit {
+	return named(ctx, sb, "HEAD..refs/base")
+}
+
+// Changes lists the PR's commits newest first, merges aside, with the files each changes: its tickets' share of the
+// PR. Unlike Commits it reads no patch and keeps every commit. nil when git fails.
+func Changes(ctx context.Context, sb *proc.Sandbox) []Commit {
+	return named(ctx, sb, "refs/base..HEAD")
+}
+
+// named is the commits of rng with their subjects and the files they change.
+func named(ctx context.Context, sb *proc.Sandbox, rng string) []Commit {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "log", "--no-merges", "--no-renames", "--format=%x00%H%x09%s",
-		"--name-only", "HEAD..refs/base"))
+	// -z: the names as they are, none quoted; each commit starts with an empty record, as no name is empty
+	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "log", "-z", "--no-merges", "--no-renames",
+		"--format=%x00%H%x09%s", "--name-only", rng))
 	if err != nil {
 		return nil
 	}
 	var cs []Commit
-	for c := range strings.SplitSeq(string(out), "\x00") {
-		head, files, _ := strings.Cut(c, "\n")
-		if sha, subject, ok := strings.Cut(head, "\t"); ok {
-			cs = append(cs, Commit{SHA: sha, Subject: subject, Paths: strings.Fields(files)})
+	head := false
+	for r := range strings.SplitSeq(string(out), "\x00") {
+		switch {
+		case r == "":
+			head = true
+		case head:
+			head = false
+			if sha, subject, ok := strings.Cut(r, "\t"); ok {
+				cs = append(cs, Commit{SHA: sha, Subject: subject})
+			}
+		case len(cs) > 0:
+			c := &cs[len(cs)-1]
+			if len(c.Paths) == 0 {
+				r = strings.TrimPrefix(r, "\n") // the line between the subject and the names
+			}
+			c.Paths = append(c.Paths, r)
 		}
 	}
 	return cs

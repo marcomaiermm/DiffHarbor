@@ -63,3 +63,21 @@ git rev-parse pr`)
 		t.Fatalf("Since an unknown head: %q", d)
 	}
 }
+
+// A name git would quote (a quote, a tab) is the file's name as it is.
+func TestChangesQuotedName(t *testing.T) {
+	defer func(pi bool) { proc.AsPi = pi }(proc.AsPi)
+	proc.AsPi = false
+	sb := &proc.Sandbox{Dir: t.TempDir()}
+	c := exec.Command("sh", "-c", `set -e
+git init -q "$0"; cd "$0"
+git commit -q --allow-empty -m base; git update-ref refs/base HEAD
+echo 1 > 'a"b.txt'; printf 1 > "$(printf 'c\td.txt')"; echo 1 > e.txt; git add .; git commit -q -m pr`, sb.Repo())
+	c.Env = append(c.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
+	if cs := Changes(context.Background(), sb); len(cs) != 1 || strings.Join(cs[0].Paths, ",") != "a\"b.txt,c\td.txt,e.txt" {
+		t.Fatalf("Changes: %+v", cs)
+	}
+}

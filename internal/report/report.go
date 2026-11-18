@@ -12,6 +12,7 @@ import (
 	"diffharbor/internal/proc"
 	"diffharbor/internal/review"
 	"diffharbor/internal/text"
+	"diffharbor/internal/ticket"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -22,7 +23,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -43,6 +43,8 @@ type Data struct {
 	Decisions   []review.Decision
 	Story       review.Story
 	Flow        []review.Step
+	Outside     []OutsideCall     // systems outside the repo the changed code calls, found by Symbols: see Outside
+	Brief       []review.Sentence // the change in brief: 2-3 sentences, each with a place
 	Walkthrough map[string]string // path -> one line
 	Commits     []review.Commit
 	Outline     diff.Outline
@@ -50,19 +52,49 @@ type Data struct {
 	Diff        string           // the whole PR diff
 	Routine     []review.Routine // hunks the review calls routine: folded
 	Symbols     map[string][]Symbol
+	Shapes      []Shape            // uses spec 9.2: the structures Ref.Shape, Hop.Shape and Joint.Shape index, within its budget
+	Nodes       []Node             // the stations Ref.Up, Symbol.Reach and Node.Up/Down index
+	UsesCut     bool               // the budget (uses spec 9.3) left a use's structure out: the sheet's note
 	Themes      review.SyntaxTheme // Shiki's, by color mode; unset: Tokyo Night
-	Whys        map[string]string  // path NUL name -> what a declaration Asks named is for: review.Explain's
 	Others      []Other            // open PRs that change files this one does
 	Behind      []review.Commit    // the base's commits since the fork point (review.Behind)
 	Conflicts   bool               // the forge says the PR conflicts with its base
 	Forge       Forge
-	Prev        *Version          // the version before: the report marks what changed since; nil for the first
 	Dropped     []review.Comment  // what the verifier dropped, its reason in Evidence
 	Failed      []string          // files whose review part failed: not reviewed
 	Omitted     []string          // files the review left out, all of them or a piece: too large
 	Docs        []review.Doc      // the reference docs the review read: listed by title and link, never their text
 	Tests       checks.Tests      // what the checks' test runs report at SHA; empty when none ran
+	PR          PR                // the header
+	Knowledge   map[string]Know   // by path in the PR: Learn; Aggregate sums up a part
 	Sources     map[string]string // the head's text of changed files, for the lines between hunks (see Sources)
+	Map         *Map              // the map of the change (BuildMap); nil when there is none to draw
+	Bot         string            // the bot's handle: @Bot talks to it
+	Threads     map[string]int64  // the comment id of each finding's inline thread, by ThreadKey; none for one not posted inline
+	Rules       Rules             // What the review covered, "Rules": the rules files read on the base, and whether a cut applied
+	Parts       int               // the review's parts: Coverage, "ran in 4 parts"
+	TestChanges TestChanges       // Test changes, its three groups (Static)
+	Kinds       []FileKind        // What the review covered, files by kind (Static)
+	Env         map[string]EnvVar // Before you merge, Environment: what reads each variable at the head (Static); nil: not searched
+	Migrations  []Migration       // Before you merge, Order: the docs and tests that name each migration (Static)
+	Schema      []Table           // Changes, Database: the tables the PR's migrations create, change or drop (Static)
+	Excerpts    []Excerpt         // lines of unchanged files and of the base the page quotes, beside Sources (Static, Excerpts)
+	CI          *CI               // the forge's checks at SHA and the CI workflows on the base; nil when the forge reads none
+	Members     *Members          // who has access to the repo now; nil when the forge can't list them
+	// The tickets section (5.9). Tickets: the cards, open first, then done, by key. FollowUps: the follow-ups line,
+	// with their states. TicketErrs: key -> why the tracker didn't answer, so the page names the tickets it couldn't
+	// read; TicketsCapped: more keys than one review reads. Split: the cards' stats lines and the footer, from git;
+	// its keys are the tickets the commits and texts name, read or not.
+	Tickets       []ticket.Ticket
+	FollowUps     []ticket.Ticket
+	TicketErrs    map[string]string
+	TicketsCapped bool
+	Split         *Split
+	SplitOff      bool // the repo turned split suggestions off: the intro says the review proposed none
+	// The gate and contract passes (review.ReadTerms): Gates feed the merge status's "Waits for {gate}" (spec 4) and
+	// the gate card (5.6), Serves and Order its items, Contracts the ticket cards' rows and four answers (5.9),
+	// Differences the difference cards (5.7, 5.6). Errs names the passes that failed: the page says what wasn't read.
+	Terms review.Terms
 }
 
 // Forge is how the forge hosting the repository names and links what a report points to.
@@ -73,14 +105,8 @@ type Forge struct {
 	Commit   string // a commit of the repository: Commit + SHA
 	PRCommit string // a commit in the PR's own view: PRCommit + SHA
 	Search   string // code search in the repository: Search + the escaped query; "" when the forge has none
-}
-
-// tab is a tab of the card over the overview: what needs a person, a kind each.
-type tab struct {
-	ID, Title string
-	N         int
-	Warn      bool // something in it a merge can't wait for
-	On        bool // the first one: shown
+	Files    string // the PR's files view, for Line and File; "" where the forge's anchor isn't built (GitLab)
+	Thread   string // an inline comment: Thread + its id
 }
 
 // maxLines and maxBytes are the diff lines and their text a file shows; the rest is on the PR's page. Bytes too:
@@ -89,9 +115,6 @@ const maxLines, maxBytes = 3000, 100_000
 
 // maxGone is the lines a deleted file shows, and the code that moved out of it: what the PR drops is rarely read.
 const maxGone = 500
-
-// wip matches commit subjects that tell nothing about the change.
-var wip = regexp.MustCompile(`(?i)^(wip\b|fixup!|squash!|amend!|typo|lint|fmt\b|format\b|oops|tmp\b|\.+$|fix(es)?$|changes?$|updates?$|address(ed)? (review|comments|feedback)|(pr |review )(comments|feedback))`)
 
 // templates is the page: report.html and the templates it calls, a file per part (see Load).
 //
@@ -148,42 +171,32 @@ var tmpl = template.Must(parseTemplates(nil))
 var funcs = template.FuncMap{
 	"short":  short,
 	"plural": plural,
-	"join":   join,
 	"sep": func(i, n int) string { // before the i-th of n in a list: "", ", ", " and "
 		return map[bool]string{true: "", false: map[bool]string{true: " and ", false: ", "}[i == n-1]}[i == 0]
 	},
-	"inc":      func(i int) int { return i + 1 },
-	"add":      func(a, b int) int { return a + b },
-	"icon":     icon,
-	"css":      func() template.CSS { return template.CSS(css) }, //nolint:gosec // ours, compiled by Tailwind
-	"favicons": func() template.HTML { return favicons },
-	"logo":     func() template.HTML { return logo },
-	"has":      slices.Contains[[]string],
-	"seq":      func(n int) []int { return make([]int, n) },
-	"wip":      func(subject string) bool { return wip.MatchString(strings.TrimSpace(subject)) },
-	"dir":      func(p string) string { return p[:strings.LastIndex(p, "/")+1] }, // "a/b/" of a/b/c.go: muted, the name stands out
-	"web":      func(u string) bool { return strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") },
-	"base":     func(p string) string { return p[strings.LastIndex(p, "/")+1:] },
+	"inc":       func(i int) int { return i + 1 },
+	"add":       func(a, b int) int { return a + b },
+	"icon":      icon,
+	"ico":       ico,
+	"kindlook":  kindLook,
+	"filelook":  fileLook,
+	"md":        md,
+	"wb":        func(s string) template.HTML { return template.HTML(wbr(s)) }, //nolint:gosec // wbr escapes
+	"ev":        func(kind, label string) chip { return chip{kind, label} },
+	"thousands": thousands,
+	"spaced":    func(s []string) string { return strings.Join(s, " ") },
+	"css":       func() template.CSS { return template.CSS(css) }, //nolint:gosec // ours, compiled by Tailwind
+	"favicons":  func() template.HTML { return favicons },
+	"logo":      func() template.HTML { return logo },
+	"dir":       func(p string) string { return p[:strings.LastIndex(p, "/")+1] }, // "a/b/" of a/b/c.go: muted, the name stands out
+	"base":      func(p string) string { return p[strings.LastIndex(p, "/")+1:] },
 	"test": func(t string) string { // "a_test.go TestSave" of step.Tests: "TestSave"; a file alone stays
 		_, n, ok := strings.Cut(t, " ")
 		return map[bool]string{true: n, false: t}[ok]
 	},
-	"tab": func(id, title string, n int, warn bool, first string) tab {
-		return tab{id, title, n, warn, id == first}
-	},
-	"finding": func(s string) string { // "a/b/c.go: title" of Version.Findings: "c.go: title"
-		p, t, _ := strings.Cut(s, ": ")
-		return p[strings.LastIndex(p, "/")+1:] + ": " + t
-	},
 	"json": func(v any) (string, error) {
 		b, err := json.Marshal(v)
 		return string(b), err
-	},
-	"percent": func(n, of int) string {
-		if of == 0 {
-			return "0%"
-		}
-		return strconv.Itoa(n*100/of) + "%"
 	},
 }
 
@@ -224,7 +237,9 @@ func Load(dir string) error {
 		img[name] = b
 	}
 	// a template naming a field the page has none of fails here, not at the first review
-	if err := t.ExecuteTemplate(io.Discard, "report.html", prepare(Data{})); err != nil {
+	v := prepare(Data{})
+	v.build()
+	if err := t.ExecuteTemplate(io.Discard, "report.html", v); err != nil {
 		return fmt.Errorf("report: templates in %s: %w", dir, err)
 	}
 	c := css
@@ -270,12 +285,28 @@ type file struct {
 	Changes          []change   // the declarations it changes
 	Moves            []change   // the declarations that only moved here, ID their fold
 	Long             bool       // lists Changes above its diff
-	Changed          string     // Prev's short SHA when its change differs from Prev's, or it's new to the PR
 	Placed           string     // why the guide put it in its step, when it isn't plain
 	Skipped          int        // tests it skips or narrows to one (skip, only)
 	New, Gone        bool       // the PR adds or deletes it
 	Src              string     // its text at the head, for the lines between hunks: Data.Sources
 	SrcN             int        // its lines
+}
+
+// Rows is the 20 px rows its diff shows at first: the placeholder height while the diff sits off screen. A folded
+// run shows its head only.
+func (f *file) Rows() int {
+	n := 0
+	for _, p := range f.Parts {
+		switch {
+		case p.ID == 0:
+			n += len(p.Lines)
+		case p.Open:
+			n += 1 + len(p.Lines)
+		default:
+			n++
+		}
+	}
+	return n
 }
 
 // change is a declaration a file's diff touches: State "new", "gone" or "" (changed), ID its first changed line.
@@ -284,6 +315,20 @@ type change struct {
 	Sev             string // the heaviest finding on its lines: "critical", "major", "minor"
 	added, removed  bool   // its declaring line
 	sig             bool   // what callers see of it differs: see signature
+}
+
+// stateRank weighs what the PR did to a declaration, as said: one name changed twice says the most.
+var stateRank = map[string]int{"changed": 1, "signature": 2, "new": 3}
+
+// said is what the PR did to c, as the popover says it: "new", "signature", "changed".
+func (c change) said() string {
+	switch {
+	case c.State == "new":
+		return "new"
+	case c.sig:
+		return "signature"
+	}
+	return "changed"
 }
 
 type step struct {
@@ -300,23 +345,6 @@ type step struct {
 	bare       []string // what it changes that no test calls
 }
 
-// Gap is what of the step no test reaches: "none: scanLine is not called by any test"; "" when tests reach all.
-func (s step) Gap() string {
-	b := s.bare
-	if len(b) > 3 {
-		b = append(b[:3:3], plural(len(s.bare)-3, "more", "more"))
-	}
-	switch {
-	case s.Untested && len(b) == 0:
-		return "none found that reaches what this step changes"
-	case s.Untested:
-		return "none: " + join(b) + map[bool]string{true: " is", false: " are"}[len(s.bare) == 1] + " not called by any test"
-	case len(b) > 0 && !s.Partial:
-		return "none reaches " + join(b)
-	}
-	return ""
-}
-
 type group struct {
 	What  string
 	Files []*file
@@ -329,38 +357,19 @@ type view struct {
 	Tests, Other         []*file
 	Mechanical           []group
 	Deleted              []*file // what moved out of them folds, the rest is what the PR drops
-	Stepwise             bool    // the commits read one by one
 	Code, NTests, NOther int
-	InSteps, NSteps      int // of Code, the files in the reading order's steps; those steps
-	Added, Moved         int // added lines, and those of them that only moved
-	Tree                 []*node
-	Inventory            []bucket        // what the PR did to its declarations
-	Deps                 *deps           // which changed directories use which
-	Affected             []affected      // changed code the rest of the repo uses
+	InSteps, NSteps      int             // of Code, the files in the reading order's steps; those steps
+	Added, Moved         int             // added lines, and those of them that only moved
 	Ways                 []way           // how the code reaches the change: routes, declarations nothing calls
 	Graphs               bool            // a graph to draw: the page loads cytoscape
 	Risks                []risk          // what a merge doesn't finish
 	BaseMoved            []review.Commit // of Behind, those that change the PR's files
-	Since                *since          // what changed from Prev
-	Groups               []fgroup        // the findings and weakened tests by weight
-	NFound               int             // in Groups
-	Outside              []*finding      // on a file the diff doesn't show: in full under the list
-	Verdict              verdict
-	Draft                draft
-	MergeN               int       // rows of the merge risks: Risks, BaseMoved, Conflicts, Others
-	MergeWarn            bool      // one of them is sure trouble
-	Authors              []string  // of the commits, first one first
-	Skipped              int       // tests the PR skips or narrows to one
-	Retired              []retired // deleted tests with the code they tested: no finding
-	now                  Version   // what the next version compares with
+	now                  Version         // what the next version compares with
 	files                map[string]*file
-}
-
-// node is a directory of the side bar's file tree, or a file when File is set.
-type node struct {
-	Name string
-	File *file
-	Kids []*node
+	Page                 page              // what the page shows: see build
+	lines                map[string]string // the diff's new lines: newLines
+	found                []*card           // the findings as cards, in Findings' order
+	lead                 []*card           // the differences and test group 2 in parts: before the findings, each an open item
 }
 
 // shared is the directory all paths share, with its slash; none for a single path.
@@ -381,23 +390,18 @@ func shared(paths []string) string {
 func Render(d Data) ([]byte, Version, error) {
 	var b bytes.Buffer
 	v := prepare(d)
+	v.build() // the page only: BuildMap prepares d too
 	if err := tmpl.ExecuteTemplate(&b, "report.html", v); err != nil {
 		return nil, Version{}, fmt.Errorf("report: %w", err)
 	}
+	// the commit status leaves the forge's CI out: GitHub shows those checks beside it, and a rerun starts no review,
+	// so a status that took them in would go stale (decision 6)
+	ci := v.CI
+	v.CI = nil
+	own := v.status()
+	v.CI = ci
+	v.now.Short, v.now.Blocked = own.Short, own.Kind == "blocked"
 	return b.Bytes(), v.now, nil
-}
-
-// Asks is the declarations of the report's inventory that neither a doc comment nor a commit explains, new or with
-// a changed signature, for review.Explain: their keys for Data.Whys, and what the model reads of each.
-func Asks(d Data) (keys, texts []string) {
-	for _, g := range prepare(d).Inventory {
-		for _, it := range g.Items {
-			if it.ask != nil && it.Doc == "" && !it.Commit {
-				keys, texts = append(keys, it.key), append(texts, strings.Join(it.ask, "\n"))
-			}
-		}
-	}
-	return keys, texts
 }
 
 // prepare is the page's view of d.
@@ -440,16 +444,8 @@ func prepare(d Data) view {
 		fd := &finding{Comment: c}
 		found = append(found, fd)
 		f := files[c.Path]
-		fd.ID = "finding-" + strconv.Itoa(i+1)
-		fd.Href = "#" + fd.ID
-		if f == nil { // outside the diff: in full under the list, a link to the file on the forge
-			if d.Forge.Blob != "" {
-				fd.Blob = d.Forge.Blob + c.Path
-				if c.Line > 0 {
-					fd.Blob += "#L" + strconv.Itoa(c.Line)
-				}
-			}
-			v.Outside = append(v.Outside, fd)
+		fd.ID = "note-" + strconv.Itoa(i+1) // its card is finding-{n}
+		if f == nil {                       // outside the diff: only its card shows it
 			continue
 		}
 		at := slices.IndexFunc(f.Lines, func(l line) bool { return l.No == strconv.Itoa(c.Line) })
@@ -463,27 +459,11 @@ func prepare(d Data) view {
 	for _, p := range slices.Concat(order, gone) {
 		all = append(all, files[p])
 	}
-	v.Risks, v.BaseMoved = risks(all), baseMoved(d.Behind, files) // before parts, like spans: risks marks the lines it jumps to
-	v.MergeN, v.MergeWarn = len(v.Risks), d.Conflicts
-	for _, r := range v.Risks {
-		for _, it := range r.Items {
-			v.MergeWarn = v.MergeWarn || it.Warn
-		}
-	}
-	for _, b := range []bool{len(v.BaseMoved) > 0, d.Conflicts, len(d.Others) > 0} {
-		if b {
-			v.MergeN++
-		}
-	}
-	for _, o := range d.Others {
-		v.MergeWarn = v.MergeWarn || len(o.Clash) > 0
-	}
+	v.Risks, v.BaseMoved = risks(all, d.Env), baseMoved(d.Behind, files) // before parts: risks marks the lines it jumps to
 	v.now = stamp(v, ids)
-	var ss []*span
 	for _, p := range slices.Concat(order, gone) {
 		f := files[p]
 		f.Changes, f.Moves = changes(f, runs)
-		ss = append(ss, spans(f, runs)...) // before parts: it marks the lines it jumps to
 		f.Long = len(f.Lines) >= minChanges
 		f.Parts = parts(f.Lines, runs)
 		v.Added += f.Add
@@ -492,7 +472,6 @@ func prepare(d Data) view {
 	for _, w := range d.Outline.Weakened {
 		if p, _, _ := strings.Cut(w.At, ":"); strings.HasPrefix(w.What, "skip/only") && files[p] != nil {
 			files[p].Skipped++
-			v.Skipped++
 		}
 	}
 	skip := d.Outline.Skippable()
@@ -556,7 +535,6 @@ func prepare(d Data) view {
 	for _, f := range files {
 		f.Short = strings.TrimPrefix(f.Path, pre)
 	}
-	v.Tree = tree(files)
 	for i := range v.Steps {
 		v.Steps[i].Graph = graph(v.Steps, i, d.Symbols)
 		st := &v.Steps[i]
@@ -564,23 +542,7 @@ func prepare(d Data) view {
 		st.Cycles = cycles(v.Steps, i, d.Symbols)
 		v.Graphs = v.Graphs || v.Steps[i].Graph != nil
 	}
-	v.Inventory = inventory(ss, d.Symbols, d.Commits, d.Title, d.Whys)
-	v.Deps, v.Affected = matrix(v.Steps, d.Symbols), reach(v.Steps, d.Symbols)
-	messy := 0
-	for _, c := range d.Commits {
-		if wip.MatchString(strings.TrimSpace(c.Subject)) {
-			messy++
-		}
-	}
-	v.Stepwise = len(d.Commits) > 1 && messy*3 < len(d.Commits) // under a third wip
-	for _, c := range d.Commits {
-		if c.Author != "" && !slices.Contains(v.Authors, c.Author) {
-			v.Authors = append(v.Authors, c.Author)
-		}
-	}
-	v.Retired = retire(d.Outline.Removed, files)
 	judge(&v, found) // adds the weakened tests' findings to v.now
-	v.Since = compare(d.Prev, v.now, files)
 	chs, _ := decls(v.Steps)
 	for _, c := range chs { // the popover says what the PR did to it
 		for i, s := range d.Symbols[c.c.Name] {
@@ -588,14 +550,7 @@ func prepare(d Data) view {
 				continue
 			}
 			s := &d.Symbols[c.c.Name][i]
-			st := "changed"
-			switch {
-			case c.c.State == "new":
-				st = "new"
-			case c.c.sig:
-				st = "signature"
-			}
-			if rank := map[string]int{"changed": 1, "signature": 2, "new": 3}; rank[st] > rank[s.State] { // one name twice in a file: the most
+			if st := c.c.said(); stateRank[st] > stateRank[s.State] { // one name twice in a file: the most
 				s.State = st
 			}
 			if heavier(c.c.Sev, s.Sev) && review.Blocks(c.c.Sev) {
@@ -603,6 +558,7 @@ func prepare(d Data) view {
 			}
 		}
 	}
+	stations(&v, chs)
 	v.Ways = ways(&v, d.Symbols)
 	if len(d.Tests.Ran) > 0 || len(d.Tests.Broken) > 0 {
 		v.now.Tests = map[string]string{}
@@ -624,26 +580,6 @@ func prepare(d Data) view {
 		}
 	}
 	return v
-}
-
-// Settled is the line over what left the findings: fixed since the last review, dropped by the cross-check,
-// tests deleted with their code; "" for none.
-func (v view) Settled() string {
-	var p []string
-	if v.Since != nil && len(v.Since.Fixed) > 0 {
-		p = append(p, strconv.Itoa(len(v.Since.Fixed))+" fixed")
-	}
-	if n := len(v.Dropped); n > 0 {
-		p = append(p, strconv.Itoa(n)+" dropped by the cross-check")
-	}
-	n := 0
-	for _, r := range v.Retired {
-		n += len(r.Names)
-	}
-	if n > 0 {
-		p = append(p, plural(n, "test", "tests")+" removed with their code")
-	}
-	return strings.Join(p, " · ")
 }
 
 // retired is the tests the PR deletes with the declaration they are named after: nothing is left to test.
@@ -748,94 +684,21 @@ func (v view) place(p string, line int) ref {
 	}
 	r := ref{Path: p, Line: line}
 	if v.files[p] != nil {
-		r.Href = "#" + p + ":" + strconv.Itoa(line) // the script finds the line
+		r.Href = lineHref(p, line) // the script finds the line
 	} else if v.Forge.Blob != "" {
-		r.Href, r.Out = v.Forge.Blob+p+"#L"+strconv.Itoa(line), true
+		r.Href, r.Out = v.Forge.Blob+escPath(p)+"#L"+strconv.Itoa(line), true
 	}
 	return r
-}
-
-// testRun is how a test fared at the head and at the last review. Mark is what its sign shows: the head's
-// outcome, else the last review's with When saying so ("on 1111111"), none when it ran at neither; "" unknown.
-type testRun struct{ Mark, When, Text string }
-
-// Run is test name's run, its spaces as go test writes them; empty when no test ran at either version.
-func (v view) Run(name string) testRun {
-	say := map[string]string{"pass": "passed", "fail": "failed", "skip": "skipped", "none": "not run"}
-	var r testRun
-	var parts []string
-	prev := ""
-	if v.Prev != nil && v.Prev.Tests != nil {
-		if prev = v.Prev.Tests[testKey(name)]; prev != "" {
-			parts = append(parts, say[prev]+" on "+short(v.Prev.SHA))
-		}
-	}
-	if t := v.Data.Tests; len(t.Ran) > 0 || len(t.Broken) > 0 {
-		r.Mark = cmp.Or(ranOf(t.Ran, name), "none")
-		if prev == r.Mark {
-			parts = nil // the same as at the last review
-		}
-		parts = append(parts, say[r.Mark]+" on "+short(v.SHA))
-	}
-	if (r.Mark == "" || r.Mark == "none") && prev != "" && prev != "none" {
-		r.Mark, r.When = prev, "on "+short(v.Prev.SHA)
-	} else if r.Mark == "" && prev == "none" {
-		r.Mark = "none"
-	}
-	r.Text = strings.Join(parts, ", ")
-	return r
-}
-
-// tcase is a test case the PR adds or a test it now skips, and how it ran.
-type tcase struct {
-	Path, Name, State string
-	Skip              bool
-	Run               testRun
-}
-
-// Cases is the new cases, then the skips: a skip by its line, what the diff shows of it.
-func (v view) Cases() []tcase {
-	var cs []tcase
-	for _, c := range v.Outline.Added {
-		p, n, _ := strings.Cut(c, ": ")
-		r := v.Run(n)
-		cs = append(cs, tcase{Path: p, Name: n, State: cmp.Or(r.Text, "new"), Run: r})
-	}
-	for _, w := range v.Outline.Weakened {
-		if code, ok := strings.CutPrefix(w.What, "skip/only: "); ok {
-			cs = append(cs, tcase{Path: w.At, Name: strings.Trim(code, "`"), State: "skipped or narrowed · " + path.Base(w.At), Skip: true})
-		}
-	}
-	return cs
-}
-
-// TestsSay is the line over the cases: how many new ones passed, what did not build, what is skipped now.
-func (v view) TestsSay() string {
-	var p []string
-	if t := v.Data.Tests; len(t.Ran) > 0 || len(t.Broken) > 0 {
-		n := 0
-		for _, c := range v.Outline.Added {
-			if _, name, _ := strings.Cut(c, ": "); ranOf(t.Ran, name) == "pass" {
-				n++
-			}
-		}
-		if of := len(v.Outline.Added); of > 0 {
-			p = append(p, fmt.Sprintf("%d of %d new cases passed on %s.", n, of, short(v.SHA)))
-		}
-		if len(t.Broken) > 0 {
-			p = append(p, join(t.Broken)+map[bool]string{true: " does", false: " do"}[len(t.Broken) == 1]+" not build on "+short(v.SHA)+", so nothing ran there.")
-		}
-	}
-	if v.Skipped > 0 {
-		p = append(p, plural(v.Skipped, "test is", "tests are")+" now skipped or narrowed to one.")
-	}
-	return strings.Join(p, " ")
 }
 
 func testKey(name string) string { return strings.ReplaceAll(name, " ", "_") }
 
-// ranOf is name's outcome in ran: by its full name, or as the one subtest of that name.
+// ranOf is name's outcome in ran: by its name as given (a JS runner's "suite > test"), by its Go name, or as the one
+// subtest of that name.
 func ranOf(ran map[string]string, name string) string {
+	if st, ok := ran[name]; ok {
+		return st
+	}
 	n := testKey(name)
 	if st, ok := ran[n]; ok {
 		return st
@@ -911,41 +774,6 @@ func parse(p, f, note string) *file {
 
 var hunk = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)`)
 
-// tree is the files by directory, a directory with nothing but one directory merged into it ("internal/report"),
-// directories before files.
-func tree(files map[string]*file) []*node {
-	root := &node{}
-	for _, f := range files {
-		n := root
-		parts := strings.Split(f.Short, "/")
-		for _, p := range parts[:len(parts)-1] {
-			i := slices.IndexFunc(n.Kids, func(k *node) bool { return k.File == nil && k.Name == p })
-			if i < 0 {
-				i, n.Kids = len(n.Kids), append(n.Kids, &node{Name: p})
-			}
-			n = n.Kids[i]
-		}
-		n.Kids = append(n.Kids, &node{Name: parts[len(parts)-1], File: f})
-	}
-	var tidy func(n *node)
-	tidy = func(n *node) {
-		for len(n.Kids) == 1 && n.Kids[0].File == nil && n.Name != "" {
-			n.Name, n.Kids = n.Name+"/"+n.Kids[0].Name, n.Kids[0].Kids
-		}
-		slices.SortFunc(n.Kids, func(a, b *node) int {
-			if (a.File == nil) != (b.File == nil) {
-				return map[bool]int{true: -1, false: 1}[a.File == nil]
-			}
-			return cmp.Compare(a.Name, b.Name)
-		})
-		for _, k := range n.Kids {
-			tidy(k)
-		}
-	}
-	tidy(root)
-	return root.Kids
-}
-
 // inert is a changed line outside any declaration that runs nothing: blank, a comment, an import, an import block's.
 var inert = regexp.MustCompile(`^\s*(?:$|//|/\*|\*|#(?:\s|$)|--|import\b|from\s|use\s|using\s|package\s|#include\b|"[^"]*"\s*[,;]?\s*$|\w+\s+"[^"]*"\s*$|[()]\s*$)`)
 
@@ -1017,6 +845,31 @@ func changes(f *file, runs map[int]run) (cs, moves []change) {
 	}
 	moves = slices.DeleteFunc(moves, func(m change) bool { _, ok := at[m.Name]; return ok }) // moved and changed is a change
 	return cs, moves
+}
+
+// sigs is the signatures the declaring line f.Lines[i] starts, from its hunk's lines: before (context and removed
+// lines) unless the line is added, now (context and added ones) unless it's removed; changed, whether either takes
+// an added or removed line.
+func sigs(f *file, i int) (before, now string, changed bool) {
+	side := func(skip string) string {
+		var ls []string
+		var classes []string
+		for j := i; j < len(f.Lines) && f.Lines[j].Class != "hunk" && len(ls) < maxSigLines; j++ {
+			if c := f.Lines[j].Class; c != skip {
+				ls, classes = append(ls, f.Lines[j].Text), append(classes, c)
+			}
+		}
+		s, n := signature(ls)
+		changed = changed || slices.ContainsFunc(classes[:n], func(c string) bool { return c != "ctx" })
+		return s
+	}
+	if c := f.Lines[i].Class; c != "add" {
+		before = side("add")
+	}
+	if c := f.Lines[i].Class; c != "del" {
+		now = side("del")
+	}
+	return before, now, changed
 }
 
 // rank is 1 for a file with a finding that blocks the merge, 0 for the others.

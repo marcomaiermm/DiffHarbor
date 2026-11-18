@@ -35,14 +35,27 @@ type Symbol struct {
 	Sev   string   `json:"sev,omitempty"`   // the heaviest finding on it that matters: "critical", "major"
 	Calls []string `json:"-"`               // exact: the declarations it names, path NUL name: the page's graphs
 	// exact: the first maxRefs places outside the diff's files that name it, and how many: what the change reaches
-	Outside  []Ref `json:"-"`
-	NOutside int   `json:"-"`
+	Outside       []Ref    `json:"-"`
+	NOutside      int      `json:"-"`
+	NOutsideTests int      `json:"-"` // of NOutside, the places in test files, also past the maxRefs kept
+	HereKind      []string `json:"-"` // exact: the index's kind of each Here entry: calls, references, renders, reads …
 	// exact, in the diff's files: the tests that reach it through the index's uses, nearest first: "a_test.go
 	// TestSave"; Partial, past what a walk reads. Untested: no test reaches it, not even by name: see cgTests.
 	Tests             []string `json:"-"`
 	Partial, Untested bool     `json:"-"`
 	From, To          int      `json:"-"` // exact: its lines by the index, from a decorator or a doc maybe
 	Ways              []Way    `json:"-"` // exact, in the diff's files: how the code reaches it, see cgTests
+	// exact, a declaration the diff adds or changes: the requests it sends to systems outside the repo, itself or
+	// within a few calls, see outside.go
+	Requests []OutsideCall `json:"-"`
+	Stores   []StorePath   `json:"-"` // the same, the queries it runs: the map's tables (spec 6.13)
+	// a declaration the PR adds or changes: up to 3 indexes into Data.Nodes, 1-based, the first station below it
+	// toward each table or system it reaches (uses spec 9.2). That station's JUp is the joint from this declaration
+	// into it, with Up 0: the declaration is no station of its own.
+	Reach []int `json:"reach,omitempty"`
+	// exact: the places past the maxRefs kept, path, line and the declaration they sit in: the uses pass counts the
+	// other lines of their declarations that name it (decision 28)
+	past []Ref
 }
 
 // Way is how the code reaches a declaration: from a route it registers ("GET", "/x/{id}", where), or from a
@@ -58,6 +71,8 @@ type Hop struct {
 	Name, Path, In string
 	Line, At       int
 	Call           string `json:"-"` // how that line names it: "inv.Validate()", see callAt; "" unknown
+	Shape          int    `json:"-"` // the structure of the joint at At: a 1-based index into Data.Shapes, 0 none
+	Rel            string `json:"-"` // the joint's relation, as Ref.Rel
 }
 
 // Ref is a line that names a symbol, and the declaration it sits in.
@@ -66,6 +81,85 @@ type Ref struct {
 	Line int    `json:"line"`
 	In   string `json:"in,omitempty"`
 	Text string `json:"text"` // the line, trimmed and cut
+	// uses spec 9.2: the structure the use sits in (1-based into Data.Shapes, 0 none; the lines of one declaration
+	// share one), the relation ("call", "iface", "render", "tie"; "" named), the interface it goes through, the
+	// station of the declaration it sits in (1-based into Data.Nodes), and whether it sits in a test file
+	Shape int    `json:"sh,omitempty"`
+	Rel   string `json:"rel,omitempty"`
+	Via   string `json:"via,omitempty"`
+	Up    int    `json:"up,omitempty"`
+	Test  bool   `json:"t,omitempty"`
+}
+
+// Shape is the code structure from a declaration down to the uses it marks (component 31, uses spec 9.2).
+type Shape struct {
+	Path string     `json:"p"`
+	Span [2]int     `json:"s"` // the declaration's first and last line
+	Rows []ShapeRow `json:"r"`
+}
+
+// ShapeRow is a row of a Shape: a container on the way to a use, the use, a fold of the entries off the way, or a
+// run of levels past the depth bound.
+type ShapeRow struct {
+	Kind  string      `json:"k"` // section 5's kinds, "fold", "levels"
+	Depth int         `json:"d"`
+	Text  string      `json:"t,omitempty"`
+	Line  int         `json:"l,omitempty"`
+	Use   bool        `json:"u,omitempty"` // the row holds a marked use
+	Cond  *ShapeCond  `json:"c,omitempty"` // under an if: where its condition's name comes from
+	N     int         `json:"n,omitempty"` // fold, levels: how many
+	Kept  []ShapeLeaf `json:"e,omitempty"` // fold: the entries kept, nearest the way
+	More  *[2]int     `json:"m,omitempty"` // fold, levels: the first and last line of the others
+}
+
+// ShapeCond is a condition's name and the line and text that give it its value.
+type ShapeCond struct {
+	Name string `json:"n"`
+	Line int    `json:"l"`
+	Text string `json:"t"`
+}
+
+// ShapeLeaf is an entry a fold keeps.
+type ShapeLeaf struct {
+	Kind string `json:"k"`
+	Text string `json:"t"`
+	Line int    `json:"l"`
+	Use  bool   `json:"u,omitempty"`
+}
+
+// Node is a station of a way (component 30, uses spec 9.2): shared by every way through it, so Data.Nodes is a
+// forest. Up and Down are 1-based indexes into Data.Nodes, 0 none.
+type Node struct {
+	Name   string `json:"n"`
+	Kind   string `json:"k"`           // "decl", "route", "call-in", "table", "subquery", "system"
+	Method string `json:"m,omitempty"` // a route's
+	Path   string `json:"p,omitempty"`
+	Line   int    `json:"l,omitempty"`
+	State  string `json:"s,omitempty"`  // "new", "changed", "signature", "outside"
+	Part   string `json:"pt,omitempty"` // the map's part label
+	Sev    string `json:"v,omitempty"`  // the heaviest blocking finding on it
+	Find   string `json:"f,omitempty"`  // that finding's card anchor
+	Up     int    `json:"u,omitempty"`  // the next station toward an entry
+	JUp    *Joint `json:"ju,omitempty"` // the joint to Up; on a Reach's first station, with Up 0, from the declaration
+	Down   int    `json:"d,omitempty"`  // the next station down from a route, or toward a table or system
+	JDown  *Joint `json:"jd,omitempty"`
+	End    *End   `json:"e,omitempty"` // the way stops here
+}
+
+// Joint is the link between two stations: its relation, the interface it goes through, its place and structure.
+type Joint struct {
+	Rel   string `json:"r"`
+	Via   string `json:"via,omitempty"`
+	Path  string `json:"p"`
+	Line  int    `json:"l"`
+	Shape int    `json:"sh,omitempty"`
+}
+
+// End is why a way stops at a station: section 4's ends ("route", "main", "nocaller", "tests", "table", "subquery",
+// "system", "bound", "cycle", "value", "byname", "nograph") and its argument.
+type End struct {
+	Kind string `json:"k"`
+	Text string `json:"t,omitempty"`
 }
 
 // gofmt prints as gofmt does: tabs indent, spaces align, so a column stays a column at any tab width.
@@ -103,8 +197,10 @@ func Declared(diffText string) []string {
 
 // Symbols indexes sb's checkout for the names the diff shows: their declarations (Go parsed, other languages
 // by the line that declares them) and who names them: codegraph's resolved edges where the review indexed the
-// checkout, else the lines that name them, by name. The index's queries run in sb, as the repo's user.
-func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
+// checkout, else the lines that name them, by name. The index's queries run in sb, as the repo's user. With an index,
+// also how each use connects (uses spec 9.2): the structures, the stations of the ways, and whether the page's budget
+// cut a structure (Data.Shapes, Data.Nodes, Data.UsesCut).
+func Symbols(sb *proc.Sandbox, diffText string) (syms map[string][]Symbol, shapes []Shape, nodes []Node, over bool) {
 	wanted := map[string]bool{}
 	for l := range strings.SplitSeq(diffText, "\n") {
 		if strings.HasPrefix(l, "@@") { // the declaration a hunk is in
@@ -116,12 +212,12 @@ func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
 			}
 		}
 	}
-	syms := map[string][]Symbol{}
+	syms = map[string][]Symbol{}
 	ms := mentions{refs: map[string][]Ref{}, uses: map[string]int{}, files: map[string]map[string]bool{}}
 	n := 0
 	root, err := sb.Pinned() // as root, in the PR's checkout: its symlinks don't reach out of it
 	if err != nil {
-		return syms
+		return syms, nil, nil, false
 	}
 	defer root.Close()
 	_ = fs.WalkDir(root.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
@@ -175,10 +271,13 @@ func Symbols(sb *proc.Sandbox, diffText string) map[string][]Symbol {
 		for _, p := range paths {
 			changed[p] = true
 		}
-		idx.exact(root, changed, syms)
+		added := diff.RightLines(diffText, false)
+		idx.exact(root, changed, added, syms)
 		idx.tests(sb, root, changed, syms)
+		idx.outside(sb, root, changed, added, syms)
+		shapes, nodes, over = idx.uses(sb, root, changed, added, syms)
 	}
-	return syms
+	return syms, shapes, nodes, over
 }
 
 // mentions is the lines that name what the diff shows, by name: the first few, how many, in which files.
@@ -206,7 +305,7 @@ func (ms mentions) scan(path string, src []byte, wanted map[string]bool) {
 				continue
 			}
 			if len(ms.refs[w]) < maxRefs*2 { // room for the declarations' own lines, dropped later
-				ms.refs[w] = append(ms.refs[w], Ref{path, i, in, cut(strings.TrimSpace(l), maxText)})
+				ms.refs[w] = append(ms.refs[w], Ref{Path: path, Line: i, In: in, Text: cut(strings.TrimSpace(l), maxText)})
 			}
 			ms.uses[w]++
 			if ms.files[w] == nil {
@@ -309,6 +408,12 @@ func lineDecls(path string, src []byte, wanted map[string]bool, syms map[string]
 			sig = strings.Join(ls[i:min(end+1, len(ls))], "\n")
 		} else if _, n := signature(ls[i:]); n > 1 { // parameters over several lines: all of them
 			sig = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(strings.Join(ls[i:i+n], "\n")), "{"))
+		} else if k := strings.IndexByte(l, '='); (m[1] == "const" || m[1] == "let" || m[1] == "var") && k > 0 && !fnValue.MatchString(strings.TrimSpace(l[k+1:])) {
+			n, closed := statement(ls[i:]) // a value over several lines, a schema's object, a type's "<…>": all of it
+			sig = strings.TrimRight(strings.Join(ls[i:i+n], "\n"), " \t")
+			if !closed {
+				sig += "\n…"
+			}
 		}
 		var doc []string
 		for j := i - 1; j >= 0; j-- {
@@ -327,6 +432,40 @@ func lineDecls(path string, src []byte, wanted map[string]bool, syms map[string]
 
 // maxSigLines is the lines a signature reads at most.
 const maxSigLines = 25
+
+// statement is the lines of ls the statement ls[0] starts takes: until its brackets ( [ { and a type's < close, at
+// most maxSigLines; closed is false when they didn't. A "<" or ">" with a space before it compares.
+func statement(ls []string) (n int, closed bool) {
+	depth := 0
+	for n = 0; n < len(ls) && n < maxSigLines; n++ {
+		t := strings.TrimSpace(ls[n])
+	scan:
+		for j := 0; j < len(t); j++ {
+			c, prev := t[j], byte(' ')
+			if j > 0 {
+				prev = t[j-1]
+			}
+			switch {
+			case c == '"' || c == '\'' || c == '`':
+				k := strings.IndexByte(t[j+1:], c)
+				if k < 0 {
+					break scan
+				}
+				j += k + 1
+			case c == '/' && j+1 < len(t) && t[j+1] == '/':
+				break scan
+			case c == '(' || c == '[' || c == '{', c == '<' && prev != ' ':
+				depth++
+			case c == ')' || c == ']' || c == '}', c == '>' && prev != '=' && (j == 0 || prev != ' '):
+				depth--
+			}
+		}
+		if depth <= 0 {
+			return n + 1, true
+		}
+	}
+	return n, false
+}
 
 var (
 	// fnValue is a value that's a function, after a const's, let's or var's "=": "async (a) =>", "function (", "func(".

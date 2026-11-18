@@ -1,24 +1,25 @@
 {{/* A file and its diff, a line of it, a finding on it; a call graph. */}}
-{{define "file"}}<div class="collapsible file" id="{{.Path}}"{{if .Open}} open{{end}}{{if .Changed}} data-changed{{end}}>
+{{define "file"}}<div class="collapsible file" id="{{.Path}}"{{if .Open}} open{{end}}>
   <div class="file-head">
     <button type="button" class="file-toggle" aria-expanded="{{.Open}}" aria-controls="{{.Path}}~body">
     {{icon "chevron-down" "collapsible-chevron"}}
+    {{template "fic" .Path}}
     <span class="min-w-0 font-mono text-[13px] break-all"><span class="font-normal text-muted-foreground">{{dir .Path}}</span>{{base .Path}}</span>
     <span class="font-mono text-xs tabular-nums"><span class="text-diff-add">+{{.Add}}</span> <span class="text-diff-del">−{{.Del}}</span></span>
-    {{if .New}}<span class="chip" data-new>new</span>{{else if .Gone}}<span class="chip" data-del>deleted</span>{{end}}
-    {{with .Moved}}<span class="chip font-mono">{{.}} moved</span>{{end}}
-    {{with .Changed}}<span class="chip changed">changed since {{.}}</span>{{end}}
-    {{with .Weight}}<span class="chip" data-sev="{{.Sev}}">{{.Text}}</span>{{end}}
-    {{with .Skipped}}<span class="chip" data-major>{{.}} skipped</span>{{end}}
-    {{with .Placed}}<span class="chip" data-dash title="Why the guide put it in this step">{{icon "link" ""}}{{.}}</span>{{end}}
+    {{if .New}}<span class="dchip" data-new>new</span>{{else if .Gone}}<span class="dchip" data-del>deleted</span>{{end}}
+    {{with .Moved}}<span class="dchip font-mono">{{.}} moved</span>{{end}}
+    {{with .Weight}}<span class="dchip" data-sev="{{.Sev}}">{{.Text}}</span>{{end}}
+    {{with .Skipped}}<span class="dchip" data-major>{{.}} skipped</span>{{end}}
+    {{with .Placed}}<span class="dchip" data-dash title="Why the guide put it in this step">{{icon "link" ""}}{{.}}</span>{{end}}
     {{with .Note}}<span class="min-w-48 flex-1 text-[13px] font-normal text-muted-foreground">{{.}}</span>{{end}}
     </button>
     <label class="viewed"><input type="checkbox" class="checkbox" data-key="{{.Path}}@{{.ID}}" data-path="{{.Path}}" aria-label="Viewed {{.Path}}"> Viewed</label>
   </div>
   <div class="collapsible-content" id="{{.Path}}~body">
   {{with .Findings}}<div class="fnotes">{{range .}}{{template "finding" .}}{{end}}</div>{{end}}
-  {{if or .Changes .Moves}}<nav class="cnav" aria-label="Declarations it changes"><span>Changes</span>{{range .Changes}}<a href="#{{.ID}}" class="chip change" data-state="{{.State}}"{{with .Sev}} data-sev="{{.}}"{{end}}>{{.Name}}</a>{{end}}{{range .Moves}}<a href="#{{.ID}}" class="chip change" data-state="moved" title="Only moved here">{{.Name}}</a>{{end}}</nav>{{end}}
-  <div class="diff overflow-x-auto"><table class="w-full border-collapse font-mono text-[12.5px] leading-5" data-path="{{.Path}}">
+  {{if or .Changes .Moves}}<nav class="cnav" aria-label="Declarations it changes"><span>Changes</span>{{range .Changes}}<a href="#{{.ID}}" class="dchip change" data-state="{{.State}}"{{with .Sev}} data-sev="{{.}}"{{end}}>{{.Name}}</a>{{end}}{{range .Moves}}<a href="#{{.ID}}" class="dchip change" data-state="moved" title="Only moved here">{{.Name}}</a>{{end}}</nav>{{end}}
+  <div class="diff overflow-x-auto" style="--rows: {{.Rows}};"><table class="w-full border-collapse font-mono text-[12.5px] leading-5" data-path="{{.Path}}">
+  <thead class="vh"><tr><th scope="col">Line</th><th scope="col">Change</th><th scope="col">Code</th></tr></thead>
   {{range .Parts}}{{if .ID}}<tbody class="fold{{if .Open}} open{{end}}" id="fold-{{.ID}}">
   <tr class="fold-head"><td colspan="4" class="px-3 py-1 font-sans"><span class="flex min-w-0 items-center gap-2"><button type="button" class="fold-toggle trace-line cursor-pointer" aria-expanded="{{.Open}}"><span class="trace-icon">{{if .Where}}{{icon "arrow-right-left" ""}}{{else}}{{icon "chevrons-down-up" ""}}{{end}}</span><span class="trace-title">{{len .Lines}} lines {{.What}}</span>{{with .Note}}<span class="trace-description">{{.}}</span>{{end}}{{with .Where}}<span class="trace-description font-mono">{{.}}</span>{{end}}<span class="trace-icon trace-chevron">{{icon "chevron-right" ""}}</span></button>{{if .Where}}<a href="#fold-{{.Link}}" class="trace-icon" title="Go to {{.Where}}" aria-label="Go to {{.Where}}">{{icon "arrow-up-right" ""}}</a>{{end}}</span></td></tr>
   {{range .Lines}}{{template "line" .}}{{end}}</tbody>
@@ -33,12 +34,11 @@
 {{range .Findings}}<tr class="fnote-row"><td colspan="4">{{template "finding" .}}</td></tr>{{end}}{{end}}
 
 {{define "finding"}}<div class="fnote"{{with .ID}} id="{{.}}"{{end}} role="note">
-  <div class="fnote-h">{{template "sev" .Severity}}{{with .Proof}}<span class="chip" data-{{if $.Shown}}shown{{else}}dash{{end}}{{with $.Evidence}} title="Verified: {{.}}"{{end}}>{{.}}</span>{{end}}{{with .Title}}<span class="fnote-t">{{.}}</span>{{end}}</div>
-  {{with .Body}}<p class="fnote-b">{{.}}</p>{{end}}
-  {{with .Blob}}<p class="fnote-at"><a href="{{.}}" class="chip loc" target="_blank" rel="noopener">{{icon "code" ""}}{{$.Loc}} at the head ↗</a></p>{{end}}
+  <div class="fnote-h">{{template "sev" .Severity}}{{with .Proof}}<span class="dchip" data-{{if $.Shown}}shown{{else}}dash{{end}}{{with $.Evidence}} title="Verified: {{.}}"{{end}}>{{.}}</span>{{end}}{{with .Title}}<span class="fnote-t">{{.}}</span>{{end}}</div>
+  {{with .Body}}<p class="fnote-b">{{md .}}</p>{{end}}
 </div>{{end}}
 
-{{/* A finding's weight as its chip: Blocker, Major, Minor, Nit. */}}
+{{/* A finding's weight as its dchip: Blocker, Major, Minor, Nit. */}}
 {{define "sev"}}<span class="sev" data-sev="{{.}}">{{if eq . "critical"}}Blocker{{else if eq . "major"}}Major{{else if eq . "nit"}}Nit{{else}}Minor{{end}}</span>{{end}}
 
 {{define "graph"}}<div class="graph" data-graph="{{json .}}"><div class="cy"></div>

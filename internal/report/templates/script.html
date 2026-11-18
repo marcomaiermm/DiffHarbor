@@ -1,91 +1,77 @@
-{{/* The page: the side bar, the views, read progress, the symbol popover. */}}
+{{/* The page: disclosures, the map's hover and selection, filters, versions, viewed marks, the diff's gaps, keys. */}}
 {{define "script"}}
 <script>
 (() => {
   const prefix = {{printf "diffharbor:%s#%d:" .Repo .Number}};
   const get = k => { try { return localStorage.getItem(k); } catch { return null; } };
   const set = (k, on) => { try { on ? localStorage.setItem(k, on === true ? "1" : on) : localStorage.removeItem(k); } catch {} };
-
-  // the side bar: a rail at ⌘B or the header's button, on a phone a sheet over the page. These and the views
-  // below hold across PRs.
-  const bar = document.getElementById("sidebar"), mobile = document.getElementById("sidebar-mobile");
-  const wide = matchMedia("(min-width: 768px)");
-  const rail = on => { bar.dataset.state = on ? "collapsed" : "expanded"; set("diffharbor:rail", on); };
-  rail(!!get("diffharbor:rail"));
-  // one copy of the side bar: the sheet borrows it while open, a big PR's is hundreds of KB
-  const lend = on => (on ? mobile : bar).append(...(on ? bar : mobile).querySelectorAll(":scope > :not(.sidebar-mobile-close)"));
-  mobile.addEventListener("close", () => lend(false));
-  const toggleBar = () => wide.matches ? rail(bar.dataset.state === "expanded") : mobile.open ? mobile.close() : (lend(true), mobile.showModal());
-  document.getElementById("nav-trigger").addEventListener("click", toggleBar);
+  const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const body = document.body;
+  const kept = new Map(), $$k = s => kept.get(s) || kept.set(s, $$(s)).get(s); // lists the page never changes
   // What a keydown means, as TanStack Hotkeys reads it: nothing while an input method composes; the letter typed, else
-  // the one on that key's place (a Cyrillic layout still has its J); Mod is Command on a Mac, Control elsewhere, with
-  // no other modifier.
+  // the one on that key's place (a Cyrillic layout still has its J)
   const composing = e => e.isComposing || e.keyCode === 229 || e.key === "Process" || e.key === "Unidentified";
   const letter = e => /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : e.key;
-  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
-  const mod = e => (mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) && !e.altKey && !e.shiftKey;
-  addEventListener("keydown", e => {
-    if (!composing(e) && mod(e) && letter(e) === "b") { e.preventDefault(); toggleBar(); }
-  });
-  mobile.addEventListener("click", e => { if (e.target === mobile || e.target.closest(".sidebar-mobile-close, a[href^='#']")) mobile.close(); });
-  // a toggle group sets <html data-files> (flow or tree) or <html data-diff> (unified or split); the CSS does the rest
-  const choose = (what, v) => {
-    document.documentElement.dataset[what] = v;
-    for (const b of document.querySelectorAll(`.toggle[data-${what}]`)) b.setAttribute("aria-pressed", b.dataset[what] === v);
-    set("diffharbor:" + what, v);
+
+  // the diff view: <html data-diff> unified or split, kept across PRs; the CSS and the split script do the rest
+  const choose = v => {
+    document.documentElement.dataset.diff = v;
+    for (const b of $$("button[data-diff]")) b.setAttribute("aria-pressed", b.dataset.diff === v);
+    set("diffharbor:diff", v);
   };
-  choose("files", get("diffharbor:files") || "flow");
-  choose("diff", get("diffharbor:diff") || "unified");
-  document.addEventListener("click", e => {
-    const t = e.target.closest(".toggle[data-files], .toggle[data-diff]");
-    if (t) choose(t.dataset.files ? "files" : "diff", t.dataset.files || t.dataset.diff);
-  });
-  const boxes = [...document.querySelectorAll("input[data-key]")];
+  choose(get("diffharbor:diff") || "unified");
+
+  // disclosures: a button with aria-expanded shows the region it controls, by id or the element after it
+  const bodyOf = b => b.getAttribute("aria-controls") ? document.getElementById(b.getAttribute("aria-controls"))
+    : b.parentElement.matches("h3") ? b.parentElement.nextElementSibling : b.nextElementSibling;
+  const disclose = (b, on) => {
+    const r = bodyOf(b);
+    if (!r) return;
+    b.setAttribute("aria-expanded", on);
+    r.hidden = !on;
+    const t = b.dataset.on && b.querySelector("span");
+    if (t) t.textContent = on ? b.dataset.on : b.dataset.off;
+    if (b.dataset.traceBoxes !== undefined) { // the traced path and a selection exclude each other
+      if (on && sel) select(null);
+      trace(on, b);
+    }
+    if (b.matches(".sbtn")) allLabel(b.closest(".pgp"));
+  };
+  // a part's steps open or close together: the button says what it does next
+  const allLabel = g => {
+    const a = $("[data-all-steps]", g);
+    if (a) a.textContent = $$(".sbtn", g).every(x => x.getAttribute("aria-expanded") === "true") ? "Close all steps" : "Open all steps";
+  };
+  const discButtons = ".icb, .pbb, .sbtn, .tch, button[data-disc]";
+  // a region inside closed ones: open each, outermost last, and a closed file too
+  const fileOpen = (f, on) => { f.toggleAttribute("open", on); $(".file-toggle", f).setAttribute("aria-expanded", on); };
+  const openUp = el => {
+    for (let p = el; p && p !== body; p = p.parentElement) {
+      if (p.matches(".file") && p !== el) fileOpen(p, true);
+      if (!p.hidden) continue;
+      const b = p.id && $(`[aria-controls="${CSS.escape(p.id)}"]`) || [p.previousElementSibling, p.previousElementSibling?.firstElementChild].find(x => x?.matches?.(discButtons));
+      if (b) disclose(b, true); else p.hidden = false;
+    }
+  };
+
   // a file's head opens and closes its diff; the Viewed box beside it is not part of the button
-  const fileOpen = (f, on) => { f.toggleAttribute("open", on); f.querySelector(".file-toggle").setAttribute("aria-expanded", on); };
-  document.addEventListener("click", e => {
-    const t = e.target.closest(".file-toggle");
-    if (t) fileOpen(t.closest(".file"), !t.closest(".file").hasAttribute("open"));
-  });
-  const viewed = new Set();
-  const navFiles = [...document.querySelectorAll(".sidebar-content a[data-path]")];
-  const steps = [...document.querySelectorAll("[data-step]")];
-  // the bar under the header, the side bar's files, and a ring per step that fills as its files get viewed
+  const boxes = $$("input[data-key]");
+  // a part or a step is read once all its files are viewed: its header, its step row, its rail rows show the mark
+  const mark = (el, on) => { el.classList.toggle("rd", on); const t = $("[data-rmark]", el); if (t) t.textContent = on ? ", read" : ", not read"; };
+  const done = el => { const fs = $$(".file", el); return fs.length > 0 && fs.every(f => f.classList.contains("seen")); };
   const sync = () => {
-    viewed.clear();
-    for (const b of boxes) {
-      if (b.checked) viewed.add(b.dataset.path);
-      b.closest(".file").classList.toggle("seen", b.checked);
+    for (const b of boxes) b.closest(".file").classList.toggle("seen", b.checked);
+    for (const s of $$("[data-step]")) mark($(".sbtn", s), done(s));
+    for (const p of $$(".pb")) {
+      const on = done(p);
+      mark($(".pbb", p), on);
+      for (const r of $$(".rrow").filter(r => r.getAttribute("href") === "#" + p.id)) mark(r, on); // by link: a page without a map has a Code block with no box
     }
-    // the header counts the reading order's code files, and names the first step not read yet
-    const code = boxes.filter(b => b.closest("#flow")), counted = code.length ? code : boxes;
-    const n = counted.filter(b => b.checked).length, text = document.getElementById("progress-text");
-    document.getElementById("progress").style.width = (counted.length ? 100 * n / counted.length : 0) + "%";
-    const ns = +text.dataset.steps, cur = steps.slice(0, ns).findIndex(s => [...s.querySelectorAll("a[data-path]")].some(a => !viewed.has(a.dataset.path)));
-    text.textContent = (ns ? "step " + (cur < 0 ? ns : cur + 1) + " of " + ns + " · " : "") + n + "/" + counted.length + (code.length ? " code files viewed" : " viewed");
-    for (const a of navFiles) a.classList.toggle("done", viewed.has(a.dataset.path));
-    const fin = document.getElementById("fin-viewed"), next = document.getElementById("fin-next");
-    if (fin) { // the finish checklist: the code files of the reading order, and the first one left
-      const left = code.find(b => !b.checked);
-      fin.textContent = code.filter(b => b.checked).length + " of " + code.length + " viewed";
-      next.hidden = !left;
-      if (left) { next.href = "#" + left.dataset.path; next.textContent = "next: " + left.dataset.path.split("/").pop(); }
-    }
-    for (const r of document.querySelectorAll(".rest")) {
-      const bs = boxes.filter(b => r.contains(b));
-      r.querySelector(".rest-v").textContent = bs.length ? bs.filter(b => b.checked).length + "/" + bs.length + " viewed" : "";
-    }
-    for (const s of steps) {
-      const files = [...s.querySelectorAll("a[data-path]")];
-      const k = files.filter(a => viewed.has(a.dataset.path)).length;
-      s.querySelector(".ring-p").style.setProperty("--p", files.length ? k / files.length : 0);
-      s.querySelector(".nav-count").textContent = k + "/" + files.length;
-      const head = document.querySelector('[data-progress="' + s.dataset.step + '"]'), done = files.length > 0 && k === files.length;
-      head.textContent = done ? "read" : k ? "reading · " + k + "/" + files.length : k + "/" + files.length;
-      head.toggleAttribute("data-done", done);
-      if (files.length && k === files.length) s.dataset.status = "complete";
-      else delete s.dataset.status;
-    }
+    const all = !!$("#read") && done($("#read"));
+    const vw = $("[data-viewed]"); // Changes' status line counts the files viewed on this page
+    if (vw) { const fs = $$(".file", $("#read")); vw.textContent = fs.length ? ` · ${fs.filter(f => f.classList.contains("seen")).length} of ${fs.length} files viewed` : ""; }
+    for (const r of $$('.rrow[href="#read"]')) mark(r, all);
+    filter();
   };
   for (const b of boxes) {
     b.checked = !!get(prefix + b.dataset.key);
@@ -100,42 +86,648 @@
       sync();
     });
   }
-  sync();
-  const copy = document.getElementById("draft-copy"), status = document.getElementById("draft-status");
-  const closed = () => status.textContent = "The browser kept the clipboard closed: select the text above and copy it.";
-  copy.addEventListener("click", () => navigator.clipboard ? navigator.clipboard.writeText(document.getElementById("draft-md").textContent).then(
-    () => status.textContent = "The review text is on your clipboard.", closed) : closed()); // no clipboard off https
 
-  // the filter over the files: all, the ones not viewed, the ones whose change differs from the last review's.
-  // For this page only: a filter left on hides files on the next PR
-  document.addEventListener("click", e => {
-    const t = e.target.closest(".toggle[data-filter]");
-    if (!t) return;
-    document.documentElement.dataset.filter = t.dataset.filter;
-    for (const b of document.querySelectorAll(".toggle[data-filter]")) b.setAttribute("aria-pressed", b === t);
-  });
-  // versions: the picker and a newer version's banner come from the PR's list of versions, next to this page's URL
-  // (none: a page alone)
-  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto", style: "short" });
-  const ago = at => {
-    const s = (new Date(at) - Date.now()) / 1000;
-    for (const [u, n] of [["year", 31536000], ["month", 2592000], ["week", 604800], ["day", 86400], ["hour", 3600], ["minute", 60]])
-      if (Math.abs(s) >= n) return rtf.format(Math.round(s / n), u);
-    return "just now";
+  // Read the change's filter: all, the files not viewed, the files changed since the Since base. For this page only
+  let mode = "all";
+  const read = $("#read");
+  const filter = () => {
+    if (!read) return;
+    for (const f of $$(".file", read)) f.hidden = mode === "unviewed" ? $("input[data-key]", f)?.checked : mode === "changed" ? !f.hasAttribute("data-changed") : false;
+    for (const s of $$("[data-step]", read)) s.hidden = mode !== "all" && !$$(".file", s).some(f => !f.hidden);
+    for (const b of $$(".pb", read)) {
+      const files = $$(".file", b);
+      $("[data-empty]", b).hidden = mode === "all" || !files.length || files.some(f => !f.hidden);
+    }
   };
-  for (const t of document.querySelectorAll("time.since-time")) t.textContent = ago(t.dateTime);
-  const pick = document.getElementById("versions");
-  const base = location.pathname.replace(/\/+$/, "").replace(/\/[0-9a-f]{40}(?:[0-9a-f]{24})?$/, "");
-  const at = (v, i) => (i ? base + "/" + v.sha : base) + location.hash;
-  fetch(base + "/versions").then(r => r.ok ? r.json() : []).then(vs => {
-    if (!Array.isArray(vs) || vs.length < 2 || !vs.some(v => v.sha === pick.dataset.sha)) return;
-    pick.replaceChildren(...vs.map((v, i) => new Option(v.sha.slice(0, 7) + " · " + ago(v.at) + (i ? "" : " · newest"), i, false, v.sha === pick.dataset.sha)));
-    pick.addEventListener("change", () => location.assign(at(vs[pick.value], +pick.value)));
-    pick.hidden = false;
-    document.getElementById("version").remove();
-    if (vs[0].sha !== pick.dataset.sha) {
-      const newer = document.getElementById("newer");
-      newer.querySelector("a").href = at(vs[0], 0);
+  const setMode = m => {
+    mode = m;
+    for (const b of $$("button[data-filter]")) b.setAttribute("aria-pressed", b.dataset.filter === m);
+    filter();
+  };
+
+  // the map: hover lights a box's lines and neighbours; a click selects it and narrows the page to it (5.14)
+  const map = $("#map");
+  const fig = key => map && $(`.mfig .mb[data-box="${CSS.escape(key)}"], .mbrow .mb[data-box="${CSS.escape(key)}"]`, map);
+  const ids = s => (s || "").split(" ").filter(Boolean).map(id => document.getElementById(id)).filter(Boolean);
+  const light = (b, cls, on) => {
+    if (!b) return;
+    for (const x of [b, ...ids(b.dataset.nb), ...ids(b.dataset.ln), ...ids(b.dataset.keep)]) x.classList.toggle(cls, on);
+  };
+  let sel = null, opener = null;
+  // a box the selection lights says how it touches the selected one: it calls it, is called by it, only names it;
+  // its lines run marks the way the data goes, as their arrows say
+  const role = (rel, up, n) => {
+    if (rel === "both") return "both ways" + n;
+    if (rel === "named") return up ? "names it" : "named";
+    return (up ? "calls it" : "called") + n;
+  };
+  const roles = b => {
+    for (const g of ids(b.dataset.ln)) {
+      const up = g.dataset.callee === b.id, o = document.getElementById(up ? g.dataset.caller : g.dataset.callee), c = g.dataset.chev;
+      if (o) o.dataset.role = role(g.dataset.rel, up, g.dataset.n ? " ×" + g.dataset.n : "");
+      if (c) for (const rev of c === "both" ? [false, true] : [c === "a"]) {
+        const f = g.firstElementChild.cloneNode();
+        f.setAttribute("class", "flow" + (rev ? " rev" : ""));
+        g.append(f);
+      }
+    }
+  };
+  const unrole = () => {
+    for (const x of $$(".mb[data-role]", map)) delete x.dataset.role;
+    for (const x of $$(".nb2", map)) x.classList.remove("nb2");
+    for (const x of $$(".ml .flow", map)) x.remove();
+  };
+  // the blast radius a step further: who calls the parts that call it, each with the caller it goes through
+  const callers = b => ids(b.dataset.ln).filter(g => g.dataset.callee === b.id && g.dataset.rel !== "named").map(g => [g, document.getElementById(g.dataset.caller)]).filter(([, o]) => o);
+  const second = b => {
+    const near = new Set([b, ...ids(b.dataset.nb)]), far = []; // a direct neighbour keeps the role it has
+    for (const [, o] of callers(b)) for (const [g, c] of callers(o)) if (!near.has(c)) far.push([g, c, o]);
+    return far;
+  };
+  const select = (key, quiet) => {
+    if (sel && fig(sel)) light(fig(sel), "nb", false);
+    unrole();
+    for (const m of $$(".mb.on", map)) m.classList.remove("on");
+    for (const m of $$(".mb[aria-pressed=true]", map)) m.setAttribute("aria-pressed", false);
+    for (const p of $$k("[data-panel]")) p.hidden = true;
+    sel = key;
+    const b = key && fig(key);
+    if (!b) {
+      sel = null;
+      delete body.dataset.sel;
+      if (map) delete map.dataset.pick;
+      $("#fchip").hidden = true;
+      for (const x of $$k("[data-item], .pb, [data-rail-box], .kt tr")) { x.classList.remove("on"); x.removeAttribute("data-off"); }
+      for (const x of $$k("[data-item], .pb")) x.hidden = false;
+      for (const x of $$k("[data-rail-box]")) x.hidden = false;
+      for (const s of $$("#before, #read, #tests")) { const e = $(":scope > [data-empty], .sbody > [data-empty]", s); if (e) e.hidden = true; }
+      counts();
+      if (!quiet && /^#(part|table|box)=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
+      filter();
+      return;
+    }
+    body.dataset.sel = key;
+    map.dataset.pick = key; // its own attribute: body's would restyle the page (perf report A)
+    const tb = $("#trace-b");
+    if (tb?.getAttribute("aria-expanded") === "true") disclose(tb, false);
+    light(b, "nb", true);
+    roles(b);
+    b.classList.add("on");
+    for (const m of $$(`.mb[data-box="${CSS.escape(key)}"]`)) m.setAttribute("aria-pressed", true);
+    const panel = $(`[data-panel="${CSS.escape(key)}"]`);
+    if (panel) panel.hidden = false;
+    const r2 = panel && $("[data-reach2]", panel);
+    if (r2) {
+      const n = new Set(second(b).map(x => x[1])).size;
+      r2.hidden = !n;
+      r2.setAttribute("aria-pressed", false);
+      r2.textContent = "Who calls those · " + n + (n === 1 ? " part" : " parts");
+    }
+    // the name may break after a slash, before a dot or an inner capital: <wbr>, never U+200B, so a copy stays clean
+    const fname = $("#fname");
+    fname.replaceChildren();
+    b.dataset.label.split(/(?<=\/)|(?=\.)|(?<=[a-z])(?=[A-Z])|(?<=_)/).forEach((w, i) => { if (i) fname.append(document.createElement("wbr")); fname.append(w); });
+    $("#fchip").hidden = false;
+    // what stays: the box's items, and for a table the parts that write or read it and its migrations' items
+    const keep = new Set([key, ...ids(b.dataset.keep).map(x => x.dataset.box)]);
+    for (const c of $$k("[data-item]")) c.hidden = !keep.has(c.dataset.box);
+    for (const p of $$k(".pb")) {
+      p.hidden = !keep.has(p.dataset.box);
+      if (!p.hidden && key.startsWith("part:")) disclose($(".pbb", p), true);
+    }
+    for (const r of $$k("[data-rail-box]")) r.hidden = !keep.has(r.dataset.railBox);
+    for (const r of $$k(".kt tr[data-block]")) r.classList.toggle("on", keep.has($("#" + CSS.escape(r.dataset.block))?.dataset.box));
+    for (const s of $$("#before, #read")) {
+      const e = $(":scope > [data-empty], .sbody > [data-empty]", s), any = $$k("[data-item], .pb").some(x => !x.hidden && s.contains(x));
+      if (e) { e.hidden = any; e.textContent = key.startsWith("table:") ? "Nothing here sits on the parts that write or read " + b.dataset.label + "." : "Nothing here sits on " + b.dataset.label + "."; }
+    }
+    counts();
+    if (!quiet) {
+      const [kind, name] = key.startsWith("table:") ? ["table", b.dataset.label] : key.startsWith("part:") ? ["part", b.dataset.label] : ["box", key];
+      history.replaceState(null, "", "#" + kind + "=" + encodeURIComponent(name));
+    }
+  };
+  // a section's count chip reads "{k} of {n}" while a selection hides some of its items
+  const counts = () => {
+    for (const c of $$k("[data-count]")) {
+      const all = $$("[data-item]", c.closest("section"));
+      c.dataset.n ??= c.textContent;
+      const shown = all.filter(x => !x.hidden).length;
+      c.textContent = sel ? shown + " of " + c.dataset.n : c.dataset.n;
+    }
+  };
+  // three lines around a line of the diff on the page, the line marked: code shown where the reader is, no jump
+  const snippet = (path, line) => {
+    const file = path && line && document.getElementById(path); // a file the page doesn't show has none
+    const rows = file ? $$("tr.ctx, tr.add, tr.del", file) : [];
+    const at = rows.findIndex(x => !x.matches(".del") && x.cells[0].textContent === String(line));
+    if (at < 0) return null;
+    const d = document.createElement("div"), t = document.createElement("table"), tb = document.createElement("tbody");
+    d.className = "diff pvd";
+    d.setAttribute("role", "region");
+    d.setAttribute("aria-label", path + ":" + line);
+    t.dataset.path = path; // its colors and Split as the file's own diff: they read its path and header
+    const head = $("table[data-path]", file)?.tHead;
+    if (head) t.append(head.cloneNode(true));
+    for (const x of rows.slice(Math.max(0, at - 3), at + 4)) {
+      const c = x.cloneNode(true);
+      c.removeAttribute("id");
+      c.classList.toggle("at", x === rows[at]);
+      tb.append(c);
+    }
+    t.append(tb);
+    d.append(t);
+    requestAnimationFrame(() => window.watchDiff?.(d)); // once the caller placed it: colored, side by side when Split is on
+    return d;
+  };
+  // a call's line in How it connects opens its code under it; a line the diff doesn't show opens Every use
+  document.addEventListener("click", e => {
+    const b = e.target.closest(".cxl");
+    if (!b) return;
+    const row = b.closest(".cxc, .dbh, .dbir, tr"), next = row.nextElementSibling, open = b.getAttribute("aria-expanded") === "true";
+    if (next?.matches(".pvd, .pvr")) { next.hidden = open; b.setAttribute("aria-expanded", !open); return; }
+    const d = snippet(b.dataset.at, b.dataset.line);
+    if (!d) { const n = b.closest(".cxn"); if (n) $(".cn", n)?.click(); return; }
+    d.id = "pv-" + b.dataset.at + "~" + b.dataset.line;
+    b.setAttribute("aria-controls", d.id);
+    b.setAttribute("aria-expanded", true);
+    if (row.matches("tr")) { // a table's row: the code in a row of its own, across the table
+      const r = document.createElement("tr"), c = r.insertCell();
+      r.className = "pvr";
+      c.colSpan = row.cells.length;
+      c.append(d);
+      row.after(r);
+    } else row.after(d);
+  });
+  // the panel keeps the reader where they are (decision 38): a part it names selects that part here, an item's row
+  // opens what the item says under it, its code too. "Read {part}" is the one link that leaves for Changes
+  let pvN = 0;
+  const peekItem = r => {
+    const open = r.getAttribute("aria-expanded") === "true", pv = r.nextElementSibling?.matches(".selpv") && r.nextElementSibling;
+    r.setAttribute("aria-expanded", !open);
+    if (pv) { pv.hidden = open; return; }
+    const src = $(r.getAttribute("href"));
+    if (!src) return;
+    const x = ($(":scope > .icx", src) || src).cloneNode(true); // a gate has no body to open: it is its body
+    for (const el of $$("h3, .gk, [data-disc], [data-more-lines]", x)) el.remove();
+    for (const el of [x, ...$$("[id], [aria-controls], [aria-labelledby]", x)]) for (const a of ["id", "aria-controls", "aria-labelledby"]) el.removeAttribute(a);
+    const box = document.createElement("div"), go = document.createElement("a");
+    box.className = "selpv";
+    box.id = "selpv-" + ++pvN;
+    go.className = "lnk";
+    go.href = r.getAttribute("href");
+    go.textContent = "Open in " + (src.closest("section.sec")?.querySelector("h2")?.firstChild?.textContent.trim() || "the page");
+    box.append(...x.childNodes, go);
+    // no excerpt in the item: its line in the diff, so the code is there without leaving
+    const line = /:(\d+)\s*$/.exec($(".sp", r)?.textContent || "")?.[1];
+    const d = !$(".xcode", box) && src.dataset.paths && snippet(JSON.parse(src.dataset.paths)[0], line);
+    if (d) box.firstElementChild ? box.firstElementChild.after(d) : box.prepend(d);
+    r.setAttribute("aria-controls", box.id);
+    r.after(box);
+  };
+  // Database's items open the same way
+  document.addEventListener("click", e => { const r = e.target.closest(".dbits a.selrow"); if (r) { e.preventDefault(); peekItem(r); } });
+  // Database: each foreign key a line from its column to the one it references, lit while its row is (decision 42).
+  // On a wide screen with a mouse ELK lays the cards out, a port per column, as the step graphs do: the cards drag,
+  // the canvas pans, Ctrl+scroll zooms; elsewhere the cards wrap
+  const erd = $("[data-erd]");
+  if (erd) {
+    const stage = $(".dbst", erd), svg = $(".dbln", erd), cards = $$(".dbt", erd), tools = $(".graph-tools", erd), hint = $(".dbhint");
+    const pairs = new Map(), NS = "http://www.w3.org/2000/svg", roomy = matchMedia("(min-width: 768px) and (hover: hover)");
+    let k = 1, tx = 0, ty = 0, size = [0, 0], elk;
+    const laid = () => erd.classList.contains("laid");
+    const full = () => document.fullscreenElement === erd;
+    // a box in the stage's own units, whatever the zoom
+    const box = el => { const r = el.getBoundingClientRect(), o = stage.getBoundingClientRect(); return { l: (r.left - o.left) / k, r: (r.right - o.left) / k, t: (r.top - o.top) / k, y: (r.top + r.height / 2 - o.top) / k }; };
+    // the row a key references in its card, the card's head when it names no column
+    const target = (r, card) => $$("tr[data-col]", card).find(x => x.dataset.col === r.dataset.refCol) || $(".dbh", card);
+    const draw = () => {
+      svg.replaceChildren();
+      pairs.clear();
+      if (getComputedStyle(svg).display === "none") return;
+      for (const r of $$("tr[data-ref]", erd)) {
+        const card = document.getElementById(r.dataset.ref);
+        if (!card || !r.getClientRects().length) continue;
+        const to = target(r, card);
+        const ca = box(r.closest(".dbt")), cb = box(card), y1 = box(r).y, y2 = box(to).y;
+        // each end a straight stub that carries its marks, the curve between the stubs; one card above the other:
+        // round the nearer side
+        let x1, x2, s1, s2;
+        if (cb.l >= ca.r) [x1, x2, s1, s2] = [ca.r, cb.l, 1, -1];
+        else if (cb.r <= ca.l) [x1, x2, s1, s2] = [ca.l, cb.r, -1, 1];
+        else if (cb.l + cb.r < ca.l + ca.r) [x1, x2, s1, s2] = [ca.l, cb.l, -1, -1];
+        else [x1, x2, s1, s2] = [ca.r, cb.r, 1, 1];
+        const a1 = x1 + s1 * 24, a2 = x2 + s2 * 24;
+        const c = s1 !== s2 ? (a1 + a2) / 2 : s1 > 0 ? Math.max(a1, a2) + 16 : Math.min(a1, a2) - 16;
+        const p = document.createElementNS(NS, "path"), m = document.createElementNS(NS, "path"), marks = [];
+        p.setAttribute("d", `M${x1} ${y1}H${a1}C${c} ${y1} ${c} ${y2} ${a2} ${y2}H${x2}`);
+        // the ends, as crow's foot notation draws them: at the key's own end zero or many (the foot on the card), zero
+        // or one when the column is unique; at the row it references exactly one when the key is not null, else zero
+        // or one
+        const bar = (x, y) => `M${x} ${y - 6}V${y + 6}`;
+        const ring = (x, y) => { const e = document.createElementNS(NS, "circle"); e.setAttribute("cx", x); e.setAttribute("cy", y); e.setAttribute("r", 3.5); marks.push(e); };
+        const need = "need" in r.dataset;
+        if ("guess" in r.dataset) p.classList.add("guess");
+        else {
+          const key = "one" in r.dataset ? bar(x1 + s1 * 7, y1) : `M${x1} ${y1 - 6}L${x1 + s1 * 11} ${y1}L${x1} ${y1 + 6}`;
+          m.setAttribute("d", key + bar(x2 + s2 * 7, y2) + (need ? bar(x2 + s2 * 12, y2) : ""));
+          ring(x1 + s1 * 17, y1);
+          if (!need) ring(x2 + s2 * 15, y2);
+        }
+        svg.append(p, m, ...marks);
+        pairs.set(r, [p, m, ...marks, to]);
+      }
+    };
+    const light = r => { // two keys may share a target: what r lights, then everything else off
+      const on = new Set(pairs.get(r));
+      for (const xs of pairs.values()) for (const x of xs) x.classList.toggle(x.matches("tr, .dbh") ? "pk" : "on", on.has(x));
+    };
+    const show = () => { stage.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`; };
+    // all of it in view, but never below least: the first view stays readable, left-aligned, the rest a pan away
+    const fit = (least = 0.2) => {
+      const [w, h] = size;
+      k = Math.max(least, Math.min(1, erd.clientWidth / w, erd.clientHeight / h));
+      tx = Math.max(0, (erd.clientWidth - w * k) / 2);
+      ty = Math.max(0, (erd.clientHeight - h * k) / 2);
+      show();
+    };
+    const unlay = () => {
+      erd.classList.remove("laid");
+      erd.style.height = stage.style.cssText = "";
+      for (const c of cards) c.style.left = c.style.top = "";
+      k = 1;
+      tools.hidden = true;
+      if (hint) hint.hidden = true;
+    };
+    // ELK, layered left to right: a key's table before the one it references, each line between two columns' ports
+    const arrange = async () => {
+      elk ??= import("https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js/+esm").then(m => new m.default());
+      unlay();
+      const ports = new Map(), edges = [];
+      const port = (row, east) => {
+        const card = row.closest(".dbt"), id = `${card.id}/${row.dataset.col ?? ""}/${east ? "e" : "w"}`;
+        if (!ports.has(card.id)) ports.set(card.id, new Map());
+        ports.get(card.id).set(id, { id, x: east ? card.offsetWidth : 0, y: box(row).y - box(card).t, width: 1, height: 1, layoutOptions: { "elk.port.side": east ? "EAST" : "WEST" } });
+        return id;
+      };
+      for (const r of $$("tr[data-ref]", erd)) {
+        const card = document.getElementById(r.dataset.ref);
+        if (!card || card === r.closest(".dbt")) continue;
+        const to = target(r, card);
+        edges.push({ id: `k${edges.length}`, sources: [port(r, true)], targets: [port(to, false)] });
+      }
+      const g = await (await elk).layout({
+        id: "db",
+        layoutOptions: { "elk.algorithm": "layered", "elk.direction": "RIGHT", "elk.padding": "[top=24,left=24,bottom=24,right=24]", "elk.spacing.nodeNode": "28",
+          "elk.layered.spacing.nodeNodeBetweenLayers": "80", "elk.spacing.componentComponent": "40", "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES" },
+        children: cards.map(c => ({ id: c.id, width: c.offsetWidth, height: c.offsetHeight, layoutOptions: { "elk.portConstraints": "FIXED_POS" }, ports: [...(ports.get(c.id)?.values() ?? [])] })),
+        edges,
+      });
+      if (!roomy.matches) return;
+      for (const n of g.children) Object.assign(document.getElementById(n.id).style, { left: n.x + "px", top: n.y + "px" });
+      size = [g.width, g.height];
+      Object.assign(stage.style, { width: g.width + "px", height: g.height + "px" });
+      erd.classList.add("laid");
+      if (!full()) erd.style.height = Math.min(640, Math.max(240, g.height * Math.max(0.85, Math.min(1, erd.clientWidth / g.width)))) + "px";
+      tools.hidden = false;
+      if (hint) hint.hidden = false;
+      fit(0.85);
+      draw();
+    };
+    const lay = () => (roomy.matches ? arrange().catch(unlay) : unlay(), draw());
+    roomy.addEventListener("change", lay);
+    new IntersectionObserver((es, io) => { if (es[0].isIntersecting) { io.disconnect(); lay(); } }, { rootMargin: "400px" }).observe(erd);
+    // drag: a card by its head, else the canvas
+    erd.addEventListener("pointerdown", e => {
+      if (!laid() || e.button !== 0 || e.target.closest("button, a, .graph-tools, tbody, .pvd, .dbrk")) return;
+      const card = e.target.closest(".dbh")?.closest(".dbt");
+      if (e.target.closest(".dbt") && !card) return;
+      e.preventDefault();
+      erd.setPointerCapture(e.pointerId);
+      let x = e.clientX, y = e.clientY;
+      for (const c of cards) c.classList.toggle("dbup", c === card);
+      erd.classList.toggle("pan", !card);
+      const move = ev => {
+        const dx = ev.clientX - x, dy = ev.clientY - y;
+        x = ev.clientX;
+        y = ev.clientY;
+        if (card) { card.style.left = parseFloat(card.style.left) + dx / k + "px"; card.style.top = parseFloat(card.style.top) + dy / k + "px"; draw(); }
+        else { tx += dx; ty += dy; show(); }
+      };
+      erd.addEventListener("pointermove", move);
+      erd.addEventListener("pointerup", () => { erd.removeEventListener("pointermove", move); erd.classList.remove("pan"); }, { once: true });
+    });
+    // the wheel scrolls the page; with Ctrl or ⌘ (a trackpad's pinch too), or in full screen, it zooms at the pointer
+    erd.addEventListener("wheel", e => {
+      if (!laid() || (!e.ctrlKey && !e.metaKey && !full())) return;
+      e.preventDefault();
+      const o = erd.getBoundingClientRect(), px = e.clientX - o.left, py = e.clientY - o.top, z = Math.min(2, Math.max(0.2, k * Math.exp(-e.deltaY * 0.002)));
+      tx = px - (px - tx) * z / k;
+      ty = py - (py - ty) * z / k;
+      k = z;
+      show();
+    }, { passive: false });
+    // the keyboard reaches a card out of view: the canvas moves to it, the browser doesn't scroll the frame
+    erd.addEventListener("focusin", e => {
+      light(e.target.closest("tr[data-ref]"));
+      if (!laid()) return;
+      erd.scrollTop = erd.scrollLeft = 0;
+      const o = erd.getBoundingClientRect(), r = e.target.getBoundingClientRect();
+      if (r.left < o.left || r.right > o.right) tx += o.left + o.width / 2 - (r.left + r.right) / 2;
+      if (r.top < o.top || r.bottom > o.bottom) ty += o.top + o.height / 2 - (r.top + r.bottom) / 2;
+      show();
+    });
+    erd.addEventListener("pointerover", e => light(e.target.closest("tr[data-ref]")));
+    erd.addEventListener("pointerleave", () => light(null));
+    $("[data-act=fit]", erd).addEventListener("click", () => fit());
+    $("[data-act=layout]", erd).addEventListener("click", () => arrange().catch(unlay));
+    $("[data-act=full]", erd).addEventListener("click", () => full() ? document.exitFullscreen() : erd.requestFullscreen?.());
+    erd.addEventListener("fullscreenchange", () => setTimeout(fit, 100, 0.2)); // after the browser resized the frame
+    // a card that opens a statement grows: its lines follow
+    const ro = new ResizeObserver(draw);
+    ro.observe(erd);
+    for (const c of cards) ro.observe(c);
+  }
+  if (map) {
+    const tip = $("#mtip");
+    // a row of the panel's How it connects and its box and line light each other
+    const peek = (r, on) => { r.classList.toggle("pk", on); for (const x of [...ids(r.dataset.hl), ...ids(r.dataset.hlLn)]) x.classList.toggle("pk", on); };
+    const rowsOf = (attr, id) => $$(`[${attr}="${CSS.escape(id)}"]`, map);
+    for (const t of ["pointerover", "focusin"]) map.addEventListener(t, e => { const r = e.target.closest("[data-hl]"); if (r) peek(r, true); });
+    for (const t of ["pointerout", "focusout"]) map.addEventListener(t, e => { const r = e.target.closest("[data-hl]"); if (r && !r.contains(e.relatedTarget)) peek(r, false); });
+    map.addEventListener("click", e => {
+      const r = e.target.closest("[data-reach2]");
+      if (!r || !sel) return;
+      const on = r.getAttribute("aria-pressed") !== "true";
+      r.setAttribute("aria-pressed", on);
+      for (const [g, c, o] of second(fig(sel))) {
+        g.classList.toggle("nb2", on);
+        c.classList.toggle("nb2", on);
+        if (on) c.dataset.role = "calls " + o.dataset.label; else delete c.dataset.role;
+      }
+    });
+    map.addEventListener("pointerover", e => {
+      const b = e.target.closest(".mb[data-box]"), p = e.target.closest(".mhit path");
+      if (b) { light(fig(b.dataset.box) || b, "hl", true); for (const r of rowsOf("data-hl", b.id)) r.classList.add("pk"); }
+      if (p) {
+        for (const r of rowsOf("data-hl-ln", p.dataset.ln)) r.classList.add("pk");
+        document.getElementById(p.dataset.ln)?.classList.add("hl");
+        if (p.dataset.tip) { tip.textContent = p.dataset.tip; tip.hidden = false; }
+      }
+    });
+    map.addEventListener("pointermove", e => { if (!tip.hidden) { tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = e.clientY + 16 + "px"; } });
+    map.addEventListener("pointerout", e => {
+      const b = e.target.closest(".mb[data-box]"), p = e.target.closest(".mhit path");
+      if (b) { light(fig(b.dataset.box) || b, "hl", false); for (const r of rowsOf("data-hl", b.id)) r.classList.remove("pk"); }
+      if (p) { for (const r of rowsOf("data-hl-ln", p.dataset.ln)) r.classList.remove("pk"); document.getElementById(p.dataset.ln)?.classList.remove("hl"); tip.hidden = true; }
+    });
+    map.addEventListener("focusin", e => { const b = e.target.closest(".mb[data-box]"); if (b) light(fig(b.dataset.box) || b, "hl", true); });
+    map.addEventListener("focusout", e => { const b = e.target.closest(".mb[data-box]"); if (b) light(fig(b.dataset.box) || b, "hl", false); });
+    map.addEventListener("click", e => {
+      const b = e.target.closest(".mb[data-box]");
+      if (b) select(sel === b.dataset.box ? null : b.dataset.box);
+    });
+    // one tab stop for the figure's boxes: the arrows move by column and row, Home and End to the first and last
+    const figs = $$(".mfig .mb", map);
+    const pos = b => [b.offsetLeft, b.offsetTop];
+    figs.forEach((b, i) => b.tabIndex = i ? -1 : 0);
+    map.addEventListener("keydown", e => {
+      const b = e.target.closest(".mfig .mb");
+      if (!b) return;
+      const [x, y] = pos(b);
+      let to;
+      const near = (ok, d) => figs.filter(o => o !== b && ok(...pos(o))).sort((p, q) => d(...pos(p)) - d(...pos(q)))[0];
+      if (e.key === "ArrowRight") to = near(ox => ox > x, (ox, oy) => (ox - x) * 1000 + Math.abs(oy - y));
+      else if (e.key === "ArrowLeft") to = near(ox => ox < x, (ox, oy) => (x - ox) * 1000 + Math.abs(oy - y));
+      else if (e.key === "ArrowDown") to = near((ox, oy) => ox === x && oy > y, (ox, oy) => oy - y);
+      else if (e.key === "ArrowUp") to = near((ox, oy) => ox === x && oy < y, (ox, oy) => y - oy);
+      else if (e.key === "Home") to = figs[0];
+      else if (e.key === "End") to = figs[figs.length - 1];
+      else return;
+      e.preventDefault();
+      if (!to) return;
+      b.tabIndex = -1;
+      to.tabIndex = 0;
+      to.focus();
+    });
+    map.addEventListener("click", e => {
+      const a = e.target.closest(".selp .hc a.lnk[href^='#']"), k = a && $(a.getAttribute("href"))?.dataset.box;
+      if (k && fig(k)) {
+        e.preventDefault();
+        select(k);
+        fig(k).focus({ preventScroll: true });
+        return;
+      }
+      const r = e.target.closest(".selp a.selrow[href^='#']");
+      if (r) { e.preventDefault(); peekItem(r); }
+    });
+    const more = $("[data-more-tables]", map);
+    more?.addEventListener("click", () => { for (const b of $$("[data-more]", map)) b.hidden = false; more.parentElement.remove(); });
+  }
+  // the brief's sentences light their boxes
+  for (const s of $$("[data-boxes]")) {
+    const on = v => { const b = s.dataset.boxes && fig(s.dataset.boxes); if (b) b.classList.toggle("hl", v); };
+    s.addEventListener("pointerenter", () => on(true));
+    s.addEventListener("pointerleave", () => on(false));
+    s.addEventListener("focusin", () => on(true));
+    s.addEventListener("focusout", () => on(false));
+  }
+  // the traced path: while open, its boxes and lines take the ink and the rest fade
+  const trace = (on, b) => {
+    for (const x of [...ids(b.dataset.traceBoxes), ...ids(b.dataset.traceLines)]) x.classList.toggle("tr", on);
+    if (on) body.dataset.trace = ""; else delete body.dataset.trace;
+  };
+  for (const c of $$("[data-clear]")) c.addEventListener("click", () => select(null));
+
+  // popovers, the More list and the sheets: Esc closes the topmost and gives the focus back to what opened it
+  const pops = [["ver-btn", "vermenu"], ["key-btn", "keypop"], ["more-btn", "morelist"]];
+  const closePops = except => {
+    for (const [b, p] of pops) if (p !== except && !document.getElementById(p).hidden) { document.getElementById(p).hidden = true; document.getElementById(b).setAttribute("aria-expanded", false); }
+  };
+  for (const [b, p] of pops) document.getElementById(b)?.addEventListener("click", e => {
+    e.stopPropagation();
+    const el = document.getElementById(p), on = el.hidden;
+    closePops(p);
+    el.hidden = !on;
+    e.currentTarget.setAttribute("aria-expanded", on);
+    if (on && p === "keypop") $("#key-title").focus();
+  });
+  document.addEventListener("click", e => { if (!e.target.closest(".pop, .mlist2")) closePops(); });
+  for (const p of ["keypop"]) $(`#${p} [data-close]`)?.addEventListener("click", () => { closePops(); $("#key-btn").focus(); });
+  const sheet = $("#sheet"), scrim = $("#scrim");
+  const openSheet = (what, from) => {
+    closePops();
+    opener = from.closest("#morelist") ? $("#more-btn") : from;
+    for (const p of $$("[data-sheet-part]", sheet)) p.hidden = p.dataset.sheetPart !== what;
+    $("#sheet-title").textContent = { sections: "Sections", key: "Evidence key", versions: "Versions" }[what];
+    sheet.hidden = scrim.hidden = false;
+    modal(true);
+    $("#sheet-title").focus();
+  };
+  // while the sheet is open the page behind it is inert and doesn't scroll
+  const modal = on => {
+    for (const x of $$("#topbar, .blockw, .lay")) x.inert = on;
+    document.documentElement.style.overflow = on ? "hidden" : "";
+  };
+  // closing gives the focus back to what opened the sheet, or to the heading of the section a row goes to
+  const closeSheet = to => {
+    if (sheet.hidden) return false;
+    sheet.hidden = scrim.hidden = true;
+    modal(false);
+    if (to) setTimeout(() => to.focus()); // after the jump: a jump to an element that takes no focus drops it
+    else opener?.focus();
+    return true;
+  };
+  for (const b of $$("[data-sheet]")) b.addEventListener("click", () => openSheet(b.dataset.sheet, b));
+  scrim.addEventListener("click", () => closeSheet());
+  $("[data-close]", sheet).addEventListener("click", () => closeSheet());
+  sheet.addEventListener("click", e => {
+    const a = e.target.closest("a[href^='#']");
+    if (!a) return;
+    const id = a.getAttribute("href").slice(1), t = document.getElementById(id);
+    closeSheet(id === "top" ? $("#h-what") : t && $("h2[tabindex], h3 .pbb", t));
+  });
+  sheet.addEventListener("keydown", e => { // the focus stays in the sheet
+    if (e.key !== "Tab") return;
+    const f = $$("a[href], button, input", sheet).filter(x => x.getClientRects().length);
+    if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+  });
+  $("#morelist")?.addEventListener("focusout", e => { if (!e.currentTarget.contains(e.relatedTarget) && e.relatedTarget !== $("#more-btn")) closePops(); });
+
+  // single-key shortcuts: on unless the reader turned them off, for every PR
+  const keysOn = () => get("diffharbor:keys") !== "off";
+  const keys = on => {
+    set("diffharbor:keys", on ? false : "off");
+    for (const c of $$("input[data-keys]")) c.checked = on;
+    for (const h of $$("[data-keyhint]")) h.hidden = !on;
+  };
+  keys(keysOn());
+  for (const c of $$("input[data-keys]")) c.addEventListener("change", () => keys(c.checked));
+
+  // Since (5.13): the version this browser opened before this one, else the previous review; the versions menu picks
+  // another for this visit. Files compare by their patch IDs, findings by the base's Findings and Weights, the other
+  // open items by Version.Items: a group (the gap, a test group) is new when the base had none of its kind.
+  const sha = {{.SHA}}, since = JSON.parse($("#since-data").textContent);
+  const seenKey = {{printf "diffharbor:seen:%s#%d" .Repo .Number}};
+  let seen = null;
+  try { seen = JSON.parse(get(seenKey)); } catch {}
+  const opened = seen ? (seen.at !== sha ? seen.at : seen.base) || "" : "";
+  set(seenKey, JSON.stringify({ at: sha, base: opened }));
+  const count = (k, one, many) => k + " " + (k === 1 ? one : many);
+  const and = a => a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a.at(-1);
+  const group = k => k === "gap" || k.startsWith("test-");
+  const commit = $("#i-commit").innerHTML;
+  let base = null;
+  const compare = (b, how) => {
+    for (const x of $$("[data-since]")) x.parentNode.removeChild(x);
+    for (const x of $$(".mb .mk")) if (!x.childElementCount) x.hidden = true; // an earlier compare's marks only
+    for (const x of $$("[data-changed]")) x.removeAttribute("data-changed");
+    for (const x of $$("[data-aria0]")) x.setAttribute("aria-label", x.dataset.aria0);
+    base = b;
+    const s7 = b.sha.slice(0, 7), was = b.files || {};
+    const changed = Object.keys(since.files).filter(p => since.files[p] !== was[p]).sort();
+    const at = new Set(changed), where = {}, kinds = { code: 0, doc: 0, test: 0, other: 0 };
+    for (const p of changed) { const w = since.where[p] || "other"; if (w in kinds) kinds[w]++; else where[w] = (where[w] || 0) + 1; }
+    const said = since.boxes.filter(([k]) => where[k]).map(([k, l, d]) => d ? l : where[k] + " in " + l);
+    for (const [k, one, many] of [["code", "code file", "code files"], ["doc", "doc", "docs"], ["test", "test file", "test files"], ["other", "other file", "other files"]]) if (kinds[k]) said.push(count(kinds[k], one, many));
+    const key = i => i.kind + "\t" + i.place, kindOf = k => k.split("\t")[0], now = new Set(since.items.map(key));
+    // a version from before Items still tells its findings
+    const known = k => kindOf(k) === "finding" || !!b.items, weights = b.weights || {};
+    const old = new Set([...(b.findings || []).filter(f => since.major.includes(weights[f])).map(f => "finding\t" + f),
+      ...(b.items || []).filter(i => i.kind !== "finding").map(key)]);
+    const oldKinds = new Set([...old].map(kindOf)), nowKinds = new Set(since.items.map(i => i.kind));
+    let news = 0, fixed = 0;
+    for (const k of now) if (known(k) && !group(kindOf(k)) && !old.has(k)) news++;
+    for (const k of old) if (!group(kindOf(k)) && !now.has(k)) fixed++;
+    if (b.items) {
+      for (const k of nowKinds) if (group(k) && !oldKinds.has(k)) news++;
+      for (const k of oldKinds) if (group(k) && !nowKinds.has(k)) fixed++;
+    }
+    const line = $("#since"), filt = $('button[data-filter="changed"]');
+    line.hidden = filt.hidden = !changed.length && !news && !fixed;
+    if (line.hidden) return mode === "changed" && setMode("all");
+    $("span", line).textContent = count(changed.length, "file", "files") + " changed since " + s7 + ", " + how + " (" + String(b.at).slice(0, 10) + ")" + (said.length ? ": " + and(said) : "") + "." +
+      (news + fixed ? " · " + count(news, "open item", "open items") + " new · " + fixed + " fixed" : "");
+    filt.textContent = "Changed since " + s7;
+    const mark = (el, text) => {
+      const c = document.createElement("span");
+      c.className = "chip st2";
+      c.dataset.since = "";
+      c.innerHTML = commit;
+      c.append(text);
+      el.append(c);
+    };
+    for (const p of at) {
+      const f = document.getElementById(p);
+      if (!f?.matches(".file")) continue;
+      f.setAttribute("data-changed", "");
+      mark($(".file-head > .file-toggle", f), "changed since " + s7);
+    }
+    for (const c of $$("article[data-k], article[data-paths]")) {
+      const ks = JSON.parse(c.dataset.k || "[]"), ps = JSON.parse(c.dataset.paths || "[]"), m = $(".icm", c);
+      if (!m) continue;
+      const isNew = ks.some(k => known(k) && (group(k) ? !oldKinds.has(k) : !old.has(k)));
+      if (isNew || ps.some(p => at.has(p))) {
+        mark(m, (isNew ? "New since " : "Changed since ") + s7);
+        const pl = $(":scope > .pl", m);
+        if (pl) m.append(pl);
+      }
+    }
+    for (const k of Object.keys(where)) {
+      for (const b of $$(`.mb[data-box="${CSS.escape(k)}"]`)) {
+        let mk = $(".mk", b);
+        if (!mk) { mk = document.createElement("span"); mk.className = "mk"; ($(".mb2", b) || b).append(mk); }
+        mk.hidden = false;
+        mk.insertAdjacentHTML("beforeend", '<span data-since style="display: inline-flex;">' + commit + "</span>");
+        b.dataset.aria0 ??= b.getAttribute("aria-label");
+        b.setAttribute("aria-label", b.dataset.aria0 + ", changed since " + s7);
+      }
+    }
+    const sk = $("[data-since-key]");
+    if (sk) {
+      sk.hidden = !Object.keys(where).length;
+      sk.parentElement.hidden = sk.hidden && !$$(":scope > :not([data-since-key])", sk.parentElement).length;
+      if (!sk.hidden) $("span:last-child", sk).textContent = s7;
+    }
+  };
+  // the versions next to this page's URL: the menu's rows, each with "Compare with this", and a newer version's banner
+  // (none: a page alone)
+  const home = location.pathname.replace(/\/+$/, "").replace(/\/[0-9a-f]{40}(?:[0-9a-f]{24})?$/, "");
+  fetch(home + "/versions").then(r => r.ok ? r.json() : []).then(vs => {
+    if (!Array.isArray(vs) || !vs.some(v => v.sha === sha)) return;
+    const rows = () => {
+      const row = (v, i) => {
+        const me = v.sha === sha, r = document.createElement("div"), a = document.createElement(me ? "p" : "a");
+        r.className = "vrow";
+        a.className = "mrow";
+        if (me) a.setAttribute("aria-current", "page"); else a.href = (i ? home + "/" + v.sha : home) + location.hash;
+        a.innerHTML = me ? $("#vermenu .mrow svg").outerHTML : '<span style="width: 16px;"></span>';
+        const t = document.createElement("span");
+        t.textContent = v.sha.slice(0, 7) + " · " + String(v.at).slice(0, 10);
+        const note = me ? "this page" : base && v.sha === base.sha ? "compared with" : "";
+        if (note) t.insertAdjacentHTML("beforeend", ' · <span class="ui12 i3">' + note + "</span>");
+        a.append(t);
+        r.append(a);
+        if (!note) {
+          const c = document.createElement("button");
+          c.type = "button";
+          c.className = "gb vcmp";
+          c.textContent = "Compare with this";
+          c.addEventListener("click", () => { compare(v, "the version you picked"); rows(); });
+          r.append(c);
+        }
+        return r;
+      };
+      for (const list of $$(".verrows")) list.replaceChildren(...vs.map(row));
+    };
+    const i = vs.findIndex(v => v.sha === sha), b = vs.find(v => v.sha === opened && v.sha !== sha);
+    if (b) compare(b, "the version you opened last");
+    else if (vs[i + 1]) compare(vs[i + 1], "the previous review");
+    rows();
+    if (vs[0].sha !== sha) {
+      const newer = $("#newer");
+      $("a", newer).href = home + location.hash;
       newer.hidden = false;
     }
   }).catch(() => {});
@@ -147,10 +739,10 @@
   };
   const hunkKey = h => {
     const t = h.closest("table");
-    return prefix + t.closest(".file").querySelector("input[data-key]").dataset.key + "#" + [...t.querySelectorAll("tr.hunk")].indexOf(h);
+    return prefix + $("input[data-key]", t.closest(".file")).dataset.key + "#" + $$("tr.hunk", t).indexOf(h);
   };
   const seeHunk = (h, on) => {
-    const b = h.querySelector(".hunk-seen");
+    const b = $(".hunk-seen", h);
     b.setAttribute("aria-pressed", on);
     b.textContent = on ? "Unfold" : "Fold";
     const rows = [...h.closest("table").rows];
@@ -159,37 +751,60 @@
       rows[i].classList.toggle("gone", on);
       n += rows[i].matches("tr.add, tr.del, tr.ctx");
     }
-    h.querySelector(".hunk-folded").textContent = on ? n + (n === 1 ? " line" : " lines") + " folded" : "";
+    $(".hunk-folded", h).textContent = on ? n + (n === 1 ? " line" : " lines") + " folded" : "";
     set(hunkKey(h), on);
   };
-  for (const h of document.querySelectorAll("tr.hunk")) if (get(hunkKey(h))) seeHunk(h, true);
+  for (const h of $$("tr.hunk")) if (get(hunkKey(h))) seeHunk(h, true);
+
   document.addEventListener("click", e => {
-    const b = e.target.closest(".hunk-seen");
-    if (!b) return;
-    const h = b.closest("tr");
-    seeHunk(h, b.getAttribute("aria-pressed") !== "true");
-    const t = h.closest("table"), box = t.closest(".file").querySelector("input[data-key]");
-    if (![...t.querySelectorAll(".hunk-seen")].some(x => x.getAttribute("aria-pressed") !== "true") && !box.checked) {
-      box.checked = true;
-      box.dispatchEvent(new Event("change"));
-    } else if (h.getBoundingClientRect().top < 80) h.scrollIntoView({ block: "start" });
+    const t = e.target;
+    const d = t.closest("button[data-diff]");
+    if (d) return choose(d.dataset.diff);
+    const f = t.closest("button[data-filter]");
+    if (f) return setMode(f.dataset.filter);
+    const g = t.closest("a[data-gate]");
+    if (g) { e.preventDefault(); const to = $(g.getAttribute("href")); to.scrollIntoView({ block: "start" }); return $("h3", to).focus({ preventScroll: true }); }
+    if (t.closest("[data-show-changed]")) { e.preventDefault(); setMode("changed"); $("#h-read").focus(); return $("#read").scrollIntoView({ block: "start" }); }
+    const ft = t.closest(".file-toggle");
+    if (ft) return fileOpen(ft.closest(".file"), !ft.closest(".file").hasAttribute("open"));
+    const as = t.closest("button[data-all-steps]");
+    if (as) { const on = as.textContent.startsWith("Open"); for (const x of $$(".sbtn", as.closest(".pgp"))) disclose(x, on); return; }
+    const b = t.closest(discButtons);
+    if (b) return disclose(b, b.getAttribute("aria-expanded") !== "true");
+    const rv = t.closest("[data-reveal]");
+    if (rv) {
+      const box = rv.closest("tbody") ?? rv;
+      const rows = [rv.nextElementSibling, rv.parentElement.nextElementSibling, rv.parentElement.previousElementSibling, box.previousElementSibling].find(x => x?.matches("[data-more-rows]"));
+      if (rows) { rows.hidden = false; box.remove(); }
+      return;
+    }
+    const ml = t.closest("[data-more-lines]");
+    if (ml) { const x = $(".xmore", ml.previousElementSibling); if (x) x.hidden = false; return ml.remove(); }
+    const hs = t.closest(".hunk-seen");
+    if (hs) {
+      const h = hs.closest("tr");
+      seeHunk(h, hs.getAttribute("aria-pressed") !== "true");
+      const tb = h.closest("table"), box = $("input[data-key]", tb.closest(".file"));
+      if (!$$(".hunk-seen", tb).some(x => x.getAttribute("aria-pressed") !== "true") && !box.checked) {
+        box.checked = true;
+        box.dispatchEvent(new Event("change"));
+      } else if (h.getBoundingClientRect().top < 80) h.scrollIntoView({ block: "start" });
+      return;
+    }
+    const fo = t.closest(".fold-toggle");
+    if (fo) fo.setAttribute("aria-expanded", fo.closest("tbody").classList.toggle("open"));
   });
 
-  // folds open on click; a jump opens what hides its target and lights it up
-  document.addEventListener("click", e => {
-    const t = e.target.closest(".fold-toggle");
-    if (t) t.setAttribute("aria-expanded", t.closest("tbody").classList.toggle("open"));
-  });
   // the unchanged lines between and around hunks, from the file's text at the head: read once a gap opens. A gap
   // shows 20 more under the change above or over the one below, or all of it; a small one all at once.
   const STEP = 20, gaps = new WeakMap(); // a gap's row -> its lines not shown yet, new numbers lo..hi
-  for (const t of document.querySelectorAll("table[data-path]")) {
+  for (const t of $$("table[data-path]")) {
     const src = t.closest(".collapsible-content").querySelector(":scope > .file-src");
     if (!src) continue;
     let text;
     const lines = () => text ??= JSON.parse(src.textContent).replace(/\n$/, "").split("\n");
-    const n = +src.dataset.lines, hunks = [...t.querySelectorAll("tr.hunk")];
-    const at = h => (/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(h.querySelector(".hunk-text").textContent) || []).slice(1).map(x => x === undefined ? 1 : +x);
+    const n = +src.dataset.lines, hunks = $$("tr.hunk", t);
+    const at = h => (/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec($(".hunk-text", h).textContent) || []).slice(1).map(x => x === undefined ? 1 : +x);
     const add = (before, lo, hi, shift, upOk, downOk) => {
       if (hi < lo) return;
       const row = document.createElement("tr");
@@ -210,7 +825,7 @@
       };
       // the buttons are made once and hidden when they don't fit: the one clicked keeps the focus, else Show N
       // does, else the first line it showed
-      const bar = row.querySelector(".gap-bar"), label = bar.querySelector("span");
+      const bar = $(".gap-bar", row), label = $("span", bar);
       const btn = act => {
         const b = document.createElement("button");
         b.type = "button";
@@ -258,19 +873,26 @@
     const last = hunks.length ? at(hunks[hunks.length - 1]) : [];
     if (n && last.length) add(null, end + 1, n, last[0] + last[1] - last[2] - last[3], false, true);
   }
+
+  // a jump opens what hides its target and lights it up: "#path:line" is the line of the file, by its new number,
+  // else its old one; one in a gap opens it; the file when the diff doesn't show it. "#part=x" selects a box.
   const reveal = () => {
-    const h = decodeURIComponent(location.hash.slice(1)), m = /^(.+):(\d+)$/.exec(h);
-    // "#path:line": the line of the file, by its new number, else its old one; one in a gap opens it; the file when
-    // the diff doesn't show it
-    const find = f => [...f.querySelectorAll("tr.add, tr.ctx")].find(r => r.cells[0].textContent === m[2]) || f.querySelector(`tr[data-old="${m[2]}"]`);
-    const lineOf = f => f && (find(f) || ([...f.querySelectorAll("tr.gap")].map(r => gaps.get(r)).find(g => g.lo <= +m[2] && +m[2] <= g.hi)?.all(), find(f)) || f);
+    const h = decodeURIComponent(location.hash.slice(1));
+    const s = /^(part|table|box)=(.+)$/.exec(h);
+    if (s) {
+      const b = $$("#map .mb[data-box]").find(b => s[1] === "box" ? b.dataset.box === s[2] : b.dataset.box.startsWith(s[1] + ":") && b.dataset.label === s[2]);
+      return b && select(b.dataset.box, true);
+    }
+    const m = /^(.+):(\d+)$/.exec(h);
+    const find = f => $$("tr.add, tr.ctx", f).find(r => r.cells[0].textContent === m[2]) || $(`tr[data-old="${m[2]}"]`, f);
+    const lineOf = f => f && (find(f) || ($$("tr.gap", f).map(r => gaps.get(r)).find(g => g.lo <= +m[2] && +m[2] <= g.hi)?.all(), find(f)) || f);
     const el = document.getElementById(h) || (m && lineOf(document.getElementById(m[1])));
     if (!el) return;
-    const tab = el.closest("[role=tabpanel][hidden]");
-    if (tab) document.getElementById(tab.getAttribute("aria-labelledby")).click();
-    for (let d = el.closest("details, .file"); d; d = d.parentElement.closest("details, .file")) d.matches(".file") ? fileOpen(d, true) : d.open = true;
+    if (el.closest("[data-item], .pb")?.hidden) select(null);
+    openUp(el);
+    if (el.matches(".file")) fileOpen(el, true);
     const fold = el.closest("tbody.fold");
-    if (fold) { fold.classList.add("open"); fold.querySelector(".fold-toggle").setAttribute("aria-expanded", true); }
+    if (fold) { fold.classList.add("open"); $(".fold-toggle", fold).setAttribute("aria-expanded", true); }
     if (el.matches("tr.gone")) seeHunk(hunkOf(el), false);
     const at = window.inSplit?.(el) || el; // the side by side view's line, when it shows
     at.classList.remove("flash");
@@ -281,64 +903,66 @@
   addEventListener("hashchange", reveal);
   reveal();
 
-  // j and k: the next and the previous file, n: the next finding, v: the file at the top viewed. Esc closes what
-  // is open: the dialogs and the symbol card do that themselves.
-  const head = 72; // where a jump puts a file: under the header, see scroll-margin-top
-  const shown = sel => [...document.querySelectorAll(sel)].filter(x => x.getClientRects().length);
+  // keys: j and k the next and previous file, n the next open item, o all steps of the part at the top, v the file at
+  // the top viewed; Esc closes the topmost sheet, popover or list, else clears the selection
+  const head = 80;
+  const shown = sel => $$(sel).filter(x => x.getClientRects().length);
   let last, lastAt = 0; // the smooth scroll to the last jump may still run: a key right after it goes on from there
-  const jump = el => { last = el; lastAt = performance.now(); history.replaceState(null, "", "#" + encodeURI(el.id)); reveal(); };
   addEventListener("keydown", e => {
-    if (composing(e) || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.target.closest?.("input, textarea, select, [contenteditable], [role=textbox], [role=searchbox]") || document.querySelector("dialog[open]")) return;
+    if (e.key === "Escape") {
+      if (closeSheet()) return;
+      const open = pops.find(([, p]) => !document.getElementById(p).hidden);
+      if (open) { closePops(); return document.getElementById(open[0]).focus(); }
+      if (sel) select(null);
+      return;
+    }
+    if (!keysOn() || composing(e) || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.target.closest?.("input, textarea, select, [contenteditable], [role=textbox], [role=searchbox]") || $("dialog:modal") || !sheet.hidden) return;
     const key = letter(e);
     const y = el => el.getBoundingClientRect().top - head;
     const files = shown(".file"), i = performance.now() - lastAt < 700 ? files.indexOf(last) : -1;
     let to;
     if (key === "j") to = i >= 0 ? files[i + 1] : files.find(f => y(f) > 8);
     else if (key === "k") to = i >= 0 ? files[i - 1] : files.findLast(f => y(f) < -8);
-    else if (key === "n") { // one in a closed file or fold counts where its shown ancestor is: jump opens it
-      const at = x => { while (!x.getClientRects().length) x = x.parentElement; return x; };
-      to = files.flatMap(f => [...f.querySelectorAll("[id^='finding-']")]).find(f => y(at(f)) > 8 + 48);
+    else if (key === "n") { // the next item card the selection shows, after the focused one or under the top bar
+      const items = $$("[data-item]").filter(c => !c.hidden && !c.closest("[hidden]:not(.pbx)"));
+      const cur = document.activeElement?.closest?.("[data-item]");
+      const next = cur ? items[items.indexOf(cur) + 1] : items.find(c => { const p = c.closest(".pbx[hidden]"); return y(p ? p.parentElement : c) > 8; });
+      if (next) {
+        e.preventDefault();
+        openUp(next);
+        const b = $(".icb", next) || $("h3", next); // a gate has no disclosure: its title takes focus
+        next.scrollIntoView({ block: "start" });
+        b.focus({ preventScroll: true });
+      }
+      return;
+    }
+    else if (key === "o") {
+      const a = shown(".pb").findLast(p => y(p) <= 8)?.querySelector("[data-all-steps]");
+      if (!a) return;
+      e.preventDefault();
+      openUp(a);
+      return a.click();
     }
     else if (key === "v" && e.repeat) return; // held, it would mark the file and unmark it again
     else if (key === "v") shown(".file").find(f => f.getBoundingClientRect().bottom > head + 8)?.querySelector("input[data-key]").click();
     else return;
     e.preventDefault();
-    if (to) jump(to);
+    if (to) { last = to; lastAt = performance.now(); history.replaceState(null, "", "#" + encodeURI(to.id)); reveal(); }
   });
 
-  // what is in view is current in the side bar: the file, its step, its section
-  const links = [...document.querySelectorAll(".sidebar-content a[href^='#']")];
-  const current = el => {
-    const ids = new Set([el.id, el.closest("[id^='step-']")?.id, el.closest("section")?.id].map(id => "#" + id));
-    for (const a of links) {
-      if (ids.has(decodeURIComponent(a.getAttribute("href")))) a.setAttribute("aria-current", "true");
-      else a.removeAttribute("aria-current");
-    }
-  };
+  // the top bar: the short merge status while the panel isn't all in view (a phone's first screen shows it); the
+  // rail: the section in view is current
+  const stand = $("#stand");
+  if (stand) new IntersectionObserver(([e]) => { for (const s of $$("[data-short]")) s.hidden = e.intersectionRatio > 0.99; }, { rootMargin: "-56px 0px 0px 0px", threshold: [0, 1] }).observe(stand);
+  const rail = $$(".rail a.rrow");
   const spy = new IntersectionObserver(es => {
-    const hit = es.filter(e => e.isIntersecting).map(e => e.target);
-    const el = hit.find(t => t.matches(".file")) || hit[0];
-    if (el) current(el);
+    const el = es.filter(e => e.isIntersecting).map(e => e.target).pop();
+    if (!el) return;
+    const id = "#" + (el.matches(".pb") && rail.some(a => a.getAttribute("href") === "#" + el.id) ? el.id : el.closest("section.sec")?.id || el.id);
+    for (const a of rail) if (a.getAttribute("href") === id) a.setAttribute("aria-current", "location"); else a.removeAttribute("aria-current");
   }, { rootMargin: "-15% 0px -75% 0px" });
-  document.querySelectorAll("main section[id], main [id^='step-'], .file").forEach(el => spy.observe(el));
-  // where it runs: a tab shows its way; a run plays it when the box first opens, on a pick and on Replay
-  const ways = document.getElementById("ways");
-  if (ways) {
-    let runs = 0;
-    const run = () => {
-      for (const w of ways.querySelectorAll(".ctw")) w.classList.remove("run-a", "run-b");
-      ways.querySelector(".ctw:not([hidden])")?.classList.add(++runs % 2 ? "run-a" : "run-b");
-    };
-    ways.addEventListener("toggle", () => { if (ways.open && !runs) run(); });
-    ways.addEventListener("click", e => {
-      const t = e.target.closest(".ctabs [data-way]"); // the panels carry data-way too: a click in a tree is no pick
-      if (t) {
-        for (const b of ways.querySelectorAll(".ctabs [data-way]")) b.setAttribute("aria-pressed", b === t);
-        for (const w of ways.querySelectorAll(".ctw")) w.hidden = w.dataset.way !== t.dataset.way;
-        run();
-      } else if (e.target.closest("[data-replay]")) run();
-    });
-  }
+  for (const el of $$("main section.sec, .pb")) spy.observe(el);
+  sync();
 })();
 </script>
 {{end}}

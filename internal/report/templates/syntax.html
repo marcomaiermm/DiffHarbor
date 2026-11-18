@@ -35,21 +35,24 @@ const lang = path => {
   return langs[name === "dockerfile" ? "dockerfile" : name.split(".").pop()];
 };
 let hl = null;
-try {
-  const { createHighlighter } = await import("https://cdn.jsdelivr.net/npm/shiki@4.6.0/+esm");
-  // the JavaScript engine: Shiki's default is WebAssembly, which the page's CSP blocks
-  const { createJavaScriptRegexEngine } = await import("https://cdn.jsdelivr.net/npm/shiki@4.6.0/dist/engine-javascript.mjs/+esm");
-  hl = await createHighlighter({ themes: [], langs: [], engine: createJavaScriptRegexEngine() });
+// Shiki loads beside the page: what waits for colors awaits this, the rest draws now
+const ready = (async () => {
   try {
-    await hl.loadTheme(theme === day.name ? day : theme);
-  } catch { // a name Shiki doesn't know: the default
-    theme = dark ? "tokyo-night" : day.name;
-    await hl.loadTheme(dark ? theme : day);
-  }
-  const t = hl.getTheme(theme); // the code's background and text: everything around the code mixes from them
-  document.documentElement.style.setProperty("--diff-bg", t.bg);
-  document.documentElement.style.setProperty("--diff-fg", t.fg);
-} catch { hl = null; }
+    const { createHighlighter } = await import("https://cdn.jsdelivr.net/npm/shiki@4.6.0/+esm");
+    // the JavaScript engine: Shiki's default is WebAssembly, which the page's CSP blocks
+    const { createJavaScriptRegexEngine } = await import("https://cdn.jsdelivr.net/npm/shiki@4.6.0/dist/engine-javascript.mjs/+esm");
+    hl = await createHighlighter({ themes: [], langs: [], engine: createJavaScriptRegexEngine() });
+    try {
+      await hl.loadTheme(theme === day.name ? day : theme);
+    } catch { // a name Shiki doesn't know: the default
+      theme = dark ? "tokyo-night" : day.name;
+      await hl.loadTheme(dark ? theme : day);
+    }
+    const t = hl.getTheme(theme); // the code's background and text: everything around the code mixes from them
+    document.documentElement.style.setProperty("--diff-bg", t.bg);
+    document.documentElement.style.setProperty("--diff-fg", t.fg);
+  } catch { hl = null; }
+})();
 
 // changed: the differing middle of two lines, widened to whole words; null when they share too little
 const word = /\w/;
@@ -90,6 +93,7 @@ const tok = (text, t) => {
   return s;
 };
 const paint = async table => {
+  await ready;
   const rows = [...table.querySelectorAll("tr.del, tr.add, tr.ctx, tr.hunk")];
   const code = rows.filter(r => !r.classList.contains("hunk"));
   const tokens = new Map(code.map(r => [r, [{ content: r.cells[2].textContent }]]));
@@ -98,13 +102,20 @@ const paint = async table => {
     // each hunk on its own and each side on its own: a string or comment that one hunk or the removed side
     // leaves open must not color the rest
     const inside = st => st.getScopes().some(s => /^(string|comment)\b/.test(s));
-    const side = rs => {
+    // 400 lines at a time, the grammar state carried over: a long file is no long task (perf report Z)
+    const side = async rs => {
       const text = rs.map(r => r.cells[2].textContent), opts = { lang: l, theme };
-      let ts = hl.codeToTokens(text.join("\n"), opts).tokens;
+      let ts = [], last;
+      for (let i = 0; i < text.length; i += 400) {
+        if (i) await new Promise(res => setTimeout(res));
+        const res = hl.codeToTokens(text.slice(i, i + 400).join("\n"), { ...opts, grammarState: last });
+        ts.push(...res.tokens);
+        last = res.grammarState;
+      }
       // a hunk that starts inside a string or comment opened above it: its closing delimiter reads as an opening
       // one and colors the rest. When the hunk ends inside one opened by a line that is only the delimiter
       // (a lone ` or */), the lines up to that one are the string, the rest code.
-      if (inside(hl.getLastGrammarState(text.join("\n"), opts))) {
+      if (last && inside(last)) {
         let st, at = -1, open;
         for (const [i, t] of text.entries()) {
           st = hl.getLastGrammarState(t, { ...opts, grammarState: st });
@@ -119,13 +130,14 @@ const paint = async table => {
     try {
       await hl.loadLanguage(l);
       let hunk = [];
-      const flush = () => {
-        side(hunk.filter(r => !r.classList.contains("add")));
-        side(hunk.filter(r => !r.classList.contains("del"))); // context lines take the new side's colors
+      const flush = async () => {
+        const h = hunk;
         hunk = [];
+        await side(h.filter(r => !r.classList.contains("add")));
+        await side(h.filter(r => !r.classList.contains("del"))); // context lines take the new side's colors
       };
-      for (const r of rows) r.classList.contains("hunk") ? flush() : hunk.push(r);
-      flush();
+      for (const r of rows) r.classList.contains("hunk") ? await flush() : hunk.push(r);
+      await flush();
     } catch {}
   }
   const m = marks(rows);
@@ -148,51 +160,9 @@ const paint = async table => {
   if (splitOn()) split(table);
 };
 
-// A name the repo declares: on hover a card with its declaration and doc, on click a sheet with every place
-// that names it. Built with textContent, never markup: the repo's text is the PR author's.
-const syms = JSON.parse(document.getElementById("symbols").textContent) || {};
-const pop = document.getElementById("sym"), sheet = document.getElementById("uses");
-const el = (tag, cls, ...kids) => {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  e.append(...kids);
-  return e;
-};
-const ic = name => document.getElementById("i-" + name).content.firstElementChild.cloneNode(true);
-const kind = k => { const s = el("span", "badge kind", k); s.dataset.variant = "outline"; s.dataset.k = k; return s; };
-const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
-// go to a line of the diff when the page shows it; false when it doesn't
-const jump = (path, line) => {
-  const t = [...document.querySelectorAll("table[data-path]")].find(t => t.dataset.path === path);
-  const row = t && [...t.querySelectorAll("tr.ctx, tr.add")].find(r => r.cells[0].textContent === String(line));
-  if (!row) return false;
-  row.id ||= path + "~L" + line;
-  go(row.id);
-  return true;
-};
-const go = id => {
-  if (location.hash === "#" + id) dispatchEvent(new HashChangeEvent("hashchange"));
-  else location.hash = id;
-};
-// a link to a line: the line in the page when it shows, else on the forge
-const link = (path, line, cls, ...kids) => {
-  const a = el("a", cls, ...kids);
-  a.title = path + ":" + line;
-  a.href = pop.dataset.blob + path + "#L" + line;
-  a.target = "_blank";
-  a.rel = "noopener";
-  a.addEventListener("click", e => {
-    if (!jump(path, line)) return;
-    e.preventDefault();
-    hide();
-    if (sheet.open) sheet.close();
-  });
-  return a;
-};
-const short = path => path.split("/").slice(-2).join("/");
-const at = (path, line) => link(path, line, "sym-at", ic("file"), el("span", "", short(path) + ":" + line));
 // tokens of one line or a block in the code's colors, plain without Shiki
 const colored = async (text, path) => {
+  await ready;
   const l = lang(path);
   if (hl && l) {
     try {
@@ -202,17 +172,16 @@ const colored = async (text, path) => {
   }
   return text.split("\n").map(content => [{ content }]);
 };
-const code = async (sig, path) => el("pre", "sym-sig scroll-area", ...(await colored(sig, path)).flatMap((ts, i) => [
-  ...(i ? ["\n"] : []),
-  ...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; }),
-]));
+
+{{template "usesjs" .}}
+
 // code lines outside the diff, the API's and the reach list's, colored like it once their box opens: a hundred
 // signatures colored at load hold the page up; a signature's name shows the card
 // a way's node that is a name alone, a handler passed on, is read as a call: it takes a function's color, the brackets cut off
 const upto = (ts, n) => { let at = 0; return ts.flatMap(t => { const x = t.content.slice(0, Math.max(0, n - at)); at += t.content.length; return x ? [{ ...t, content: x }] : []; }); };
 const tint = box => {
-  for (const c of box.querySelectorAll(".inv-lines code, .reach-item li > code, .asig, .ct-pill code")) {
-    const path = c.closest("[data-path]")?.dataset.path, node = c.matches(".ct-pill code") && !c.textContent.endsWith(")"), text = c.textContent;
+  for (const c of box.querySelectorAll(".inv-lines code, .reach-item li > code, .asig, .ct-pill code, .cxs .cn code, .cxl code, .dbg .dbty")) {
+    const path = c.closest("[data-at]")?.dataset.at ?? c.closest("[data-path]")?.dataset.path, node = c.matches(".ct-pill code") && !c.textContent.endsWith(")"), text = c.textContent;
     if (path && lang(path)) colored(node ? text + "()" : text, path).then(([ts = []]) => {
       if (node) ts = upto(ts, text.length);
       c.replaceChildren(...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; }));
@@ -225,190 +194,9 @@ for (const box of document.querySelectorAll("#explore details.box"))
   if (box.open) tint(box); // opened before the colors loaded
   else box.addEventListener("toggle", () => tint(box), { once: true });
 for (const w of document.querySelectorAll(".ctw")) if (!w.closest("details")) tint(w); // a step's way is always in view
-// the colored tokens of ts between two offsets of their text, split where those fall
-const cut = (ts, a, b) => {
-  const out = [];
-  let at = 0;
-  for (const t of ts) {
-    const x = Math.max(a, at), y = Math.min(b, at + t.content.length);
-    if (x < y) { const s = el("span", "", t.content.slice(x - at, y - at)); if (t.color) s.style.color = t.color; out.push(s); }
-    at += t.content.length;
-  }
-  return out;
-};
-// a declaring line as it was, and below it the same line getting the part that differs changed as in nvim (viw, s,
-// the new part typed, Esc); lines too unlike, all of it
-const morph = async (before, after, path) => {
-  [before, after] = [before, after].map(l => l.replace(/\s*\{$/, ""));
-  const [[o = []], [n = []]] = await Promise.all([colored(before, path), colored(after, path)]);
-  const [[p, ea], [, eb]] = changed(before, after) ?? [[0, before.length], [0, after.length]];
-  const cur = (cls, on, off) => {
-    const c = el("span", "m-cur " + cls);
-    c.style.setProperty("--on", on + "ms");
-    c.style.setProperty("--for", off - on + "ms");
-    return c;
-  };
-  const step = Math.min(55, 900 / Math.max(1, eb - p)), typed = 750 + (eb - p) * step, ins = el("ins", "");
-  for (let at = p; at < eb; at++) for (const k of cut(n, at, at + 1)) { k.style.setProperty("--d", 750 + (at - p) * step + "ms"); ins.append(k); }
-  const gone = el("del", "", cur("", 0, 300), ...cut(o, p, ea - 1), cur("", 300, 750), ...cut(o, Math.max(p, ea - 1), ea));
-  const now = el("span", "m-now", ...cut(n, 0, p), gone, ins, cur("bar", 750, typed + 150), cur("esc", typed + 150, typed + 750), ...cut(n, eb, after.length));
-  gone.ariaHidden = "true";
-  const pre = el("pre", "sym-sig sym-morph scroll-area",
-    el("span", "m-was", ...cut(o, 0, p), el("del", "", ...cut(o, p, ea)), ...cut(o, ea, before.length)), now);
-  pre.style.setProperty("--t", typed + 150 + "ms");
-  return pre;
-};
-// the new file's line a name of the diff is on; null on a removed one
-const newLine = span => {
-  const tr = span.closest("tr");
-  if (tr) return tr.matches(".add, .ctx") ? tr.cells[0].textContent : null;
-  const sl = span.closest(".sl"), pane = sl?.parentElement;
-  return sl && pane === pane.parentElement.lastElementChild ? sl.firstChild.textContent : null;
-};
-// which declarations a name means: the one codegraph resolved this line to, or declared on it; else, by name,
-// pkg.Name's package, a member after a dot, then the file's own directory
-const pick = (span, list) => {
-  const path = span.closest("[data-path]").dataset.path, no = newLine(span);
-  if (no) {
-    const here = list.filter(s => s.here?.includes(path + ":" + no) || s.path === path && String(s.line) === no);
-    if (here.length) return here;
-    const guessed = list.filter(s => !s.exact); // resolved ones the index doesn't see here aren't meant
-    if (guessed.length) list = guessed;
-  }
-  const prev = span.previousSibling?.textContent === "." ? span.previousSibling.previousSibling?.textContent : null;
-  let c = list;
-  if (prev) {
-    const pkg = c.filter(s => s.pkg === prev);
-    const member = c.filter(s => /^(method|field)/.test(s.kind));
-    c = pkg.length ? pkg : member.length ? member : c;
-  }
-  const dir = path.replace(/[^/]*$/, "");
-  const near = c.filter(s => s.path.startsWith(dir) && !s.path.slice(dir.length).includes("/"));
-  return (near.length ? near : c).slice(0, 3);
-};
-// what the PR did to it and the finding on it, as the diff's chips say it
-const chip = (text, data, cls = "") => {
-  const c = el("span", ("chip " + cls).trim(), text);
-  Object.assign(c.dataset, data);
-  return c;
-};
-const head = (s, name) => el("div", "sym-head", kind(s.kind),
-  el("span", "sym-name", ...(s.pkg ? [el("span", "sym-pkg", s.pkg + ".")] : []), name),
-  ...(s.state === "new" ? [chip("new", { new: "" })] : s.state ? [chip(s.state === "signature" ? "signature changed" : s.state, {}, "changed")] : []),
-  ...(s.sev ? [chip(s.sev === "critical" ? "Blocker" : "Major", { sev: s.sev })] : []),
-  at(s.path, s.line));
-const doc = s => s.doc.replace(/(?<!\n)\n(?!\n)/g, " "); // source line breaks go, paragraphs stay
-let anchor = null, timer = 0;
-const hide = () => { clearTimeout(timer); anchor = null; if (pop.matches(":popover-open")) pop.hidePopover(); };
-const show = async span => {
-  clearTimeout(timer);
-  if (anchor === span || !syms[span.dataset.sym]) return;
-  anchor = span;
-  const name = span.dataset.sym, list = pick(span, syms[name]);
-  const item = span.closest(".arow"), turn = item?.dataset.oldHead; // an API row's: what it was
-  const cards = await Promise.all(list.map(async (s, i) => {
-    const card = el("div", "sym-card", head(s, name), i || !turn ? await code(s.sig, s.path) : await morph(turn, item.dataset.head, s.path));
-    if (s.doc) card.append(el("p", "sym-doc", doc(s)));
-    return card;
-  }));
-  if (anchor !== span) return; // the pointer moved on while the signature was colored
-  const s = list[0];
-  const foot = el("div", "sym-foot",
-    s.uses ? el("span", "", el("strong", "", String(s.uses)), ` ${s.uses === 1 ? "use" : "uses"} in `, el("strong", "", String(s.files)), ` ${s.files === 1 ? "file" : "files"}`) : el("span", "", "Named nowhere else"),
-    el("button", "btn sym-all", "Every use", el("kbd", "", ic("enter"))));
-  foot.lastChild.type = "button";
-  Object.assign(foot.lastChild.dataset, { variant: "ghost", size: "sm" });
-  foot.lastChild.addEventListener("click", () => open(span));
-  pop.replaceChildren(...cards, foot);
-  pop.scrollTop = 0;
-  if (!pop.matches(":popover-open")) pop.showPopover();
-  const r = span.getBoundingClientRect(), h = pop.offsetHeight;
-  pop.style.left = Math.max(8, Math.min(r.left, document.documentElement.clientWidth - pop.offsetWidth - 8)) + "px";
-  pop.style.top = (r.bottom + 6 + h > innerHeight && r.top - 6 - h > 0 ? r.top - 6 - h : r.bottom + 6) + "px";
-};
-// a line that names it, the name marked
-const use = async (r, name) => {
-  const c = el("code", "");
-  for (const t of (await colored(r.text, r.path))[0] || []) {
-    const parts = t.content.split(new RegExp(`(?<![\\w$])(${name.replace(/\$/g, "\\$")})(?![\\w$])`));
-    for (const [i, p] of parts.entries()) {
-      if (!p) continue;
-      const s = el(i % 2 ? "mark" : "span", "", p);
-      if (t.color) s.style.color = t.color;
-      c.append(s);
-    }
-  }
-  return link(r.path, r.line, "use", el("span", "no", String(r.line)), c, r.in ? el("span", "in", r.in) : "");
-};
-// Find usages: the declarations, then the places that name it by file
-const open = async span => syms[span.dataset.sym] && uses(span.dataset.sym, pick(span, syms[span.dataset.sym]));
-const uses = async (name, list) => {
-  hide();
-  const s = list[0];
-  const body = sheet.querySelector(".sheet-body");
-  sheet.querySelector(".sheet-kicker").replaceChildren(kind(s.kind), ...(s.pkg ? [el("span", "font-mono text-xs text-muted-foreground", (s.unit ? s.unit + " " : "") + s.pkg)] : []));
-  sheet.querySelector(".sheet-title").textContent = name;
-  const refs = s.refs || [];
-  sheet.querySelector(".sheet-description").textContent = s.uses
-    ? `Named in ${plural(s.uses, "place")} across ${plural(s.files, "file")}${s.uses > refs.length ? `, the first ${refs.length} below` : ""}.${s.exact ? "" : " Found by name: lines that say it, not resolved."}`
-    : "Named nowhere but where it is declared.";
-  const decls = await Promise.all(list.map(async d => {
-    const box = el("div", "sym-card rounded-lg border", head(d, name), await code(d.sig, d.path));
-    if (d.doc) box.append(el("p", "sym-doc line-clamp-none", doc(d)));
-    return box;
-  }));
-  const files = Map.groupBy(refs, r => r.path);
-  const groups = await Promise.all([...files].map(async ([path, rs]) => el("section", "uses-file",
-    el("h3", "", ic("file"), el("span", "", short(path)), el("b", "", String(rs.length))),
-    el("ol", "py-1", ...await Promise.all(rs.map(async r => el("li", "", await use(r, name))))))));
-  const more = [];
-  if (s.uses > refs.length && pop.dataset.search) { // a forge without code search: none
-    const a = el("a", "mt-5 flex h-9 items-center justify-center gap-2 rounded-md border text-[13px] hover:bg-accent", ic("search"), `All ${s.uses} on ${pop.dataset.forge}`);
-    a.href = pop.dataset.search + encodeURIComponent(name);
-    a.target = "_blank";
-    a.rel = "noopener";
-    more.push(a);
-  }
-  body.replaceChildren(el("div", "space-y-3", ...decls), ...groups, ...more);
-  if (!sheet.open) sheet.showModal();
-  sheet.scrollTop = 0;
-};
-// a graph's "Every use" and the reach list's: its declaration by name and file
-document.addEventListener("sym:uses", e => {
-  const list = syms[e.detail.name] || [], own = list.filter(s => s.path === e.detail.path);
-  if (list.length) uses(e.detail.name, own.length ? own : list);
-});
-document.addEventListener("click", e => {
-  const b = e.target.closest("[data-uses]");
-  if (b?.closest("summary")) e.preventDefault(); // the sheet, not the row
-  if (b) document.dispatchEvent(new CustomEvent("sym:uses", { detail: { name: b.dataset.uses, path: b.dataset.path } }));
-});
-sheet.addEventListener("click", e => { if (e.target === sheet || e.target.closest("[data-sheet-close]")) sheet.close(); });
-document.addEventListener("mouseover", e => {
-  const s = e.target.closest?.(".sym");
-  clearTimeout(timer);
-  if (s) timer = setTimeout(() => show(s), 300);
-  else if (anchor && !pop.contains(e.target)) timer = setTimeout(hide, 300);
-});
-document.addEventListener("focusin", e => { // a name the keyboard reaches shows its card, Enter its uses
-  const s = e.target.closest?.(".sym");
-  if (s?.matches(":focus-visible")) show(s);
-  else if (anchor && !pop.contains(e.target)) hide();
-});
-document.addEventListener("click", e => {
-  const s = e.target.closest(".sym");
-  if (s?.closest("summary")) e.preventDefault(); // the sheet, not the row
-  if (s && !s.closest("a")) open(s);
-  else if (!pop.contains(e.target)) hide();
-});
-addEventListener("keydown", e => {
-  if (e.key === "Escape") hide();
-  else if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229 && anchor && pop.matches(":popover-open") && !e.target.closest?.("a, button, input, textarea")) {
-    e.preventDefault();
-    open(anchor);
-  }
-});
-addEventListener("scroll", e => { if (anchor && !pop.contains(e.target)) hide(); }, { passive: true, capture: true }); // the inventory's list scrolls too
+// How it connects and the tables take their colors as they come into view, the panel's copies when it shows them
+const inView = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { inView.unobserve(e.target); tint(e.target); } }, { rootMargin: "600px 0px" });
+for (const b of document.querySelectorAll(".cx, .dbt")) inView.observe(b);
 
 // JetBrains' side by side: old left, new right, between them a ribbon from the lines that went to those that came.
 // Lines keep one height, so a ribbon is drawn from line counts; a fold, a finding or a hunk's header spans both
@@ -418,10 +206,17 @@ const splitOn = () => document.documentElement.dataset.diff === "split";
 const lineOf = new WeakMap(); // a row of the table -> what shows it side by side
 let keep = null; // the gap button clicked side by side, to focus again once it is drawn anew
 const clone = node => [...node.childNodes].map(n => n.cloneNode(true));
+// a segment's rows as the table has them, under its header: what a screen reader reads, in order, for the two sides
+const linear = (table, rows) => el("table", "vh", table.tHead.cloneNode(true), el("tbody", "", ...rows.map(r => {
+  const c = r.cloneNode(true);
+  c.removeAttribute("id");
+  return c;
+})));
 const split = table => {
+  if (!table.querySelector("tr.ctx") && !(table.querySelector("tr.del") && table.querySelector("tr.add"))) return; // a new or a deleted file: one side, read whole
   const box = el("div", "split");
   box.dataset.path = table.dataset.path;
-  let l = [], r = [], blocks = [], cur = null;
+  let l = [], r = [], rows = [], blocks = [], cur = null;
   const close = () => { if (cur) { blocks.push({ ...cur, l1: l.length, r1: r.length }); cur = null; } };
   const flush = () => {
     close();
@@ -440,11 +235,17 @@ const split = table => {
       p.setAttribute("d", `M0 ${y0}C${m} ${y0} ${m} ${z0} ${GW} ${z0}L${GW} ${z1}C${m} ${z1} ${m} ${y1} 0 ${y1}Z`);
       svg.append(p);
     }
-    box.append(el("div", "split-seg", el("div", "split-pane", ...l), svg, el("div", "split-pane", ...r)));
-    l = []; r = []; blocks = [];
+    const seg = el("div", "split-seg", el("div", "split-pane", ...l), svg, el("div", "split-pane", ...r));
+    seg.setAttribute("aria-hidden", "true");
+    box.append(seg, linear(table, rows));
+    l = []; r = []; rows = []; blocks = [];
   };
-  const line = (row, no) => el("div", "sl", el("span", "no", no || ""), el("span", "code", ...clone(row.cells[2])));
-  for (const row of table.rows) {
+  const line = (row, no) => {
+    const n = el("div", "sl", el("span", "no", no || ""), el("span", "code", ...clone(row.cells[2])));
+    n.classList.toggle("at", row.classList.contains("at")); // a snippet's marked line
+    return n;
+  };
+  for (const row of [...table.tBodies].flatMap(b => [...b.rows])) {
     const fold = row.closest("tbody.fold");
     if (row.matches("tr.fold-head")) {
       flush();
@@ -474,6 +275,7 @@ const split = table => {
       lineOf.set(row, bar);
     } else if (row.matches("tr.ctx")) {
       close();
+      rows.push(row);
       const n = line(row, row.cells[0].textContent);
       l.push(line(row, row.dataset.old));
       r.push(n);
@@ -481,22 +283,26 @@ const split = table => {
     } else if (row.matches("tr.del")) {
       if (cur && r.length > cur.r0) close(); // removed after added: the next change
       cur ||= { l0: l.length, r0: r.length };
+      rows.push(row);
       const n = line(row, row.dataset.old);
       l.push(n);
       lineOf.set(row, n);
     } else if (row.matches("tr.add")) {
       cur ||= { l0: l.length, r0: r.length };
+      rows.push(row);
       const n = line(row, row.cells[0].textContent);
       r.push(n);
       lineOf.set(row, n);
     } else { // a finding
       flush();
       const n = el("div", "split-note", ...clone(row.cells[0]));
+      for (const x of n.querySelectorAll("[id]")) x.removeAttribute("id"); // the table's note keeps it: a link lands there
       box.append(n);
       lineOf.set(row, n);
     }
   }
   flush();
+  built.add(table);
   table.parentElement.querySelector(":scope > .split")?.remove();
   table.after(box);
   if (keep?.table === table) {
@@ -510,17 +316,28 @@ const split = table => {
     keep = null;
   }
 };
-const tables = [...document.querySelectorAll("table[data-path]")];
-const wideEnough = matchMedia("(min-width: 1024px)");
+// whether Split shows is the stylesheet's to say (the width): the jump asks it
 window.inSplit = el => {
   const t = el.closest?.("table[data-path]");
-  if (!t || !splitOn() || !wideEnough.matches) return null;
+  if (!t || !splitOn()) return null;
   split(t); // what reveal opened shows
-  return lineOf.get(el.matches("tbody") ? el.rows[0] : el) || null;
+  const s = t.parentElement.querySelector(":scope > .split");
+  return s && getComputedStyle(s).display !== "none" && lineOf.get(el.matches("tbody") ? el.rows[0] : el) || null;
 };
-document.addEventListener("click", e => { if (e.target.closest(".toggle[data-diff]") && splitOn()) tables.forEach(split); });
+// Split is drawn near the viewport, like the colors: a table further off shows unified until it nears (perf report C)
+let built = new WeakSet();
+const near = new IntersectionObserver(es => {
+  if (splitOn()) for (const e of es) if (e.isIntersecting) { const t = e.target.querySelector("table"); if (t && !built.has(t)) split(t); }
+}, { rootMargin: "800px" });
+const lazySplit = () => {
+  built = new WeakSet();
+  near.disconnect();
+  for (const s of document.querySelectorAll(".diff > .split")) s.remove(); // drawn before the last toggle: stale
+  for (const d of document.querySelectorAll(".diff")) near.observe(d);
+};
+document.addEventListener("click", e => { if (e.target.closest("button[data-diff]") && splitOn()) lazySplit(); });
 if (splitOn()) {
-  tables.forEach(split);
+  lazySplit();
   if (location.hash) dispatchEvent(new HashChangeEvent("hashchange")); // the jump on load hit the hidden table
 }
 
@@ -535,5 +352,7 @@ document.addEventListener("diff:rows", ({ detail: { table, rows } }) => {
   done.then(() => { if (splitOn()) split(table); });
 });
 document.querySelectorAll(".diff").forEach(d => seen.observe(d));
+// a diff the page adds later (a call's lines in How it connects): colored, and side by side when Split is on
+window.watchDiff = d => seen.observe(d);
 </script>
 {{end}}

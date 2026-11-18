@@ -4,6 +4,7 @@ import (
 	"context"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/review"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -199,8 +200,13 @@ func TestFormat(t *testing.T) {
 		t.Fatalf("allPrompts: %q", p)
 	}
 	c.Body += "\n\n" + review.Verified + "the map is nil on line 3\n"
-	if p := Parse(Format(c, "suggestion")); p.Severity != "major" || p.Title != "t" || !strings.HasPrefix(p.Body, "b\n") || p.Evidence != "the map is nil on line 3" {
-		t.Fatalf("parse: %+v", p)
+	// Read back without the fix and the prompt: in a suggestion (GitHub, GitLab) or folded.
+	placed := c
+	placed.Start, placed.End = 3, 3
+	for _, f := range []string{Format(c, "suggestion"), Format(placed, "suggestion"), Format(placed, "suggestion:-1+0")} {
+		if p := Parse(f); p.Severity != "major" || p.Title != "t" || p.Body != "b\n\n"+review.Verified+"the map is nil on line 3" || p.Evidence != "the map is nil on line 3" {
+			t.Fatalf("parse %q: %+v", f, p)
+		}
 	}
 	// Threads still open from before keep their severity and title.
 	for _, old := range []string{"_🟠 Major_ · **t**\n\nb", "_🔵 Nit_ · **t**\n\nb"} {
@@ -218,6 +224,15 @@ func TestFormat(t *testing.T) {
 	}
 	if p := Parse("by hand"); p.Severity != "" || p.Body != "by hand" || p.Evidence != "" {
 		t.Fatalf("parse plain: %+v", p)
+	}
+}
+
+// A details block of the body's own stays in it: only Format's folds are cut.
+func TestParseOwnDetails(t *testing.T) {
+	body := "b\n\n<details>\n<summary>Log</summary>\n\nx\n\n</details>\n\nmore"
+	c := Finding{Comment: review.Comment{Severity: "major", Title: "t", Body: body}}
+	if p := Parse(Format(c, "")); p.Body != body {
+		t.Fatalf("parse %+v", p)
 	}
 }
 
@@ -276,6 +291,7 @@ func TestStickyOutline(t *testing.T) {
 		Story: review.Story{Problem: "p", Before: "a 429 failed the review", After: "the fallback reviews"},
 	}, "abcdef1234", []string{"api/a.go", "api/a_test.go", "README.md", "p1/x.go", "p2/x.go", "p3/x.go"}, true)
 	st.Report = "https://review.example/r/o/r/1"
+	st.Unreviewed = []string{"p2/x.go", "p3/x.go"}
 	o := &diff.Outline{
 		Added:      []string{"api/a_test.go: TestA"},
 		Weakened:   []diff.Flag{{At: "api/a_test.go:9", What: "skip/only: `t.Skip()`"}},
@@ -286,7 +302,10 @@ func TestStickyOutline(t *testing.T) {
 	if !ok {
 		t.Fatalf("no walkthrough:\n%s", body)
 	}
-	for _, w := range []string{"(https://review.example/r/o/r/1)", "- Retry on failure?", "**Before:** a 429 failed the review\n**After:** the fallback reviews", "**⚠️ Tests to check**\n- `api/a_test.go:9` skip/only"} {
+	for _, w := range []string{
+		"(https://review.example/r/o/r/1)", "- Retry on failure?", "**Before:** a 429 failed the review\n**After:** the fallback reviews", "**⚠️ Tests to check**\n- `api/a_test.go:9` skip/only",
+		"⚠️ <strong>Not reviewed: 2 files</strong>, past the size one review reads or in a part that failed: no finding covers them</summary>\n<dl>\n<dd>\n<br>\n\n- `p2/x.go`\n- `p3/x.go`",
+	} {
 		if !strings.Contains(top, w) {
 			t.Errorf("above the walkthrough, want %q:\n%s", w, body)
 		}
@@ -301,7 +320,7 @@ func TestStickyOutline(t *testing.T) {
 			t.Errorf("folded sections lack %q:\n%s", w, walk)
 		}
 	}
-	if got := parseState(body); len(got.Flow) != 1 || got.Decisions[0].Text != "Retry on failure?" || got.Story.After != "the fallback reviews" || got.Report == "" {
+	if got := parseState(body); len(got.Flow) != 1 || got.Decisions[0].Text != "Retry on failure?" || got.Story.After != "the fallback reviews" || got.Report == "" || len(got.Unreviewed) != 2 {
 		t.Errorf("state: %+v", got)
 	}
 }
@@ -425,6 +444,17 @@ func TestRisked(t *testing.T) {
 	}
 	if old := (State{SHA: "a"}).render("", "", "", nil); strings.Contains(old, "Merge Risk") || parseState(old).Risk != nil {
 		t.Fatal("old sticky shows a risk")
+	}
+}
+
+// The PR's creation date and author come from GitHub's payload as it is.
+func TestEventHeader(t *testing.T) {
+	var e Event
+	if err := json.Unmarshal([]byte(`{"pull_request":{"number":1,"created_at":"2026-11-02T10:00:00Z","user":{"login":"marco","type":"User"}}}`), &e); err != nil {
+		t.Fatal(err)
+	}
+	if p := e.PullRequest; p.User.Login != "marco" || !p.CreatedAt.Equal(time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)) {
+		t.Fatalf("%+v", p)
 	}
 }
 

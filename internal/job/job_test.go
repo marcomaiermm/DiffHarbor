@@ -242,11 +242,19 @@ func TestReportVersions(t *testing.T) {
 	key := reportSecret("")
 	dir := reportPath(e) + "/" + key
 	for i := range maxVersions + 2 {
-		if u := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(i)}); u != ReportURL+"/r/github.com/id:5/7/"+key {
+		if u, _ := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(i)}); u != ReportURL+"/r/github.com/id:5/7/"+key {
 			t.Fatal(u)
 		}
 	}
-	writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(5)}) // reviewed again: the newest
+	// reviewed again: the newest; its merge status sets the commit status, failure only when blocked
+	if _, now := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(5), Conflicts: true}); now.Short != "Blocked · conflict with the base branch" || !now.Blocked {
+		t.Errorf("%+v", now)
+	}
+	// a failed CI check blocks the page, not the commit status: GitHub shows the check, and a rerun would leave it stale
+	failedCI := &report.CI{Checks: []report.Check{{Name: "test", Status: "completed", Conclusion: "failure"}}}
+	if _, now := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(5), CI: failedCI}); now.Blocked || strings.Contains(now.Short, "failed") {
+		t.Errorf("CI in the commit status: %+v", now)
+	}
 	vs, err := Versions(dir)
 	if err != nil || len(vs) != maxVersions || vs[0].SHA != sha(5) || vs[1].SHA != sha(maxVersions+1) || vs[0].At.IsZero() {
 		t.Fatalf("%+v", vs)
@@ -268,16 +276,16 @@ func TestReportVersions(t *testing.T) {
 		}
 	}
 	Reports().Put(dir+"/versions.json", []byte("{")) // unreadable: a report would drop the list
-	if u := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(1)}); u != "" {
+	if u, _ := writeReport(e, key, "", report.Data{Repo: "o/r", Number: 7, SHA: sha(1)}); u != "" {
 		t.Fatal("wrote over an unreadable list:", u)
 	}
 	gl := &forge.Event{Forge: "gitlab"} // a project in a subgroup
 	gl.Repository.FullName, gl.PullRequest.Number, gl.PullRequest.HTMLURL = "g/s/p", 3, "https://gitlab.example.com/g/s/p/-/merge_requests/3"
-	if u := writeReport(gl, key, "", report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/g/s/p/3/"+key {
+	if u, _ := writeReport(gl, key, "", report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/g/s/p/3/"+key {
 		t.Fatal("without the repo's id, by its name:", u)
 	}
 	gl.Repository.ID = 9
-	if u := writeReport(gl, key, "", report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/id:9/3/"+key {
+	if u, _ := writeReport(gl, key, "", report.Data{Repo: "g/s/p", Number: 3, SHA: sha(1)}); u != ReportURL+"/r/gitlab.example.com/id:9/3/"+key {
 		t.Fatal(u)
 	}
 }
@@ -297,7 +305,7 @@ func TestAdoptNamedReports(t *testing.T) {
 		Reports().Put(dir+"/versions.json", fmt.Appendf(nil, `[{"sha":"%s","at":"2026-01-02T00:00:00Z"},{"sha":"%s","at":"2026-01-01T00:00:00Z"}]`, sha(2), sha(1)))
 	}
 	dir := reportPath(e) + "/" + key
-	if u := writeReport(e, key, ReportURL+"/r/"+old, report.Data{SHA: sha(3)}); u != ReportURL+"/r/"+dir {
+	if u, _ := writeReport(e, key, ReportURL+"/r/"+old, report.Data{SHA: sha(3)}); u != ReportURL+"/r/"+dir {
 		t.Fatal(u)
 	}
 	vs, err := Versions(dir)
@@ -373,7 +381,7 @@ func TestAdoptPublishFails(t *testing.T) {
 	link := ReportURL + "/r/" + old
 	for _, block := range []string{dir + "/versions.json", old + "/moved"} { // a folder in the way
 		Reports().Put(block+"/x", nil)
-		if u := writeReport(e, key, link, report.Data{SHA: sha(2)}); u != link {
+		if u, _ := writeReport(e, key, link, report.Data{SHA: sha(2)}); u != link {
 			t.Fatal(block, u)
 		}
 		if b, err := Reports().Get(old + "/" + sha(1) + ".html.gz"); string(b) != "one" {
@@ -741,6 +749,26 @@ func TestFailing(t *testing.T) {
 	ran := map[string]string{"TestA": "fail", "TestA/x": "fail", "TestB": "pass", "TestC": "fail"}
 	if n := failing(checks.Tests{Ran: ran, Broken: []string{"pkg"}}); n != 3 {
 		t.Fatal("failing:", n)
+	}
+}
+
+// The thread ids carry the keys the report looks findings up by: the open threads' and the posted ones, not a resolved one's.
+func TestThreadIDs(t *testing.T) {
+	open := forge.Thread{ID: "a", Comment: 11, Path: "a.go", Line: 5, Body: "_🟠 Major_ · **x**"}
+	resolved := forge.Thread{ID: "b", Comment: 12, Path: "b.go", Line: 5, Body: "_🟠 Major_ · **y**", Resolved: true}
+	fresh := review.Comment{Path: "c.go", Line: 1, Severity: "major", Title: "z"}
+	threads := []forge.Thread{open, resolved}
+	ids := threadIDs(threads, map[string]int64{report.ThreadKey(fresh): 5})
+	for _, c := range openFindings(threads, nil, review.Result{Comments: []review.Comment{fresh}}) {
+		if id := ids[report.ThreadKey(c)]; id != 11 && id != 5 {
+			t.Errorf("%v: id %d", c, id)
+		}
+		if c.Earlier != (c.Path == "a.go") { // the open thread's comes from an earlier review, the fresh one doesn't
+			t.Errorf("%v: earlier %v", c, c.Earlier)
+		}
+	}
+	if len(ids) != 2 {
+		t.Errorf("ids %v", ids)
 	}
 }
 

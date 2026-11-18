@@ -96,6 +96,11 @@ func TestMatrix(t *testing.T) {
 	if d := Default(); FallbackFor(d, "review") != "deepseek/deepseek-flash:high" || FallbackFor(d, "verify") != "deepseek/deepseek-flash:off" {
 		t.Fatalf("anthropic + deepseek: fallback %q %q", FallbackFor(d, "review"), FallbackFor(d, "verify"))
 	}
+	for name, want := range map[string]string{"gates": "deepseek/deepseek-flash:off", "check": "deepseek/deepseek-flash:off", "contract": "deepseek/deepseek-flash:high"} {
+		if fb := FallbackFor(Default(), name); fb != want {
+			t.Errorf("the %s pass falls back to %q, want %q", name, fb, want)
+		}
+	}
 	os.MkdirAll(AuthDir(), 0o700)
 	os.WriteFile(filepath.Join(AuthDir(), "auth.json"), []byte(`{"openai":{"type":"oauth"}}`), 0o600)
 	if d := Default(); d != "openai/gpt-6.1-terra:high" || FallbackFor(d, "review") != "anthropic/claude-sonnet-5-5:high" {

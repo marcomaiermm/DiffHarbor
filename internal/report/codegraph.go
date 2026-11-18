@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"context"
+	"diffharbor/internal/checks"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
 	"encoding/json"
@@ -22,20 +23,26 @@ import (
 // go.mod: its files are that one's, their paths prefixed with its directory.
 const cgQuery = `
 const { DatabaseSync } = require("node:sqlite");
-const { names, dbs } = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const { names, dbs, paths } = JSON.parse(require("fs").readFileSync(0, "utf8"));
 const out = { nodes: [], edges: [] }, skip = "('file', 'import')", list = JSON.stringify(names);
 const other = (p, own) => dbs.some(d => d.prefix.length > own.length && p.startsWith(d.prefix)); // a deeper index's
 for (const { db: file, prefix } of dbs) {
   const db = new DatabaseSync(file, { readOnly: true });
-  for (const n of db.prepare("select name, file_path path, start_line line, end_line end from nodes where kind not in " + skip +
-    " and name in (select value from json_each(?))").all(list)) {
+  // a changed file's methods too: git's hunk header names the class, not a method changed below its first lines
+  const own = JSON.stringify(paths.filter(p => p.startsWith(prefix)).map(p => p.slice(prefix.length)));
+  // owner: the class a method sits in, for the map's {class}.{method}
+  for (const n of db.prepare("select n.name, n.kind, n.file_path path, n.start_line line, n.end_line end," +
+    " case when n.kind = 'method' then (select c.name from nodes c where c.file_path = n.file_path and c.kind in ('class', 'interface', 'struct', 'trait', 'enum', 'component')" +
+    " and c.start_line <= n.start_line and c.end_line >= n.end_line order by c.start_line desc limit 1) end owner from nodes n where n.kind not in " + skip +
+    " and (n.name in (select value from json_each(?1)) or (n.kind = 'method' and n.file_path in (select value from json_each(?2))))").all(list, own)) {
     n.path = prefix + n.path;
     if (!other(n.path, prefix)) out.nodes.push(n);
   }
   for (const e of db.prepare("select e.line, e.kind, s.name sname, s.kind skind, s.file_path spath, s.start_line sline," +
     " s.end_line send, t.name tname, t.file_path tpath, t.start_line tline from edges e join nodes s on s.id = e.source" +
     " join nodes t on t.id = e.target where e.kind in ('calls', 'references', 'instantiates', 'extends', 'implements')" +
-    " and t.kind not in " + skip + " and (t.name in (select value from json_each(?1)) or s.name in (select value from json_each(?1)))").all(list)) {
+    " and t.kind not in " + skip + " and (t.name in (select value from json_each(?1)) or s.name in (select value from json_each(?1))" +
+    " or (t.kind = 'method' and t.file_path in (select value from json_each(?2))) or (s.kind = 'method' and s.file_path in (select value from json_each(?2))))").all(list, own)) {
     e.spath = prefix + e.spath;
     e.tpath = prefix + e.tpath;
     if (!other(e.spath, prefix) && !other(e.tpath, prefix)) out.edges.push(e);
@@ -46,11 +53,14 @@ process.stdout.write(JSON.stringify(out));
 
 type cgIndex struct {
 	dbs   []cgDB
-	Nodes []struct {
-		Name, Path string
-		Line, End  int
-	}
+	Nodes []cgNode
 	Edges []cgEdge
+	calls map[declKey][]cgEdge // outside's call graph from the changed declarations, for the uses' ways down
+}
+
+type cgNode struct {
+	Name, Path, Kind, Owner string
+	Line, End               int
 }
 
 // codegraph is the indexes of the checkout at repo, the root's and those of the directories above paths, for the
@@ -76,7 +86,7 @@ func codegraph(sb *proc.Sandbox, repo string, wanted map[string]bool, paths []st
 	}
 	idx := cgIndex{dbs: dbs}
 	names := slices.Collect(maps.Keys(wanted))
-	if !runNode(sb, cgQuery, map[string]any{"names": names, "dbs": dbs}, &idx) {
+	if !runNode(sb, cgQuery, map[string]any{"names": names, "dbs": dbs, "paths": paths}, &idx) {
 		return nil
 	}
 	idx.vtaEdges(sb, repo, names)
@@ -102,10 +112,45 @@ func runNode(sb *proc.Sandbox, script string, in, out any) bool {
 	return err == nil && json.Unmarshal(got, out) == nil
 }
 
+// addedIn is whether the diff adds a line of path between from and to.
+func addedIn(added map[string]bool, p string, from, to int) bool {
+	for l := from; l <= to; l++ {
+		if added[p+":"+strconv.Itoa(l)] {
+			return true
+		}
+	}
+	return false
+}
+
+// freshMethods are a class's methods, named {class}.{method}: the scan of other languages reads only the lines that
+// start a declaration. The map's calls into the methods the PR changes: those with an added line, up to maxSymbols
+// in all. known: the scan has it.
+func (idx *cgIndex) freshMethods(changed, added map[string]bool, syms map[string][]Symbol, known func(cgNode) bool) map[string][]Symbol {
+	total := 0
+	for _, ss := range syms {
+		total += len(ss)
+	}
+	fresh, seen := map[string][]Symbol{}, map[string]bool{}
+	for _, n := range idx.Nodes {
+		qn := n.Owner + "." + n.Name
+		if n.Kind != "method" || n.Owner == "" || !changed[n.Path] || path.Ext(n.Path) == ".go" || seen[n.Path+"\x00"+qn] || total >= maxSymbols {
+			continue
+		}
+		if !addedIn(added, n.Path, n.Line, n.End) || known(n) {
+			continue
+		}
+		seen[n.Path+"\x00"+qn], total = true, total+1
+		fresh[qn] = append(fresh[qn], Symbol{Kind: "method", Path: n.Path, Line: n.Line})
+	}
+	return fresh
+}
+
 // exact replaces what the name scan guessed with the index's resolved edges, for the declarations the index knows:
 // its lines (From, To), who names one (Refs, Uses, Files; Here, the lines of the diff's files; Outside, those of
 // the others), what it names (Calls). Those it doesn't know, a Go struct's fields, keep the scan's.
-func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[string][]Symbol) {
+//
+//nolint:gocognit // the index's edges step by step, each step a few lines
+func (idx *cgIndex) exact(root *os.Root, changed, added map[string]bool, syms map[string][]Symbol) {
 	type key struct{ path, name string }
 	at := map[key][]*Symbol{}
 	for name, ss := range syms {
@@ -125,14 +170,30 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 	}
 	type uses struct {
 		refs, out []Ref
+		past      []Ref // the places past the refs kept
 		seen      map[Ref]bool
 		files     map[string]bool
 		n, nOut   int
+		nTest     int         // of nOut, in test files
+		here      map[Ref]int // a site's place in Here
+		kept      map[Ref]int // a site's place in refs
+	}
+	// the scan has it when its declaration of that name sits in the method's lines, not another of that name
+	fresh := idx.freshMethods(changed, added, syms, func(n cgNode) bool {
+		s := find(n.Path, n.Name, n.Line)
+		return s != nil && s.Line >= n.Line && s.Line <= n.End
+	})
+	for qn, ss := range fresh {
+		syms[qn] = append(syms[qn], ss...)
+		plain := qn[strings.LastIndex(qn, ".")+1:]
+		for i := range syms[qn] {
+			at[key{syms[qn][i].Path, plain}] = append(at[key{syms[qn][i].Path, plain}], &syms[qn][i])
+		}
 	}
 	known := map[*Symbol]*uses{}
 	for _, n := range idx.Nodes {
 		if s := find(n.Path, n.Name, n.Line); s != nil && known[s] == nil {
-			known[s] = &uses{seen: map[Ref]bool{}, files: map[string]bool{}}
+			known[s] = &uses{seen: map[Ref]bool{}, files: map[string]bool{}, here: map[Ref]int{}, kept: map[Ref]int{}}
 			s.From, s.To = n.Line, n.End
 		}
 	}
@@ -142,7 +203,7 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 		if e.SKind == "file" {
 			in = ""
 		}
-		if e.TPath == "" { // a store only named (a string, SQL's table): no declaration to point at
+		if e.TPath == "" { // a store only named (a string, SQL's table): no declaration to point at; the store walk keeps it (outside.go)
 			continue
 		}
 		if from := find(e.SPath, e.SName, e.SLine); from != nil && known[from] != nil {
@@ -161,38 +222,67 @@ func (idx *cgIndex) exact(root *os.Root, changed map[string]bool, syms map[strin
 			}
 		}
 		u, r := known[to], Ref{Path: e.SPath, Line: line, In: in, Text: cut(strings.TrimSpace(lines.text(e.SPath, line)), maxText)}
-		if u.seen[Ref{Path: r.Path, Line: r.Line}] {
+		r.Rel, r.Via = relOf(e)
+		site := Ref{Path: r.Path, Line: r.Line}
+		if u.seen[site] {
+			if i, ok := u.here[site]; ok && (e.Kind == "calls" || e.Kind == "renders") { // VTA's and the checker's edges come after the index's: a call beats a name
+				to.HereKind[i] = e.Kind
+			}
+			if i, ok := u.kept[site]; ok && r.Rel != "" && (u.refs[i].Rel == "" || r.Via != "") {
+				u.refs[i].Rel, u.refs[i].Via = r.Rel, r.Via
+			}
 			continue
 		}
-		u.seen[Ref{Path: r.Path, Line: r.Line}] = true
+		u.seen[site] = true
 		u.n++
 		u.files[r.Path] = true
 		if len(u.refs) < maxRefs {
-			u.refs = append(u.refs, r)
+			u.kept[site], u.refs = len(u.refs), append(u.refs, r)
+		} else {
+			u.past = append(u.past, Ref{Path: r.Path, Line: r.Line, In: r.In})
 		}
 		switch {
 		case changed[r.Path]:
-			to.Here = append(to.Here, r.Path+":"+strconv.Itoa(r.Line))
+			u.here[site] = len(to.Here)
+			to.Here, to.HereKind = append(to.Here, r.Path+":"+strconv.Itoa(r.Line)), append(to.HereKind, e.Kind)
 		case len(u.out) < maxRefs:
 			u.out = append(u.out, r)
 			fallthrough
 		default:
 			u.nOut++
+			if checks.IsTest(r.Path) {
+				u.nTest++
+			}
 		}
 	}
 	for s, u := range known {
-		s.Refs, s.Uses, s.Files, s.Exact = u.refs, u.n, len(u.files), true
-		s.Outside, s.NOutside = u.out, u.nOut
+		s.Refs, s.Uses, s.Files, s.Exact, s.past = u.refs, u.n, len(u.files), true, u.past
+		s.Outside, s.NOutside, s.NOutsideTests = u.out, u.nOut, u.nTest
 	}
 }
 
 func abs(n int) int { return max(n, -n) }
 
-// added is the edges VTA and the checker add that point at a declaration: cgTests walks them with the index's.
+// relOf is how an edge's source uses its target, as Ref.Rel (uses spec 9.2): "call", "iface" through an interface
+// (via, VTA's), "render"; "" it names it.
+func relOf(e cgEdge) (rel, via string) {
+	switch {
+	case e.Kind == "calls" && e.Via != "":
+		return "iface", e.Via
+	case e.Kind == "calls", e.Kind == "handles", e.Kind == "passes":
+		return "call", ""
+	case e.Kind == "renders":
+		return "render", ""
+	}
+	return "", ""
+}
+
+// added is the edges VTA and the checker add that point at a declaration: cgTests walks them with the index's. A
+// handler's calls that pass its input on are its calls again: not walked twice.
 func (idx *cgIndex) added() []cgEdge {
 	var es []cgEdge
 	for _, e := range idx.Edges {
-		if e.By != "" && e.TPath != "" {
+		if e.By != "" && e.TPath != "" && e.Kind != "passes" {
 			es = append(es, e)
 		}
 	}
@@ -206,22 +296,22 @@ func (idx *cgIndex) added() []cgEdge {
 // misses. A line in a file no index read, or at a file's top level, may run anything: no claim, as past maxNames
 // names or a name in more than maxMentions lines, as common as "Run". A test: the conventions of codegraph's
 // isTestPath, a marker on or just above the declaration, or below a #[cfg(test)]. ways: how the code reaches it,
-// see ways below.
+// see ways below. With "ups" in the input it walks the ways up from declarations instead: see upAll below.
 const cgTests = `
 const { DatabaseSync } = require("node:sqlite");
 const { execFileSync } = require("child_process");
 const fs = require("fs"), base = require("path").basename;
-const { repo, dbs, starts, extra } = JSON.parse(fs.readFileSync(0, "utf8"));
+const { repo, dbs, starts, extra, ups } = JSON.parse(fs.readFileSync(0, "utf8"));
 const byTarget = new Map(); // "path NUL name": the edges VTA and the checker add into it, the index doesn't have
 for (const e of extra || []) { const k = e.TPath + "\0" + e.TName; byTarget.set(k, [...(byTarget.get(k) || []), e]) }
 const maxNodes = 5000, maxNames = 2000, maxMentions = 1000, maxLines = 50000;
 const open = dbs.map(d => {
   const db = new DatabaseSync(d.db, { readOnly: true });
   return { prefix: d.prefix, files: new Set(db.prepare("select path from files").all().map(r => r.path)),
-    named: db.prepare("select id, kind, start_line line from nodes where file_path = ? and name = ? and kind not in ('file', 'import')"),
+    named: db.prepare("select id, kind, start_line line, end_line end from nodes where file_path = ? and name = ? and kind not in ('file', 'import')"),
     node: db.prepare("select file_path path, name, start_line line, end_line end from nodes where id = ?"),
     file: db.prepare("select id, start_line line from nodes where file_path = ? and kind = 'file'"),
-    into: db.prepare("select s.id, s.kind, s.name, s.file_path path, s.start_line line, e.line at from edges e join nodes s on s.id = e.source" +
+    into: db.prepare("select s.id, s.kind, s.name, s.file_path path, s.start_line line, s.end_line end, e.line at, e.kind ekind from edges e join nodes s on s.id = e.source" +
       " where e.target = ? and e.kind in ('calls', 'references', 'instantiates')"),
     around: db.prepare("select kind, name, start_line line from nodes where file_path = :f and start_line <= :l and end_line >= :l" +
       " and kind != 'file' order by start_line desc, end_line limit 1") };
@@ -236,15 +326,19 @@ const into = (d, id) => {
     if (e.TLine < n.line || e.TLine > n.end || !e.SPath.startsWith(d.prefix)) continue; // another of that name
     const sp = e.SPath.slice(d.prefix.length);
     if (e.SKind === "route") {
-      rows.push({ id: "route\0" + e.SPath + "\0" + e.SName, kind: "route", name: e.SName, path: sp, line: e.SLine, at: e.Line, route: e.SName });
+      rows.push({ id: "route\0" + e.SPath + "\0" + e.SName, kind: "route", name: e.SName, path: sp, line: e.SLine, at: e.Line, route: e.SName, ekind: e.Kind, via: e.Via });
       continue;
     }
     const s = e.SKind === "file" ? d.file.get(sp) : d.named.all(sp, e.SName).sort((a, b) => Math.abs(a.line - e.SLine) - Math.abs(b.line - e.SLine))[0];
-    if (s && !rows.some(r => r.id === s.id)) rows.push({ id: s.id, kind: s.kind || "file", name: e.SName, path: sp, line: s.line, at: e.Line });
+    const r = s && rows.find(r => r.id === s.id);
+    if (r && e.Via) Object.assign(r, { ekind: e.Kind, via: e.Via }); // through an interface: VTA's word on it
+    else if (s && !r) rows.push({ id: s.id, kind: s.kind || "file", name: e.SName, path: sp, line: s.line, at: e.Line, ekind: e.Kind, via: e.Via });
   }
   d.memo.set(id, rows);
   return rows;
 };
+// relOf is how a caller row uses what it names, as Ref.Rel: "call", "iface" (and via), "render"; "" it names it
+const relOf = r => (r.via ? "iface" : { calls: "call", handles: "call", renders: "render" }[r.ekind] || "");
 const src = new Map();
 const lines = p => { if (!src.has(p)) { let t = ""; try { t = fs.readFileSync(repo + "/" + p, "utf8") } catch {} src.set(p, t.split("\n")) } return src.get(p) };
 const testPath = p => { // codegraph's isTestPath
@@ -353,14 +447,14 @@ const maxWays = 4, maxWalk = 400, maxDepth = 8;
 function ways(d, start, name, path, line) {
   const info = new Map([[start, { name, path, line }]]), next = new Map([[start, null]]), depth = new Map([[start, 0]]);
   const q = [start], out = [], seen = new Set();
-  const chain = (id, inn, at) => {
+  const chain = (id, inn, at, rel) => {
     const c = [];
     for (; id != null; ) {
       const { name, path, line } = info.get(id);
-      c.push({ name, path, line, in: inn, at });
+      c.push({ name, path, line, in: inn, at, rel });
       const n = next.get(id);
       if (!n) break;
-      [id, inn, at] = [n.to, info.get(id).path, n.at];
+      [id, inn, at, rel] = [n.to, info.get(id).path, n.at, n.rel];
     }
     return c;
   };
@@ -370,7 +464,7 @@ function ways(d, start, name, path, line) {
       const top = info.get(id);
       // a function or a file's top level: a method nothing calls is an interface's, a variable runs nothing itself
       if (i && !seen.has(id) && (top.kind === "function" || top.kind === "file"))
-        out.push({ method: "CALL", route: top.name, path: top.path, line: top.line, chain: chain(id, "", 0).slice(1) });
+        out.push({ method: "CALL", route: top.name, path: top.path, line: top.line, chain: chain(id, "", 0, "").slice(1) });
       seen.add(id);
       continue;
     }
@@ -380,12 +474,12 @@ function ways(d, start, name, path, line) {
       const r = by ? { method: by[1].toUpperCase(), route: by[2], line: s.line } : s.at && routeAt(p, s.line, s.at);
       if (r) {
         const k = r.method + " " + r.route + " " + p;
-        if (!seen.has(k) && out.length < maxWays) seen.add(k), out.push({ ...r, path: p, chain: chain(id, p, s.at) });
+        if (!seen.has(k) && out.length < maxWays) seen.add(k), out.push({ ...r, path: p, chain: chain(id, p, s.at, relOf(s)) });
         continue;
       }
       if (next.has(s.id) || next.size >= maxWalk) continue;
       info.set(s.id, { name: s.kind === "file" ? base(p) : s.name, path: p, line: s.line, kind: s.kind });
-      next.set(s.id, { to: id, at: s.at || 0 });
+      next.set(s.id, { to: id, at: s.at || 0, rel: relOf(s) });
       depth.set(s.id, depth.get(id) + 1);
       q.push(s.id);
     }
@@ -393,8 +487,94 @@ function ways(d, start, name, path, line) {
   return out;
 }
 
+// naming is the first line from..to of p that names name, as Go's files.naming; 0 for none or no end
+const naming = (p, name, from, to) => {
+  const ls = lines(p), w = new RegExp("(^|[^\\w$])" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "([^\\w$]|$)");
+  for (let i = Math.max(from, 1); i <= Math.min(to || 0, ls.length); i++) if (w.test(ls[i - 1])) return i;
+  return 0;
+};
+
+// upAll is the way up from each of ups ({path, name, line}: a declaration a use sits in; name "" a file's top level),
+// its callers and namers, tests aside, to the nearest entry: a route, Go's main, a function or file nothing calls
+// (uses spec 9.2, Nodes). Breadth first, at most maxWalk callers and maxDepth stations; a station whose way is known
+// ends the walk there, so the ways make a forest: each station once, with the first way up it gets. Without an
+// entry in reach, the first caller's chain goes on to "bound", or round to "cycle". Out: the stations by key, each
+// with its next one up (u) and the joint to it (ju), or its end (e); and each start's key.
+const keyOf = s => (s.kind === "route" ? "route\0" + s.p + "\0" + s.m + " " + s.n : s.p + "\0" + s.n + "\0" + s.l);
+function upAll(ups) {
+  const stations = {}, keys = [];
+  const fit = (n, line) => (n.line <= line && line <= n.end ? 0 : 1e6 + Math.abs(n.line - line));
+  for (const u of ups) {
+    const d = owner(u.path), f = d && u.path.slice(d.prefix.length);
+    const n = d && d.files.has(f) && (u.name ? d.named.all(f, u.name).sort((a, b) => fit(a, u.line) - fit(b, u.line))[0] : d.file.get(f));
+    const first = { n: u.name || base(u.path), kind: "decl", kind0: (n && n.kind) || "file", p: u.path, l: n ? n.line : u.line };
+    if (n) { keys.push(walkUp(d, n.id, first, stations)); continue }
+    const k = keyOf(first); // not in the code graph
+    stations[k] ??= { n: first.n, kind: "decl", p: first.p, l: first.l, e: { k: "nograph", t: u.path } };
+    keys.push(k);
+  }
+  return { stations, starts: keys };
+}
+function walkUp(d, start, first, stations) {
+  const st = new Map([[start, first]]), prev = new Map(), depth = new Map([[start, 0]]), q = [start];
+  const known = id => { const s = stations[keyOf(st.get(id))]; return !!s && !!(s.u || s.e) };
+  const station = (s, p) => ({ n: s.kind === "file" ? base(p) : s.name, kind: "decl", kind0: s.kind, p, l: s.line });
+  const joint = (s, p, name) => ({ r: relOf(s), via: s.via || undefined, p, l: s.at || naming(p, name, s.line, s.end) });
+  let hit = null, end = null;
+  scan: for (let i = 0; i < q.length && i < maxWalk; i++) {
+    const id = q[i], me = st.get(id);
+    if (known(id)) { hit = id; break }
+    const all = into(d, id), callers = all.filter(s => !isTest(d.prefix + s.path, s.line));
+    if (!callers.length) { // nothing calls it but tests, or nothing at all: an entry
+      hit = id;
+      end = all.length ? { k: "tests", t: me.n } : me.n === "main" && me.p.endsWith(".go") ? { k: "main" } : { k: "nocaller" };
+      if (end.k !== "tests" && (me.kind0 === "function" || me.kind0 === "file")) me.kind = "call-in";
+      break;
+    }
+    if (depth.get(id) >= maxDepth - 1) continue;
+    for (const s of callers) {
+      const p = d.prefix + s.path, by = s.route && /^(\S+)\s+(.*)$/.exec(s.route);
+      const r = by ? { method: by[1].toUpperCase(), route: by[2], line: s.line } : s.at && routeAt(p, s.line, s.at);
+      if (r) {
+        const rid = "route\0" + p + "\0" + r.method + " " + r.route;
+        st.set(rid, { n: r.route, kind: "route", m: r.method, p, l: r.line });
+        prev.set(rid, { from: id, joint: joint(s, p, me.n) });
+        hit = rid, end = { k: "route" };
+        break scan;
+      }
+      if (st.has(s.id)) continue;
+      st.set(s.id, station(s, p));
+      prev.set(s.id, { from: id, joint: joint(s, p, me.n) });
+      depth.set(s.id, depth.get(id) + 1);
+      q.push(s.id);
+    }
+  }
+  let chain = [hit];
+  if (hit == null) { // no entry within reach: the first caller's way, to the bound or round
+    chain = [start];
+    for (let id = start; ; ) {
+      const c = into(d, id).find(s => !s.route && !isTest(d.prefix + s.path, s.line));
+      if (!c) { end = { k: "nocaller" }; break }
+      if (chain.includes(c.id)) { end = { k: "cycle", t: st.get(c.id).n }; break }
+      if (chain.length >= maxDepth) { end = { k: "bound" }; break }
+      const p = d.prefix + c.path;
+      if (!st.has(c.id)) st.set(c.id, station(c, p));
+      prev.set(c.id, { from: id, joint: joint(c, p, st.get(id).n) });
+      chain.push((id = c.id));
+      if (known(id)) break;
+    }
+  } else for (let x = hit; x !== start; ) chain.unshift((x = prev.get(x).from));
+  for (let i = 0; i < chain.length; i++) {
+    const { kind0, ...me } = st.get(chain[i]), s = (stations[keyOf(me)] ??= me);
+    if (s.u || s.e) break; // its way goes on from here
+    if (i + 1 < chain.length) s.u = keyOf(st.get(chain[i + 1])), s.ju = prev.get(chain[i + 1]).joint;
+    else s.e = end || { k: "nocaller" };
+  }
+  return keyOf(first);
+}
+
 const out = [], known = new Map();
-for (const { path, name } of starts) {
+for (const { path, name } of ups ? [] : starts) {
   const d = owner(path);
   if (!d) continue;
   for (const n of d.named.all(path.slice(d.prefix.length), name)) {
@@ -402,7 +582,7 @@ for (const { path, name } of starts) {
     out.push({ path, name, line: n.line, ...strict(d, n.id), untested: known.get(name), ways: ways(d, n.id, name, path, n.line) });
   }
 }
-process.stdout.write(JSON.stringify(out));
+process.stdout.write(JSON.stringify(ups ? upAll(ups) : out));
 `
 
 // tests sets the Tests, Partial, Untested and Ways of the diff's declarations in the index: see cgTests. Without git or
@@ -413,10 +593,14 @@ func (idx *cgIndex) tests(sb *proc.Sandbox, root *os.Root, changed map[string]bo
 		Name string `json:"name"`
 	}
 	var starts []start
+	fresh := map[string][]string{} // freshMethods' {class}.{method} by the method's name, the index's
 	for name, ss := range syms {
+		if own := ownName(name); own != name {
+			fresh[own] = append(fresh[own], name)
+		}
 		for _, s := range ss {
-			if s.Exact && changed[s.Path] && !slices.Contains(starts, start{s.Path, name}) {
-				starts = append(starts, start{s.Path, name})
+			if s.Exact && changed[s.Path] && !slices.Contains(starts, start{s.Path, ownName(name)}) {
+				starts = append(starts, start{s.Path, ownName(name)})
 			}
 		}
 	}
@@ -427,16 +611,22 @@ func (idx *cgIndex) tests(sb *proc.Sandbox, root *os.Root, changed map[string]bo
 		Partial, Untested bool
 		Ways              []Way
 	}
-	if len(starts) == 0 || !runNode(sb, cgTests, map[string]any{"repo": sb.Repo(), "dbs": idx.dbs, "starts": starts, "extra": idx.added()}, &got) {
+	var rels []struct {
+		Ways []struct{ Chain []struct{ Rel string } }
+	} // a hop's relation, which Hop doesn't decode
+	in := map[string]any{"repo": sb.Repo(), "dbs": idx.dbs, "starts": starts, "extra": idx.added()}
+	var out json.RawMessage
+	if len(starts) == 0 || !runNode(sb, cgTests, in, &out) || json.Unmarshal(out, &got) != nil || json.Unmarshal(out, &rels) != nil {
 		return
 	}
 	lines := sources(root)
-	for _, g := range got {
-		for _, w := range g.Ways {
+	for gi, g := range got {
+		for wi, w := range g.Ways {
 			for i, h := range w.Chain {
 				if h.At > 0 && h.In != "" {
 					w.Chain[i].Call = callAt(lines.text(h.In, h.At), h.Name)
 				}
+				w.Chain[i].Rel = rels[gi].Ways[wi].Chain[i].Rel
 			}
 		}
 	}
@@ -446,6 +636,13 @@ func (idx *cgIndex) tests(sb *proc.Sandbox, root *os.Root, changed map[string]bo
 		for i, s := range syms[g.Name] {
 			if s.Path == g.Path && (best == nil || abs(s.Line-g.Line) < abs(best.Line-g.Line)) {
 				best = &syms[g.Name][i]
+			}
+		}
+		for _, q := range fresh[g.Name] { // a fresh method is the index's node at its line, of its class only
+			for i, s := range syms[q] {
+				if s.Path == g.Path && s.Line == g.Line {
+					best = &syms[q][i]
+				}
 			}
 		}
 		switch {

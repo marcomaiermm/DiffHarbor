@@ -3,9 +3,9 @@ package report
 import (
 	"cmp"
 	"diffharbor/internal/review"
-	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 // maxWays is the ways in the page shows, maxWayRows the declarations one shows below its entry.
@@ -23,7 +23,6 @@ type way struct {
 	Sev           string // the heaviest finding on them: "critical", "major", "" lighter or none
 	Finding       string // where that finding is
 	Step          int    // the step whose card shows it, from 1; 0 none
-	reach         []string
 }
 
 // wrow is a declaration on a way: D its depth below the entry, Cols the tree's guides left of it (pipe, blank, tee,
@@ -209,10 +208,10 @@ func findingsOf(f *file, sev string) []*finding {
 	return out
 }
 
-// findingOf is where the first of f's findings of severity sev is.
+// findingOf is the card of the first of f's findings of severity sev.
 func findingOf(f *file, sev string) string {
 	if fds := findingsOf(f, sev); len(fds) > 0 {
-		return fds[0].Href
+		return "#finding-" + strings.TrimPrefix(fds[0].ID, "note-")
 	}
 	return ""
 }
@@ -247,14 +246,3 @@ func (w way) Name() string {
 
 // Label is the way's name for a screen reader: "GET /x: its path to the change".
 func (w way) Label() string { return w.Name() + ": its path to the change" }
-
-// WaysSay is the line beside "Where it runs": how many ways, and which a step shows.
-func (v view) WaysSay() string {
-	s := plural(len(v.Ways), "way in", "ways in")
-	for _, w := range v.Ways {
-		if w.Step > 0 {
-			return s + " · the " + w.Name() + " path is in step " + fmt.Sprintf("%02d", w.Step)
-		}
-	}
-	return s
-}

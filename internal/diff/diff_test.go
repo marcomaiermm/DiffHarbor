@@ -3,6 +3,7 @@ package diff
 import (
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -241,5 +242,49 @@ func TestGeneratedSymlink(t *testing.T) {
 	os.Symlink("gen.go", filepath.Join(dir, "link.go"))
 	if !generatedAt(dir, "gen.go") || generatedAt(dir, "link.go") {
 		t.Fatal(generatedAt(dir, "gen.go"), generatedAt(dir, "link.go"))
+	}
+}
+
+// git's quoted names in a real diff come back as they are: past ASCII, a quote, a tab, a rename's two; a quote in a
+// hunk stays.
+func TestUnquote(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+		return string(out)
+	}
+	git("init", "-q")
+	write := func(name, text string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("old name.go", "package a\n\nfunc A() {}\n\nfunc B() {}\n")
+	git("add", ".")
+	git("commit", "-qm", "a")
+	git("mv", "old name.go", "caf\u00e9.go")
+	write("caf\u00e9.go", "package a\n\nfunc A() {}\n\nfunc B() {}\n\nfunc C() {}\n")
+	write("q\"uote.go", "x := \"+++ \\\"b/no.go\\\"\"\n")
+	write("tab\tname.go", "package a\n")
+	git("add", ".")
+	raw := git("diff", "-M", "--cached")
+	if !strings.Contains(raw, `"b/caf\303\251.go"`) {
+		t.Fatalf("git didn't quote: %s", raw)
+	}
+	d := Unquote(raw)
+	want := []string{"caf\u00e9.go", "q\"uote.go", "tab\tname.go"}
+	if got := Paths(d); !slices.Equal(got, want) {
+		t.Errorf("paths %q, want %q\n%s", got, want, d)
+	}
+	if !strings.Contains(d, "rename from old name.go\nrename to caf\u00e9.go\n") || !strings.Contains(d, `+x := "+++ \"b/no.go\""`) {
+		t.Errorf("unquoted:\n%s", d)
+	}
+	if Unquote("+++ \"b/a\\nb\"\n") != "+++ \"b/a\\nb\"\n" {
+		t.Error("a name with a newline lost its quotes")
 	}
 }

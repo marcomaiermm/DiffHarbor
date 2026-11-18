@@ -210,6 +210,10 @@ func Filter(diff, root string, only map[string]bool, ignore func(string) bool, n
 	return parts, left
 }
 
+// Generated tells whether the file p, whose diff is f, says it is generated: in its diff, or in its first lines in
+// root ("" reads no file).
+func Generated(root, p, f string) bool { return generated.MatchString(f) || generatedAt(root, p) }
+
 // generatedAt tells whether the file p in root starts with a generated header, its diff aside: a change lower in
 // the file has no hunk at its first lines.
 func generatedAt(root, p string) bool {
@@ -366,6 +370,15 @@ func NewLines(diff string) map[string]string {
 
 // EachNewLine calls fn with "path:line" and the diff line ('+' or ' ' first) of every new-file line in the diff.
 func EachNewLine(diff string, fn func(at, l string)) {
+	EachLine(diff, func(at, l string) {
+		if l[0] != '-' {
+			fn(at, l)
+		}
+	})
+}
+
+// EachLine is EachNewLine with the removed lines too ('-' first), each at the new line that follows it.
+func EachLine(diff string, fn func(at, l string)) {
 	file, line, hunk := "", 0, false
 	for _, l := range strings.Split(diff, "\n") {
 		switch {
@@ -381,6 +394,8 @@ func EachNewLine(diff string, fn func(at, l string)) {
 		case hunk && file != "" && (strings.HasPrefix(l, "+") || strings.HasPrefix(l, " ")):
 			fn(fmt.Sprintf("%s:%d", file, line), l)
 			line++
+		case hunk && file != "" && strings.HasPrefix(l, "-"):
+			fn(fmt.Sprintf("%s:%d", file, line), l)
 		}
 	}
 }
@@ -412,4 +427,70 @@ func Overlap(a, b [][2]int) bool {
 		}
 	}
 	return false
+}
+
+// Unquote writes the paths git quotes in a diff's file headers as they are: git quotes a name with a byte past ASCII,
+// a quote, a backslash or a control character (`+++ "b/caf\303\251.go"`), and every reader of a diff takes "+++ b/" at
+// its word. A name with a newline stays quoted: no line could hold it.
+func Unquote(diff string) string {
+	if !strings.Contains(diff, `"`) {
+		return diff
+	}
+	lines := strings.SplitAfter(diff, "\n")
+	head := false // in a file's header, before its first hunk: a quote in a hunk is code
+	for i, l := range lines {
+		switch {
+		case strings.HasPrefix(l, "diff --git "):
+			head = true
+		case strings.HasPrefix(l, "@@"):
+			head = false
+		}
+		if !head || !strings.Contains(l, `"`) {
+			continue
+		}
+		body, nl := strings.CutSuffix(l, "\n")
+		for _, pre := range []string{"diff --git ", "--- ", "+++ ", "rename from ", "rename to ", "copy from ", "copy to "} {
+			if rest, ok := strings.CutPrefix(body, pre); ok {
+				if u, ok := unquoted(rest, pre == "diff --git "); ok {
+					if nl {
+						u += "\n"
+					}
+					lines[i] = pre + u
+				}
+				break
+			}
+		}
+	}
+	return strings.Join(lines, "")
+}
+
+// unquoted is a header's quoted name as it is; two, "a/x" "b/y", for a diff --git line. ok false when none is quoted
+// or one holds a newline.
+func unquoted(s string, two bool) (string, bool) {
+	var out []string
+	names := 1
+	if two {
+		names = 2
+	}
+	for n := range names {
+		if n > 0 {
+			var ok bool
+			if s, ok = strings.CutPrefix(s, " "); !ok {
+				return "", false
+			}
+		}
+		q, err := strconv.QuotedPrefix(s)
+		if err != nil { // not quoted: a diff --git line's other name may be; no space to tell its end, so leave the line
+			return "", false
+		}
+		u, err := strconv.Unquote(q)
+		if err != nil || strings.Contains(u, "\n") {
+			return "", false
+		}
+		out, s = append(out, u), s[len(q):]
+	}
+	if s != "" {
+		return "", false
+	}
+	return strings.Join(out, " "), true
 }

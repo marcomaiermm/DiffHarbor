@@ -52,8 +52,10 @@ func main() { backfill(store.DB{}); each(store.DB{}) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := cgEdge{Line: 6, Kind: "calls", By: "vta", SName: "backfill", SKind: "function", SPath: "main.go", SLine: 5, SEnd: 7,
-		TName: "Record", TPath: "store/store.go", TLine: 7}
+	want := cgEdge{
+		Line: 6, Kind: "calls", By: "vta", SName: "backfill", SKind: "function", SPath: "main.go", SLine: 5, SEnd: 7,
+		TName: "Record", TPath: "store/store.go", TLine: 7, Via: "Store",
+	} // through the interface: its name
 	generic := cgEdge{Line: 9, Kind: "calls", By: "vta", SName: "each", SKind: "function", SPath: "main.go", SLine: 9, SEnd: 9,
 		TName: "Record", TPath: "store/store.go", TLine: 7} // through its instance
 	if len(got) != 2 || !slices.Contains(got, want) || !slices.Contains(got, generic) {
@@ -71,6 +73,134 @@ func main() { backfill(store.DB{}); each(store.DB{}) }
 	}
 	if _, err := vtaCalls(dir, []string{"Record"}); err == nil {
 		t.Fatal("a program that doesn't type-check: want an error")
+	}
+}
+
+// A SQL statement's table, sqlc's generated form too: a write unless it selects; not a message that reads like one.
+func TestVTAStores(t *testing.T) {
+	dir := t.TempDir()
+	for name, src := range map[string]string{
+		"go.mod": "module fix\n\ngo 1.26\n",
+		"db.go": `package fix
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+)
+
+const createUser = "-- name: CreateUser :one\nINSERT INTO users (name) VALUES ($1) RETURNING id"
+
+func CreateUser(ctx context.Context, db *sql.DB) { db.QueryRowContext(ctx, createUser, "a") }
+
+func listOrders(db *sql.DB) { db.Query("SELECT id FROM \"orders\" WHERE n > 1") }
+
+func bump(db *sql.Tx) error {
+	q := "UPDATE accounts SET n = n + 1"
+	db.Exec(q)
+	db.Exec("update failed")
+	db.Query("SELECT x FROM unnest($1::int[]) x")
+	return fmt.Errorf("select a file from disk")
+}
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := vtaCalls(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stores []string
+	for _, e := range got {
+		if e.Kind == "reads" || e.Kind == "writes" {
+			stores = append(stores, fmt.Sprintf("%s %s %d -> %s %q", e.Kind, e.SName, e.Line, e.TName, e.TPath))
+		}
+	}
+	want := []string{`writes CreateUser 11 -> users ""`, `reads listOrders 13 -> orders ""`, `writes bump 17 -> accounts ""`}
+	if !slices.Equal(stores, want) {
+		t.Errorf("got %q, want %q", stores, want)
+	}
+}
+
+// An ORM's chain, gorm's and bun's shapes: its verbs say read or write, its arguments the store. A package's only:
+// the module's own Create (a dotted path like a package's) names none, nor a chain without a verb.
+func TestVTAORM(t *testing.T) {
+	dir := t.TempDir()
+	for name, src := range map[string]string{
+		"go.mod":     "module example.com/app\n\ngo 1.26\n\nrequire example.com/orm v0.0.0\n\nreplace example.com/orm => ./orm\n",
+		"orm/go.mod": "module example.com/orm\n\ngo 1.26\n",
+		"orm/orm.go": `package orm
+
+type DB struct{}
+
+func (d *DB) Model(v any) *DB              { return d }
+func (d *DB) Table(name string) *DB        { return d }
+func (d *DB) Where(q string, a ...any) *DB { return d }
+func (d *DB) Create(v any) *DB             { return d }
+func (d *DB) Find(v any) *DB               { return d }
+func (d *DB) Update(c string, v any) *DB   { return d }
+func (d *DB) NewInsert() *DB               { return d }
+func (d *DB) Exec(ctx any) error           { return nil }
+func (d *DB) AutoMigrate(v ...any) error   { return nil }
+`,
+		"db.go": `package fix
+
+import "example.com/orm"
+
+type User struct{ Name string }
+
+type Order struct{ ID int }
+
+func add(db *orm.DB, u *User) { db.Create(u) }
+
+func list(db *orm.DB) {
+	var os []Order
+	db.Where("id > ?", 1).
+		Find(&os)
+}
+
+func rename(db *orm.DB) { db.Table("accounts").Where("id = ?", 1).Update("name", "x") }
+
+func insert(db *orm.DB) { db.NewInsert().Model(&User{}).Exec(nil) }
+
+func migrate(db *orm.DB) { db.AutoMigrate(&User{}) }
+
+func Create(u *User) {}
+
+func local(u *User) { Create(u) }
+
+func archive(db *orm.DB) { db.Table("archive").Create(&User{}) }
+`,
+	} {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := vtaCalls(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stores []string
+	for _, e := range got {
+		if e.Kind == "reads" || e.Kind == "writes" {
+			stores = append(stores, fmt.Sprintf("%s %s %d -> %s %s:%d", e.Kind, e.SName, e.Line, e.TName, e.TPath, e.TLine))
+		}
+	}
+	want := []string{
+		"writes add 9 -> User db.go:5",
+		"reads list 13 -> Order db.go:7", // the chain's first line
+		"writes rename 17 -> accounts :0",
+		"writes insert 19 -> User db.go:5",
+		"writes archive 27 -> archive :0", // the store nearest the client
+	}
+	if !slices.Equal(stores, want) {
+		t.Errorf("got %q, want %q", stores, want)
 	}
 }
 
@@ -99,24 +229,71 @@ func TestTSEdges(t *testing.T) {
 		}
 	}
 	for _, w := range []string{ // the root tsconfig only references tsconfig.app.json
-		"reads listOrders src/data.ts:5 -> orders src/schema.ts",   // the table in the chain
-		"writes addUser src/data.ts:7 -> users src/schema.ts",      // in a transaction's callback
-		"writes renameUser src/data.ts:9 -> users src/schema.ts",   // update(t).set(…)
-		"writes txCount src/data.ts:13 -> users src/schema.ts",     // const n = db.transaction(…): no route "n"
-		"writes nsWrite src/data.ts:15 -> users src/schema.ts",     // insert(schema.users)
-		"reads findPosts src/data.ts:10 -> post ",                  // client.post.findMany()
-		"reads rawCount src/data.ts:11 -> audit_log ",              // SQL
-		"reads allOrders src/data.ts:12 -> Order src/schema.ts",    // Repository<Order>
-		"handles get /orders src/api.ts:6 -> getOrders src/api.ts", // app.get("/orders", getOrders)
-		"calls post /users src/api.ts:7 -> addUser src/data.ts",    // an inline handler
-		"calls query posts src/api.ts:9 -> findPosts src/data.ts",  // a procedure under its key
-		"calls shout src/api.ts:12 -> send src/notify.ts",          // n.make().send()
-		"calls notifyAll src/notify.ts:4 -> toLabel src/notify.ts", // xs.map(toLabel)
-		"renders List src/App.tsx:2 -> Row src/App.tsx",            // <Row />
+		"reads listOrders src/data.ts:5 -> orders src/schema.ts",                     // the table in the chain
+		"writes addUser src/data.ts:7 -> users src/schema.ts",                        // in a transaction's callback
+		"writes renameUser src/data.ts:9 -> users src/schema.ts",                     // update(t).set(…)
+		"writes txCount src/data.ts:13 -> users src/schema.ts",                       // const n = db.transaction(…): no route "n"
+		"writes nsWrite src/data.ts:15 -> users src/schema.ts",                       // insert(schema.users)
+		"reads findPosts src/data.ts:10 -> post ",                                    // client.post.findMany()
+		"reads rawCount src/data.ts:11 -> audit_log ",                                // SQL
+		"reads allOrders src/data.ts:12 -> Order src/schema.ts",                      // Repository<Order>
+		"handles get /orders src/api.ts:6 -> getOrders src/api.ts",                   // app.get("/orders", getOrders)
+		"calls post /users src/api.ts:7 -> addUser src/data.ts",                      // an inline handler
+		"calls query posts src/api.ts:9 -> findPosts src/data.ts",                    // a procedure under its key
+		"calls shout src/api.ts:12 -> send src/notify.ts",                            // n.make().send()
+		"calls notifyAll src/notify.ts:4 -> toLabel src/notify.ts",                   // xs.map(toLabel)
+		"renders List src/App.tsx:2 -> Row src/App.tsx",                              // <Row />
+		"reads listRecent src/data.ts:17 -> recentSq src/data.ts",                    // a subquery is a table of its own
+		"calls query shop.list src/items.ts:27 -> listItems src/data.ts",             // a procedure under its key path
+		"passes query shop.list src/items.ts:27 -> listItems src/data.ts",            // the handler passes its input on
+		"references query shop.list src/items.ts:23 -> listInputSchema src/items.ts", // the procedure's input schema
+		"calls query shop.list src/items.ts:29 -> listOrders src/data.ts",            // a call that doesn't read the input
+		"passes get /items src/api.ts:18 -> getItems src/api.ts",                     // the route hands its input to its named handler
+		"passes getItems src/api.ts:16 -> listItems src/data.ts",                     // which passes it on
+		"calls relay src/notify.ts:6 -> send src/notify.ts",                          // through an interface
 	} {
 		if !slices.Contains(got, w) {
 			t.Errorf("no %q in\n%s", w, strings.Join(got, "\n"))
 		}
+	}
+	for _, w := range []string{
+		"passes query shop.list src/items.ts:29 -> listOrders src/data.ts", // listOrders() reads no input
+		"passes get /orders src/api.ts:5 -> listOrders src/data.ts",        // nor in a named handler
+		"passes getItems src/api.ts:15 -> renameUser src/data.ts",          // renameUser() neither
+	} {
+		if slices.Contains(got, w) {
+			t.Errorf("%q: the call doesn't pass the input on", w)
+		}
+	}
+	for _, e := range idx.Edges {
+		if via := e.SName == "relay" && e.TName == "send"; via != (e.Via == "Sender") {
+			t.Errorf("only relay's call goes through the interface Sender: %+v", e)
+		}
+	}
+	for _, e := range idx.Edges {
+		if (e.Kind == "reads" || e.Kind == "writes") && e.Sub != (e.TName == "recentSq") {
+			t.Errorf("only recentSq, made by .as(…), is a subquery: %+v", e)
+		}
+	}
+}
+
+// A call VTA resolves through an interface is a use called through it: Ref.Rel "iface" and the interface.
+func TestRefIface(t *testing.T) {
+	sb, dir := sandbox(t)
+	if err := os.WriteFile(filepath.Join(dir, "run.go"), []byte("package a\n\nfunc Run(s S) {\n\ts.Rec()\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := sb.Pinned()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := &cgIndex{Nodes: []cgNode{{Name: "Rec", Path: "store.go", Kind: "method", Line: 3, End: 3}}, Edges: []cgEdge{
+		{Line: 4, Kind: "calls", By: "vta", SName: "Run", SKind: "function", SPath: "run.go", SLine: 3, SEnd: 5, TName: "Rec", TPath: "store.go", TLine: 3, Via: "S"},
+	}}
+	syms := map[string][]Symbol{"Rec": {{Path: "store.go", Line: 3}}}
+	idx.exact(root, map[string]bool{"store.go": true}, nil, syms)
+	if rs := syms["Rec"][0].Refs; len(rs) != 1 || rs[0].Rel != "iface" || rs[0].Via != "S" {
+		t.Errorf("refs %+v", rs)
 	}
 }
 

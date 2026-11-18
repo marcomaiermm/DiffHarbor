@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -217,17 +218,36 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 		}
 	}
 	// at most 12,100 so nested rules keep their 6000 in TrustedContext's 18,500
-	rules := text.Truncate(cfg.ReadRules(func(n ...string) string { return p.File(pr.Base.SHA, n...) }), 12_100) + p.NestedRules(pr.Base.SHA, files)
+	var ruled [][2]string // the rules files read: name, text
+	rules := text.Truncate(cfg.ReadRules(func(n ...string) string {
+		for _, name := range n {
+			if t := p.File(pr.Base.SHA, name); t != "" {
+				ruled = append(ruled, [2]string{name, t})
+				return t
+			}
+		}
+		return ""
+	}), 12_100)
+	ruleSet := report.ReadRules(pr.Base.SHA, rules, ruled)
+	rules += p.NestedRules(pr.Base.SHA, files)
 	p.Skills(pr.Base.SHA, cfg.SkillPaths(), filepath.Join(sb.Dir, "skills"))
 
 	started := time.Now()
 	var tid, tk string
+	var tickets ticket.Found
+	var changes []review.Commit // the PR's commits with their files: the tickets' keys and stats
 	var regs []checks.Registry
 	var docs []review.Doc
 	commits := forge.Redact(review.Messages(ctx, sb))
 	cfg.Authors = review.Authors(ctx, sb)
 	if pr.Head.Repo.ID == e.Repository.ID { // a fork's author could name any ticket and read it in the review, or fetch the internal packages
-		tid, tk = ticket.Lookup(ctx, cfg.Tickets, pr.Title, pr.Head.Ref, pr.Body)
+		changes = review.Changes(ctx, sb)
+		var subjects []string
+		for _, c := range changes {
+			subjects = append(subjects, c.Subject)
+		}
+		tickets = ticket.Lookup(ctx, cfg.Tickets, pr.Title, pr.Head.Ref, pr.Body, strings.Join(subjects, "\n"))
+		tid, tk = tickets.ID, tickets.Section
 		regs, _ = checks.Registries(e.Owner()) // main checked them
 		// what a doc says reaches the PR's comments: private repos only unless review.json opts in. Before Analyze:
 		// docs reads the checkout as the merge base left it, its checks run the PR's code there.
@@ -334,11 +354,16 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if still > 0 {
 		desc += fmt.Sprintf(", %d earlier still open", still)
 	}
-	if len(r.Failed) > 0 { // their part failed: not green, the next push or `@app review` reviews them
+	// their part failed: not green, the next push or `@app review` reviews them; a report's merge status counts them
+	// as the gap in the review instead
+	if len(r.Failed) > 0 {
 		desc, state = desc+", "+text.Count(len(r.Failed), "file")+" not reviewed", "error"
 	}
 	log.Printf("%s %s %s %s: %s", key, sha[:7], kind, stats, desc)
 	s.State = s.State.Update(r, sha, prFiles, only == nil)
+	left := slices.Concat(omitted, r.Failed)
+	slices.Sort(left)
+	s.State.Unreviewed = slices.Compact(left)
 	risk := forge.Risked(stillOpen(threads, open, r, post, seen, lines, posted), failing(r.Tests))
 	s.State.Risk = &risk
 	// a file with a piece left out isn't reviewed: the next push reviews it again
@@ -355,29 +380,57 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	reviewed := footer(fmt.Sprintf("Reviewed up to `%s` · %s", sha[:7], desc))
 	// Right after posting: a restart from here on finds this head reviewed, rather than posting its findings again.
 	s.Write(banner, reviewed)
+	merge := false // the report's merge status set the commit status
 	if guide {
 		st := s.State
 		d := report.Data{
 			Repo: e.Repository.FullName, Number: pr.Number, Title: pr.Title, URL: pr.HTMLURL, SHA: pr.Head.SHA,
 			Summary: st.Summary, Diagram: st.Diagram, Effort: st.Effort, Decisions: st.Decisions, Story: st.Story, Flow: st.Flow,
+			Brief:       st.Brief,
 			Walkthrough: st.Files, Commits: review.Commits(ctx, sb), Outline: outline, Findings: openFindings(threads, open, r),
-			Diff: raw, Routine: r.Routine, Symbols: report.Symbols(sb, raw), Themes: cfg.SyntaxTheme,
+			Diff: raw, Routine: r.Routine, Themes: cfg.SyntaxTheme,
 			Others: others(p, e.Key(), raw), Behind: review.Behind(ctx, sb),
 			Conflicts: pr.Mergeable != nil && !*pr.Mergeable, Forge: p.Links(),
+			Bot: f.Bot(), Threads: threadIDs(threads, p.Posted()),
 			Docs: docs, Dropped: r.Dropped, Failed: r.Failed, Omitted: omitted, Tests: r.Tests, Sources: report.Sources(sb, raw),
 		}
-		// what the new code is for, where no doc comment or commit says: one call, the provider's small model
-		if keys, texts := report.Asks(d); len(keys) > 0 {
-			d.Whys = map[string]string{}
-			for i, w := range review.Explain(ctx, agent.Pi{}, sb, cmp.Or(agent.VerifyFor(rm), vm, rm), forge.Redact(pr.Title), texts) {
-				d.Whys[keys[i]] = w
+		d.Symbols, d.Shapes, d.Nodes, d.UsesCut = report.Symbols(sb, raw)
+		d.PR = report.Header(ctx, sb, report.PR{Created: pr.CreatedAt, Author: pr.User.Login, Head: pr.Head.Ref, Base: pr.Base.Ref, Body: forge.Redact(pr.Body)})
+		d.Knowledge = report.Learn(ctx, sb, raw, pr.CreatedAt)
+		d.CI = ciOf(ctx, p, sb, key, sha, prFiles)
+		d.Members = membersOf(p, key)
+		d.Outside = report.Outside(d.Symbols)
+		d.Rules, d.Parts = ruleSet, len(parts)
+		report.Static(ctx, sb, &d, diff.Paths(strings.Join(parts, ""))) // before the map: its Before merging reads Env
+		d.Map = report.BuildMap(sb, d, d.Outside)
+		d.Tickets, d.FollowUps, d.TicketErrs, d.TicketsCapped = tickets.Tickets, tickets.FollowUps, tickets.Failed, tickets.Capped
+		d.Split = report.SplitTickets(tickets.Keys, changes, d.Flow)
+		d.SplitOff = cfg.SuggestSplit.Lines == 0 && cfg.SuggestSplit.Files == 0
+		var decls []string // the declarations the PR adds or changes: places the contract pass may cite
+		for name, ss := range d.Symbols {
+			for _, sy := range ss {
+				if sy.State != "" {
+					decls = append(decls, fmt.Sprintf("%s:%d %s", sy.Path, sy.Line, name))
+				}
 			}
 		}
+		slices.Sort(decls)
+		d.Terms = review.ReadTerms(ctx, review.TermsInput{
+			Agent: agent.Pi{}, Sandbox: sb, Settings: cfg, Body: forge.Redact(pr.Body),
+			Tickets: d.Tickets, Summary: st.Summary, Flow: st.Flow, Walk: st.Files, Findings: d.Findings, Decls: decls,
+		})
 		s.State.Secret = reportSecret(s.State.Secret)
-		s.State.Report = writeReport(e, s.State.Secret, s.State.Report, d)
+		var now report.Version
+		s.State.Report, now = writeReport(e, s.State.Secret, s.State.Report, d)
 		s.Write(banner, reviewed) // again, with the report's link
+		if now.Short != "" {      // the report's merge status decides (decision 6): failure only when blocked, its short form says why
+			desc, state, merge = text.OneLine(now.Short, 140), "success", true
+			if now.Blocked {
+				state = "failure"
+			}
+		}
 	}
-	if w := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); len(w) <= 140 { // GitHub's limit
+	if w := fmt.Sprintf("%s, merge risk %d/5", desc, risk.Score); !merge && len(w) <= 140 { // GitHub's limit
 		desc = w
 	}
 	sp.Result = "ok"
@@ -621,27 +674,24 @@ func Moved(dir string) string {
 	return string(b)
 }
 
-// writeReport renders the PR's report into its secret's folder as the version of its head, against the newest of
-// another head, and returns its URL; "" when that fails, the review stands without it. d.Routine is this review's: an
+// writeReport renders the PR's report into its secret's folder as the version of its head, and returns its URL and
+// that version; "" when that fails, the review stands without it. d.Routine is this review's: an
 // incremental one has none, and the last full one's line numbers may be stale.
 // link is the walkthrough's last one: reports it names from before the repo's ID move here first (adopt). Until they
 // did, it stays the link.
 // ponytail: two reviews of a PR finishing at once can drop one's entry from versions.json; a lock per PR if it shows.
-func writeReport(e *forge.Event, secret, link string, d report.Data) string {
+func writeReport(e *forge.Event, secret, link string, d report.Data) (string, report.Version) {
 	dir, s := reportPath(e)+"/"+secret, Reports()
 	if err := adopt(namedDir(e, secret, link), dir); err != nil { // the next report retries; till then link serves
 		log.Println(e.Key(), "report:", Hide(err, secret))
-		return link
+		return link, report.Version{}
 	}
 	vs, err := Versions(dir)
 	if err != nil {
 		log.Println(e.Key(), "report:", Hide(err, secret))
-		return ""
+		return "", report.Version{}
 	}
 	vs = slices.DeleteFunc(vs, func(v report.Version) bool { return v.SHA == d.SHA })
-	if len(vs) > 0 {
-		d.Prev = &vs[0]
-	}
 	b, now, err := report.Render(d)
 	now.At = time.Now()
 	vs = slices.Insert(vs, 0, now)
@@ -660,14 +710,14 @@ func writeReport(e *forge.Event, secret, link string, d report.Data) string {
 	if err == nil {
 		err = s.Put(dir+"/versions.json", b)
 	}
-	if err != nil {
+	if err != nil { // no page: the commit status keeps the review's own
 		log.Println(e.Key(), "report:", Hide(err, secret))
-		return ""
+		return "", report.Version{}
 	}
 	for _, v := range vs[len(keep):] {
 		_ = deletePage(s, dir, v.SHA)
 	}
-	return ReportURL + "/r/" + dir
+	return ReportURL + "/r/" + dir, now
 }
 
 // maxClash is the PRs others fetches the diff of, those sharing the most files first.
@@ -709,7 +759,7 @@ func others(p forge.PR, key, raw string) []report.Other {
 	return out
 }
 
-// openFindings is what the report shows inline: the threads still open after this review, and its new findings.
+// openFindings is what the report shows inline: the threads still open after this review, Earlier, and its new findings.
 func openFindings(threads, open []forge.Thread, r review.Result) []review.Comment {
 	fixed := map[string]bool{}
 	for _, i := range r.Fixed {
@@ -719,11 +769,25 @@ func openFindings(threads, open []forge.Thread, r review.Result) []review.Commen
 	for _, t := range threads {
 		if !t.Resolved && !fixed[t.ID] {
 			c := forge.Parse(forge.Clean(t.Body))
-			c.Path, c.Line = t.Path, t.Line
+			c.Path, c.Line, c.Earlier = t.Path, t.Line, true
 			cs = append(cs, c)
 		}
 	}
 	return append(cs, r.Comments...)
+}
+
+// threadIDs is the comment id of each finding's thread: the ids Post read back, and the open threads' of earlier reviews.
+func threadIDs(threads []forge.Thread, posted map[string]int64) map[string]int64 {
+	ids := map[string]int64{}
+	maps.Copy(ids, posted)
+	for _, t := range threads {
+		if !t.Resolved && t.Comment > 0 {
+			c := forge.Parse(forge.Clean(t.Body))
+			c.Path, c.Line = t.Path, t.Line
+			ids[report.ThreadKey(c)] = t.Comment
+		}
+	}
+	return ids
 }
 
 // stillOpen is what is open after the post: the threads left open, the findings reopen brought back (r's not in

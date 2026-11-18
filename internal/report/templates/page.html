@@ -1,0 +1,343 @@
+{{/* The v4 page's sections (spec sections 2–5), in page order; view.build computes what each draws. */}}
+
+{{define "chip"}}{{if .Kind}}<span class="chip {{if eq .Kind "fail"}}ev-fail{{else if eq .Kind "ai"}}ev-ai{{else if eq .Kind "inf"}}ev-inf{{else if eq .Kind "word" "tk"}}ev-word{{else}}ev-shown{{end}}">{{if eq .Kind "fail" "run"}}{{ico "play" 12}}{{else if eq .Kind "shown"}}{{ico "eye" 12}}{{else if eq .Kind "inf"}}{{ico "circle-dashed" 12}}{{else if eq .Kind "word"}}{{ico "quote" 12}}{{else if eq .Kind "tk"}}{{ico "ticket" 12}}{{end}}<span class="vh">Evidence: </span>{{.Label}}</span>{{end}}{{end}}
+
+{{/* a line led by its chip, a forge link after it */}}
+{{define "mline"}}<p class="ln">{{template "chip" .Chip}}{{md .Text}}{{with .Href}} <a class="gh" href="{{.}}" target="_blank" rel="noopener">{{$.HrefText}}{{ico "external-link" 16}}<span class="vh"> (opens in a new tab)</span></a>{{end}}</p>{{end}}
+
+{{/* component 2: a status chip; it and the evidence chip after it read as one name, "Deviates, AI cross-check" */}}
+{{define "stchip"}}<span class="chip st">{{ico .Icon 12}}{{.Label}}</span><span class="vh">, </span>{{end}}
+
+{{/* a line of a block: a quote block (component 8) with its cite, or text with a place */}}
+{{define "cline"}}{{if .Quote}}<figure class="q"><blockquote>{{md .Text}}</blockquote>{{with .Cite}}<figcaption>{{.}}</figcaption>{{end}}</figure>{{else}}<p class="ln13">{{with .Lead}}{{.}} {{end}}{{if .Code}}{{if .Href}}<a class="path" href="{{.Href}}">{{wb .Code}}</a>{{else}}<code class="cd" translate="no">{{.Code}}</code>{{end}}{{if or .Text .Note}} {{end}}{{end}}{{md .Text}}{{with .Note}} <span class="i3">{{.}}</span>{{end}}</p>{{end}}{{end}}
+
+{{define "keylist"}}<ul class="keyl">
+  <li>{{template "chip" (ev "shown" "Diff")}}Filled: a machine showed or ran it, and the chip names the source. Green marks a machine's word. It says nothing about whether the news is good.</li>
+  <li>{{template "chip" (ev "word" "Author")}}Solid outline: a ticket's or the author's word, quoted.</li>
+  <li>{{template "chip" (ev "ai" "AI cross-check")}}Dashed outline: a second model agreed, or a model paraphrased the author. Neither ran the code.</li>
+  <li>{{template "chip" (ev "inf" "Inferred by the review")}}Dotted outline: one model inferred it, and nothing checked it.</li>
+  <li>“· not run here”: no result for this test reached this page.</li>
+  <li>Only a failed run or a conflict blocks a merge. The author's or a ticket's word can make it wait, and only a later run ends the wait.</li>
+</ul>
+<div class="keysc"><label class="opt"><input type="checkbox" data-keys checked>Single-key shortcuts</label>
+<p class="keysl" data-keyhint>n next open item · j k next and previous file · o open all steps · v mark viewed</p></div>{{end}}
+
+{{/* 5.1 Top bar */}}
+{{define "top"}}<header class="top" id="topbar">
+<div class="tb-l">
+  {{block "logo" .}}{{end}}<span class="tb-repo w-only">{{.Repo}} / </span><span class="tb-pr n360">{{.Forge.Ref}}{{.Number}}</span>
+  <span class="popwrap" id="verwrap"><button class="vchip" id="ver-btn" type="button" aria-expanded="false" aria-controls="vermenu" aria-haspopup="true"><span class="vh">Version </span>{{short .SHA}}{{ico "chevron-down" 12}}</button>
+    <div class="pop pop-l menu" id="vermenu" hidden><div class="verrows">{{template "verrow" .}}</div></div></span>
+  <span class="short t-only" data-short hidden>{{.Page.Status.Short}}</span>
+  <span class="fchip" id="fchip" hidden><span class="ft"><span class="fsh">Showing </span><span id="fname"></span></span><button class="fx" type="button" aria-label="Show everything" data-clear>{{ico "x" 14}}</button></span>
+</div>
+<div class="tb-c"><span class="short" data-short hidden>{{.Page.Status.Short}}</span></div>
+<div class="tb-r">
+  <span class="popwrap d-only"><button class="gb" id="key-btn" type="button" aria-expanded="false" aria-controls="keypop">Evidence key</button>
+    <div class="pop pop-r keypop" id="keypop" role="dialog" aria-labelledby="key-title" hidden><div class="keyh"><p id="key-title" tabindex="-1">Evidence key</p><button class="ibtn" type="button" aria-label="Close" data-close>{{ico "x" 16}}</button></div>{{template "keylist" .}}</div></span>
+  <span class="seg dview" role="group" aria-label="Diff view"><button type="button" data-diff="unified" aria-pressed="true">Unified</button><button type="button" data-diff="split" aria-pressed="false">Split</button></span>
+  {{with .URL}}<span class="d-only"><a class="gb" href="{{.}}" target="_blank" rel="noopener">Open on {{or $.Forge.Name "GitHub"}}{{ico "external-link" 16}}<span class="vh"> (opens in a new tab)</span></a></span>{{end}}
+  <button class="gb secbtn" id="sec-btn" type="button" aria-haspopup="dialog" data-sheet="sections">{{ico "list" 16}}<span class="slb">Sections</span></button>
+  <button class="ibtn morebtn" id="more-btn" type="button" aria-label="More" aria-expanded="false" aria-controls="morelist">{{ico "ellipsis" 16}}</button>
+</div>
+<ul class="mlist2" id="morelist" hidden>
+  <li><button class="mrow" type="button" id="more-key" data-sheet="key">Evidence key</button></li>
+  <li><button class="mrow" type="button" id="more-ver" data-sheet="versions">Versions</button></li>
+  {{with .URL}}<li><a class="mrow" href="{{.}}" target="_blank" rel="noopener">Open on {{or $.Forge.Name "GitHub"}}{{ico "external-link" 16}}<span class="vh"> (opens in a new tab)</span></a></li>{{end}}
+</ul>
+</header>{{end}}
+
+{{define "verrow"}}<p class="mrow" aria-current="page">{{ico "check" 16}}<span>{{short .SHA}} · <span class="ui12 i3">this page</span></span></p>{{end}}
+
+{{/* 5.2 Header, with the Since line (5.13) */}}
+{{define "pagehead"}}<header class="hdr" id="what">
+  <div class="newer warn" id="newer" role="status" hidden>{{ico "rotate-ccw" 16}}<p>A newer review exists. This is the report of <code class="cd">{{short .SHA}}</code>. <a class="lnk" href="">Open the newest</a></p></div>
+  <p class="m-repo">{{.Repo}}</p>
+  <p class="over">{{.Page.Over}}</p>
+  <h1 class="h-title" id="h-what" tabindex="-1">{{.Title}}</h1>
+  <p class="meta">{{.Page.Meta}}</p>
+  <p class="since" id="since" hidden>{{ico "git-compare" 16}}<span></span><a class="lnk" href="#read" data-show-changed>Show what changed</a></p>
+</header>{{end}}
+
+{{/* 5.3 Merge status */}}
+{{define "status"}}{{$s := .Page.Status}}<section class="msp" id="stand" aria-labelledby="h-stand">
+  {{if eq $s.Kind "blocked"}}<span class="edge" aria-hidden="true" style="background: var(--critical);"></span>{{else if eq $s.Kind "waits"}}<span class="edge" aria-hidden="true" style="background: var(--line3);"></span>{{end}}
+  <div class="shd">{{if eq $s.Kind "blocked"}}<span style="color: var(--critical); display: inline-flex;">{{ico "octagon" 20}}</span>{{else if eq $s.Kind "waits"}}<span class="i2" style="display: inline-flex;">{{ico "pause" 20}}</span>{{else if eq $s.Kind "open"}}<span class="i2" style="display: inline-flex;">{{ico "circle-dashed" 20}}</span>{{else}}<span class="i2" style="display: inline-flex;">{{ico "circle" 20}}</span>{{end}}<h2 id="h-stand" tabindex="-1">{{$s.Head}}</h2>
+    {{if $s.Gate}}<span class="d-only" style="margin-left: auto;"><a class="glink" href="{{$s.Gate}}" data-gate>{{$s.GateText}}{{ico "arrow-down" 16}}</a></span>{{else if .Page.Before}}<span class="d-only" style="margin-left: auto;"><a class="glink" href="#before">Go to Before you merge{{ico "arrow-down" 16}}</a></span>{{end}}</div>
+  <div class="slines">{{range $s.Lines}}{{template "mline" .}}{{end}}{{range $s.Note}}<p class="clears">{{.}}</p>{{end}}{{with $s.Clears}}<p class="clears">{{.}}</p>{{end}}
+    {{with $s.Gate}}<p class="m-only"><a class="glink" href="{{.}}" data-gate>{{$s.GateText}}{{ico "arrow-down" 16}}</a></p>{{end}}</div>
+  <div class="stats">{{range $s.Stats}}<div class="stat"><span class="sn">{{.N}}{{with .Of}}<span class="of"> of </span>{{.}}{{end}}</span><span class="slb">{{if .Href}}<a class="lnk" href="{{.Href}}">{{.Label}}</a>{{else}}{{.Label}}{{end}}<span class="s2">{{.Second}}</span></span></div>{{end}}</div>
+</section>{{end}}
+
+{{/* 5.4 The change in brief */}}
+{{define "brief"}}{{with .Page.Brief}}<section class="brief" aria-labelledby="h-brief"><div class="bh"><h2 class="lbl" id="h-brief">The change in brief</h2>{{template "chip" (ev "inf" "Inferred by the review")}}</div>
+  <p class="btx">{{range .}}<span data-boxes="{{.Parts}}">{{md .Text}} (<a class="path" href="{{.Href}}">{{wb .Place}}</a>).</span> {{end}}</p></section>{{end}}{{end}}
+
+{{/* 5.5 The change, by part (6, components 23–26) */}}
+{{define "map"}}{{with .Page.Map}}<figure class="mapf" id="map" aria-labelledby="h-map">
+  <h2 id="h-map" tabindex="-1">Map</h2>{{with index $.Page.Subs "map"}}<p class="ssub">{{.}}</p>{{end}}
+  <div class="mtop"{{if .Fig}} style="--fw: {{.W}}px;"{{end}}>{{if .Fig}}<div class="mscr" role="region" aria-label="Map, scrolls sideways" tabindex="-1">
+    <div class="mfig" style="width: {{.W}}px; height: {{.H}}px;">
+      <svg class="ml-svg" width="{{.W}}" height="{{.H}}" viewBox="0 0 {{.W}} {{.H}}" aria-hidden="true">
+        {{range .Lines}}{{$l := .}}<g class="ml" id="{{.El}}" data-callee="{{.Callee}}" data-caller="{{.Caller}}" data-rel="{{.Rel}}"{{with .N}} data-n="{{.}}"{{end}}{{with .Chev}} data-chev="{{.}}"{{end}}><path d="{{.D}}" stroke-width="{{.Width}}"{{if eq .Style "dashed"}} class="dash"{{else if eq .Style "dotted"}} class="dot"{{end}}></path>{{with .Chev}}<path d="{{.}}" stroke-width="{{$l.ChevW}}"></path>{{end}}</g>{{end}}
+        <g class="mhit">{{range .Lines}}<path d="{{.D}}" data-tip="{{.Tip}}" data-ln="{{.El}}"></path>{{end}}</g>
+      </svg>
+      {{range .Fig}}{{template "mbox" .}}{{end}}
+    </div></div>{{end}}
+  <div class="mside"><div class="mleg"><p class="msent">{{.Sentence}}</p>
+    <div class="mkeys"{{if not .Keys}} hidden{{end}}>{{range .Keys}}{{template "mkey" .}}{{end}}<span data-since-key hidden>{{ico "git-commit-horizontal" 12}}changed since <span></span></span></div>
+    {{if or .OnMap .Off}}<p>{{if .OnMap}}{{.OnMap}} of the {{$.Page.Open}} open items sit on the map.{{end}}{{with .Off}} Off it: {{range $i, $o := .}}{{sep $i (len $.Page.Map.Off)}}<a class="lnk" href="{{$o.Href}}">{{md $o.Text}}</a>{{end}}.{{end}}</p>{{end}}
+  </div>
+  {{if .Fig}}<p class="mselh">Select a part to see how it connects: who calls it, what it calls, its tables and its open items.</p>{{end}}
+  {{range .All}}{{with .Panel}}<div class="selp" data-panel="{{.Key}}" hidden>{{template "panel" .}}</div>{{end}}{{end}}</div>
+  <div class="mrest">{{with .List}}<div class="mlist">{{range .}}{{template "mboxl" .}}{{end}}</div>{{end}}
+  {{with .Alone}}<p class="mrl">No line to other parts</p><div class="mbrow">{{range .}}{{template "mbox" .}}{{end}}{{with $.Page.Map.Removed}}{{template "mbox" .}}{{end}}{{with $.Page.Map.Gen}}{{template "mbox" .}}{{end}}</div>
+  {{else}}{{if or .Removed .Gen}}<div class="mbrow" style="margin-top: 16px;">{{with .Removed}}{{template "mbox" .}}{{end}}{{with .Gen}}{{template "mbox" .}}{{end}}</div>{{end}}{{end}}
+  {{with .Writes}}<p class="mrl dp">Tables it writes</p><div class="mbrow">{{range .}}{{template "mbox" .}}{{end}}</div>{{end}}
+  {{with .Reads}}<p class="mrl dp">Tables it only reads</p><div class="mbrow">{{range .}}{{template "mbox" .}}{{end}}</div>{{end}}
+  {{with .MoreTables}}<p><button class="gb" type="button" data-more-tables style="padding: 0;">{{.}}</button></p>{{end}}
+  {{with .Deploy}}<p class="mrl dp">Before merging</p><div class="mbrow">{{range .}}{{template "mbox" .}}{{end}}</div>{{end}}</div></div>
+  {{if or .Reach .Trace}}<div class="mreach">
+    {{with .Reach}}<p class="ln">{{template "chip" (ev "shown" "Call graph")}}{{.}}</p>{{end}}
+    {{if or .ReachList .Pairs}}<div><button class="disc" type="button" aria-expanded="false" aria-controls="reachlist" data-disc data-on="Hide them" data-off="Show them">{{ico "chevron-down" 16}}<span>Show them</span></button>
+      <div class="rlist" id="reachlist" hidden>{{range .ReachList}}<div class="rpart"><p class="lbl">{{.Label}}</p>{{range .Decls}}{{template "rdecl" .}}{{end}}</div>{{end}}
+        {{with .ReachMore}}<p class="cfoot">{{plural . "more declaration" "more declarations"}} with places outside the PR.</p>{{end}}
+        {{with .Tests}}<p class="cfoot">Places in tests aren't counted: {{.}}.</p>{{end}}
+        {{with .Pairs}}<div class="rpart"><p class="lbl">Parts that use each other</p>{{range .}}<p class="ln13">{{md .}}</p>{{end}}</div>{{end}}</div></div>{{end}}
+    {{with .Trace}}<div><button class="disc" type="button" id="trace-b" aria-expanded="false" aria-controls="tracepath" data-disc data-trace-boxes="{{spaced .Boxes}}" data-trace-lines="{{spaced .Lines}}">{{ico "chevron-down" 16}}<span>{{md .Label}}</span></button>
+      <div id="tracepath" hidden>{{template "path" .Path}}{{with .Foot}}<p class="cfoot">{{.}}</p>{{end}}</div></div>{{end}}
+  </div>{{end}}
+</figure>{{end}}{{end}}
+
+{{define "mbox"}}<button class="mb{{if eq .Kind "system"}} mbo{{else if eq .Kind "table"}} mbs mbt{{else if eq .Kind "deploy" "generated"}} mbs{{else if eq .Kind "removed"}} mbs mbd{{else if not .Pos}} mbn{{end}}" type="button" id="{{.El}}" data-box="{{.Key}}" data-label="{{.Label}}" data-nb="{{spaced .Nb}}" data-ln="{{spaced .Ln}}"{{with .Sel}} data-keep="{{spaced .}}"{{end}}{{if .Pos}} style="left: {{.X}}px; top: {{.Y}}px;"{{end}}{{if .Hide}} data-more hidden{{end}} aria-pressed="false" aria-label="{{or .Aria .Label}}">{{template "mboxin" .}}</button>{{end}}
+{{define "mboxl"}}<button class="mb" type="button" data-box="{{.Key}}" data-label="{{.Label}}" aria-pressed="false" aria-label="{{or .Aria .Label}}">{{template "mboxin" .}}{{with .Says}}<span class="says">{{md .}}</span>{{end}}</button>{{end}}
+{{define "mboxin"}}
+  {{- if eq .Kind "system"}}<span class="mbl" translate="no">{{range .Lines}}<span>{{.}}</span>{{end}}</span>{{if .Open}}<span class="mb2"><span class="mo">{{.Open}} open</span></span>{{end}}
+  {{- else if eq .Kind "table"}}<span class="mbl" translate="no">{{.Label}}</span>{{with .Line2}}<span class="mb2">· {{.}}</span>{{end}}
+  {{- else if eq .Kind "part"}}<span class="mbl{{if .Small}} s12{{end}}">{{.Label}}</span><span class="mb2">{{if .Open}}<span class="mo">{{.Open}} open</span>{{else}}<span>{{plural .Files "file" "files"}}</span>{{end}}{{with .Reach}}<span class="mr"><span aria-hidden="true">↗</span>{{.}}</span>{{end}}{{if .New}}<span>new</span>{{end}}<span class="mk"{{if not (or .DB .Eye)}} hidden{{end}}>{{if .DB}}{{ico "database" 12}}{{end}}{{if .Eye}}{{ico "eye-off" 12}}{{end}}</span></span>
+  {{- else}}<span class="mbl">{{.Label}}</span>{{with .Line2}}<span class="mb2">{{.}}</span>{{end}}{{end -}}
+{{end}}
+
+{{define "mkey"}}<span>{{if eq .K "heavy"}}<svg width="24" height="12" viewBox="0 0 24 12" aria-hidden="true"><path d="M1 6H23" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path></svg>more calls
+{{- else if eq .K "iface"}}<svg width="24" height="12" viewBox="0 0 24 12" aria-hidden="true" fill="none"><path d="M1 6H22" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4"></path><path d="M18 2L22 6L18 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>called through an interface
+{{- else if eq .K "dash"}}<svg width="24" height="12" viewBox="0 0 24 12" aria-hidden="true"><path d="M1 6H23" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4"></path></svg>named without a call
+{{- else if eq .K "dot"}}<svg width="24" height="12" viewBox="0 0 24 12" aria-hidden="true"><path d="M1 6H23" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 4" stroke-linecap="round"></path></svg>a call out of the repo
+{{- else if eq .K "reach"}}<span aria-hidden="true" style="font: 400 12px var(--mono); color: var(--ink2);">↗</span>named by code outside this PR
+{{- else if eq .K "db"}}{{ico "database" 12}}used a table this PR drops
+{{- else if eq .K "eye"}}{{ico "eye-off" 12}}not read by the review{{end}}</span>{{end}}
+
+{{define "rdecl"}}<div class="rdecl"><span class="rn"><code translate="no">{{.Name}}</code><span class="m12">{{wb .Path}}{{with .Line}}:{{.}}{{end}}</span><span class="rc2">{{plural .N "place" "places"}}</span></span>{{range .Places}}<span class="m12 rp">{{wb .Path}}{{with .Line}}:{{.}}{{end}}</span>{{end}}</div>{{end}}
+
+{{/* component 30, a path: the script draws its stations and joints from the items */}}
+{{define "path"}}<ol class="pa" aria-label="{{.Label}}" data-items="{{json .Items}}"></ol>{{end}}
+
+{{define "panel"}}{{$p := .}}<div class="selh"><span class="sn1{{if $p.Code}} snm{{end}}"{{if $p.Code}} translate="no"{{end}}>{{$p.Head}}</span>{{with $p.Path}}<span class="m12">{{wb .}}</span>{{end}}<span class="sc">{{$p.Count}}</span><span class="sr">{{with $p.Read}}<a class="lnk" href="{{$p.ReadHref}}">{{.}}</a>{{end}}<button class="gb" type="button" data-clear>Show everything</button></span></div>
+  {{with $p.Conn}}<div class="selsub"><div class="bh"><p class="lbl">How it connects</p>{{template "chip" (ev "shown" "Call graph")}}<button class="glink" type="button" data-reach2 aria-pressed="false" hidden></button></div><div class="hc">{{range .}}{{template "conn" .}}{{end}}</div></div>{{end}}
+  {{if eq $p.Kind "table"}}{{range $k := $p.Kinds}}<div class="selsub"><div class="bh"><p class="lbl">{{if eq $k "writes"}}Written by{{else}}Read by{{end}}</p>{{template "chip" (ev "shown" "Call graph")}}</div><div class="selrows">{{range $p.Rows}}{{if eq .Kind $k}}<a class="selrow tr" href="{{.Href}}"><span><span class="tp">{{.Title}}</span> · {{md .Place}}</span></a>{{end}}{{end}}</div></div>{{end}}
+  {{else}}{{with $p.Rows}}<div class="selrows">{{range .}}{{template "prow" .}}{{end}}{{with $p.More}}<p class="ui13 i2" style="padding: 8px;">{{.}} more in Changes</p>{{end}}</div>{{end}}{{end}}
+  {{range $p.Subs}}<div class="selsub">{{if .Head}}<div class="bh"><p class="lbl">{{.Head}}</p>{{template "chip" .Chip}}</div>{{range .Lines}}<p class="ln13">{{md .}}</p>{{end}}{{else}}{{$c := .Chip}}{{range .Lines}}<p class="ln13">{{template "chip" $c}}{{md .}}</p>{{end}}{{end}}</div>{{end}}{{end}}
+
+{{/* the rail (component 22) */}}
+{{define "rail"}}<nav class="rail" aria-label="Sections"><ul>{{range .Page.Rail}}{{template "railrow" .}}{{end}}</ul></nav>{{end}}
+{{/* a part's sub-row and Read the change carry the reading mark: the script fills it once every file is viewed */}}
+{{define "railrow"}}<li{{if .Box}} data-rail-box="{{.Box}}"{{end}}><a class="rrow{{if .Sub}} rsub{{end}}" href="{{.Href}}"><span>{{.Label}}</span>{{if or .Sub (eq .Href "#read")}}<span class="rmark" aria-hidden="true"></span><span class="vh" data-rmark>, not read</span>{{end}}{{with .N}} <span class="rc">{{.}}</span>{{end}}</a></li>{{end}}
+
+{{/* component 6: an item card, collapsed */}}
+{{define "card"}}{{if .Gate}}{{template "gate" .}}{{else}}<article class="ic" id="{{.ID}}"{{if ne .Kind "Minor finding"}} data-item{{end}} data-box="{{.Box}}"{{with .Keys}} data-k="{{json .}}"{{end}}{{with .Paths}} data-paths="{{json .}}"{{end}} aria-labelledby="{{.ID}}-tt">
+<h3><button class="icb" type="button" id="{{.ID}}-b" aria-expanded="false" aria-controls="{{.ID}}-x"><span class="ict"><span class="tt" id="{{.ID}}-tt">{{md .Title}}</span>{{with .Line}}<span class="il">{{md .}}</span>{{end}}<span class="icm">{{$l := kindlook .Kind}}<span class="knd {{$l.Cls}}">{{ico $l.Icon 14}}{{.Kind}}</span>{{with .St}}{{template "stchip" .}}{{end}}{{template "chip" .Chip}}{{with .Ticket}}<span class="tk">{{ico "ticket" 12}}<span class="k">{{.}}</span></span>{{end}}{{with .Step}}<span class="stepchip">Step {{.}}</span>{{end}}{{range .Tags}}<span class="chip st2">{{ico .Icon 12}}{{.Text}}</span>{{end}}{{with .Place}}<span class="pl">{{template "fic" .}}{{wb .}}</span>{{end}}</span></span>{{ico "chevron-down" 16}}</button></h3>
+<div class="icx" id="{{.ID}}-x" hidden>
+  {{with .Stats}}<p class="tg-stats">{{.}}</p>{{end}}
+  {{with .Body}}<div class="blk"><div class="blkh"><p class="lbl">Finding</p>{{template "chip" $.Chip}}</div><p class="ln body">{{md .}}</p></div>{{end}}
+  {{range .Blocks}}{{template "cblock" .}}{{end}}
+  {{range .Tables}}<div class="blk"><div class="blkh"><p class="lbl">{{.Label}}</p>{{template "chip" .Chip}}</div>{{template "ttable" .}}{{with .More}}<div><button class="disc" type="button" aria-expanded="false" data-disc data-on="Hide the {{len .}} more files" data-off="Show the {{len .}} more files">{{ico "chevron-down" 16}}<span>Show the {{len .}} more files</span></button><div hidden>{{template "ttable" $.Rest}}</div></div>{{end}}</div>{{end}}
+  {{with .Samples}}<div class="blk"><p class="lbl">One example of each kind</p><div class="samples">{{range .}}<div class="sample"><span class="path">{{wb .Place}}</span><span>{{md .Text}}</span>{{if .Before}}<div class="exp2">{{.Before}}</div><span class="arrow"><span aria-hidden="true">→</span><span class="vh">changed to</span></span><div class="exp2">{{.After}}</div>{{end}}</div>{{end}}</div></div>{{end}}
+  {{range .Files}}<div class="blk"><div class="blkh"><p class="lbl">{{.Label}}</p></div><div class="dfiles">{{range .Files}}<a class="path" href="#{{.}}">{{wb .}}</a>{{end}}</div></div>{{end}}
+  {{with .Excerpt}}{{template "excerpt" .}}{{end}}
+  {{with .Cov}}<div class="cov"><p class="ln13">{{template "chip" (ev "shown" "Review run")}}{{.}}</p></div>{{end}}
+  {{with .GH}}<p class="ghl"><a class="gh" href="{{.}}" target="_blank" rel="noopener">{{$.GHText}}{{ico "external-link" 16}}<span class="vh"> (opens in a new tab)</span></a></p>{{end}}
+</div></article>{{end}}{{end}}
+
+{{/* the gate variant of component 6: always open, its "Clears when" line last, no GitHub link */}}
+{{define "gate"}}<article class="ic gate" id="{{.ID}}" data-item data-box="{{.Box}}"{{with .Keys}} data-k="{{json .}}"{{end}} aria-labelledby="{{.ID}}-t">{{$l := kindlook .Kind}}<p class="gk {{$l.Cls}}">{{ico $l.Icon 14}}{{.Kind}}</p><h3 id="{{.ID}}-t" tabindex="-1">{{md .Title}}</h3>
+  <div class="slines">{{range .Blocks}}{{template "cblock" .}}{{end}}</div><p class="clr">{{md .Clr}}</p></article>{{end}}
+
+{{/* a block of a card: its label row with one chip, an excerpt, its lines */}}
+{{define "cblock"}}<div class="blk">{{if or .Label .Chip.Kind}}<div class="blkh">{{with .Label}}<p class="lbl">{{.}}</p>{{end}}{{template "chip" .Chip}}</div>{{end}}{{with .Excerpt}}{{template "excerpt" .}}{{end}}{{range .Lines}}{{template "cline" .}}{{end}}</div>{{end}}
+
+{{/* component 18's table: from 768 px a fixed layout, so a path breaks at most a few times; on the phone, blocks */}}
+{{define "ttable"}}{{$cols := .Cols}}<table class="tbl fx">{{if eq (len $cols) 3}}<colgroup><col style="width: 50%;"><col style="width: 56px;"><col></colgroup>{{else if eq (len $cols) 4}}<colgroup><col style="width: 240px;"><col style="width: 56px;"><col style="width: 24%;"><col></colgroup>{{else}}<colgroup><col><col style="width: 64px;"></colgroup>{{end}}<thead><tr>{{range $cols}}<th{{if eq . "Tests" "Flags"}} class="n"{{end}}>{{.}}</th>{{end}}</tr></thead>
+  <tbody>{{range .Rows}}<tr>{{range $i, $c := .}}{{$h := index $cols $i}}<td{{if $i}} data-col="{{$h}}"{{end}}{{if eq $h "Tests" "Flags"}} class="n"{{end}}>{{md $c}}</td>{{end}}</tr>{{end}}</tbody></table>{{end}}
+
+{{/* a file's icon in its kind's color (decision 37), before its path */}}
+{{define "fic"}}{{with filelook .}}{{if .Icon}}<span class="fic {{.Cls}}">{{ico .Icon 14}}</span>{{end}}{{end}}{{end}}
+
+{{/* component 7: a code excerpt at the head */}}
+{{define "excerpt"}}<div><div class="exh">{{template "fic" .Path}}{{if .Href}}<a class="path" href="{{.Href}}">{{wb .Path}}:{{.Range}}</a>{{else}}<span class="path">{{wb .Path}}:{{.Range}}</span>{{end}}<span class="ev">{{.At}}</span><span class="ev">cited {{.Cited}}</span></div>
+<div class="xcode" tabindex="0" role="region" aria-label="{{.Path}}:{{.Range}}, scrolls sideways"><div>{{range .Rows}}<div class="cr{{if .Cited}} ci{{end}}"><i>{{.No}}</i>{{if .Remark}}<span class="cm">{{.Text}}</span>{{else}}{{.Text}}{{end}}</div>{{end}}{{with .More}}<div class="xmore" hidden>{{range .}}<div class="cr{{if .Cited}} ci{{end}}"><i>{{.No}}</i>{{if .Remark}}<span class="cm">{{.Text}}</span>{{else}}{{.Text}}{{end}}</div>{{end}}</div>{{end}}</div></div>
+{{with .More}}<button class="dlink" type="button" data-more-lines>Show {{plural (len .) "more line" "more lines"}}</button>{{end}}</div>{{end}}
+
+{{/* 5.6 Before you merge */}}
+{{define "before"}}<section class="sec" id="before" aria-labelledby="h-before"><h2 class="sh" id="h-before" tabindex="-1">Before you merge{{with .Page.Before}}<span class="chip cnt" data-count>{{len .}}</span>{{end}}</h2>{{with index .Page.Subs "before"}}<p class="ssub">{{.}}</p>{{end}}
+  {{with .Page.Before}}<div class="sbody8 icards">{{range .}}{{template "card" .}}{{end}}</div><p class="nomatch" data-empty hidden></p>
+  {{else}}<p class="none ln">{{template "chip" (ev "shown" "Diff")}}Nothing found that merging alone doesn't finish.</p>{{end}}
+</section>{{end}}
+
+{{/* 5.8 Test changes */}}
+{{define "tests"}}{{$t := .Page.Tests}}<section class="sec" id="tests" aria-labelledby="h-tests"><h2 class="sh" id="h-tests" tabindex="-1">Tests{{with $t.Cards}}<span class="chip cnt" data-count>{{len .}}</span>{{end}}</h2>{{with index .Page.Subs "tests"}}<p class="ssub">{{.}}</p>{{end}}
+  {{with $t.Intro}}<p class="intro">{{.}}</p>{{end}}
+  {{with $t.Cards}}<div class="sbody8 icards">{{range .}}{{template "card" .}}{{end}}</div><p class="nomatch" data-empty hidden></p>
+  {{else}}{{if not $t.Intro}}<p class="none ln">{{template "chip" (ev "shown" "Diff")}}No test deleted or weakened.</p>{{end}}{{end}}
+</section>{{end}}
+
+{{/* 5.9 Tickets */}}
+{{define "tickets"}}{{$t := .Page.Tickets}}{{if $t.Shown}}<section class="sec" id="tickets" aria-labelledby="h-tickets"><h2 class="sh" id="h-tickets" tabindex="-1">Tickets{{with $t.Cards}}<span class="chip cnt">{{len .}}</span>{{end}}</h2>{{with index .Page.Subs "tickets"}}<p class="ssub">{{.}}</p>{{end}}
+  <div class="sbody">
+  {{range $t.Intro}}{{template "mline" .}}{{end}}
+  {{with $t.Follow}}<p class="fu">Follow-ups the author names: {{.}}</p>{{end}}
+  {{with $t.ReadOn}}<p class="ln">{{template "chip" (ev "shown" "Tracker")}}Read from the tracker on {{.}}.</p>{{end}}
+  <div class="tcs">{{range $t.Cards}}{{template "tcard" .}}{{end}}</div>
+  {{range $t.Foot}}{{template "mline" .}}{{end}}
+  </div>
+</section>{{end}}{{end}}
+
+{{/* component 11: a ticket card */}}
+{{define "tcard"}}{{$c := .}}<article class="tc" id="{{.ID}}" aria-labelledby="{{.ID}}-tt">
+<h3><button class="tch" type="button" aria-expanded="{{.Open}}" aria-controls="{{.ID}}-x"><span class="mt"><span class="l1"><span class="tk"><span class="sti {{.Cls}}"{{with .State}} title="{{.}}"{{end}}>{{ico .Icon 14}}</span><span class="k">{{.Key}}</span>{{with .State}}<span class="vh">, {{.}}</span>{{end}}</span>{{with .Title}}<span class="tt" id="{{$c.ID}}-tt">{{.}}</span>{{else}}<span class="tt" id="{{$c.ID}}-tt">{{.Key}}</span>{{end}}{{with .Diffs}}<span class="chip badge">{{.}}</span>{{end}}</span></span>{{ico "chevron-down" 16}}</button></h3>
+<div class="tcb" id="{{.ID}}-x"{{if not .Open}} hidden{{end}}>{{if or .Reason .Outcome .Answers .Rows}}<div class="tcm">
+  {{with .Reason}}<p class="ln">{{template "chip" (ev "shown" "Review run")}}{{.}}</p>{{end}}
+  {{with .Outcome}}<div class="blk"><div class="blkh">{{template "chip" (ev "tk" (printf "%s says" $c.Key))}}</div><figure class="q"><blockquote>{{md .}}</blockquote><figcaption>From {{$c.Key}}, Outcome</figcaption></figure></div>{{end}}
+  {{with .Answers}}<div class="fa"><div class="blkh"><p class="lbl">Four answers</p>{{template "chip" $c.AnsChip}}</div><div class="fag">{{range .}}<div class="fac"><p class="fq">{{.Label}}</p><p>{{md .Text}}</p>{{with .At}}<div class="fw">{{range .}}{{if .Href}}<a class="path" href="{{.Href}}">{{wb .Code}}</a>{{else}}<code class="cd" translate="no">{{.Code}}</code>{{end}}{{end}}</div>{{end}}</div>{{end}}</div></div>{{end}}
+  {{with .Rows}}<table class="ctab"><colgroup><col style="width: 46%;"><col style="width: 168px;"><col></colgroup><thead><tr><th>Ask</th><th>Status</th><th>Evidence</th></tr></thead><tbody>{{range .}}<tr><td class="ask">{{md .Ask}}</td><td data-col="Status"><span class="stc">{{with .St}}{{template "stchip" .}}{{end}}{{template "chip" .Chip}}</span></td><td data-col="Evidence"><div class="evd">{{range .Lines}}{{template "cline" .}}{{end}}</div></td></tr>{{end}}</tbody></table>{{end}}
+</div>{{end}}
+  <aside class="tcr" aria-label="{{.Key}}: its properties">
+    <div><p class="tcl">Properties</p><p class="tcp"><span class="sti {{.Cls}}">{{ico .Icon 14}}</span>{{or .State "State not read"}}</p>{{with .Due}}<p class="tcp">{{ico "calendar" 14}}{{.}}</p>{{end}}{{with .URL}}<p class="tcp"><a href="{{.}}" target="_blank" rel="noopener">{{ico "external-link" 14}}Open in the tracker<span class="vh"> (opens in a new tab)</span></a></p>{{end}}</div>
+    {{with .BlockedBy}}<div><p class="tcl">Blocked by</p>{{range .}}{{template "tref" .}}{{end}}</div>{{end}}
+    {{with .Blocks}}<div><p class="tcl">Blocks</p>{{range .}}{{template "tref" .}}{{end}}</div>{{end}}
+    {{with .Stats}}<div><p class="tcl">In this PR</p><p class="tcp tst">{{.}}</p></div>{{end}}
+  </aside>
+</div></article>{{end}}
+
+{{/* a ticket a card's relations name: its card when the PR carries it */}}
+{{define "tref"}}<p class="tcp">{{if .Href}}<a href="{{.Href}}">{{end}}{{with .Icon}}<span class="sti {{$.Cls}}">{{ico . 14}}</span>{{end}}<span class="k">{{.Key}}</span>{{with .Title}}<span class="tct">{{.}}</span>{{end}}{{if .Href}}</a>{{end}}</p>{{end}}
+
+{{/* 5.7 Read the change */}}
+{{define "read"}}<section class="sec" id="read" aria-labelledby="h-read"><h2 class="sh" id="h-read" tabindex="-1">Changes{{with .Page.ReadN}}<span class="chip cnt" data-count>{{.}}</span>{{end}}</h2><p class="ssub">{{index .Page.Subs "read"}}<span data-viewed></span></p>
+  <div class="sbody">
+  <span class="seg" role="group" aria-label="Show" style="align-self: flex-start;"><button type="button" data-filter="all" aria-pressed="true">All</button><button type="button" data-filter="unviewed" aria-pressed="false">Not viewed</button><button type="button" data-filter="changed" aria-pressed="false" hidden>Changed since</button></span>
+  {{if and .Page.Tickets.Shown (not .Tickets)}}<p class="ln">{{template "chip" (ev "shown" "Review run")}}No ticket was read, so nothing compared the code with what the tickets ask.</p>{{end}}
+  {{with .Page.Gap}}{{template "card" .}}{{end}}
+  {{with .Page.DB}}<section class="dbs" aria-labelledby="h-db"><div class="bh"><h3 id="h-db">{{ico "database" 16}}Database</h3>{{template "chip" (ev "shown" "Migrations")}}</div>
+  <div class="dbc" data-erd><div class="dbst"><svg class="dbln" aria-hidden="true"></svg>{{range .Tables}}{{template "dbt" .}}{{end}}</div>
+  <div class="graph-tools btn-group" role="group" aria-label="Schema" hidden>
+    <button type="button" class="btn" data-variant="outline" data-size="icon-sm" data-act="fit" title="Fit to view" aria-label="Fit to view">{{icon "maximize" ""}}</button>
+    <button type="button" class="btn" data-variant="outline" data-size="icon-sm" data-act="layout" title="Arrange again" aria-label="Arrange again">{{icon "rotate-ccw" ""}}</button>
+    <button type="button" class="btn" data-variant="outline" data-size="icon-sm" data-act="full" title="Full screen" aria-label="Full screen">{{icon "expand" ""}}</button>
+  </div></div>
+  <ul class="dblg" aria-label="Legend">{{if .Ref}}<li><i class="lg-fk"></i>foreign key</li>{{end}}{{if .Many}}<li><svg class="lg-mk" viewBox="0 0 24 12" aria-hidden="true"><path d="M2 1 10 6 2 11M2 6H11M19 6H22"/><circle cx="15" cy="6" r="3.5"/></svg>zero or many</li>{{end}}{{if .Exact}}<li><svg class="lg-mk" viewBox="0 0 24 12" aria-hidden="true"><path d="M2 6H22M6 1V11M10 1V11"/></svg>exactly one</li>{{end}}{{if .ZeroOne}}<li><svg class="lg-mk" viewBox="0 0 24 12" aria-hidden="true"><path d="M2 6H9.5M16.5 6H22M6 1V11"/><circle cx="13" cy="6" r="3.5"/></svg>zero or one</li>{{end}}{{if .Guess}}<li><i class="lg-fk lg-guess"></i>by name, no foreign key</li>{{end}}{{if .Context}}<li><i class="lg-ctx"></i>outside this PR</li>{{end}}{{if .New}}<li><i class="lg-new"></i>new</li>{{end}}{{if .Changed}}<li><i class="lg-chg"></i>changed</li>{{end}}{{if .Dropped}}<li><i class="lg-del"></i>dropped</li>{{end}}<li class="dbhint" hidden><b>Drag</b> a card or the canvas · <b>Ctrl+scroll</b> zoom</li></ul>
+  {{with .Items}}<div class="selrows dbits">{{range .}}{{template "prow" .}}{{end}}</div>{{end}}</section>{{end}}
+  <div class="pbs">{{range .Page.Parts}}{{template "block" .}}{{end}}{{with .Page.Others}}{{template "block" .}}{{end}}</div>
+  {{with .Page.Minors}}<div><button class="disc" type="button" aria-expanded="false" aria-controls="minors-x" data-disc>{{ico "chevron-down" 16}}<span>Minor findings in no part · {{len .}} · not counted</span></button><div class="icards" id="minors-x" hidden>{{range .}}{{template "card" .}}{{end}}</div></div>{{end}}
+  <p class="rend"><a class="glink" href="#stand">{{.Page.Status.Head}}{{ico "arrow-up" 16}}</a></p>
+  </div>
+</section>{{end}}
+
+{{/* an item's row: its kind, title and place; a click opens what it says under it (decision 38) */}}
+{{define "prow"}}<a class="selrow" href="{{.Href}}">{{$l := kindlook .Kind}}<span class="sk {{$l.Cls}}">{{ico $l.Icon 14}}{{.Kind}}</span><span>{{md .Title}}</span><span class="sp">{{with .Place}}{{template "fic" .}}{{wb .}}{{end}}</span></a>{{end}}
+{{/* a table a migration creates, changes or drops (decision 42): a schema card */}}
+{{define "dbt"}}<article class="dbt" id="{{.ID}}" data-kind="{{.Kind}}" data-path="{{.Path}}" aria-labelledby="{{.ID}}-h">
+  <div class="dbh">{{ico "table" 14}}<h4 id="{{.ID}}-h"><code translate="no">{{.Name}}</code></h4>{{if eq .Kind "created"}}<span class="dchip" data-new>new table</span>{{else if eq .Kind "dropped"}}<span class="dchip" data-del>dropped</span>{{else if eq .Kind "context"}}<span class="dchip" data-dash>outside this PR</span>{{else}}<span class="dchip changed">changed</span>{{end}}{{if .Path}}<button class="cxl dbat" type="button" data-at="{{.Path}}" data-line="{{.Line}}" aria-expanded="false" title="Show line {{.Line}} of {{.Label}}">{{template "fic" .Path}}{{.Label}}</button>{{end}}</div>
+  {{with .Join}}<p class="dbw">{{md .}}.</p>{{end}}{{with .Who}}<p class="dbw">{{.}}.</p>{{end}}{{if and (eq .Kind "changed") (not .Base)}}<p class="dbw">Only what this PR changes: the base&#39;s migrations don&#39;t declare it.</p>{{end}}
+  <table class="dbg"><caption class="vh">Columns of {{.Name}}</caption><thead class="vh"><tr><th scope="col">Column and type</th><th scope="col">Notes</th></tr></thead>
+  <tbody>{{range .Cols}}{{template "dbr" .}}{{end}}{{range .Indexes}}<tr class="dbix" data-st="{{if eq .State "new"}}new{{else}}dropped{{end}}"><th scope="row"><span class="dbsg" aria-hidden="true">{{if eq .State "new"}}+{{else}}−{{end}}</span><span class="dbk"></span><button class="cxl" type="button" data-at="{{$.Path}}" data-line="{{.Line}}" aria-expanded="false"><code translate="no">{{if .Unique}}unique {{end}}index {{.Name}}</code></button></th><td><code translate="no">({{.Cols}})</code> · {{if eq .State "new"}}new{{else}}dropped{{end}}</td></tr>{{end}}</tbody>
+  {{with .More}}<tbody data-more-rows hidden>{{range .}}{{template "dbr" .}}{{end}}</tbody><tbody><tr><td colspan="2"><button class="dlink" type="button" data-reveal>Show {{plural (len .) "unchanged column" "unchanged columns"}}</button></td></tr></tbody>{{end}}
+  </table>
+  {{with .Risks}}<ul class="dbrk" aria-label="Risks">{{range .}}<li>{{ico "triangle-alert" 12}}<span>{{md .}}</span></li>{{end}}</ul>{{end}}
+</article>{{end}}
+{{define "dbr"}}<tr{{with .State}} data-st="{{.}}"{{end}} data-col="{{.Name}}"{{with .RefID}} data-ref="{{.}}" data-ref-col="{{$.RefCol}}"{{if $.Guess}} data-guess=""{{else}}{{if $.One}} data-one=""{{end}}{{if $.Need}} data-need=""{{end}}{{end}}{{end}}><th scope="row"><span class="dbsg" aria-hidden="true">{{.Sign}}</span><span class="dbk">{{if .PK}}{{ico "key-round" 12}}<span class="vh">Primary key: </span>{{end}}</span>{{if .Line}}<button class="cxl" type="button" data-at="{{.Path}}" data-line="{{.Line}}" aria-expanded="false" title="Show line {{.Line}}"><code translate="no">{{.Name}}</code></button>{{else}}<code translate="no">{{.Name}}</code>{{end}}<code class="dbty" translate="no">{{.Type}}</code>{{with .State}}<span class="vh">, {{.}}</span>{{end}}</th><td>{{.Note}}{{with .Ref}}{{if $.Note}} · {{end}}{{ico "arrow-right" 12}}{{if $.RefID}}<a class="lnk" href="#{{$.RefID}}"><code translate="no">{{.}}</code></a>{{else}}<code translate="no">{{.}}</code>{{end}}{{if $.Guess}} · by its name, no foreign key{{end}}{{with $.Act}} · {{.}}{{end}}{{end}}</td></tr>{{end}}
+
+{{/* component 29: a part block */}}
+{{define "block"}}<section class="pb" id="{{.ID}}" aria-labelledby="{{.ID}}-h"{{with .Key}} data-box="{{.}}"{{end}}>
+<h3 id="{{.ID}}-h"><button class="pbb" type="button" aria-expanded="{{.Open}}" aria-controls="{{.ID}}-x"><span class="pbt"><span class="pb1"><span class="pbl">{{.Label}}</span>{{with .Path}}<span class="pbf">{{wb .}}</span>{{end}}{{if .New}}<span class="pnew">new</span>{{end}}{{with .N}}<span class="pbo">{{.}} open</span>{{end}}</span>{{if not .Others}}<span class="pb2">{{.Second}}</span>{{end}}{{if .NoMember}}<span class="pb2 pbm">{{ico "user-x" 16}} No current member changed or reviewed this code in 12 months.</span>{{end}}</span>{{if not .Others}}<span class="rmark" aria-hidden="true"></span><span class="vh" data-rmark>, not read</span>{{end}}{{ico "chevron-down" 16}}</button></h3>
+<div class="pbx" id="{{.ID}}-x"{{if not .Open}} hidden{{end}}>
+  <p class="nomatch" data-empty hidden>Nothing here matches the filter.</p>
+  {{if or .Conn .Tables .Outside .Reach .DB}}<div class="pgp"><div class="bh"><h4>How it connects</h4>{{template "chip" (ev "shown" "Call graph")}}</div><div class="hc">
+    {{range .Conn}}{{template "conn" .}}{{end}}
+    {{with .ConnMore}}<div data-more-rows hidden>{{range .}}{{template "conn" .}}{{end}}</div><p><button class="dlink" type="button" data-reveal>and {{plural (len .) "more part" "more parts"}}</button></p>{{end}}
+    {{range .Tables}}{{template "conn" .}}{{end}}
+    {{with .TablesMore}}<div data-more-rows hidden>{{range .}}{{template "conn" .}}{{end}}</div><p><button class="dlink" type="button" data-reveal>and {{len .}} more</button></p>{{end}}
+    {{range .Outside}}<p>{{md .}}</p>{{end}}
+    {{with .Reach}}<p>{{md .}} <button class="dlink" type="button" data-reveal>Show them</button></p><div data-more-rows hidden>{{range $.ReachList}}{{template "rdecl" .}}{{end}}</div>{{end}}
+    {{with .DB}}<p>{{.}} <span class="cite">From git at the base</span></p>{{end}}
+  </div></div>{{end}}
+  {{with .Cards}}<div class="icards">{{range .}}{{template "card" .}}{{end}}</div>{{end}}
+  {{with .Paths}}<div class="pgp"><h4>Call paths to a finding</h4>{{range .}}<div>{{template "path" .Path}}<p class="cfoot">{{.Says}}</p></div>{{end}}</div>{{end}}
+  {{with .Steps}}<div class="pgp"><div class="bh"><h4>Steps</h4>{{template "chip" (ev "inf" "Inferred by the review")}}{{if gt (len .) 1}}<button class="glink" type="button" data-all-steps>Open all steps</button>{{end}}</div><div class="steps">{{range .}}{{$s := .}}<div class="step" data-step><button class="sbtn" type="button" aria-expanded="false"><span class="sn">{{.N}}</span><span class="stt">{{.Title}}</span><span class="sf">{{plural (len .Files) "file" "files"}}</span><span class="rmark" aria-hidden="true"></span><span class="vh" data-rmark>, not read</span>{{ico "chevron-down" 16}}{{with .Why}}<span class="sw">{{md .}}</span>{{end}}</button>
+    <div class="sexp" hidden>{{with .Check}}<p class="ln13"><strong>Check</strong> · {{md .}}</p>{{end}}{{with .Tests}}<p class="ln13">Tests that reach it: {{range $i, $t := .}}{{sep $i (len $s.Tests)}}<code class="cd" translate="no">{{test $t}}</code>{{end}}{{with $s.More}} and {{.}} more{{end}}{{if not $s.Ran}} · not run here{{end}}.</p>{{end}}{{with .Graph}}{{template "graph" .}}{{end}}<div class="pfiles">{{range .Files}}{{template "file" .}}{{end}}</div></div></div>{{end}}</div></div>{{end}}
+  {{with .Minors}}<div><button class="disc" type="button" aria-expanded="false" data-disc>{{ico "chevron-down" 16}}<span>Minor findings · {{len .}} · not counted</span></button><div class="icards" hidden>{{range .}}{{template "card" .}}{{end}}</div></div>{{end}}
+  {{with .Loose}}<div><button class="disc" type="button" aria-expanded="{{if $.Steps}}false{{else}}true{{end}}" data-disc>{{ico "chevron-down" 16}}<span>{{if $.Steps}}Files in no step · {{len .}}{{else}}{{plural (len .) "file" "files"}}{{end}}</span></button><div class="pfiles"{{if $.Steps}} hidden{{end}}>{{range .}}{{template "file" .}}{{end}}</div></div>{{end}}
+  {{with .Gone}}<div><button class="disc" type="button" aria-expanded="false" data-disc>{{ico "chevron-down" 16}}<span>{{plural (len .) "deleted file" "deleted files"}}</span></button><div class="pfiles" hidden>{{range .}}{{template "file" .}}{{end}}</div></div>{{end}}
+</div></section>{{end}}
+
+{{define "conn"}}{{if .Flow}}{{template "cflow" .}}{{else}}<p{{with .Box}} data-hl="{{.}}"{{end}}{{with .Ln}} data-hl-ln="{{.}}"{{end}}>{{if .Table}}<span class="d">{{.Dir}} <code translate="no">{{.Table}}</code></span>{{else}}<span class="d">{{.Dir}} {{if .Href}}<a class="lnk" href="{{.Href}}">{{.Part}}</a>{{else}}{{.Part}}{{end}}</span>{{with .Via}}{{if not $.Table}} {{md .}}{{end}}{{end}}{{end}}{{.Count}} {{range $i, $n := .Names}}{{if $i}}, {{end}}{{template "cname" $n.Name}} <span class="x">×{{$n.N}}</span>{{end}}{{with .More}} <button class="dlink" type="button" data-reveal>and {{len .}} more</button><span data-more-rows hidden>{{range .}}, {{template "cname" .Name}} <span class="x">×{{.N}}</span>{{end}}</span>{{end}}{{if .Table}}{{with .NoCall}}{{$.Via}} {{range $i, $n := .}}{{if $i}}, {{end}}{{template "cname" $n.Name}} <span class="x">×{{$n.N}}</span>{{end}}{{end}}.{{else}}.{{with .NoCall}} Named without a call: {{range $i, $n := .}}{{if $i}}, {{end}}{{template "cname" $n.Name}} <span class="x">×{{$n.N}}</span>{{end}}.{{end}}{{end}}</p>{{end}}{{end}}
+
+{{/* a connection told by its code (decision 40): each name's declaration, doc, state and finding, then where it is
+   called, the line opening under itself */}}
+{{define "cflow"}}{{$r := .}}<div class="cx"{{with .Box}} data-hl="{{.}}"{{end}}{{with .Ln}} data-hl-ln="{{.}}"{{end}}>
+  <p class="cxh"><span class="d">{{.Dir}} {{if .Href}}<a class="lnk" href="{{.Href}}">{{.Part}}</a>{{else}}{{.Part}}{{end}}</span>{{with .Via}} {{md .}}{{end}}{{.Count}}</p>
+  {{range .Flow}}{{$f := .}}<div class="cxn" data-path="{{.Path}}">
+    <p class="cxs"><button class="cn" type="button" data-uses="{{.Name}}"><code translate="no">{{.Sig}}</code></button>{{if eq .State "new"}}<span class="dchip" data-new>new</span>{{else if eq .State "signature"}}<span class="dchip">signature changed</span>{{else if eq .State "changed"}}<span class="dchip">changed</span>{{end}}{{with .SevText}}<span class="sev" data-sev="{{$f.Sev}}">{{.}}</span>{{end}}</p>
+    {{with .Doc}}<p class="cxd">{{.}}</p>{{end}}
+    {{range .Sites}}<div class="cxc"><span class="cxi">in <code translate="no">{{.In}}</code></span><button class="cxl" type="button" data-at="{{.Path}}" data-line="{{.Line}}" aria-expanded="false"><code translate="no">{{.Text}}</code></button><span class="sp">{{template "fic" .Path}}{{.Place}}</span></div>{{end}}
+    {{with .More}}<p class="cxm"><button class="dlink" type="button" data-uses="{{$f.Name}}">{{if $f.Sites}}and {{plural . "more call" "more calls"}}{{else}}Show {{plural . "call" "calls"}}{{end}}</button></p>{{end}}
+  </div>{{end}}
+  {{if or .Names .More}}<p class="cxm">Also {{range $i, $n := .Names}}{{if $i}}, {{end}}{{template "cname" $n.Name}} <span class="x">×{{$n.N}}</span>{{end}}{{with .More}}{{if $r.Names}}, {{end}}{{range $i, $n := .}}{{if $i}}, {{end}}{{template "cname" $n.Name}} <span class="x">×{{$n.N}}</span>{{end}}{{end}}.</p>{{end}}
+  {{with .NoCall}}<p class="cxm">Named without a call: {{range $i, $n := .}}{{if $i}}, {{end}}{{template "cname" $n.Name}} <span class="x">×{{$n.N}}</span>{{end}}.</p>{{end}}
+</div>{{end}}
+{{/* a declaration a connection names: it opens Every use */}}
+{{define "cname"}}<button class="cn" type="button" data-uses="{{.}}"><code translate="no">{{.}}</code></button>{{end}}
+
+{{/* 5.10 What the review covered */}}
+{{define "covered"}}<section class="sec" id="covered" aria-labelledby="h-covered"><h2 class="sh" id="h-covered" tabindex="-1">Review scope</h2>{{with index .Page.Subs "covered"}}<p class="ssub">{{.}}</p>{{end}}
+  <div class="sbody">
+  {{with .Page.KindBar}}<div class="kinds">{{if .Total}}<p class="lbl">{{.Total}} files by kind</p><div class="lbar" role="img" aria-label="{{range $i, $r := .Rows}}{{if $i}}, {{end}}{{$r.Name}} {{$r.N}}{{end}}">{{range .Rows}}{{if .N}}<span class="k-{{.Kind}}" style="flex: {{.N}} 1 0;"></span>{{end}}{{end}}</div>{{end}}
+    <div class="krows">{{range .Rows}}<div class="krow"><span class="sw k-{{.Kind}}" aria-hidden="true"></span><span class="nm">{{.Name}}</span><span>{{plural .N "file" "files"}}</span><span class="lc">+{{thousands .Add}} −{{thousands .Del}}</span>
+      <div class="cp2">{{template "chip" .Chip}}{{md .Text}}</div>
+      {{if .N}}<div class="dz"><button class="disc" type="button" aria-expanded="false" data-disc>{{ico "chevron-down" 16}}<span>Show the {{plural .N "file" "files"}}</span></button><div hidden>{{with .Links}}<div class="dlinks">{{range .}}<a class="path" href="#{{.}}">{{wb .}}</a>{{end}}</div>{{end}}<div class="pfiles">{{range .Files}}{{template "file" .}}{{end}}</div></div></div>{{end}}</div>{{end}}</div></div>{{end}}
+  <dl class="clist">{{range .Page.Covered}}<div class="crow"><dt>{{.Label}}</dt><dd>{{if eq .Label "Open items"}}{{with $.Page.OpenKinds}}<p class="ln olinks"><span>{{$.Page.Open}}:</span> {{range $i, $o := .}}{{with sep $i (len $.Page.OpenKinds)}}<span class="osep">{{.}}</span>{{end}}<a class="lnk" href="{{$o.Href}}">{{$o.Text}}</a>{{end}}</p>{{else}}{{range .Lines}}{{template "mline" .}}{{end}}{{end}}{{else}}{{range .Lines}}{{template "mline" .}}{{end}}{{end}}</dd></div>{{end}}
+  {{range .Page.Kinds}}<div class="crow"><dt>{{.Name}}</dt><dd><p class="ln">{{plural (len .Files) "file" "files"}} · +{{thousands .Add}} −{{thousands .Del}}</p><div><button class="disc" type="button" aria-expanded="false" data-disc>{{ico "chevron-down" 16}}<span>Show the {{plural (len .Files) "file" "files"}}</span></button><div class="pfiles" hidden>{{range .Files}}{{template "file" .}}{{end}}</div></div></dd></div>{{end}}</dl>
+  </div>
+</section>{{end}}
+
+{{/* 5.11 Who changed this code */}}
+{{define "team"}}{{$t := .Page.Team}}<section class="sec" id="team" aria-labelledby="h-team"><h2 class="sh" id="h-team" tabindex="-1">People</h2>
+  <p class="intro">Who changed these files in the 12 months before the PR opened. The page counts the team as a whole and ranks nobody.</p>
+  <div class="sbody">
+  {{if $t.NoHistory}}<p class="ln">{{template "chip" (ev "shown" "Git log")}}No git history reached this review, so the page can't say who changed these files.</p>
+  {{else}}<p class="ln">{{template "chip" (ev "shown" "Git log")}}{{$t.People}}</p>
+  {{with $t.Rows}}<table class="kt"><thead><tr><th>Part</th><th>Files</th><th>Changed</th><th>Last changed, days ago (median · oldest)</th></tr></thead><tbody>{{range .}}<tr data-block="{{.ID}}"><td class="ar"><a href="#{{.ID}}" aria-label="{{.Label}}{{with .Path}}, {{.}}{{end}}">{{.Label}}</a></td><td data-col="Files">{{.Files}}</td><td data-col="Changed" class="chg">{{.Changed}}</td><td data-col="Last changed, days ago (median · oldest)">{{or .Days "–"}}</td></tr>{{end}}</tbody></table>{{end}}
+  {{with $t.NoMember}}<div class="warn">{{ico "user-x" 16}}<p>{{.}}</p></div>{{end}}
+  {{with $t.New}}<p class="ln13">{{md .}}</p>{{end}}{{with $t.Removed}}<p class="ln13">{{md .}}</p>{{end}}
+  <div class="foot"><p>Commits that touch 150 files or more don't count as a change here. Bot accounts never count.</p>{{with $t.Members}}<p>{{.}}</p>{{end}}</div>{{end}}
+  </div>
+  {{if .Bot}}<div class="hint"><p>A reply on the PR can become a rule that later reviews follow.</p>
+    <div><button class="gb" type="button" aria-expanded="false" data-disc style="padding: 0;">{{ico "chevron-down" 16}}<span>How</span></button>
+    <div class="hl" hidden><p>Reply in a finding's thread, or mention @{{.Bot}} in a PR comment. Correct the review or state a convention, and say why.</p>
+      <p>Only someone who can push to the repo sets one. A learning keeps its reason, the PR and the date, and DiffHarbor's answer says when it saved one. A call on one finding, or a rule that holds only for now, isn't saved.</p>
+      <p><code class="cd">@{{.Bot}} learnings</code> lists them. <code class="cd">@{{.Bot}} forget &lt;part of it&gt;</code> drops those that contain it.</p></div></div></div>{{end}}
+</section>{{end}}
+
+{{/* 5.12 Footer, the sheets (component 17) and the map's tip */}}
+{{define "pagefoot"}}<footer class="pfoot">This page posts nothing. It's deleted when the PR closes; what's said on the PR stays.</footer>{{end}}
+
+{{define "sheets"}}<div class="scrim" id="scrim" hidden></div>
+<div class="vsheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden>
+  <div class="shead"><h2 id="sheet-title" tabindex="-1"></h2><button class="ibtn" type="button" aria-label="Close" data-close>{{ico "x" 16}}</button></div>
+  <div class="sbody2">
+    <div data-sheet-part="sections" hidden><ul class="seclist">{{range .Page.Rail}}{{template "railrow" .}}{{end}}</ul></div>
+    <div data-sheet-part="key" hidden>{{template "keylist" .}}</div>
+    <div data-sheet-part="versions" hidden><div class="verrows">{{template "verrow" .}}</div></div>
+  </div>
+</div>
+<div class="mtip" id="mtip" hidden aria-hidden="true"></div>
+<template id="i-commit">{{ico "git-commit-horizontal" 12}}</template>
+<script type="application/json" id="since-data">{{.SinceData}}</script>{{end}}

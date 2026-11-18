@@ -16,7 +16,9 @@ Create a GitHub App:
   - Contents: read/write. GitHub needs write to resolve threads. Reviews get a read-only token.
   - Pull requests: read/write
   - Commit statuses: read/write
-  - Issues and Metadata: read
+  - Issues and Metadata: read. Metadata also lists the repo's collaborators, the report's current members.
+  - Checks and Actions: read. The report reads the head's check runs and their workflows with them. Without them
+    it says the checks weren't read.
 - **Events:** Pull request, Pull request review comment, Issue comment.
 
 | Variable | |
@@ -81,7 +83,9 @@ Use API keys. Pi can also log in with a ChatGPT subscription: `openai/…` witho
 
 `REPORT_URL` turns on an HTML page per PR, linked in the bot's PR comment.
 
-- **What's on it:** a verdict, the findings by weight, a reading order, diffs with findings, call graphs and what the change reaches outside the PR. Before you merge: base commits the PR is behind on, conflicts, and open PRs changing the same files or lines. At the end a draft review to send from the forge yourself. The page posts nothing.
+- **What's on it:** whether it merges (base commits the PR is behind on, conflicts, open PRs changing the same files or lines), a short brief, and a map of the parts the PR changes with the systems, tables and deploys they reach. Then Before you merge, the parts in reading order with their diffs and how they connect (Read the change), What the review covered, and Who changed this code. The page posts nothing.
+- **Searched at the head:** what the page says about code the PR left alone comes from a `git grep` of the head, at most a minute in all, and says when a search stopped early. An environment variable the diff stops reading is listed as no longer read only when no code at the head still names it.
+- **Tickets and gates:** each report runs up to three small model passes after the review. One reads the description and the tickets' paragraphs about the merge for what makes it wait ("Merge after …"). With a ticket that has an Outcome or Done-when items, one compares it with what the review wrote, and the verify model checks those claims in the code. Quotes not found word for word in their source and places not in the code at the head are dropped.
 - **Versions:** each reviewed head keeps one, the newest 10 stay. Closing the PR deletes them.
 - **Link:** `/r/<host>/id:<repo id>/<n>/<secret>`, by the repo's ID: a rename keeps it, a new repo under an old name gets its own. Links from before the ID (`/r/<host>/<repo>/<n>/<secret>`) keep working: the PR's next review moves its reports to the ID and redirects them. A PR that closes without one loses those under its current name. Under a name the repo had before a rename they stay. The secret is random per PR (130 bits) and only the PR comment holds it. Any other `/r/` path is a 404.
 - **Older reports:** reports from before the secret no longer open. The next review writes one at the new link, closing the PR deletes the old.
@@ -120,6 +124,13 @@ The ticket a PR names goes into the review as what the PR must do.
 
 - The main ticket is named in title, branch or description: `ABC-12`.
 - Up to 3 more it names (`closes ABC-7`, a link in the description) follow as context.
+- The report reads every ticket that title, branch, description and commit subjects name, at most 20 per review:
+  state, due date, blocking relations, and the sections `Outcome`, `Done when` (its list items, and an itsaplan
+  checklist named "Done when") and `Notes` of the description.
+- Keys under a `## Follow-ups` heading of the description are follow-ups, not the PR's tickets: the report lists them
+  with their states.
+- A ticket the tracker fails on is named in the report as not read; the others are still read, all within one minute
+  per review. If the linked ticket fails, the review goes without one: no other ticket takes its place.
 - Never for PRs from forks.
 
 ## npm registries
@@ -289,23 +300,23 @@ func main() {
 
 The report page is the templates in [`internal/report/templates/`](https://github.com/marcomaiermm/DiffHarbor/blob/main/internal/report/templates/). Files in `TEMPLATE_DIR` override them, like Django's template dirs:
 
-- `logo.png` (64 px), `favicon.svg` and `favicon-32x32.png` replace the images.
+- `logo.png` (64 px), `favicon.svg` and `favicon-32x32.png` replace the images. The page shows no logo until a template asks for it: `{{define "logo"}}{{logo}}{{end}}` puts it at the left of the top bar.
 - A `*.html` file that defines a template again replaces ours.
-- A file named like one of ours (`header.html`) replaces all of that file.
+- A file named like one of ours (`page.html`) replaces all of that file.
 - Files are read in name order. The last definition wins.
 
 ```html
 <!-- $TEMPLATE_DIR/brand.html -->
-{{define "theme"}}<style>:root { --primary: #0b5fff; --ring: #0b5fff; }</style>{{end}}
+{{define "theme"}}<style>:root { --acc: #0b5fff; /* and the other tokens of theme.html */ }</style>{{end}}
 {{define "footer"}}<footer class="py-6 text-center text-xs text-muted-foreground">Acme Engineering</footer>{{end}}
 ```
 
 **Blocks meant for this:**
 
-- `theme`: the color tokens, see `theme.html`. `--major` colors what to fix, `--verified` what is shown without a model.
-- `logo`, `head` (more in `<head>`), `header`, `footer`.
+- `theme`: the color tokens, see `theme.html`. A new `theme` replaces all of them. `--major` colors what to fix, `--verified` what is shown without a model, `--acc` the focus and the current item.
+- `logo`, `head` (more in `<head>`), `top` (the bar over the page), `footer`.
 
-The others work too but follow the page's data, which can change between versions. `finish` (`finish.html`) is the draft review at the end.
+The others work too but follow the page's data, which can change between versions.
 
 - The page's CSS is compiled with the classes its templates use. With your templates, DiffHarbor compiles it again at start (Tailwind's CLI is in the image).
 - DiffHarbor checks the templates at start and doesn't start with a broken one.

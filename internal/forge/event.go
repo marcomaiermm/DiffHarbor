@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Event is the part of a webhook payload the bot reads, in GitHub's shape: the GitLab side fills it from its own
@@ -31,11 +32,14 @@ type Event struct {
 		Title   string `json:"title"`
 		Body    string `json:"body"`
 		Draft   bool   `json:"draft"`
-		State   string `json:"state"`
+		// GitLab's fill leaves it unchanged (Refresh keeps the webhook's date) when it is "" or unparsable; its API and GitHub send RFC 3339, its webhooks "2006-01-02 15:04:05 UTC"
+		CreatedAt time.Time `json:"created_at"`
+		State     string    `json:"state"`
 		// false: it conflicts with the base; nil until GitHub has worked it out, and in webhook payloads
 		Mergeable *bool `json:"mergeable"`
 		User      struct {
-			Type string `json:"type"` // "Bot" for GitHub Apps: Dependabot, Renovate, release-please
+			Login string `json:"login"`
+			Type  string `json:"type"` // "Bot" for GitHub Apps: Dependabot, Renovate, release-please
 		} `json:"user"`
 		Head struct {
 			SHA  string `json:"sha"`
