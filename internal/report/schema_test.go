@@ -290,8 +290,8 @@ refunds changed base=true db/migrations/0010_keys.sql:4
 `,
 	}, {
 		name: "an edited CREATE TABLE a later base migration altered",
-		diff: edit("@@ -2,4 +2,5 @@\n   id bigserial PRIMARY KEY,\n-  body text,\n-  legacy text\n+  body char(9) NOT NULL,\n+  legacy int\n+  , pinned boolean\n );\n"),
-		src:  "CREATE TABLE IF NOT EXISTS notes (\n  id bigserial PRIMARY KEY,\n  body char(9) NOT NULL,\n  legacy int\n  , pinned boolean\n);\n",
+		diff: edit("@@ -2,4 +2,5 @@\n   id bigserial PRIMARY KEY,\n-  body text,\n-  legacy text\n+  body char(9) NOT NULL,\n+  legacy int\n+  , pinned boolean, later bigint\n );\n"),
+		src:  "CREATE TABLE IF NOT EXISTS notes (\n  id bigserial PRIMARY KEY,\n  body char(9) NOT NULL,\n  legacy int\n  , pinned boolean, later bigint\n);\n",
 		base: notes + "ALTER TABLE notes ADD COLUMN later int;\nALTER TABLE notes ALTER COLUMN body TYPE varchar(80);\n",
 		want: `notes changed base=true db/schema.sql:3
   id "bigserial"  was="" ref= [primary key] @0

@@ -1357,7 +1357,7 @@ func (b *mapper) trace() {
 }
 
 var (
-	dropTable = regexp.MustCompile(`(?i)\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([^;]+)`)
+	dropTable = regexp.MustCompile(`(?i)^DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([^;]+)`) // a statement's own operation, not text it quotes
 	// downMark starts what runs on the way back: goose's and dbmate's
 	downMark  = regexp.MustCompile(`(?i)^\s*--\s*(?:\+goose\s+down|migrate:down)\b`)
 	tableName = regexp.MustCompile(`^\w+$`)
@@ -1382,17 +1382,22 @@ const (
 func upStatements(d Data, f func(p string, st sqlLine)) (before map[string]string) {
 	var files []string
 	byFile := map[string][]sqlLine{}
-	before = map[string]string{}
+	was := map[string]*strings.Builder{}
 	migrationLines(d, func(p string, l sqlLine) {
 		if _, ok := byFile[p]; !ok {
 			files = append(files, p)
+			was[p] = &strings.Builder{}
 		}
 		byFile[p] = append(byFile[p], l)
-		before[p] += l.gone
+		was[p].WriteString(l.gone)
 		if !l.add {
-			before[p] += l.text + "\n"
+			was[p].WriteString(l.text + "\n")
 		}
 	})
+	before = map[string]string{}
+	for p, b := range was {
+		before[p] = b.String()
+	}
 	for _, p := range files {
 		for _, st := range statements(byFile[p]) {
 			if st.add {

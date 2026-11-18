@@ -8,6 +8,7 @@ import (
 	"context"
 	"diffharbor/internal/text"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -369,7 +370,8 @@ inverseRelations(first: 50) { nodes { type issue { identifier } } } } }`,
 		Issue        struct{ Identifier string }
 	}
 	var out struct {
-		Data struct {
+		Errors []struct{ Message string }
+		Data   struct {
 			Issue *struct {
 				Identifier, Title, Description, URL, DueDate string
 				PreviousIdentifiers                          []string
@@ -379,6 +381,10 @@ inverseRelations(first: 50) { nodes { type issue { identifier } } } } }`,
 		}
 	}
 	if found, err := fetch(req, &out); !found || err != nil || out.Data.Issue == nil {
+		// GraphQL answers 200 with errors: one that isn't "not found" is a failure, not an unknown ticket
+		if err == nil && len(out.Errors) > 0 && !strings.Contains(strings.ToLower(out.Errors[0].Message), "not found") {
+			err = errors.New(out.Errors[0].Message)
+		}
 		return nil, "", wrap("linear", err)
 	}
 	is := out.Data.Issue

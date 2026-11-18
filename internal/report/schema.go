@@ -536,7 +536,7 @@ func compare(b, h *stab) Table {
 }
 
 // baseSchema is the tables names as the base's .sql files that name them declare them, read at refs/base: the files
-// in path order, which is the order migration tools number them in. partial: more files name them than it reads.
+// in path order, which is the order migration tools number them in. partial: some files that name them went unread.
 func baseSchema(ctx context.Context, sb *proc.Sandbox, names []string) (db sdb, partial bool) {
 	args := []string{"grep", "-l", "-i", "-w", "-I"}
 	for _, n := range names {
@@ -555,6 +555,7 @@ func baseSchema(ctx context.Context, sb *proc.Sandbox, names []string) (db sdb, 
 		specs = specs[:maxTableFiles]
 	}
 	texts := catFiles(ctx, sb, specs)
+	partial = partial || len(texts) < len(specs) // a blob too big, or past what one read takes
 	db = sdb{}
 	for _, sp := range specs {
 		db.read(texts[sp])
@@ -1075,14 +1076,11 @@ func (db sdb) recreate(s sqlLine, before sdb) bool {
 	for _, c := range now[name].cols {
 		w, old := was.find(c.name), h.find(c.name)
 		switch {
-		case w == nil && old == nil: // the edit adds it
+		case w == nil && old == nil: // the edit adds it; a later migration that adds it too wins
 			x := *c
 			x.line = s.line
 			h.cols = append(h.cols, &x)
-		case w == nil:
-			*old = *c
-			old.line = s.line
-		case old != nil && old.edit(w, c): // a later migration that drops it, or changes the same part, wins
+		case w != nil && old != nil && old.edit(w, c): // a later migration that drops it, or changes the same part, wins
 			old.line = s.line
 		}
 	}
@@ -1091,6 +1089,11 @@ func (db sdb) recreate(s sqlLine, before sdb) bool {
 			if old := h.find(c.name); old != nil {
 				old.gone, old.line = true, s.line
 			}
+		}
+	}
+	for n := range was.named {
+		if _, ok := now[name].named[n]; !ok {
+			delete(h.named, n) // the edit removes the constraint, or renames it
 		}
 	}
 	for n, k := range now[name].named {

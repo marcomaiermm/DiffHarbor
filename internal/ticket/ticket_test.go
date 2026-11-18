@@ -211,6 +211,10 @@ func TestLinear(t *testing.T) {
 				`"description":"## Outcome\nBursts get 429.\n\n## Done when\n- [ ] 429 on burst\n","dueDate":"2026-12-01","previousIdentifiers":[],`+
 				`"state":{"name":"In Progress","type":"started"},"relations":{"nodes":[{"type":"related","relatedIssue":{"identifier":"ENG-2"}}]},`+
 				`"inverseRelations":{"nodes":[{"type":"blocks","issue":{"identifier":"ENG-3"}}]}}}}`)
+		case q.Variables.ID == "ENG-9":
+			fmt.Fprint(w, `{"errors":[{"message":"Authentication required, not authenticated"}],"data":{"issue":null}}`)
+		case q.Variables.ID == "ENG-10":
+			fmt.Fprint(w, `{"errors":[{"message":"Entity not found: Issue"}],"data":{"issue":null}}`)
 		case q.Variables.ID == "ENG-8":
 			fmt.Fprint(w, `{"data":{"issue":{"identifier":"ENG-8","title":"Moved","previousIdentifiers":["PYR-1","PYR-8"],"state":{"name":"Done","type":"completed"}}}}`)
 		default:
@@ -233,6 +237,9 @@ func TestLinear(t *testing.T) {
 	f = Lookup(t.Context(), nil, "OLD-7 ENG-8", "", "", "")
 	if len(f.Tickets) != 2 || f.Tickets[0].Key != "ENG-7" || f.Tickets[0].Was != "OLD-7" || f.Tickets[1].Was != "PYR-8" || !f.Tickets[1].Done {
 		t.Fatalf("moved: %+v", f.Tickets)
+	}
+	if f := Lookup(t.Context(), nil, "ENG-9 ENG-10", "", "", ""); len(f.Tickets) != 0 || !strings.Contains(f.Failed["ENG-9"], "Authentication") || f.Failed["ENG-10"] != "" {
+		t.Fatalf("graphql errors: %+v %+v", f.Tickets, f.Failed)
 	}
 	LinearKey = "bad"
 	if f := Lookup(t.Context(), nil, "ENG-7", "", "", ""); !strings.Contains(f.Failed["ENG-7"], "401") {
