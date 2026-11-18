@@ -152,7 +152,7 @@ type pool struct {
 	run     func(context.Context, *forge.Event) error // runJob, a fake in tests
 }
 
-const jobDeadline = 4 * time.Hour // 8 parts, 2 at once, ~30 min of passes each, plus checks
+const jobDeadline = 9 * time.Hour // review.AutoParts (32), 2 at once, ~30 min of passes each, plus checks
 
 // newPool runs up to limit jobs at once, at least one, and queues up to 100 more.
 func newPool(limit int, run func(context.Context, *forge.Event) error) *pool {

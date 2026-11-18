@@ -174,7 +174,7 @@ func TestSettings(t *testing.T) {
 	if _, err := LoadSettings(`{"min_severity":"high"}`); err == nil {
 		t.Error("min_severity high accepted")
 	}
-	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"gitlab_findings":"each"}`, `{"suggest_split":{"files":-1}}`, `{"suggest_split":{"count":["tests"]}}`, `{"suggest_split":{"skip":["a/{b"]}}`, `{"learnings":{"max":-1}}`, `{"learnings":{"max":101}}`, `{"learnings":{"max_age_days":-1}}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
+	for _, bad := range []string{`{"ignore":["a/{b"]}`, `{"ignore":["!a}"]}`, `{"ignore":["[z-a]"]}`, `{"packages":{"[a":{}}}`, `{"large_pr":"yes"}`, `{"max_parts":9}`, `{"max_parts":-1}`, `{"max_parts":"lots"}`, `{"max_parts":2.5}`, `{"max_parts":"6"}`, `{"gitlab_findings":"each"}`, `{"suggest_split":{"files":-1}}`, `{"suggest_split":{"count":["tests"]}}`, `{"suggest_split":{"skip":["a/{b"]}}`, `{"learnings":{"max":-1}}`, `{"learnings":{"max":101}}`, `{"learnings":{"max_age_days":-1}}`, `{"syntax_theme":{"dark":"x\");alert(1)//"}}`} {
 		if _, err := LoadSettings(bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
@@ -198,6 +198,32 @@ func TestSettings(t *testing.T) {
 	for k := range twenty {
 		twenty[k] = fmt.Sprintf("p%d/a.go", k)
 	}
+	// "auto": a diff past 8 parts leaves nothing out; up to AutoParts, which "ask" gives only once confirmed.
+	auto, err := LoadSettings(`{"max_parts":"auto"}`)
+	askAuto, _ := LoadSettings(`{"large_pr":"ask","max_parts":"auto"}`)
+	if err != nil || auto.Parts(false) != AutoParts || askAuto.Parts(false) != 1 || askAuto.Parts(true) != AutoParts {
+		t.Error("max_parts auto", err)
+	}
+	big := pr(16000, twenty[:12]...) // 12 files of 48k in 12 folders: one part each
+	if parts, left := diff.Filter(big, "", nil, nil, all.Parts(false)); len(parts) != 6 || len(left) != 6 {
+		t.Errorf("max_parts 6: %d parts, %d left", len(parts), len(left))
+	}
+	if parts, left := diff.Filter(big, "", nil, nil, auto.Parts(false)); len(parts) != 12 || len(left) != 0 {
+		t.Errorf("max_parts auto: %d parts, %d left", len(parts), len(left))
+	}
+	var ceiling []string // 33 files of 48k in 33 folders: "auto" stops at 32 parts
+	for k := range 33 {
+		ceiling = append(ceiling, fmt.Sprintf("p%d/a.go", k))
+	}
+	if parts, left := diff.Filter(pr(16000, ceiling...), "", nil, nil, auto.Parts(false)); len(parts) != 32 || len(left) != 1 {
+		t.Errorf("max_parts auto ceiling: %d parts, %d left", len(parts), len(left))
+	}
+	escaped, err1 := LoadSettings(`{"max_parts":"\u0061uto"}`)
+	zero, err2 := LoadSettings(`{"max_parts":0}`)
+	null, err3 := LoadSettings(`{"max_parts":null}`)
+	if escaped.Parts(false) != AutoParts || zero.Parts(false) != 4 || null.Parts(false) != 4 || err1 != nil || err2 != nil || err3 != nil {
+		t.Error("max_parts escaped, 0, null", err1, err2, err3)
+	}
 	lines, _ := LoadSettings(`{"suggest_split":{"lines":300}}`)
 	either, _ := LoadSettings(`{"suggest_split":{"lines":300,"files":20}}`)
 	if (Settings{}).SuggestsSplit(pr(1000, twenty...)) || lines.SuggestsSplit(pr(299, "a.go")) || !lines.SuggestsSplit(pr(300, "a.go")) ||
@@ -216,8 +242,10 @@ func TestSettings(t *testing.T) {
 	if _, err := LoadSettings(`{"review_model":"--tools=bash"}`); err == nil {
 		t.Error("flag as model accepted")
 	}
-	for _, bad := range []string{`{"passes":[{},{},{},{}]}`, `{"passes":[{"max_lines":10}]}`, `{"passes":[{"model":"x/y"}]}`,
-		`{"passes":[{},{"model":"--tools=bash"}]}`, `{"passes":[{},{"min_lines":10,"max_lines":5}]}`} {
+	for _, bad := range []string{
+		`{"passes":[{},{},{},{}]}`, `{"passes":[{"max_lines":10}]}`, `{"passes":[{"model":"x/y"}]}`,
+		`{"passes":[{},{"model":"--tools=bash"}]}`, `{"passes":[{},{"min_lines":10,"max_lines":5}]}`,
+	} {
 		if _, err := LoadSettings(bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
@@ -407,8 +435,11 @@ func TestProfile(t *testing.T) {
 		path, sev string
 		fold      bool
 	}{
-		{"a.go", "major", false}, {"a.go", "minor", true}, {"a.go", "nit", true},
-		{"web/a.ts", "minor", false}, {"web/a.ts", "nit", false},
+		{"a.go", "major", false},
+		{"a.go", "minor", true},
+		{"a.go", "nit", true},
+		{"web/a.ts", "minor", false},
+		{"web/a.ts", "nit", false},
 		{"api/a.go", "minor", true}, // the package sets no profile: the top's
 	} {
 		if got := cfg.Fold(Comment{Path: tc.path, Severity: tc.sev}); got != tc.fold {
