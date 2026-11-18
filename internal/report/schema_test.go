@@ -215,3 +215,92 @@ users context base=true :0
 		t.Errorf("schema, a column added inside a CREATE TABLE:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func TestSchemaEdits(t *testing.T) {
+	const n = "db/schema.sql"
+	edit := func(hunk string) string {
+		return "diff --git a/" + n + " b/" + n + "\n--- a/" + n + "\n+++ b/" + n + "\n" + hunk
+	}
+	const notes = "CREATE TABLE IF NOT EXISTS notes (\n  id bigserial PRIMARY KEY,\n  body text,\n  legacy text\n);\n"
+	cases := []struct {
+		name, diff, src, base, want string
+	}{{
+		name: "a column removed from a CREATE TABLE, nothing added",
+		diff: edit("@@ -1,5 +1,4 @@\n CREATE TABLE IF NOT EXISTS notes (\n   id bigserial PRIMARY KEY,\n-  body text,\n-  legacy text\n+  body text\n );\n"),
+		src:  "CREATE TABLE IF NOT EXISTS notes (\n  id bigserial PRIMARY KEY,\n  body text\n);\n",
+		base: notes,
+		want: `notes changed base=true db/schema.sql:3
+  id "bigserial"  was="" ref= [primary key] @0
+  body "text"  was="" ref= [] @0
+  legacy "text" dropped was="" ref= [] @3
+`,
+	}, {
+		name: "a line removed inside a CREATE TABLE only",
+		diff: edit("@@ -2,4 +2,3 @@\n   id bigserial PRIMARY KEY,\n   body text,\n-  legacy text,\n );\n"),
+		src:  "CREATE TABLE IF NOT EXISTS notes (\n  id bigserial PRIMARY KEY,\n  body text,\n);\n",
+		base: notes,
+		want: `notes changed base=true db/schema.sql:4
+  id "bigserial"  was="" ref= [primary key] @0
+  body "text"  was="" ref= [] @0
+  legacy "text" dropped was="" ref= [] @4
+`,
+	}, {
+		name: "a column added to a CREATE TABLE IF NOT EXISTS",
+		diff: edit("@@ -3,3 +3,4 @@\n   body text,\n   legacy text\n+  , pinned boolean NOT NULL DEFAULT false\n );\n"),
+		src:  "CREATE TABLE IF NOT EXISTS notes (\n  id bigserial PRIMARY KEY,\n  body text,\n  legacy text\n  , pinned boolean NOT NULL DEFAULT false\n);\n",
+		base: notes,
+		want: `notes changed base=true db/schema.sql:5
+  id "bigserial"  was="" ref= [primary key] @0
+  body "text"  was="" ref= [] @0
+  legacy "text"  was="" ref= [] @0
+  pinned "boolean" new was="" ref= [not null default false] @5
+`,
+	}, {
+		name: "an index dropped alone",
+		diff: newFile("db/migrations/0009_drop.sql", "DROP INDEX IF EXISTS orders_note_idx;\n"),
+		base: schemaBase,
+		want: `orders changed base=true db/migrations/0009_drop.sql:1
+  id "bigserial"  was="" ref= [primary key] @0
+  user_id "bigint"  was="" ref=users.id [] @0
+  total "numeric(10, 2)"  was="" ref= [] @0
+  note "text"  was="" ref= [] @0
+  legacy_code "text"  was="" ref= [] @0
+  index orders_note_idx (note) unique=false dropped @1
+users context base=true :0
+  id "bigserial"  was="" ref= [primary key] @0
+`,
+	}, {
+		name: "constraints dropped by name, declared or default",
+		diff: newFile("db/migrations/0010_keys.sql", "ALTER TABLE orders DROP CONSTRAINT orders_user_id_fkey;\n"+
+			"ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;\nALTER TABLE refunds DROP CONSTRAINT refunds_order_fk;\n"),
+		base: "/* the schema\n   so far */\nCREATE TABLE refunds (\n  id bigserial,\n  order_id bigint,\n" +
+			"  CONSTRAINT refunds_order_fk FOREIGN KEY (order_id) REFERENCES orders (id)\n);\n" + schemaBase,
+		want: `orders changed base=true db/migrations/0010_keys.sql:1
+  id "bigserial"  was="" ref= [primary key] @0
+  user_id "bigint" changed was="references users.id" ref=users.id [] @1 by name
+  total "numeric(10, 2)"  was="" ref= [] @0
+  note "text"  was="" ref= [] @0
+  legacy_code "text"  was="" ref= [] @0
+users changed base=true db/migrations/0010_keys.sql:2
+  id "bigserial"  was="" ref= [primary key] @0
+  email "text" changed was="unique" ref= [not null] @2
+refunds changed base=true db/migrations/0010_keys.sql:3
+  id "bigserial"  was="" ref= [] @0
+  order_id "bigint" changed was="references orders.id" ref=orders.id [] @3 by name
+`,
+	}}
+	for _, c := range cases {
+		d := Data{Diff: c.diff}
+		if c.src != "" {
+			d.Sources = map[string]string{n: c.src}
+		}
+		got := show(schema(d, func([]string) sdb {
+			db := sdb{}
+			db.read(c.base)
+			return db
+		}))
+		if got != c.want {
+			t.Errorf("%s:\n%s\nwant:\n%s", c.name, got, c.want)
+		}
+	}
+}

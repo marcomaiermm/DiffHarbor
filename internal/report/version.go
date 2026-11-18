@@ -18,7 +18,7 @@ type Version struct {
 	Weights  map[string]string `json:"weights,omitempty"`  // "path: title" of Findings -> its severity
 	Tests    map[string]string `json:"tests,omitempty"`    // the tests the page names -> pass, fail, skip or none (not run); unset when none ran
 	Broken   bool              `json:"broken,omitempty"`   // a changed package did not build
-	Items    []Item            `json:"items,omitempty"`    // the open items by kind and place; none in a version from before them
+	Items    []Item            `json:"items"`              // the open items by kind and place, [] for none; null in a version from before them
 	// The merge status's short form and whether it blocks, without the forge's CI, for the commit status (decision 6).
 	Short   string `json:"-"`
 	Blocked bool   `json:"-"`
@@ -34,7 +34,7 @@ type Item struct {
 
 // stamp is the version v shows, its time unset.
 func stamp(v view, ids map[string]string) Version {
-	now := Version{SHA: v.SHA, Files: ids, Weights: map[string]string{}, Broken: len(v.Data.Tests.Broken) > 0}
+	now := Version{SHA: v.SHA, Files: ids, Weights: map[string]string{}, Broken: len(v.Data.Tests.Broken) > 0, Items: []Item{}}
 	for _, c := range v.Findings {
 		now.Findings = append(now.Findings, c.Path+": "+c.Title)
 		now.Weights[c.Path+": "+c.Title] = c.Severity

@@ -2,8 +2,18 @@ package report
 
 import (
 	"diffharbor/internal/review"
+	"encoding/json"
+	"strings"
 	"testing"
 )
+
+// A version without open items says so, [], where one from before them has none: the script tells them apart.
+func TestStampEmptyItems(t *testing.T) {
+	b, _ := json.Marshal(stamp(view{}, nil))
+	if !strings.Contains(string(b), `"items":[]`) {
+		t.Errorf("stamp without items = %s", b)
+	}
+}
 
 func TestSpanPathWithColon(t *testing.T) {
 	for at, want := range map[string]struct {

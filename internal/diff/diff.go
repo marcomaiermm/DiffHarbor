@@ -370,6 +370,15 @@ func NewLines(diff string) map[string]string {
 
 // EachNewLine calls fn with "path:line" and the diff line ('+' or ' ' first) of every new-file line in the diff.
 func EachNewLine(diff string, fn func(at, l string)) {
+	EachLine(diff, func(at, l string) {
+		if l[0] != '-' {
+			fn(at, l)
+		}
+	})
+}
+
+// EachLine is EachNewLine with the removed lines too ('-' first), each at the new line that follows it.
+func EachLine(diff string, fn func(at, l string)) {
 	file, line, hunk := "", 0, false
 	for _, l := range strings.Split(diff, "\n") {
 		switch {
@@ -385,6 +394,8 @@ func EachNewLine(diff string, fn func(at, l string)) {
 		case hunk && file != "" && (strings.HasPrefix(l, "+") || strings.HasPrefix(l, " ")):
 			fn(fmt.Sprintf("%s:%d", file, line), l)
 			line++
+		case hunk && file != "" && strings.HasPrefix(l, "-"):
+			fn(fmt.Sprintf("%s:%d", file, line), l)
 		}
 	}
 }

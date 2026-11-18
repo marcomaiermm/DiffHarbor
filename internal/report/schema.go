@@ -77,7 +77,14 @@ type stab struct {
 	name          string
 	cols          []*scol
 	idx           []Index
+	named         map[string]named // a constraint's name, lower case, as declared or as Postgres names it
 	created, gone bool
+}
+
+// named is a constraint by name: kind "p" primary key, "u" unique, "f" foreign key, and its columns.
+type named struct {
+	kind string
+	cols []string
 }
 
 type sdb map[string]*stab
@@ -85,7 +92,9 @@ type sdb map[string]*stab
 type sqlLine struct {
 	text string
 	line int
-	add  bool // the PR adds the line; a statement: some line of it
+	add  bool // the PR adds the line; a statement: it adds a line of it or removes one inside it
+	cut  bool // the PR removes lines right before the line
+	edit bool // a statement of the PR's: it was there before, the PR changes it
 }
 
 // schema is the tables the PR's migrations name (decision 42): the base's migrations that name them (base, nil for
@@ -98,7 +107,7 @@ func schema(d Data, base func(names []string) sdb) []Table {
 	var order []string
 	first := map[string]site{}
 	var files []string
-	pr := map[string][]sqlLine{} // the statements the PR adds a line to, whole: a column added to a CREATE TABLE too
+	pr := map[string][]sqlLine{} // the statements the PR changes, whole: a column added to a CREATE TABLE too
 	upStatements(d, func(p string, st sqlLine) {
 		if _, ok := pr[p]; !ok {
 			files = append(files, p)
@@ -119,21 +128,29 @@ func schema(d Data, base func(names []string) sdb) []Table {
 			probe.apply(st, true, touch(p, st.line))
 		}
 	}
-	if len(order) == 0 {
-		return nil
-	}
 	was := sdb{}
+	fill := func(names []string) { // the base's tables of names that was lacks
+		for n, t := range base(names) {
+			if was[n] == nil {
+				was[n] = t
+			}
+		}
+	}
 	if base != nil {
-		was = base(order)
+		if len(order) > 0 {
+			fill(order)
+		}
+		if more := lostIndexes(files, pr, probe, was, base, func(p string, line int, table string) { touch(p, line)(table) }); len(more) > 0 {
+			fill(more)
+		}
 		// the tables the keys reach that the files naming the PR's don't declare: what a key references, what a
 		// column's name points at
 		if more := joined(was, probe, order); len(more) > 0 {
-			for n, t := range base(more) {
-				if was[n] == nil {
-					was[n] = t
-				}
-			}
+			fill(more)
 		}
+	}
+	if len(order) == 0 {
+		return nil
 	}
 	head := was.clone()
 	for _, p := range files {
@@ -158,6 +175,47 @@ func schema(d Data, base func(names []string) sdb) []Table {
 		}
 	}
 	return append(out, around(out, head)...)
+}
+
+// lostIndexes is the tables outside was of the indexes the PR drops that neither its own statements nor was create:
+// the base's migrations that name an index declare its table. found hears each drop's site and its table.
+func lostIndexes(files []string, pr map[string][]sqlLine, probe, was sdb, base func([]string) sdb, found func(p string, line int, table string)) []string {
+	type site struct {
+		path string
+		line int
+	}
+	held := map[string]bool{}
+	for _, db := range []sdb{probe, was} {
+		for _, t := range db {
+			for _, ix := range t.idx {
+				held[ix.Name] = true
+			}
+		}
+	}
+	at := map[string]site{}
+	for _, p := range files {
+		for _, st := range pr[p] {
+			if m := ddlDropIndex.FindStringSubmatch(st.text); m != nil && !held[bareName(m[1])] {
+				at[bareName(m[1])] = site{p, st.line}
+			}
+		}
+	}
+	if len(at) == 0 {
+		return nil
+	}
+	var more []string
+	db := base(slices.Sorted(maps.Keys(at)))
+	for _, table := range slices.Sorted(maps.Keys(db)) {
+		for _, ix := range db[table].idx {
+			if s, ok := at[ix.Name]; ok {
+				found(s.path, s.line, table)
+				if was[table] == nil && !slices.Contains(more, table) {
+					more = append(more, table)
+				}
+			}
+		}
+	}
+	return more
 }
 
 // maxContext caps the cards of tables outside the PR.
@@ -492,11 +550,13 @@ func baseSchema(ctx context.Context, sb *proc.Sandbox, names []string) sdb {
 // read runs the statements of one migration's text, up to its Down part.
 func (db sdb) read(text string) {
 	var lines []sqlLine
+	block := false
 	for i, l := range strings.Split(text, "\n") {
-		if downMark.MatchString(l) {
+		if !block && downMark.MatchString(l) {
 			break
 		}
-		lines = append(lines, sqlLine{l, i + 1, false})
+		l, block = uncomment(l, block)
+		lines = append(lines, sqlLine{text: l, line: i + 1})
 	}
 	for _, st := range statements(lines) {
 		db.apply(st, false, func(string) {})
@@ -504,12 +564,18 @@ func (db sdb) read(text string) {
 }
 
 // statements joins lines into statements at the semicolons outside quotes and $$ bodies, comments cut; each starts at
-// the line of its first word, or of its first added one when the PR adds to it.
+// the line of its first word, or of the PR's first change to it.
 func statements(lines []sqlLine) []sqlLine {
 	var out []sqlLine
 	var b strings.Builder
-	start, quote, dollar, add := 0, false, false, false
+	start, quote, dollar, add, edit := 0, false, false, false, false
 	for _, l := range lines {
+		if l.cut && b.Len() > 0 { // lines removed inside the statement
+			if !add {
+				start = l.line
+			}
+			add, edit = true, true
+		}
 		t := l.text
 		for i := 0; i < len(t); i++ {
 			c := t[i]
@@ -537,10 +603,10 @@ func statements(lines []sqlLine) []sqlLine {
 				continue
 			case c == ';':
 				if s := strings.TrimSpace(b.String()); s != "" {
-					out = append(out, sqlLine{s, start, add})
+					out = append(out, sqlLine{text: s, line: start, add: add, edit: edit})
 				}
 				b.Reset()
-				add = false
+				add, edit = false, false
 				continue
 			}
 			if b.Len() == 0 && (c == ' ' || c == '\t') {
@@ -552,6 +618,7 @@ func statements(lines []sqlLine) []sqlLine {
 			if l.add && !add {
 				add, start = true, l.line
 			}
+			edit = edit || !l.add
 			b.WriteByte(c)
 		}
 		if b.Len() > 0 {
@@ -559,7 +626,7 @@ func statements(lines []sqlLine) []sqlLine {
 		}
 	}
 	if s := strings.TrimSpace(b.String()); s != "" {
-		out = append(out, sqlLine{s, start, add})
+		out = append(out, sqlLine{text: s, line: start, add: add, edit: edit})
 	}
 	return out
 }
@@ -574,7 +641,9 @@ func (db sdb) apply(s sqlLine, pr bool, touch func(string)) {
 	if m := ddlCreate.FindStringSubmatchIndex(text); m != nil {
 		name := bareName(text[m[4]:m[5]])
 		touch(name)
-		if old := db[name]; old != nil && !old.gone && m[2] >= 0 { // IF NOT EXISTS
+		edit := pr && s.edit // the PR edits the base's CREATE: it runs instead, not after
+		old := db[name]
+		if old != nil && !old.gone && m[2] >= 0 && !edit { // IF NOT EXISTS
 			return
 		}
 		body, _ := inParens(text, m[1]-1)
@@ -585,9 +654,17 @@ func (db sdb) apply(s sqlLine, pr bool, touch func(string)) {
 			if len(ws) == 0 || t.constraint(ws, line) {
 				continue
 			}
-			c := colDef(ws)
-			c.line = line
-			t.cols = append(t.cols, c)
+			t.add(ws, line)
+		}
+		if edit && old != nil { // what the edit removes, the PR drops
+			t.idx = old.idx
+			for _, c := range old.cols {
+				if t.find(c.name) == nil && !c.gone {
+					x := *c
+					x.gone, x.line = true, line
+					t.cols = append(t.cols, &x)
+				}
+			}
 		}
 		return
 	}
@@ -663,6 +740,7 @@ func (db sdb) clone() sdb {
 			c.cols[i] = &x
 		}
 		c.idx = slices.Clone(t.idx)
+		c.named = maps.Clone(t.named)
 		out[n] = &c
 	}
 	return out
@@ -706,16 +784,22 @@ func (t *stab) alter(ws []string, line int, pr bool) {
 		if len(ws) == 0 || t.constraint(ws, line) {
 			return
 		}
-		c := colDef(ws)
-		c.line = line
-		if old := t.find(c.name); old != nil {
-			*old = *c
-			return
-		}
-		t.cols = append(t.cols, c)
+		t.add(ws, line)
 	case "DROP":
 		ws = skip(ws, "IF", "EXISTS")
-		if len(ws) == 0 || slices.Contains([]string{"CONSTRAINT", "PRIMARY", "FOREIGN", "INDEX", "KEY", "CHECK"}, strings.ToUpper(ws[0])) {
+		if len(ws) == 0 {
+			return
+		}
+		switch strings.ToUpper(ws[0]) {
+		case "CONSTRAINT", "FOREIGN": // FOREIGN KEY name: MySQL's
+			if ws = skip(ws[1:], "KEY", "IF", "EXISTS"); len(ws) > 0 {
+				t.unname(bareName(ws[0]), line, pr)
+			}
+			return
+		case "PRIMARY":
+			t.unname(t.name+"_pkey", line, pr)
+			return
+		case "INDEX", "KEY", "CHECK":
 			return
 		}
 		c := t.col(bareName(ws[0]), line, pr)
@@ -749,7 +833,7 @@ func (t *stab) alter(ws []string, line int, pr bool) {
 		if len(ws) == 0 {
 			return
 		}
-		n := colDef(ws)
+		n, _ := colDef(ws)
 		c := t.col(cmp.Or(old, n.name), line, pr)
 		if pr && c.from == "" && !strings.EqualFold(c.name, n.name) {
 			c.from = c.name
@@ -769,11 +853,12 @@ func (t *stab) alter(ws []string, line int, pr bool) {
 
 // constraint reads a table constraint (PRIMARY KEY, UNIQUE, FOREIGN KEY) onto its columns; false: ws is a column.
 func (t *stab) constraint(ws []string, line int) bool {
+	name := ""
 	if strings.EqualFold(ws[0], "CONSTRAINT") {
 		if len(ws) < 3 {
 			return true
 		}
-		ws = ws[2:]
+		name, ws = bareName(ws[1]), ws[2:]
 	}
 	kw := strings.ToUpper(ws[0])
 	if i := strings.IndexByte(kw, '('); i > 0 {
@@ -790,9 +875,11 @@ func (t *stab) constraint(ws []string, line int) bool {
 				c.keyPos = i + 1
 			}
 		}
+		t.keep(pick(kw == "PRIMARY", "p", "u"), name, cols)
 	case "FOREIGN":
 		if len(cols) > 0 && len(rest) > 1 && strings.EqualFold(rest[0], "REFERENCES") {
 			t.col(cols[0], line, pr).fk(rest[1:])
+			t.keep("f", name, cols[:1])
 		}
 	case "CHECK", "INDEX", "KEY", "EXCLUDE", "FULLTEXT", "SPATIAL":
 	default:
@@ -801,9 +888,12 @@ func (t *stab) constraint(ws []string, line int) bool {
 	return true
 }
 
-// colDef is a column's definition: its name, its type up to the first constraint, then the constraints.
-func colDef(ws []string) *scol {
+// colDef is a column's definition: its name, its type up to the first constraint, then the constraints, and the
+// names of its keys (kind as in named, and the name, "" for none).
+func colDef(ws []string) (*scol, [][2]string) {
 	c := &scol{name: bareName(ws[0])}
+	var keys [][2]string
+	name := ""
 	i := 1
 	for i < len(ws) && !colStop[strings.ToUpper(ws[i])] {
 		i++
@@ -815,12 +905,20 @@ func colDef(ws []string) *scol {
 			next = strings.ToUpper(ws[i+1])
 		}
 		switch strings.ToUpper(ws[i]) {
+		case "CONSTRAINT":
+			if next != "" {
+				name = bareName(ws[i+1])
+				i++
+			}
+			continue
 		case "NOT":
 			c.notNull = c.notNull || next == "NULL"
 		case "PRIMARY":
 			c.pk = true
+			keys = append(keys, [2]string{"p", name})
 		case "UNIQUE":
 			c.unique = true
+			keys = append(keys, [2]string{"u", name})
 		case "DEFAULT":
 			if next != "" {
 				c.def = ws[i+1]
@@ -828,9 +926,63 @@ func colDef(ws []string) *scol {
 			}
 		case "REFERENCES":
 			i += c.fk(ws[i+1:])
+			keys = append(keys, [2]string{"f", name})
+		}
+		name = ""
+	}
+	return c, keys
+}
+
+// add adds the column ws defines at line, or replaces the one of its name, with its keys' names.
+func (t *stab) add(ws []string, line int) {
+	c, keys := colDef(ws)
+	c.line = line
+	for _, k := range keys {
+		t.keep(k[0], k[1], []string{c.name})
+	}
+	if old := t.find(c.name); old != nil {
+		*old = *c
+		return
+	}
+	t.cols = append(t.cols, c)
+}
+
+// keep keeps a constraint's name, the one Postgres gives it when it has none: table_pkey, table_col_key,
+// table_col_fkey.
+func (t *stab) keep(kind, name string, cols []string) {
+	switch {
+	case name != "":
+	case kind == "p":
+		name = t.name + "_pkey"
+	case kind == "u":
+		name = t.name + "_" + strings.Join(cols, "_") + "_key"
+	default:
+		name = t.name + "_" + strings.Join(cols, "_") + "_fkey"
+	}
+	if t.named == nil {
+		t.named = map[string]named{}
+	}
+	t.named[strings.ToLower(name)] = named{kind, cols}
+}
+
+// unname drops the constraint of that name: its columns lose the key it made.
+func (t *stab) unname(name string, line int, pr bool) {
+	k, ok := t.named[strings.ToLower(name)]
+	if !ok {
+		return
+	}
+	delete(t.named, strings.ToLower(name))
+	for _, n := range k.cols {
+		c := t.col(n, line, pr)
+		switch k.kind {
+		case "p":
+			c.pk, c.keyPos = false, 0
+		case "u":
+			c.unique, c.keyPos = false, 0
+		case "f":
+			c.ref, c.onDelete, c.onUpdate = "", "", ""
 		}
 	}
-	return c
 }
 
 // fk reads what REFERENCES names and its ON DELETE and ON UPDATE actions; the number of words it read.

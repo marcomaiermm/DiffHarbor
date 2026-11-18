@@ -1379,23 +1379,23 @@ const (
 // goose file's Down part, a .down.sql file and a test's SQL don't count. A file's text is its head's, the diff's lines
 // without it.
 func upLines(d Data, f func(p string, no int, text string)) {
-	migrationLines(d, func(p string, no int, text string, add bool) {
-		if t := strings.TrimSpace(text); add && t != "" && !strings.HasPrefix(t, "--") {
-			f(p, no, text)
+	migrationLines(d, func(p string, l sqlLine) {
+		if t := strings.TrimSpace(l.text); l.add && t != "" && !strings.HasPrefix(t, "--") {
+			f(p, l.line, l.text)
 		}
 	})
 }
 
-// upStatements calls f with each statement of d's migrations that the PR adds a line to, whole: a column added inside
-// a CREATE TABLE comes with its table. Its line is its first added one.
+// upStatements calls f with each statement of d's migrations that the PR adds a line to or removes one inside, whole:
+// a column added inside a CREATE TABLE comes with its table. Its line is the PR's first change to it.
 func upStatements(d Data, f func(p string, st sqlLine)) {
 	var files []string
 	byFile := map[string][]sqlLine{}
-	migrationLines(d, func(p string, no int, text string, add bool) {
+	migrationLines(d, func(p string, l sqlLine) {
 		if _, ok := byFile[p]; !ok {
 			files = append(files, p)
 		}
-		byFile[p] = append(byFile[p], sqlLine{text, no, add})
+		byFile[p] = append(byFile[p], l)
 	})
 	for _, p := range files {
 		for _, st := range statements(byFile[p]) {
@@ -1406,32 +1406,31 @@ func upStatements(d Data, f func(p string, st sqlLine)) {
 	}
 }
 
-// migrationLines calls f with each line of d's SQL files that runs on migrate, add when the PR adds it, its /* */
-// comments cut: what upLines reads, with the unchanged lines around for a statement the PR edits. The added lines come
-// from the whole diff, not the page's capped view of it.
-func migrationLines(d Data, f func(p string, no int, text string, add bool)) {
+// migrationLines calls f with each line of d's SQL files that runs on migrate, add when the PR adds it, cut when it
+// removes lines right before it, its /* */ comments cut: what upLines reads, with the unchanged lines around for a
+// statement the PR edits. The changed lines come from the whole diff, not the page's capped view of it.
+func migrationLines(d Data, f func(p string, l sqlLine)) {
 	diff.EachFile(d.Diff, func(p, fd string) {
 		if path.Ext(p) != ".sql" || strings.HasSuffix(p, ".down.sql") || isTest(p) {
 			return
 		}
-		type ln struct {
-			no   int
-			text string
-			add  bool
-		}
 		src := d.Sources[p]
-		var lines []ln
-		added := map[int]bool{}
-		diff.EachNewLine(fd, func(at, l string) {
+		var lines []sqlLine
+		added, cut := map[int]bool{}, map[int]bool{}
+		diff.EachLine(fd, func(at, l string) {
 			n, _ := strconv.Atoi(at[strings.LastIndexByte(at, ':')+1:])
+			if l[0] == '-' {
+				cut[n] = true
+				return
+			}
 			added[n] = l[0] == '+'
 			if src == "" {
-				lines = append(lines, ln{n, l[1:], l[0] == '+'})
+				lines = append(lines, sqlLine{text: l[1:], line: n, add: added[n], cut: cut[n]})
 			}
 		})
 		if src != "" {
 			for i, t := range strings.Split(src, "\n") {
-				lines = append(lines, ln{i + 1, t, added[i+1]})
+				lines = append(lines, sqlLine{text: t, line: i + 1, add: added[i+1], cut: cut[i+1]})
 			}
 		}
 		block := false
@@ -1439,9 +1438,8 @@ func migrationLines(d Data, f func(p string, no int, text string, add bool)) {
 			if !block && downMark.MatchString(l.text) {
 				break
 			}
-			var t string
-			t, block = uncomment(l.text, block)
-			f(p, l.no, t, l.add)
+			l.text, block = uncomment(l.text, block)
+			f(p, l)
 		}
 	})
 }
