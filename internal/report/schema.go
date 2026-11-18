@@ -435,7 +435,7 @@ func schemaRisks(t Table, b, h *stab, head sdb) []string {
 			continue
 		case !h.created && was == nil && !c.guess && (c.notNull || c.pk) && (c.def == "" || strings.EqualFold(c.def, "null")) && !c.auto && !strings.Contains(c.typ, "serial"):
 			out = append(out, fmt.Sprintf("`%s` is NOT NULL with no default: adding it fails while `%s` has rows.", c.name, t.Name))
-		case was != nil && !was.notNull && c.notNull:
+		case was != nil && !was.notNull && !was.pk && (c.notNull || c.pk): // a primary key is NOT NULL too
 			out = append(out, fmt.Sprintf("Setting `%s` NOT NULL fails while any row holds a null.", c.name))
 		}
 		out = append(out, keyRisks(c, was, h, head)...)
@@ -483,6 +483,12 @@ func keyType(t string) string {
 // only): "`invoices.order_id`".
 func (db sdb) refsTo(table, col string) string {
 	var by []string
+	pk := "" // REFERENCES table with no column names its primary key, dropped or not
+	if t := db[table]; t != nil {
+		if i := slices.IndexFunc(t.cols, func(c *scol) bool { return c.pk }); i >= 0 {
+			pk = t.cols[i].name
+		}
+	}
 	for _, n := range slices.Sorted(maps.Keys(db)) {
 		t := db[n]
 		if t.gone {
@@ -490,6 +496,7 @@ func (db sdb) refsTo(table, col string) string {
 		}
 		for _, c := range t.cols {
 			ref, rc, _ := strings.Cut(c.ref, ".")
+			rc = cmp.Or(rc, pk)
 			self := strings.EqualFold(n, table)
 			itself := self && strings.EqualFold(c.name, col) // the dropped column referencing itself
 			if !c.gone && strings.EqualFold(ref, table) && (col == "" && !self || col != "" && strings.EqualFold(rc, col) && !itself) {
