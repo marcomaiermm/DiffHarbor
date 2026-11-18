@@ -212,7 +212,7 @@ func TestLinear(t *testing.T) {
 				`"state":{"name":"In Progress","type":"started"},"relations":{"nodes":[{"type":"related","relatedIssue":{"identifier":"ENG-2"}}]},`+
 				`"inverseRelations":{"nodes":[{"type":"blocks","issue":{"identifier":"ENG-3"}}]}}}}`)
 		case q.Variables.ID == "ENG-9":
-			fmt.Fprint(w, `{"errors":[{"message":"Authentication required, not authenticated"}],"data":{"issue":null}}`)
+			fmt.Fprint(w, `{"errors":[{"message":"Entity not found: Issue"},{"message":"Authentication required, not authenticated"}],"data":{"issue":null}}`)
 		case q.Variables.ID == "ENG-10":
 			fmt.Fprint(w, `{"errors":[{"message":"Entity not found: Issue"}],"data":{"issue":null}}`)
 		case q.Variables.ID == "ENG-8":

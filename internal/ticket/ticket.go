@@ -382,8 +382,10 @@ inverseRelations(first: 50) { nodes { type issue { identifier } } } } }`,
 	}
 	if found, err := fetch(req, &out); !found || err != nil || out.Data.Issue == nil {
 		// GraphQL answers 200 with errors: one that isn't "not found" is a failure, not an unknown ticket
-		if err == nil && len(out.Errors) > 0 && !strings.Contains(strings.ToLower(out.Errors[0].Message), "not found") {
-			err = errors.New(out.Errors[0].Message)
+		for _, e := range out.Errors {
+			if err == nil && !strings.Contains(strings.ToLower(e.Message), "not found") {
+				err = errors.New(e.Message)
+			}
 		}
 		return nil, "", wrap("linear", err)
 	}
