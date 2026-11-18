@@ -345,7 +345,7 @@ for (const file of program.getSourceFileNames()) {
     let u = null;
     for (const a of c.n.arguments) if ((u = urlOf(a, sf, path, sym))) break;
     const sender = dp && ((name === "fetch" && ambient(syms[c.at].declarations[0])) || !rel(dp) && (/\/@types\/node\/https?\.d\.ts$/.test(dp) && /^(request|get)$/.test(name)));
-    if (sender || (u?.url && ext(c.at))) emit("requests", eff(c.scope), line(c.n), { name });
+    if (sender || ((u?.url || u?.env) && ext(c.at))) emit("requests", eff(c.scope), line(c.n), { name });
     if (u) emit("url", eff(c.scope), line(c.n), { name }, u);
   }
   // reads and writes: one per chain, to the first store it names

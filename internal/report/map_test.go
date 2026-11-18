@@ -524,7 +524,11 @@ func TestFindImporters(t *testing.T) {
 	var read []string
 	got := func(specs []string) map[string]string {
 		read = specs
-		return map[string]string{}
+		out := map[string]string{}
+		for _, s := range specs {
+			out[s] = ""
+		}
+		return out
 	}
 	_, cut := findImporters(git, got, "", tableSite{"src/db/items.ts", "itemsTable"}, nil, 2)
 	if !cut || !slices.Equal(read, []string{"HEAD:a.ts", "HEAD:b.ts"}) {
@@ -897,10 +901,20 @@ func TestUpStatements(t *testing.T) {
 		{"'it''s -- no' -- yes", "'it''s -- no' -- yes", "", ""},
 		{"AS $fn$/*$$ x $fn$ /* gone */ y $1", "AS $fn$/*$$ x $fn$  y $1", "", ""},
 		{"$body$ open", "$body$ open", "", "$body$"},
+		{"DEFAULT E'it\\'s /* not' /* yes */", "DEFAULT E'it\\'s /* not' ", "", ""},
+		{"name'x' /* c */", "name'x' ", "", ""},
 	} {
 		if s, out := uncomment(c.line, c.in); s != c.want || out != c.out {
 			t.Errorf("uncomment(%q) = %q %q, want %q %q", c.line, s, out, c.want, c.out)
 		}
+	}
+	named := []MapTable{{Name: "orders"}}
+	sqlNames(func(...string) []byte { return []byte("src/q.ts\x0012\x00SELECT * FROM users JOIN orders ON true\n") }, named, []string{"orders"})
+	if !slices.Equal(named[0].Named, []string{"src/q.ts:12"}) {
+		t.Errorf("sql names past the first table on a line: %+v", named[0].Named)
+	}
+	if sts := statements([]sqlLine{{text: "INSERT INTO t VALUES (E'a\\';b');"}, {text: "SELECT 1;"}}); len(sts) != 2 {
+		t.Errorf("statements across an escape string: %+v", sts)
 	}
 	if sts := statements([]sqlLine{{text: "CREATE FUNCTION f() AS $fn$ a; $$ b; $fn$;"}, {text: "CREATE TABLE t (x int);"}}); len(sts) != 2 {
 		t.Errorf("statements across a tagged body: %+v", sts)

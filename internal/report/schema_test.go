@@ -322,6 +322,32 @@ orders context base=true :0
   id "bigserial"  was="" ref= [primary key] @0
   email "text"  was="" ref= [not null unique] @0
 `,
+	}, {
+		name: "guards, null defaults, unknown targets, update actions, self references, a table rename",
+		diff: newFile("db/migrations/0013_mix.sql", "ALTER TABLE orders ADD COLUMN IF NOT EXISTS total text;\n"+
+			"ALTER TABLE orders ADD COLUMN flag text NOT NULL DEFAULT NULL;\nALTER TABLE orders ADD COLUMN vendor_id bigint REFERENCES vendors (id);\n"+
+			"ALTER TABLE employees DROP CONSTRAINT employees_manager_id_fkey, ADD CONSTRAINT employees_manager_fk FOREIGN KEY (manager_id) REFERENCES employees (id) ON UPDATE restrict;\n"+
+			"ALTER TABLE employees DROP COLUMN id;\nALTER TABLE users RENAME TO accounts;\n"),
+		base: "CREATE TABLE employees (\n  id bigserial PRIMARY KEY,\n  manager_id bigint REFERENCES employees (id) ON UPDATE cascade\n);\n" + schemaBase,
+		want: `orders changed base=true db/migrations/0013_mix.sql:1
+  id "bigserial"  was="" ref= [primary key] @0
+  user_id "bigint" changed was="references users.id" ref=accounts.id [] @0
+  total "numeric(10, 2)"  was="" ref= [] @0
+  note "text"  was="" ref= [] @0
+  legacy_code "text"  was="" ref= [] @0
+  flag "text" new was="" ref= [not null default NULL] @2
+  vendor_id "bigint" new was="" ref=vendors.id [] @3
+  risk: 'flag' is NOT NULL with no default: adding it fails while 'orders' has rows.
+  risk: No index on 'vendor_id': Postgres doesn't create one for a foreign key.
+employees changed base=true db/migrations/0013_mix.sql:4
+  id "bigserial" dropped was="" ref= [primary key] @5
+  manager_id "bigint" changed was="on update cascade" ref=employees.id [] @4 delete= update=restrict
+  risk: 'id' is dropped while 'employees.manager_id' still references it.
+accounts changed base=true db/migrations/0013_mix.sql:6
+  id "bigserial"  was="" ref= [primary key] @0
+  email "text"  was="" ref= [not null unique] @0
+  risk: Renamed from 'users': code and SQL that still name it break.
+`,
 	}}
 	for _, c := range cases {
 		d := Data{Diff: c.diff}

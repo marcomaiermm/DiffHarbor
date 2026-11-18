@@ -141,6 +141,7 @@ func TestOutsideTS(t *testing.T) {
 		"requests viaPackage:9   ", // a package's call given a URL
 		"url viaPackage:9 https://pkg.example.com/y  src/outbound.ts:9",
 		"requests local:10   ", // a request, no URL to name
+		"requests viaPackageEnv:12   ", // a package's call given an environment URL
 	} {
 		if !slices.Contains(got, w) {
 			t.Errorf("no %q in\n%s", w, strings.Join(got, "\n"))

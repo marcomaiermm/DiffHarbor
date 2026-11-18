@@ -389,6 +389,9 @@ inverseRelations(first: 50) { nodes { type issue { identifier } } } } }`,
 		}
 		return nil, "", wrap("linear", err)
 	}
+	if len(out.Errors) > 0 { // an issue with fields Linear failed to read: not the whole ticket
+		return nil, "", fmt.Errorf("linear: partial: %s", out.Errors[0].Message)
+	}
 	is := out.Data.Issue
 	t := &Ticket{
 		Key: is.Identifier, Title: is.Title, State: is.State.Name, URL: is.URL, Body: is.Description,

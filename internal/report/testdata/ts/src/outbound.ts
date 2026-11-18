@@ -9,3 +9,4 @@ export function viaNode() { get("http://node.example.com/x"); }
 export function viaPackage() { ping(new URL("https://pkg.example.com/y")); }
 export function local() { return fetch("/relative"); }
 export function pass() { return loadItems(); }
+export function viaPackageEnv() { ping(process.env.PING_URL!); }

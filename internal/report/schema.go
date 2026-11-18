@@ -78,6 +78,7 @@ type stab struct {
 	cols          []*scol
 	idx           []Index
 	named         map[string]named // a constraint's name, lower case, as declared or as Postgres names it
+	from          string           // its name before the PR renames it
 	created, gone bool
 }
 
@@ -92,7 +93,7 @@ type sdb map[string]*stab
 type sqlLine struct {
 	text string
 	line int
-	add  bool // the PR adds the line; a statement: it adds a line of it or removes one inside it
+	add  bool   // the PR adds the line; a statement: it adds a line of it or removes one inside it
 	gone string // the lines the PR removes right before the line, each with its newline
 }
 
@@ -163,11 +164,27 @@ func schema(d Data, base func(names []string) sdb) []Table {
 		}
 	}
 	out := make([]Table, 0, len(order))
+	moved := map[string]bool{} // the old names of the tables the PR renames: their new name has the card
+	for _, h := range head {
+		if h.from != "" {
+			moved[h.from] = true
+		}
+	}
 	for _, name := range order {
-		t := compare(was[name], head[name])
+		h, b := head[name], was[name]
+		if h == nil && moved[name] {
+			continue
+		}
+		if h != nil && h.from != "" {
+			b = was[h.from]
+		}
+		t := compare(b, h)
 		t.Name, t.Path, t.Line = name, first[name].path, first[name].line
-		t.Risks = schemaRisks(t, was[name], head[name], head)
-		t.Joins = head[name].joins()
+		t.Risks = schemaRisks(t, b, h, head)
+		if h != nil && h.from != "" {
+			t.Risks = append(t.Risks, fmt.Sprintf("Renamed from `%s`: code and SQL that still name it break.", h.from))
+		}
+		t.Joins = h.joins()
 		out = append(out, t)
 	}
 	for i := range out {
@@ -413,7 +430,7 @@ func schemaRisks(t Table, b, h *stab, head sdb) []string {
 				out = append(out, fmt.Sprintf("`%s` is dropped while %s still references it.", c.name, by))
 			}
 			continue
-		case !h.created && was == nil && !c.guess && c.notNull && c.def == "" && !c.pk:
+		case !h.created && was == nil && !c.guess && c.notNull && (c.def == "" || strings.EqualFold(c.def, "null")) && !c.pk:
 			out = append(out, fmt.Sprintf("`%s` is NOT NULL with no default: adding it fails while `%s` has rows.", c.name, t.Name))
 		case was != nil && !was.notNull && c.notNull:
 			out = append(out, fmt.Sprintf("Setting `%s` NOT NULL fails while any row holds a null.", c.name))
@@ -426,13 +443,14 @@ func schemaRisks(t Table, b, h *stab, head sdb) []string {
 // keyRisks is what the key of a column the PR touches may break: a type its target doesn't share, no index.
 func keyRisks(c, was *scol, h *stab, head sdb) []string {
 	ref, col, _ := strings.Cut(c.ref, ".")
-	to := head[ref]
-	if ref == "" || to == nil {
+	if ref == "" {
 		return nil
 	}
 	var out []string
-	if tc := to.find(cmp.Or(col, to.key())); tc != nil && c.typ != "" && tc.typ != "" && keyType(c.typ) != keyType(tc.typ) {
-		out = append(out, fmt.Sprintf("`%s` is %s, `%s.%s` is %s: the key compares across types.", c.name, c.typ, ref, tc.name, tc.typ))
+	if to := head[ref]; to != nil { // a target the migrations don't declare has no types to compare; the index check stands
+		if tc := to.find(cmp.Or(col, to.key())); tc != nil && c.typ != "" && tc.typ != "" && keyType(c.typ) != keyType(tc.typ) {
+			out = append(out, fmt.Sprintf("`%s` is %s, `%s.%s` is %s: the key compares across types.", c.name, c.typ, ref, tc.name, tc.typ))
+		}
 	}
 	indexed := (c.pk || c.unique) && c.keyPos <= 1 || slices.ContainsFunc(h.idx, func(ix Index) bool {
 		cols := strings.FieldsFunc(ix.Cols, func(r rune) bool { return r == ',' || r == ' ' })
@@ -458,7 +476,8 @@ func keyType(t string) string {
 	return t
 }
 
-// refsTo is the columns of tables the PR keeps that reference table (its column col; "" any): "`invoices.order_id`".
+// refsTo is the columns of tables the PR keeps that reference table (its column col; "" any, from other tables
+// only): "`invoices.order_id`".
 func (db sdb) refsTo(table, col string) string {
 	var by []string
 	for _, n := range slices.Sorted(maps.Keys(db)) {
@@ -468,7 +487,7 @@ func (db sdb) refsTo(table, col string) string {
 		}
 		for _, c := range t.cols {
 			ref, rc, _ := strings.Cut(c.ref, ".")
-			if !c.gone && strings.EqualFold(ref, table) && n != table && (col == "" || strings.EqualFold(rc, col)) {
+			if !c.gone && strings.EqualFold(ref, table) && (col == "" && n != table || col != "" && strings.EqualFold(rc, col) && !strings.EqualFold(c.name, col)) {
 				by = append(by, "`"+n+"."+c.name+"`")
 			}
 		}
@@ -538,27 +557,51 @@ func compare(b, h *stab) Table {
 // baseSchema is the tables names as the base's .sql files that name them declare them, read at refs/base: the files
 // in path order, which is the order migration tools number them in. partial: some files that name them went unread.
 func baseSchema(ctx context.Context, sb *proc.Sandbox, names []string) (db sdb, partial bool) {
-	args := []string{"grep", "-l", "-i", "-w", "-I"}
-	for _, n := range names {
-		args = append(args, "-e", n)
+	naming := func(names []string) []string {
+		args := []string{"grep", "-l", "-i", "-w", "-I"}
+		for _, n := range names {
+			args = append(args, "-e", n)
+		}
+		out, _ := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", append(args, "refs/base", "--", "*.sql")...)) // exit 1: nothing found
+		var specs []string
+		for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if l != "" && !strings.HasSuffix(l, ".down.sql") {
+				specs = append(specs, l)
+			}
+		}
+		return specs
 	}
-	out, _ := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", append(args, "refs/base", "--", "*.sql")...)) // exit 1: nothing found
-	var specs []string
-	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if l != "" && !strings.HasSuffix(l, ".down.sql") {
-			specs = append(specs, l)
+	read := func(specs []string) {
+		slices.Sort(specs)
+		partial = len(specs) > maxTableFiles
+		if partial {
+			specs = specs[:maxTableFiles]
+		}
+		texts := catFiles(ctx, sb, specs)
+		partial = partial || len(texts) < len(specs) // a blob too big, or past what one read takes
+		db = sdb{}
+		for _, sp := range specs {
+			db.read(texts[sp])
 		}
 	}
-	slices.Sort(specs)
-	partial = len(specs) > maxTableFiles
-	if partial {
-		specs = specs[:maxTableFiles]
+	specs := naming(names)
+	read(specs)
+	// a later migration may drop an index without naming its table: the files naming the indexes count too
+	var idx []string
+	for _, t := range db {
+		for _, ix := range t.idx {
+			if ix.Name != "" {
+				idx = append(idx, ix.Name)
+			}
+		}
 	}
-	texts := catFiles(ctx, sb, specs)
-	partial = partial || len(texts) < len(specs) // a blob too big, or past what one read takes
-	db = sdb{}
-	for _, sp := range specs {
-		db.read(texts[sp])
+	if len(idx) > 0 {
+		slices.Sort(idx)
+		all := slices.Concat(specs, naming(slices.Compact(idx)))
+		slices.Sort(all)
+		if all = slices.Compact(all); len(all) > len(specs) {
+			read(all)
+		}
 	}
 	return db, partial
 }
@@ -593,15 +636,19 @@ func statements(lines []sqlLine) []sqlLine {
 		for i := 0; i < len(t); i++ {
 			c := t[i]
 			switch {
+			case in == escString && c == '\\' && i+1 < len(t):
+				b.WriteByte(c)
+				i++
+				c = t[i]
 			case in != "":
-				if strings.HasPrefix(t[i:], in) {
-					b.WriteString(in)
-					i += len(in) - 1
+				if closer := strings.TrimPrefix(in, `\`); strings.HasPrefix(t[i:], closer) {
+					b.WriteString(closer)
+					i += len(closer) - 1
 					in = ""
 					continue
 				}
 			case c == '\'':
-				in = "'"
+				in = quoteOpen(t, i)
 			case c == '$' && dollarOpen.MatchString(t[i:]):
 				in = dollarOpen.FindString(t[i:])
 				b.WriteString(in)
@@ -674,6 +721,11 @@ func (db sdb) apply(s sqlLine, pr bool, touch func(string)) {
 		name := bareName(m[1])
 		touch(name)
 		t := db.table(name)
+		if ws := words(m[2]); len(ws) == 3 && strings.EqualFold(ws[0], "RENAME") && strings.EqualFold(ws[1], "TO") {
+			db.move(t, bareName(ws[2]), pr)
+			touch(t.name)
+			return
+		}
 		for _, a := range splitTop(m[2]) {
 			t.alter(words(a), line, pr)
 		}
@@ -722,6 +774,22 @@ func (db sdb) apply(s sqlLine, pr bool, touch func(string)) {
 			}
 		}
 	}
+}
+
+// move renames table t to "to", in what references it too; from keeps the PR's first old name.
+func (db sdb) move(t *stab, to string, pr bool) {
+	if pr && t.from == "" {
+		t.from = t.name
+	}
+	delete(db, t.name)
+	for _, o := range db {
+		for _, c := range o.cols {
+			if ref, col, _ := strings.Cut(c.ref, "."); strings.EqualFold(ref, t.name) {
+				c.ref = strings.TrimSuffix(to+"."+col, ".")
+			}
+		}
+	}
+	t.name, db[to] = to, t
 }
 
 func (db sdb) table(name string) *stab {
@@ -782,9 +850,10 @@ func (t *stab) alter(ws []string, line int, pr bool) {
 	ws = skip(ws[1:], "COLUMN")
 	switch op {
 	case "ADD":
+		guarded := len(ws) > 0 && strings.EqualFold(ws[0], "IF")
 		ws = skip(ws, "IF", "NOT", "EXISTS")
-		if len(ws) == 0 || t.constraint(ws, line) {
-			return
+		if len(ws) == 0 || t.constraint(ws, line) || guarded && t.find(bareName(ws[0])) != nil {
+			return // IF NOT EXISTS on a column it has: it stays as it is
 		}
 		t.add(ws, line)
 	case "DROP":
@@ -1290,8 +1359,13 @@ func (c *scol) differs(h *scol) string {
 	switch {
 	case c.ref != h.ref:
 		w = append(w, pick(c.ref != "", "references "+c.ref, "no reference"))
-	case c.onDelete != h.onDelete:
-		w = append(w, "on delete "+cmp.Or(c.onDelete, "no action"))
+	case c.onDelete != h.onDelete || c.onUpdate != h.onUpdate:
+		if c.onDelete != h.onDelete {
+			w = append(w, "on delete "+cmp.Or(c.onDelete, "no action"))
+		}
+		if c.onUpdate != h.onUpdate {
+			w = append(w, "on update "+cmp.Or(c.onUpdate, "no action"))
+		}
 	}
 	if c.pk != h.pk || c.unique != h.unique {
 		w = append(w, pick(c.unique || c.pk, "unique", "not unique"))

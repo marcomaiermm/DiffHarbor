@@ -8,9 +8,11 @@ import (
 	"diffharbor/internal/checks"
 	"diffharbor/internal/diff"
 	"diffharbor/internal/proc"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
+	"os/exec"
 	"path"
 	"regexp"
 	"slices"
@@ -1449,6 +1451,40 @@ func migrationLines(d Data, f func(p string, l sqlLine)) {
 // dollarOpen is what opens a dollar-quoted body, $$ or $tag$; the same text closes it.
 var dollarOpen = regexp.MustCompile(`^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$`)
 
+// escString is what closes a Postgres escape string, E'…', where a backslash escapes the quote.
+const escString = `\'`
+
+// quoteOpen is what closes the string the quote at t[i] opens: an escape string after an E of its own.
+func quoteOpen(t string, i int) string {
+	if i > 0 && (t[i-1] == 'E' || t[i-1] == 'e') && (i == 1 || !isWordByte(t[i-2])) {
+		return escString
+	}
+	return "'"
+}
+
+func isWordByte(c byte) bool {
+	return c == '_' || c >= '0' && c <= '9' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z'
+}
+
+// closeAt is where in t what closes in ends, -1 for not in t.
+func closeAt(t, in string) int {
+	if in != escString {
+		if j := strings.Index(t, in); j >= 0 {
+			return j + len(in)
+		}
+		return -1
+	}
+	for i := 0; i < len(t); i++ {
+		switch t[i] {
+		case '\\':
+			i++
+		case '\'':
+			return i + 1
+		}
+	}
+	return -1
+}
+
 // uncomment is a line of SQL without its /* */ comments, outside quotes and dollar-quoted bodies. in is what closes
 // where the line starts ("" in code, "*/" in a comment, "'" in a string, the tag of a dollar-quoted body), and the
 // result what closes where the next line does. A -- comment stays: statements cuts it.
@@ -1456,7 +1492,7 @@ func uncomment(t, in string) (string, string) {
 	var b strings.Builder
 	for i := 0; i < len(t); {
 		if in != "" {
-			j := strings.Index(t[i:], in)
+			j := closeAt(t[i:], in)
 			if j < 0 {
 				if in != "*/" {
 					b.WriteString(t[i:])
@@ -1464,9 +1500,9 @@ func uncomment(t, in string) (string, string) {
 				return b.String(), in
 			}
 			if in != "*/" {
-				b.WriteString(t[i : i+j+len(in)])
+				b.WriteString(t[i : i+j])
 			}
-			i, in = i+j+len(in), ""
+			i, in = i+j, ""
 			continue
 		}
 		switch {
@@ -1475,7 +1511,7 @@ func uncomment(t, in string) (string, string) {
 		case strings.HasPrefix(t[i:], "/*"):
 			in, i = "*/", i+2
 		case t[i] == '\'':
-			in = "'"
+			in = quoteOpen(t, i)
 			b.WriteByte('\'')
 			i++
 		case t[i] == '$' && dollarOpen.MatchString(t[i:]):
@@ -1567,11 +1603,10 @@ func sqlNames(git func(args ...string) []byte, ts []MapTable, names []string) {
 		if len(f) != 3 || diff.Kind(f[0]) == "test" {
 			continue
 		}
-		if m := sql.FindStringSubmatch(f[2]); m != nil {
-			for i := range ts {
-				if strings.EqualFold(ts[i].Name, m[2]) && len(ts[i].Named) < maxNamed {
-					ts[i].Named = append(ts[i].Named, f[0]+":"+f[1])
-				}
+		for i := range ts {
+			if slices.ContainsFunc(sql.FindAllStringSubmatch(f[2], -1), func(m []string) bool { return strings.EqualFold(ts[i].Name, m[2]) }) &&
+				len(ts[i].Named) < maxNamed {
+				ts[i].Named = append(ts[i].Named, f[0]+":"+f[1])
 			}
 		}
 	}
@@ -1588,8 +1623,13 @@ func (b *mapper) tables(sb *proc.Sandbox) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), tableTime)
 	defer cancel()
+	failed := false // a search git didn't finish: what it found is not all there is
 	git := func(args ...string) []byte {
-		out, _ := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", args...)) // exit 1: nothing found
+		out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", args...))
+		var exit *exec.ExitError
+		if err != nil && (!errors.As(err, &exit) || exit.ExitCode() != 1) { // exit 1: nothing found
+			failed = true
+		}
 		return out
 	}
 	names := make([]string, min(len(ts), maxDrops))
@@ -1639,6 +1679,9 @@ func (b *mapper) tables(sb *proc.Sandbox) {
 		ts[i].Cut = cut || cutHead || ctx.Err() != nil
 	}
 	sqlNames(git, ts, names)
+	for i := range ts {
+		ts[i].Cut = ts[i].Cut || failed
+	}
 	b.m.Tables = ts
 }
 
@@ -1686,7 +1729,9 @@ func findImporters(git func(args ...string) []byte, read func(specs []string) ma
 				specs = append(specs, tag+p)
 			}
 		}
-		maps.Copy(texts, read(specs))
+		got := read(specs)
+		cut = cut || len(got) < len(specs) // a blob too big, or past what one read takes
+		maps.Copy(texts, got)
 		im = importers(texts, d.file, d.id, tag, seed)
 		if len(im.mods) == len(mods) {
 			break

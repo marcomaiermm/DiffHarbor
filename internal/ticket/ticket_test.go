@@ -215,6 +215,8 @@ func TestLinear(t *testing.T) {
 			fmt.Fprint(w, `{"errors":[{"message":"Entity not found: Issue"},{"message":"Authentication required, not authenticated"}],"data":{"issue":null}}`)
 		case q.Variables.ID == "ENG-10":
 			fmt.Fprint(w, `{"errors":[{"message":"Entity not found: Issue"}],"data":{"issue":null}}`)
+		case q.Variables.ID == "ENG-11":
+			fmt.Fprint(w, `{"errors":[{"message":"Cannot read relations"}],"data":{"issue":{"identifier":"ENG-11","title":"Half"}}}`)
 		case q.Variables.ID == "ENG-8":
 			fmt.Fprint(w, `{"data":{"issue":{"identifier":"ENG-8","title":"Moved","previousIdentifiers":["PYR-1","PYR-8"],"state":{"name":"Done","type":"completed"}}}}`)
 		default:
@@ -238,7 +240,8 @@ func TestLinear(t *testing.T) {
 	if len(f.Tickets) != 2 || f.Tickets[0].Key != "ENG-7" || f.Tickets[0].Was != "OLD-7" || f.Tickets[1].Was != "PYR-8" || !f.Tickets[1].Done {
 		t.Fatalf("moved: %+v", f.Tickets)
 	}
-	if f := Lookup(t.Context(), nil, "ENG-9 ENG-10", "", "", ""); len(f.Tickets) != 0 || !strings.Contains(f.Failed["ENG-9"], "Authentication") || f.Failed["ENG-10"] != "" {
+	if f := Lookup(t.Context(), nil, "ENG-9 ENG-10 ENG-11", "", "", ""); len(f.Tickets) != 0 || !strings.Contains(f.Failed["ENG-9"], "Authentication") ||
+		f.Failed["ENG-10"] != "" || !strings.Contains(f.Failed["ENG-11"], "partial") {
 		t.Fatalf("graphql errors: %+v %+v", f.Tickets, f.Failed)
 	}
 	LinearKey = "bad"
