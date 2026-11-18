@@ -289,6 +289,18 @@ func TestJSONTests(t *testing.T) {
 	}
 }
 
+// A file that fails after its tests passed (an afterAll that throws) is broken; one a failed test explains is not.
+func TestJSONTestsHookFails(t *testing.T) {
+	js := `{"testResults":[
+{"name":"/w/repo/web/a.test.ts","status":"failed","assertionResults":[{"ancestorTitles":[],"title":"a","status":"passed"}]},
+{"name":"/w/repo/web/b.test.ts","status":"failed","assertionResults":[{"ancestorTitles":[],"title":"b","status":"failed"}]}]}`
+	var got Tests
+	jsonTests([]byte(js), "/w/repo", &got)
+	if got.Ran["a"] != "pass" || got.Ran["b"] != "fail" || !slices.Equal(got.Broken, []string{"web/a.test.ts"}) {
+		t.Errorf("ran %v, broken %v", got.Ran, got.Broken)
+	}
+}
+
 // The checks take vitest's results from its JSON reporter's file, the dot reporter's text stays the hint.
 func TestVitestJSON(t *testing.T) {
 	defer func(pi bool) { proc.AsPi = pi }(proc.AsPi)

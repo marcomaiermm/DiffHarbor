@@ -237,3 +237,25 @@ func TestStoresWalk(t *testing.T) {
 		t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// Two calls of one helper, each with its own URL: two outside calls.
+func TestOutsideSameHelperTwice(t *testing.T) {
+	start := declKey{"x.go", "start"}
+	g := map[declKey][]cgEdge{
+		start: {
+			{Kind: "url", SPath: "x.go", SName: "start", Line: 4, URL: "https://a.example.com/x", URLAt: "x.go:4"},
+			{Kind: "calls", SPath: "x.go", SName: "start", TPath: "x.go", TName: "send", Line: 4},
+			{Kind: "url", SPath: "x.go", SName: "start", Line: 6, URL: "https://b.example.com/x", URLAt: "x.go:6"},
+			{Kind: "calls", SPath: "x.go", SName: "start", TPath: "x.go", TName: "send", Line: 6},
+		},
+		{"x.go", "send"}: {{Kind: "requests", SPath: "x.go", SName: "send", TName: "Do", Line: 20}},
+	}
+	got := sendersFrom(g, start)
+	want := []OutsideCall{
+		{System: "a.example.com", Path: "x.go", Line: 4, URL: "https://a.example.com/x", URLAt: "x.go:4"},
+		{System: "b.example.com", Path: "x.go", Line: 6, URL: "https://b.example.com/x", URLAt: "x.go:6"},
+	}
+	if !slices.EqualFunc(got, want, OutsideCall.same) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}

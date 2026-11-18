@@ -41,6 +41,30 @@ func TestChecks(t *testing.T) {
 	}
 }
 
+// A branch and a merge request pipeline of one sha: a job in both by the newer, one only in the older still counts.
+func TestChecksPipelines(t *testing.T) {
+	serve(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/projects/5/pipelines":
+			fmt.Fprint(w, `[{"id":812,"web_url":"https://gl/p/812"},{"id":800,"web_url":"https://gl/p/800"}]`)
+		case "/projects/5/pipelines/812/jobs":
+			fmt.Fprint(w, `[{"name":"test","status":"success"}]`)
+		case "/projects/5/pipelines/800/jobs":
+			fmt.Fprint(w, `[{"name":"test","status":"failed"},{"name":"danger","status":"failed"}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	got, err := (&pr{api: "/projects/5"}).Checks("abc")
+	want := []report.Check{
+		{Name: "test", Status: "completed", Conclusion: "success", Workflow: "#812", URL: "https://gl/p/812"},
+		{Name: "danger", Status: "completed", Conclusion: "failure", Workflow: "#800", URL: "https://gl/p/800"},
+	}
+	if err != nil || !slices.Equal(got, want) {
+		t.Fatalf("%v %v", got, err)
+	}
+}
+
 // A Blocked PR's "failure" posts GitLab's "failed", the state name GitLab accepts.
 func TestStatusFailure(t *testing.T) {
 	var got map[string]string

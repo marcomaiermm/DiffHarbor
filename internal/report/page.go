@@ -1035,7 +1035,10 @@ func (v *view) covered() []crow {
 		if pending > 0 {
 			ls = append(ls, mline{Chip: evRun, Text: plural(pending, "CI check was", "CI checks were") + " still running when the review read them."})
 		}
-		if ci.Err != "" {
+		switch {
+		case ci.Err != "" && len(ci.Checks) > 0: // a part the App may not read: its runs, or the statuses other CI posts
+			ls = append(ls, mline{Chip: evRun, Text: "Not all of the forge's checks were read for this review, so a failed one may be missing here."})
+		case ci.Err != "":
 			ls = append(ls, mline{Chip: evRun, Text: "The forge's checks weren't read for this review, so no CI result is on this page."})
 		}
 	}

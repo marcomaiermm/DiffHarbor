@@ -42,7 +42,7 @@ for (const { db: file, prefix } of dbs) {
     " s.end_line send, t.name tname, t.file_path tpath, t.start_line tline from edges e join nodes s on s.id = e.source" +
     " join nodes t on t.id = e.target where e.kind in ('calls', 'references', 'instantiates', 'extends', 'implements')" +
     " and t.kind not in " + skip + " and (t.name in (select value from json_each(?1)) or s.name in (select value from json_each(?1))" +
-    " or (t.kind = 'method' and t.file_path in (select value from json_each(?2))))").all(list, own)) {
+    " or (t.kind = 'method' and t.file_path in (select value from json_each(?2))) or (s.kind = 'method' and s.file_path in (select value from json_each(?2))))").all(list, own)) {
     e.spath = prefix + e.spath;
     e.tpath = prefix + e.tpath;
     if (!other(e.spath, prefix) && !other(e.tpath, prefix)) out.edges.push(e);
@@ -178,7 +178,11 @@ func (idx *cgIndex) exact(root *os.Root, changed, added map[string]bool, syms ma
 		here      map[Ref]int // a site's place in Here
 		kept      map[Ref]int // a site's place in refs
 	}
-	fresh := idx.freshMethods(changed, added, syms, func(n cgNode) bool { return find(n.Path, n.Name, n.Line) != nil })
+	// the scan has it when its declaration of that name sits in the method's lines, not another of that name
+	fresh := idx.freshMethods(changed, added, syms, func(n cgNode) bool {
+		s := find(n.Path, n.Name, n.Line)
+		return s != nil && s.Line >= n.Line && s.Line <= n.End
+	})
 	for qn, ss := range fresh {
 		syms[qn] = append(syms[qn], ss...)
 		plain := qn[strings.LastIndex(qn, ".")+1:]
@@ -589,10 +593,14 @@ func (idx *cgIndex) tests(sb *proc.Sandbox, root *os.Root, changed map[string]bo
 		Name string `json:"name"`
 	}
 	var starts []start
+	fresh := map[string][]string{} // freshMethods' {class}.{method} by the method's name, the index's
 	for name, ss := range syms {
+		if own := ownName(name); own != name {
+			fresh[own] = append(fresh[own], name)
+		}
 		for _, s := range ss {
-			if s.Exact && changed[s.Path] && !slices.Contains(starts, start{s.Path, name}) {
-				starts = append(starts, start{s.Path, name})
+			if s.Exact && changed[s.Path] && !slices.Contains(starts, start{s.Path, ownName(name)}) {
+				starts = append(starts, start{s.Path, ownName(name)})
 			}
 		}
 	}
@@ -628,6 +636,13 @@ func (idx *cgIndex) tests(sb *proc.Sandbox, root *os.Root, changed map[string]bo
 		for i, s := range syms[g.Name] {
 			if s.Path == g.Path && (best == nil || abs(s.Line-g.Line) < abs(best.Line-g.Line)) {
 				best = &syms[g.Name][i]
+			}
+		}
+		for _, q := range fresh[g.Name] { // a fresh method is the index's node at its line, of its class only
+			for i, s := range syms[q] {
+				if s.Path == g.Path && s.Line == g.Line {
+					best = &syms[q][i]
+				}
 			}
 		}
 		switch {

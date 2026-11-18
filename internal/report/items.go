@@ -91,26 +91,31 @@ func statusChip(status string, ev chip) *schip {
 	return &schip{status, icon}
 }
 
-// span is a place "path:line", "path:from-to" or "path": its path and lines, 0 without.
+// span is a place "path:line", "path:from-to" or "path": its path and lines, 0 without. The last colon cuts the
+// lines off, as the contract pass reads a place, so a path may hold a colon.
 func span(at string) (p string, from, to int) {
-	p, r, ok := strings.Cut(at, ":")
-	if !ok {
+	i := strings.LastIndex(at, ":")
+	if i < 0 {
 		return at, 0, 0
 	}
-	a, b, _ := strings.Cut(r, "-")
-	from, _ = strconv.Atoi(a)
-	to, err := strconv.Atoi(b)
+	a, b, _ := strings.Cut(at[i+1:], "-")
+	from, err := strconv.Atoi(a)
+	if err != nil {
+		return at, 0, 0
+	}
+	p = at[:i]
+	to, err = strconv.Atoi(b)
 	if err != nil || to < from {
 		to = from
 	}
 	return p, from, to
 }
 
-// waiting is the gates that make the merge wait, one per name: its card's ID.
+// waiting is the gates that make the merge wait, one per quote: the model may give two quotes one name.
 func (v *view) waiting() []review.Gate {
 	var out []review.Gate
 	for _, g := range v.Terms.Gates {
-		if g.Waits && !slices.ContainsFunc(out, func(o review.Gate) bool { return o.Name == g.Name }) {
+		if g.Waits && !slices.ContainsFunc(out, func(o review.Gate) bool { return o.Quote == g.Quote }) {
 			out = append(out, g)
 		}
 	}
@@ -119,6 +124,23 @@ func (v *view) waiting() []review.Gate {
 
 // gateKey is a gate's Version.Items place: its ticket, else its exact quote; the model words its name anew each run.
 func gateKey(g review.Gate) string { return cmp.Or(g.Ticket, g.Text) }
+
+// gateID is a gate's card ID: its name's slug, numbered after the first waiting gate with that slug.
+func (v *view) gateID(g review.Gate) string {
+	id, n := slug(g.Name)+"-gate", 1
+	for _, o := range v.waiting() {
+		if o.Quote == g.Quote {
+			break
+		}
+		if slug(o.Name) == slug(g.Name) {
+			n++
+		}
+	}
+	if n > 1 {
+		id += "-" + strconv.Itoa(n)
+	}
+	return id
+}
 
 // gateLink is what a link to a gate names it: "the cutover gate", else "the gate".
 func gateLink(name string) string {
@@ -180,7 +202,7 @@ func (v *view) clears(g review.Gate) string {
 
 // gateCard is a gate in Before you merge (5.6): always open, its quote, the tracker line and how a run starts.
 func (v *view) gateCard(g review.Gate) *card {
-	k := &card{ID: slug(g.Name) + "-gate", Kind: "Before merging", Gate: true, Title: "The merge waits for " + g.Name, Chip: wordChip(g.In), Keys: []string{"gate\t" + gateKey(g)}}
+	k := &card{ID: v.gateID(g), Kind: "Before merging", Gate: true, Title: "The merge waits for " + g.Name, Chip: wordChip(g.In), Keys: []string{"gate\t" + gateKey(g)}}
 	k.Blocks = []cblock{{Chip: k.Chip, Lines: []cline{{Text: g.Text, Quote: true, Cite: cite(g.Quote)}}}}
 	t := v.gateTracker(g, true)
 	k.Blocks = append(k.Blocks, cblock{Chip: t.Chip, Lines: []cline{{Text: t.Text}}})
@@ -238,6 +260,9 @@ func (v *view) diffCard(i int, d review.Difference) *card {
 	}
 	if xp, from, to := span(d.Excerpt); xp == p && from > 0 {
 		does.Excerpt = v.excerptAt(p, from, to, max(line, from))
+		if does.Excerpt != nil && does.Excerpt.At == "on the base" {
+			does.Chip = evBase
+		}
 	}
 	if d.Does != "" {
 		does.Lines = []cline{{Text: d.Does}}

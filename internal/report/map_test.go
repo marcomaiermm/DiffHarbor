@@ -64,8 +64,8 @@ func TestMapParts(t *testing.T) {
 	if len(m.Parts) != 16 {
 		t.Fatalf("%d parts, want 15 and Other", len(m.Parts))
 	}
-	o := mapPart(m, "other")
-	if o.Label != "Other · 5 folders" || len(o.Files) != 5 || m.Parts[15].ID != "other" || mapPart(m, "d19").ID == "" || mapPart(m, "d18").ID == "" {
+	o := mapPart(m, otherID)
+	if o.Label != "Other · 5 folders" || len(o.Files) != 5 || m.Parts[15].ID != otherID || mapPart(m, "d19").ID == "" || mapPart(m, "d18").ID == "" {
 		t.Errorf("other %+v", o)
 	}
 
@@ -784,5 +784,110 @@ func TestFindingPathUnknown(t *testing.T) {
 	w = ways(v, v.Symbols)[0]
 	if j := v.findingPath(w, w.Rows, "", "", "", v.hops()).Items[1]; j.Line != 0 || j.Text != "" || j.Rel != "call" || j.Sh != 2 {
 		t.Errorf("joint without a place %+v", j)
+	}
+}
+
+// A folder named other keeps its own part beside "Other": one ID each, its deleted file its own.
+func TestMapOtherFolder(t *testing.T) {
+	var d strings.Builder
+	for i := range 19 {
+		d.WriteString(newFile(fmt.Sprintf("d%02d/x.go", i), "package x\n"))
+	}
+	for _, f := range []string{"a", "b", "c"} { // the biggest: it stays
+		d.WriteString(newFile("other/"+f+".go", "package other\n"))
+	}
+	d.WriteString(goneFile("other/z.go"))
+	m := BuildMap(nil, Data{Diff: d.String()}, nil)
+	ids := map[string]bool{}
+	for _, p := range m.Parts {
+		if ids[p.ID] {
+			t.Fatalf("two parts with ID %q", p.ID)
+		}
+		ids[p.ID] = true
+	}
+	if o := mapPart(m, "other"); len(o.Files) != 3 || o.Deleted != 1 {
+		t.Errorf("the folder other %+v", o)
+	}
+	if o := mapPart(m, otherID); o.Folders != 5 || o.Deleted != 0 {
+		t.Errorf("Other %+v", o)
+	}
+}
+
+// Every table a migration drops is in its box, past the cap of tables searched too.
+func TestMapDropsPastCap(t *testing.T) {
+	var sql strings.Builder
+	for i := range maxDrops + 10 {
+		fmt.Fprintf(&sql, "DROP TABLE t%d;\n", i)
+	}
+	d := Data{Diff: newFile("db/migrations/0001_drop.sql", sql.String()) + newFile("a/a.go", "package a\n") + newFile("b/b.go", "package b\n")}
+	m := BuildMap(nil, d, nil)
+	if len(m.Tables) != maxDrops+10 {
+		t.Errorf("%d tables, want %d", len(m.Tables), maxDrops+10)
+	}
+	if k := slices.IndexFunc(m.Deploy, func(x MapDeploy) bool { return x.Kind == "migration" }); k < 0 || len(m.Deploy[k].Drops) != maxDrops+10 {
+		t.Errorf("deploy %+v", m.Deploy)
+	}
+}
+
+// An alias joins the table its own module declares, not another module's of the same name.
+func TestJoinTablesSameName(t *testing.T) {
+	tables := map[string]StorePath{
+		"a/schema.ts:1": {Table: "items", TPath: "a/schema.ts", TLine: 1, Text: "export const items = pgTable(\"a_items\", {"},
+		"b/schema.ts:1": {Table: "items", TPath: "b/schema.ts", TLine: 1, Text: "export const items = pgTable(\"b_items\", {"},
+		"b/schema.ts:5": {Table: "later", TPath: "b/schema.ts", TLine: 5, Text: "export const later = alias(items, \"later\")"},
+	}
+	root, _ := joinTables(tables)
+	if got := root("b/schema.ts:5"); got != "b/schema.ts:1" {
+		t.Errorf("the alias joins %q, want b/schema.ts:1", got)
+	}
+}
+
+// A migration of public.orders is the table the code names public.orders.
+func TestMapSchemaMigration(t *testing.T) {
+	lines := strings.Repeat("x\n", 6)
+	s := changedSym("a/a.go", 3, "new")
+	s.Stores = []StorePath{{Kind: "reads", Table: "public.orders", At: "a/a.go:4"}}
+	d := Data{
+		Diff:    newFile("a/a.go", lines) + newFile("b/b.go", lines) + newFile("db/migrations/0001_x.sql", "ALTER TABLE public.\"orders\" ADD COLUMN x int;\n"),
+		Symbols: map[string][]Symbol{"Load": {s}},
+	}
+	o := storeAt(BuildMap(nil, d, nil), "public.orders")
+	if want := []MapStoreMigration{{"db/migrations/0001_x.sql", "Migration 0001", "changed", []int{1}}}; o == nil || !reflect.DeepEqual(o.Migrations, want) {
+		t.Errorf("public.orders %+v", o)
+	}
+}
+
+// Two declarations of one name in a part: a call into the one that only reads keeps its chevron at the caller.
+func TestMapWritesByDecl(t *testing.T) {
+	lines := strings.Repeat("x\n", 12)
+	reads := changedSym("a/a.go", 3, "new", "b/b.go:7=calls")
+	writes := changedSym("a/other.go", 3, "new")
+	writes.Stores = []StorePath{{Kind: "writes", Table: "users", At: "a/other.go:4"}}
+	d := Data{
+		Diff:    newFile("a/a.go", lines) + newFile("a/other.go", lines) + newFile("b/b.go", lines),
+		Symbols: map[string][]Symbol{"Save": {reads, writes}},
+	}
+	l := mapLine(BuildMap(nil, d, nil), "a", "b")
+	if l == nil || l.Chevron != "to" || l.Names[0].Writes != nil {
+		t.Errorf("a-b %+v", l)
+	}
+}
+
+// What runs on migrate: a statement past the page's diff cap, not one in a /* */ comment, not a test's SQL.
+func TestUpLines(t *testing.T) {
+	big := strings.Repeat("SELECT 1;\n", 3500) + "DROP TABLE far;\n/*\nDROP TABLE commented;\n*/ DROP TABLE after; /* x */\n"
+	const fx = "testdata/seed.sql"
+	d := Data{Diff: newFile("db/m.sql", big) + newFile(fx, "DROP TABLE fixture;\n"), Sources: map[string]string{"db/m.sql": big}}
+	var got []string
+	upLines(d, func(p string, no int, text string) {
+		if strings.Contains(text, "DROP") {
+			got = append(got, fmt.Sprintf("%s:%d %s", p, no, strings.TrimSpace(text)))
+		}
+	})
+	if want := []string{"db/m.sql:3501 DROP TABLE far;", "db/m.sql:3504 DROP TABLE after;"}; !slices.Equal(got, want) {
+		t.Errorf("up lines: %q, want %q", got, want)
+	}
+	if s, open := uncomment("a /* b */ c -- /* d", false); s != "a  c -- /* d" || open {
+		t.Errorf("uncomment: %q %v", s, open)
 	}
 }

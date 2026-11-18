@@ -102,8 +102,12 @@ func sendersFrom(g map[declKey][]cgEdge, start declKey) []OutsideCall {
 		at    int // the line of start that began the path
 		calls []StoreCall
 	}
+	type visit struct {
+		k  declKey
+		at int
+	}
 	var out []OutsideCall
-	seen := map[declKey]bool{start: true}
+	seen := map[visit]bool{} // by the line of start too: a second call of a helper passes its own URL
 	level := []step{{start, 0, nil}}
 	for hop := 0; hop <= maxHops && len(level) > 0 && len(out) < maxPer; hop++ {
 		var next []step
@@ -121,8 +125,8 @@ func sendersFrom(g map[declKey][]cgEdge, start declKey) []OutsideCall {
 						c.Calls = append(slices.Clip(s.calls), callOf(e))
 						out = append(out, c)
 					}
-				case e.Kind == "calls" && hop < maxHops && e.TPath != "" && !seen[declKey{e.TPath, e.TName}]:
-					seen[declKey{e.TPath, e.TName}] = true
+				case e.Kind == "calls" && hop < maxHops && e.TPath != "" && declKey{e.TPath, e.TName} != start && !seen[visit{declKey{e.TPath, e.TName}, at}]:
+					seen[visit{declKey{e.TPath, e.TName}, at}] = true
 					next = append(next, step{declKey{e.TPath, e.TName}, at, append(slices.Clip(s.calls), callOf(e))})
 				}
 			}

@@ -129,3 +129,42 @@ git rev-parse pr`)
 		t.Fatalf("Learn: %v", ks)
 	}
 }
+
+// learnRepo is a repo whose refs/base is where script leaves it, after a first commit that reads as no change, with
+// proc.AsPi off until t ends; a commit's author as "A=name c …".
+func learnRepo(t *testing.T, script string) *proc.Sandbox {
+	t.Helper()
+	pi := proc.AsPi
+	t.Cleanup(func() { proc.AsPi = pi })
+	proc.AsPi = false
+	sb := &proc.Sandbox{Dir: t.TempDir()}
+	c := exec.Command("sh", "-c", `set -e
+git init -q "$0"; cd "$0"; git commit -q --allow-empty -m root
+c() { GIT_AUTHOR_NAME=$A GIT_AUTHOR_EMAIL=$A@x git commit -q "$@"; }
+`+script+`
+git update-ref refs/base HEAD`, sb.Repo())
+	c.Env = append(c.Environ(), "GIT_AUTHOR_NAME=o", "GIT_AUTHOR_EMAIL=o@x", "GIT_COMMITTER_NAME=o", "GIT_COMMITTER_EMAIL=o@x")
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
+	return sb
+}
+
+// A name git would quote is the file's name as it is.
+func TestLearnQuotedName(t *testing.T) {
+	sb := learnRepo(t, `echo 1 > 'a"b.txt'; git add .; A=Quinn c -m add`)
+	if ks := Learn(context.Background(), sb, "+++ b/a\"b.txt\n", time.Now().Add(time.Hour)); fmt.Sprint(ks) != `map[a"b.txt:{0 [Quinn]}]` {
+		t.Fatalf("Learn: %v", ks)
+	}
+}
+
+// A file's history ends where it was added: a former file of its name, deleted before, isn't it. One deleted at the
+// base, which the PR adds anew, has none.
+func TestLearnStopsAtAdd(t *testing.T) {
+	sb := learnRepo(t, `echo 1 > x.txt; echo 1 > y.txt; git add .; A=Old c -m old
+git rm -q x.txt y.txt; A=Old c -m gone
+echo 2 > x.txt; git add .; A=New c -m new`)
+	if ks := Learn(context.Background(), sb, "+++ b/x.txt\n+++ b/y.txt\n", time.Now().Add(time.Hour)); fmt.Sprint(ks) != `map[x.txt:{0 [New]}]` {
+		t.Fatalf("Learn: %v", ks)
+	}
+}

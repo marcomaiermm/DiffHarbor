@@ -227,6 +227,15 @@ func TestFormat(t *testing.T) {
 	}
 }
 
+// A details block of the body's own stays in it: only Format's folds are cut.
+func TestParseOwnDetails(t *testing.T) {
+	body := "b\n\n<details>\n<summary>Log</summary>\n\nx\n\n</details>\n\nmore"
+	c := Finding{Comment: review.Comment{Severity: "major", Title: "t", Body: body}}
+	if p := Parse(Format(c, "")); p.Body != body {
+		t.Fatalf("parse %+v", p)
+	}
+}
+
 func TestSticky(t *testing.T) {
 	st := State{}.Update(review.Result{
 		Summary: "s", Walkthrough: map[string]string{"a.go": "x | y", "gone.go": "z"},

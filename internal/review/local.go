@@ -243,16 +243,29 @@ func Changes(ctx context.Context, sb *proc.Sandbox) []Commit {
 func named(ctx context.Context, sb *proc.Sandbox, rng string) []Commit {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "-c", "core.quotepath=off", "log", "--no-merges", "--no-renames",
+	// -z: the names as they are, none quoted; each commit starts with an empty record, as no name is empty
+	out, err := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", "log", "-z", "--no-merges", "--no-renames",
 		"--format=%x00%H%x09%s", "--name-only", rng))
 	if err != nil {
 		return nil
 	}
 	var cs []Commit
-	for c := range strings.SplitSeq(string(out), "\x00") {
-		head, files, _ := strings.Cut(c, "\n")
-		if sha, subject, ok := strings.Cut(head, "\t"); ok {
-			cs = append(cs, Commit{SHA: sha, Subject: subject, Paths: strings.FieldsFunc(files, func(r rune) bool { return r == '\n' })})
+	head := false
+	for r := range strings.SplitSeq(string(out), "\x00") {
+		switch {
+		case r == "":
+			head = true
+		case head:
+			head = false
+			if sha, subject, ok := strings.Cut(r, "\t"); ok {
+				cs = append(cs, Commit{SHA: sha, Subject: subject})
+			}
+		case len(cs) > 0:
+			c := &cs[len(cs)-1]
+			if len(c.Paths) == 0 {
+				r = strings.TrimPrefix(r, "\n") // the line between the subject and the names
+			}
+			c.Paths = append(c.Paths, r)
 		}
 	}
 	return cs

@@ -7,7 +7,7 @@ func TestFileLook(t *testing.T) {
 		"internal/orders/orders.go:2": "seti/go2", "internal/orders/orders_test.go": "flask-conical",
 		"db/migrations/0007_orders.sql:2": "seti/db", "web/App.tsx": "seti/react", "config/app.yaml": "seti/yml",
 		"docs/guide.md": "seti/markdown", "Dockerfile": "seti/docker", "Makefile": "seti/makefile", "a/b.unknown": "seti/default",
-		"tsconfig.base.json": "seti/tsconfig", "3 files": "",
+		"tsconfig.base.json": "seti/tsconfig", "3 files": "", "2 queries, and 1 call": "", "docs/release notes.md:4": "seti/markdown",
 	} {
 		if got := fileLook(in).Icon; got != want {
 			t.Errorf("fileLook(%q) = %q, want %q", in, got, want)

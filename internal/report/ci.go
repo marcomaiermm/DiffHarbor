@@ -11,8 +11,8 @@ import (
 // stays "pending" on this version.
 type CI struct {
 	Checks []Check
-	// Err is why the forge's checks weren't read (a missing App permission, a timeout): the page says they
-	// weren't read. Checks is empty then.
+	// Err is why the forge's checks weren't read, or not all of them (a missing App permission, a timeout): the page
+	// says so. Checks holds what was read.
 	Err       string
 	Workflows []string // the CI files on the base branch, read with git: .github/workflows/*, .gitlab-ci.yml
 	Tests     string   // of Workflows, the one that runs the tests on a pull request (checks.CITests); "" for none

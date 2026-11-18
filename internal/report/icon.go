@@ -143,10 +143,10 @@ var byExt = map[string]look{
 
 // fileLook is a file's icon by its path, a place's "path:line" too: a test file the flask (decision 37), a file by
 // its name or extension Seti's icon in its language's color, else Seti's plain file. A place that names no file
-// ("3 files") has none.
+// ("3 files", "2 queries, and 1 call": a count first) has none.
 func fileLook(place string) look {
 	p := place
-	if p == "" || strings.ContainsRune(p, ' ') {
+	if n, _, ok := strings.Cut(p, " "); p == "" || ok && n != "" && strings.Trim(n, "0123456789") == "" {
 		return look{}
 	}
 	if i := strings.LastIndexByte(p, ':'); i > 0 && strings.Trim(p[i+1:], "0123456789-") == "" {

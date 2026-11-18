@@ -130,7 +130,7 @@ type Script struct{ Name, File string }
 
 // Tests is what the test runs among the checks report: each test's outcome by its name as the runner prints it
 // ("TestTotal", "TestTotal/discount"; vitest and jest: "suite > test"), "pass", "fail" or "skip", and the packages
-// (JS: the test files) that do not build. Empty when no test ran.
+// that do not build (JS: the test files that fail outside a test). Empty when no test ran.
 type Tests struct {
 	Ran    map[string]string `json:"ran,omitempty"`
 	Broken []string          `json:"broken,omitempty"`
@@ -495,8 +495,8 @@ func testRuns(js string, t *Tests) {
 }
 
 // jsonTests adds what vitest's or jest's JSON reporter wrote (one shape) to t: each test by its suites and title
-// joined with " > ", as TestCmd takes a proof, and a test file that failed without a test result (it doesn't
-// build or import), by its path in repo. A name in two files fails if either fails, as testRuns.
+// joined with " > ", as TestCmd takes a proof, and a test file that failed without a failed test (it doesn't
+// build or import, a hook threw), by its path in repo. A name in two files fails if either fails, as testRuns.
 func jsonTests(b []byte, repo string, t *Tests) {
 	var r struct {
 		TestResults []struct {
@@ -513,21 +513,23 @@ func jsonTests(b []byte, repo string, t *Tests) {
 		return
 	}
 	for _, f := range r.TestResults {
-		if f.Status == "failed" && len(f.AssertionResults) == 0 {
-			if p := strings.TrimPrefix(f.Name, repo+"/"); !slices.Contains(t.Broken, p) {
-				t.Broken = append(t.Broken, p)
-			}
-		}
+		failed := false // a test that accounts for the file's failure
 		for _, a := range f.AssertionResults {
 			st := map[string]string{"passed": "pass", "failed": "fail", "skipped": "skip", "pending": "skip", "todo": "skip", "disabled": "skip"}[a.Status]
 			if st == "" {
 				continue
 			}
+			failed = failed || st == "fail"
 			if t.Ran == nil {
 				t.Ran = map[string]string{}
 			}
 			if n := strings.Join(append(slices.Clone(a.AncestorTitles), a.Title), " > "); t.Ran[n] != "fail" {
 				t.Ran[n] = st
+			}
+		}
+		if f.Status == "failed" && !failed {
+			if p := strings.TrimPrefix(f.Name, repo+"/"); !slices.Contains(t.Broken, p) {
+				t.Broken = append(t.Broken, p)
 			}
 		}
 	}

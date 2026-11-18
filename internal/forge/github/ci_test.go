@@ -34,9 +34,11 @@ func TestChecks(t *testing.T) {
 				t.Errorf("runs of %q", r.URL.RawQuery)
 			}
 			fmt.Fprint(w, `{"total_count":1,"workflow_runs":[{"name":"ci","path":".github/workflows/ci.yml@refs/heads/main","check_suite_id":7}]}`)
-		case r.URL.Path == "/repos/o/r/commits/abc/status":
-			fmt.Fprint(w, `{"state":"failure","statuses":[{"context":"legacy","state":"error","target_url":"https://legacy/1"},
-{"context":"diffharbor","state":"success"},{"context":"lint","state":"pending"}]}`)
+		case r.URL.Path == "/repos/o/r/commits/abc/statuses" && r.URL.Query().Get("page") == "":
+			w.Header().Set("Link", `<`+srv.URL+r.URL.Path+`?per_page=100&page=2>; rel="next"`)
+			fmt.Fprint(w, `[{"context":"legacy","state":"error","target_url":"https://legacy/1"},{"context":"diffharbor","state":"success"}]`)
+		case r.URL.Path == "/repos/o/r/commits/abc/statuses":
+			fmt.Fprint(w, `[{"context":"legacy","state":"success"},{"context":"lint","state":"pending"}]`)
 		case r.URL.Query().Get("page") == "":
 			w.Header().Set("Link", `<`+srv.URL+r.URL.Path+`?per_page=100&page=2>; rel="next"`)
 			fmt.Fprint(w, `{"total_count":3,"check_runs":[{"name":"test","status":"completed","conclusion":"failure","html_url":"https://gh/runs/1","check_suite":{"id":7}},
@@ -79,7 +81,7 @@ func TestChecksNoPermission(t *testing.T) {
 	}
 }
 
-// An App with "Checks: read" alone: its check runs, without workflows; neither runs nor statuses read.
+// An App with "Checks: read" alone: its check runs, without workflows, and the statuses' permission as the error.
 func TestChecksOnly(t *testing.T) {
 	AppKey, _ = rsa.GenerateKey(rand.Reader, 2048)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +103,8 @@ func TestChecksOnly(t *testing.T) {
 	APIURL = srv.URL
 	p := &pr{e: &forge.Event{}, api: "/repos/o/r", token: "t"}
 	got, err := p.Checks("abc")
-	if want := []report.Check{{Name: "test", Status: "completed", Conclusion: "success"}}; err != nil || !slices.Equal(got, want) {
+	want := []report.Check{{Name: "test", Status: "completed", Conclusion: "success"}}
+	if err == nil || !strings.Contains(err.Error(), "Commit statuses: read") || !slices.Equal(got, want) {
 		t.Fatalf("%v %v", got, err)
 	}
 }

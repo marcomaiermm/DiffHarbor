@@ -41,9 +41,9 @@ func Learn(ctx context.Context, sb *proc.Sandbox, raw string, created time.Time)
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	// From the git dir, with the mailmap of the base: the worktree is the PR's, and a PR doesn't decide who is who. No lazy
-	// fetch: a base without .mailmap in the partial clone only warns. ponytail: no -z, quotepath off keeps most names whole
-	out, err := proc.Run(sb.Command(ctx, filepath.Join(sb.Repo(), ".git"), []string{"GIT_NO_LAZY_FETCH=1"}, "git", "-c", "core.quotepath=off",
-		"-c", "log.showRoot=false", "-c", "mailmap.blob=refs/base:.mailmap", "log", "-n", "3000", "--no-merges", "--find-renames=100%", "--name-status",
+	// fetch: a base without .mailmap in the partial clone only warns. -z: the names as they are, none quoted.
+	out, err := proc.Run(sb.Command(ctx, filepath.Join(sb.Repo(), ".git"), []string{"GIT_NO_LAZY_FETCH=1"}, "git",
+		"-c", "log.showRoot=false", "-c", "mailmap.blob=refs/base:.mailmap", "log", "-z", "-n", "3000", "--no-merges", "--find-renames=100%", "--name-status",
 		"--until="+created.Format(time.RFC3339), "--format=%x01%ct%x01%aN%x01%aE", "refs/base"))
 	if err != nil {
 		log.Println("knowledge:", err)
@@ -63,8 +63,9 @@ func renamed(raw string) map[string]string {
 	return m
 }
 
-// learn walks the log newest first, keeping for each name the file it is at the base as it reads back through renames.
-// prs maps what the PR renamed to its new path, which keys the result.
+// learn walks the log newest first, keeping for each name the file it is at the base as it reads back through renames,
+// up to where the file was added: older commits of its name were another file. One deleted before any add is no file
+// at the base, one the PR adds anew. prs maps what the PR renamed to its new path, which keys the result.
 func learn(log string, paths []string, prs map[string]string, created time.Time) map[string]Know {
 	at := map[string]string{} // a path at this point of the history -> the path in the PR
 	for _, p := range paths {
@@ -82,6 +83,7 @@ func learn(log string, paths []string, prs map[string]string, created time.Time)
 	var n int // files the commit touches
 	var touched []string
 	var renames [][2]string // old, new
+	var ends []string       // names whose file starts here, read back
 	flush := func() {
 		if n > 0 && n < bulk {
 			bot := bots.MatchString(name) || bots.MatchString(email)
@@ -103,15 +105,19 @@ func learn(log string, paths []string, prs map[string]string, created time.Time)
 				}
 			}
 		}
+		for _, p := range ends {
+			delete(at, p)
+		}
 		for _, r := range renames { // older commits know the file by its old name
 			at[r[0]] = at[r[1]]
 			delete(at, r[1])
 		}
-		n, touched, renames = 0, nil, nil
+		n, touched, renames, ends = 0, nil, nil, nil
 	}
-	for l := range strings.Lines(log) {
-		l = strings.TrimRight(l, "\n")
-		if rest, ok := strings.CutPrefix(l, "\x01"); ok {
+	rs := strings.Split(log, "\x00")
+	for i := 0; i < len(rs); i++ {
+		r := strings.TrimPrefix(rs[i], "\n") // a commit's first status is on the line after its header
+		if rest, ok := strings.CutPrefix(r, "\x01"); ok {
 			flush()
 			f := strings.Split(rest, "\x01")
 			if len(f) != 3 {
@@ -121,17 +127,32 @@ func learn(log string, paths []string, prs map[string]string, created time.Time)
 			when, name, email = time.Unix(ts, 0), f[1], f[2]
 			continue
 		}
-		f := strings.Split(l, "\t")
-		if len(f) < 2 || f[0] == "" {
+		if r == "" {
 			continue
 		}
+		k := 1 // a status, then its names: a rename's or a copy's old and new
+		if r[0] == 'R' || r[0] == 'C' {
+			k = 2
+		}
+		if i+k >= len(rs) {
+			break
+		}
+		ps := rs[i+1 : i+1+k]
+		i += k
 		n++
-		cur := f[len(f)-1] // a rename's new name
-		if _, ok := at[cur]; ok {
+		cur := ps[k-1]
+		if _, ok := at[cur]; !ok {
+			continue
+		}
+		switch r[0] {
+		case 'D': // gone, read back: no file at this name until an add
+			ends = append(ends, cur)
+		case 'A':
+			touched, ends = append(touched, cur), append(ends, cur)
+		case 'R':
+			touched, renames = append(touched, cur), append(renames, [2]string{ps[0], cur})
+		default:
 			touched = append(touched, cur)
-			if f[0][0] == 'R' && len(f) == 3 {
-				renames = append(renames, [2]string{f[1], cur})
-			}
 		}
 	}
 	flush()

@@ -98,21 +98,13 @@ func schema(d Data, base func(names []string) sdb) []Table {
 	var order []string
 	first := map[string]site{}
 	var files []string
-	byFile := map[string][]sqlLine{}
-	migrationLines(d, func(p string, no int, text string, add bool) {
-		if _, ok := byFile[p]; !ok {
+	pr := map[string][]sqlLine{} // the statements the PR adds a line to, whole: a column added to a CREATE TABLE too
+	upStatements(d, func(p string, st sqlLine) {
+		if _, ok := pr[p]; !ok {
 			files = append(files, p)
 		}
-		byFile[p] = append(byFile[p], sqlLine{text, no, add})
+		pr[p] = append(pr[p], st)
 	})
-	pr := map[string][]sqlLine{} // the statements the PR adds a line to, whole: a column added to a CREATE TABLE too
-	for _, p := range files {
-		for _, st := range statements(byFile[p]) {
-			if st.add {
-				pr[p] = append(pr[p], st)
-			}
-		}
-	}
 	touch := func(p string, line int) func(string) {
 		return func(name string) {
 			if _, ok := first[name]; !ok {

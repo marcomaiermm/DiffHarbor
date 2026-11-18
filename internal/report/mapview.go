@@ -288,9 +288,6 @@ func sysLines(name string, keep, width int) []string {
 		if at == len(toks) {
 			lo, hi := math.MaxInt, 0
 			for _, l := range lines {
-				if len(l) > width {
-					return
-				}
 				lo, hi = min(lo, len(l)), max(hi, len(l))
 			}
 			if k := [2]int{len(lines), hi - lo}; k[0] < bestKey[0] || k[0] == bestKey[0] && k[1] < bestKey[1] {
@@ -299,7 +296,11 @@ func sysLines(name string, keep, width int) []string {
 			return
 		}
 		for j := at + 1; j <= len(toks); j++ {
-			try(j, append(lines, strings.Join(toks[at:j], "")))
+			l := strings.Join(toks[at:j], "")
+			if len(l) > width { // a longer line only grows: a long name stays quick
+				break
+			}
+			try(j, append(lines, l))
 		}
 	}
 	try(0, nil)

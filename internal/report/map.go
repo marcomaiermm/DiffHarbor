@@ -44,7 +44,7 @@ type Map struct {
 // MapPart is a folder of the PR's code. Col and Row place it; Alone: no line reaches it, it sits in the row
 // "No line to other parts".
 type MapPart struct {
-	ID, Label, Path string // Path is its folder, "." the top level; ID is Path, "other" for the rest
+	ID, Label, Path string // Path is its folder, "." the top level; ID is Path, otherID for the rest
 	Files           []string
 	Deleted         int  // its code files the PR deletes
 	New             bool // every file is new
@@ -154,7 +154,7 @@ type MapTable struct {
 	Parts            []MapTablePart
 	Tests, Elsewhere int
 	Imports, Named   []string
-	Cut              bool // a search of the importers stopped at its file cap: the counts are partial
+	Cut              bool // its importers' search stopped at its file cap or in time, or was past maxDrops: the counts are partial
 }
 
 // MapStore is a table the changed code writes or reads, one box however many names the code gives it. Path and
@@ -213,6 +213,7 @@ type MapTrace struct {
 
 const (
 	maxParts, maxDepth = 16, 3
+	otherID            = "/other folders" // the part "Other": no repo path starts with "/", so no folder shares it
 	mapCols            = "_($["
 )
 
@@ -248,8 +249,8 @@ type mapper struct {
 	box   map[string]*MapDeploy
 	gen   map[string]bool
 	added map[string]bool
-	drawn []drawnCall           // the calls the map draws: the store walk starts at them too
-	wrote map[partName][]string // the tables a part's declaration writes, for its callers' chevrons
+	drawn []drawnCall          // the calls the map draws: the store walk starts at them too
+	wrote map[*Symbol][]string // the tables a declaration writes, for its callers' chevrons
 }
 
 // BuildMap is the map of d's change, with the outside calls (Outside). sb is the checkout: its
@@ -321,8 +322,8 @@ func (b *mapper) parts(root string) {
 		b.m.Parts = append(b.m.Parts, MapPart{ID: k, Path: k, Files: groups[k]})
 	}
 	if len(b.other) > 0 {
-		at["other"] = len(b.m.Parts)
-		o := MapPart{ID: "other", Path: "other", Label: fmt.Sprintf("Other · %d folders", len(b.other)), Folders: len(b.other)}
+		at[otherID] = len(b.m.Parts)
+		o := MapPart{ID: otherID, Path: "other", Label: fmt.Sprintf("Other · %d folders", len(b.other)), Folders: len(b.other)}
 		for k := range b.other {
 			o.Files = append(o.Files, groups[k]...)
 			at[k] = len(b.m.Parts)
@@ -343,7 +344,7 @@ func (b *mapper) parts(root string) {
 		}
 	}
 	for i := range b.m.Parts {
-		if p := &b.m.Parts[i]; labels[p.Label] > 1 && p.ID != "other" {
+		if p := &b.m.Parts[i]; labels[p.Label] > 1 && p.ID != otherID {
 			p.Label = partLabel(p.Path, true)
 		}
 	}
@@ -483,11 +484,17 @@ func (b *mapper) lines() {
 	behind, kinds := b.direct(used, names, iface)
 	b.through(used, names, iface, behind)
 	b.stores(names)
-	for u, ns := range used {
-		for k, n := range ns {
-			if k.kind == "calls" {
-				n.Writes = b.wrote[partName{u.decl, k.name}]
-			}
+	for _, c := range b.drawn { // what the called declaration writes, not another of its name in the part
+		if n := used[use{b.part[c.s.Path], c.up}][nameKey{c.name, "calls", ""}]; n != nil {
+			n.Writes = append(n.Writes, b.wrote[c.s]...)
+		}
+	}
+	for _, ns := range used {
+		for _, n := range ns {
+			slices.SortFunc(n.Writes, func(x, y string) int {
+				return cmp.Or(cmp.Compare(strings.ToLower(x), strings.ToLower(y)), cmp.Compare(x, y))
+			})
+			n.Writes = slices.Compact(n.Writes)
 		}
 	}
 	b.m.NoKinds = !kinds && len(used) > 0
@@ -646,12 +653,6 @@ type drawnCall struct {
 	up   int
 }
 
-// partName is a part's declaration by name.
-type partName struct {
-	part int
-	name string
-}
-
 // storeUse is a part's use of a table, before its places are counted.
 type storeUse struct {
 	kind, decl string
@@ -747,10 +748,10 @@ func (sc *storeScan) through(pi int, calls []StoreCall, p StorePath) {
 // it is of, a name is one table. root gives a table's box key; named, by a name SQL may give it (lower case), a table.
 func joinTables(tables map[string]StorePath) (root func(string) string, named map[string]string) {
 	keys := slices.Sorted(maps.Keys(tables))
-	byName, parent := map[string]string{}, map[string]string{}
+	byName, parent := map[string][]string{}, map[string]string{} // byName: the declarations of a name
 	for _, k := range keys {
-		if p := tables[k]; p.TPath != "" && byName[strings.ToLower(p.Table)] == "" {
-			byName[strings.ToLower(p.Table)] = k
+		if p := tables[k]; p.TPath != "" {
+			byName[strings.ToLower(p.Table)] = append(byName[strings.ToLower(p.Table)], k)
 		}
 	}
 	named = map[string]string{}
@@ -762,7 +763,7 @@ func joinTables(tables map[string]StorePath) (root func(string) string, named ma
 		}
 		named[strings.ToLower(p.Table)] = cmp.Or(named[strings.ToLower(p.Table)], k)
 		q, of := tableNames(p.Text)
-		if t := byName[strings.ToLower(of)]; of != "" && t != "" && t != k {
+		if t := ofDecl(tables, byName[strings.ToLower(of)], p.TPath); of != "" && t != "" && t != k {
 			parent[k] = t
 		}
 		if q = strings.ToLower(q); q != "" {
@@ -784,6 +785,20 @@ func joinTables(tables map[string]StorePath) (root func(string) string, named ma
 	}, named
 }
 
+// ofDecl is the declaration an alias in file names among ds: the one in its file, else the only one; "" when two
+// modules declare the name and the alias's file neither.
+func ofDecl(tables map[string]StorePath, ds []string, file string) string {
+	for _, d := range ds {
+		if tables[d].TPath == file {
+			return d
+		}
+	}
+	if len(ds) == 1 {
+		return ds[0]
+	}
+	return ""
+}
+
 // stores is Map.Stores (6.13), but for their order, and the tables each part's declaration writes (wrote). A query
 // of a declaration the PR adds or changes is its part's. A part's call reaches more, within maxHops calls: a call the
 // map draws and a call on a line the diff adds start a path (storeScan.through).
@@ -796,7 +811,7 @@ func (b *mapper) stores(names []string) {
 			}
 		}
 	}
-	wrote := map[partName][]string{} // table keys
+	wrote := map[*Symbol][]string{} // table keys
 	for _, n := range names {
 		for i := range b.d.Symbols[n] {
 			s := &b.d.Symbols[n][i]
@@ -812,7 +827,7 @@ func (b *mapper) stores(names []string) {
 					sc.through(pi, p.Calls, p)
 				}
 				if p.Kind == "writes" && len(p.Calls) < maxHops {
-					wrote[partName{pi, n}] = append(wrote[partName{pi, n}], sc.note(p))
+					wrote[s] = append(wrote[s], sc.note(p))
 				}
 			}
 		}
@@ -854,21 +869,23 @@ func (b *mapper) stores(names []string) {
 	for i := range b.m.Stores {
 		b.storeParts(&b.m.Stores[i], uses[i])
 	}
-	b.wrote = map[partName][]string{}
-	for pn, ks := range wrote {
-		var ns []string
+	b.wrote = map[*Symbol][]string{}
+	for s, ks := range wrote {
 		for _, k := range ks {
-			ns = append(ns, sc.tables[root(k)].Table)
+			b.wrote[s] = append(b.wrote[s], sc.tables[root(k)].Table)
 		}
-		slices.SortFunc(ns, func(x, y string) int {
-			return cmp.Or(cmp.Compare(strings.ToLower(x), strings.ToLower(y)), cmp.Compare(x, y))
-		})
-		b.wrote[pn] = slices.Compact(ns)
 	}
 	b.storeMigrations(func(name string) (int, bool) {
-		k := named[strings.ToLower(name)]
-		i, ok := box[root(k)]
-		return i, ok && k != ""
+		// the name with its schema, then without: public.orders is the table public.orders, else orders
+		full := strings.NewReplacer(`"`, "", "`", "", "'", "", "[", "", "]", "").Replace(name)
+		for _, n := range []string{full, bareName(name)} {
+			if k := named[strings.ToLower(n)]; k != "" {
+				if i, ok := box[root(k)]; ok {
+					return i, true
+				}
+			}
+		}
+		return 0, false
 	})
 }
 
@@ -900,7 +917,8 @@ func (b *mapper) storeMigrations(table func(name string) (int, bool)) {
 		path  string
 	}
 	kinds, lines := map[key]map[string]bool{}, map[key][]int{}
-	upLines(b.d, func(p string, no int, text string) {
+	upStatements(b.d, func(p string, stmt sqlLine) {
+		no, text := stmt.line, strings.ReplaceAll(stmt.text, "\n", " ")
 		for _, st := range []struct {
 			re   *regexp.Regexp
 			kind string
@@ -914,7 +932,7 @@ func (b *mapper) storeMigrations(table func(name string) (int, bool)) {
 				if len(fs) == 0 {
 					continue
 				}
-				i, ok := table(bareName(fs[0]))
+				i, ok := table(fs[0])
 				if !ok {
 					continue
 				}
@@ -1353,57 +1371,103 @@ var (
 // maxTableFiles is the files a search of the base or the head reads; maxNamed the places it keeps per table.
 const (
 	maxTableFiles, maxNamed = 300, 20
-	maxDrops                = 50 // tables a PR's migrations drop; each costs git calls within tableTime
+	maxDrops                = 50 // the dropped tables that tables searches: each costs git calls within tableTime
 	tableTime               = time.Minute
 )
 
 // upLines calls f with each line of d's SQL files that the PR adds and that runs on migrate, comments aside: a
-// goose file's Down part and a .down.sql file don't count. A file's text is its head's, the diff's lines without it.
+// goose file's Down part, a .down.sql file and a test's SQL don't count. A file's text is its head's, the diff's lines
+// without it.
 func upLines(d Data, f func(p string, no int, text string)) {
 	migrationLines(d, func(p string, no int, text string, add bool) {
-		if add && !strings.HasPrefix(strings.TrimSpace(text), "--") {
+		if t := strings.TrimSpace(text); add && t != "" && !strings.HasPrefix(t, "--") {
 			f(p, no, text)
 		}
 	})
 }
 
-// migrationLines calls f with each line of d's SQL files that runs on migrate, add when the PR adds it: what upLines
-// reads, with the unchanged lines around for a statement the PR edits.
+// upStatements calls f with each statement of d's migrations that the PR adds a line to, whole: a column added inside
+// a CREATE TABLE comes with its table. Its line is its first added one.
+func upStatements(d Data, f func(p string, st sqlLine)) {
+	var files []string
+	byFile := map[string][]sqlLine{}
+	migrationLines(d, func(p string, no int, text string, add bool) {
+		if _, ok := byFile[p]; !ok {
+			files = append(files, p)
+		}
+		byFile[p] = append(byFile[p], sqlLine{text, no, add})
+	})
+	for _, p := range files {
+		for _, st := range statements(byFile[p]) {
+			if st.add {
+				f(p, st)
+			}
+		}
+	}
+}
+
+// migrationLines calls f with each line of d's SQL files that runs on migrate, add when the PR adds it, its /* */
+// comments cut: what upLines reads, with the unchanged lines around for a statement the PR edits. The added lines come
+// from the whole diff, not the page's capped view of it.
 func migrationLines(d Data, f func(p string, no int, text string, add bool)) {
 	diff.EachFile(d.Diff, func(p, fd string) {
-		if path.Ext(p) != ".sql" || strings.HasSuffix(p, ".down.sql") {
+		if path.Ext(p) != ".sql" || strings.HasSuffix(p, ".down.sql") || isTest(p) {
 			return
 		}
-		fl := parse(p, fd, "")
 		type ln struct {
 			no   int
 			text string
 			add  bool
 		}
+		src := d.Sources[p]
 		var lines []ln
 		added := map[int]bool{}
-		for _, l := range fl.Lines {
-			if n, err := strconv.Atoi(l.No); err == nil && l.Class == "add" {
-				added[n] = true
-				if d.Sources[p] == "" {
-					lines = append(lines, ln{n, l.Text, true})
-				}
-			} else if err == nil && d.Sources[p] == "" {
-				lines = append(lines, ln{n, l.Text, false})
+		diff.EachNewLine(fd, func(at, l string) {
+			n, _ := strconv.Atoi(at[strings.LastIndexByte(at, ':')+1:])
+			added[n] = l[0] == '+'
+			if src == "" {
+				lines = append(lines, ln{n, l[1:], l[0] == '+'})
 			}
-		}
-		for i, t := range strings.Split(d.Sources[p], "\n") {
-			if d.Sources[p] != "" {
+		})
+		if src != "" {
+			for i, t := range strings.Split(src, "\n") {
 				lines = append(lines, ln{i + 1, t, added[i+1]})
 			}
 		}
+		block := false
 		for _, l := range lines {
-			if downMark.MatchString(l.text) {
+			if !block && downMark.MatchString(l.text) {
 				break
 			}
-			f(p, l.no, l.text, l.add)
+			var t string
+			t, block = uncomment(l.text, block)
+			f(p, l.no, t, l.add)
 		}
 	})
+}
+
+// uncomment is a line of SQL without its /* */ comments, block when one is open at its start; open, one is at its end.
+// A -- comment stays: statements cuts it.
+func uncomment(t string, block bool) (string, bool) {
+	var b strings.Builder
+	for t != "" {
+		if block {
+			i := strings.Index(t, "*/")
+			if i < 0 {
+				return b.String(), true
+			}
+			t, block = t[i+2:], false
+			continue
+		}
+		i := strings.Index(t, "/*")
+		if j := strings.Index(t, "--"); i < 0 || j >= 0 && j < i {
+			b.WriteString(t)
+			break
+		}
+		b.WriteString(t[:i])
+		t, block = t[i+2:], true
+	}
+	return b.String(), block
 }
 
 // bareName is a table's name in SQL without its schema and quotes: public."items" is items.
@@ -1426,7 +1490,7 @@ func (b *mapper) drops() []MapTable {
 				continue
 			}
 			name := bareName(fs[0])
-			if tableName.MatchString(name) && !seen[[2]string{p, name}] && len(out) < maxDrops {
+			if tableName.MatchString(name) && !seen[[2]string{p, name}] {
 				seen[[2]string{p, name}] = true
 				out = append(out, MapTable{Name: name, Path: p, Line: no})
 			}
@@ -1507,9 +1571,9 @@ func (b *mapper) tables(sb *proc.Sandbox) {
 		out, _ := proc.Run(sb.Command(ctx, sb.Repo(), nil, "git", args...)) // exit 1: nothing found
 		return out
 	}
-	names := make([]string, len(ts))
-	for i, t := range ts {
-		names[i] = t.Name
+	names := make([]string, min(len(ts), maxDrops))
+	for i := range names {
+		names[i] = ts[i].Name
 	}
 	decls := declarations(git, names)
 	find := func(ref string, d tableSite, seed map[string]bool) (importing, bool) {
@@ -1517,10 +1581,10 @@ func (b *mapper) tables(sb *proc.Sandbox) {
 	}
 	for i := range ts {
 		d, ok := decls[ts[i].Name]
-		if ctx.Err() != nil { // out of time: the rest of the tables were not searched
+		if i >= maxDrops || ctx.Err() != nil { // past the cap or out of time: the rest of the tables were not searched
 			ts[i].Cut = true
 		}
-		if !ok || ctx.Err() != nil {
+		if !ok || ts[i].Cut {
 			continue
 		}
 		ts[i].Decl = d.file
@@ -1614,7 +1678,7 @@ func findImporters(git func(args ...string) []byte, read func(specs []string) ma
 // byFolder is the part that holds folder k, "Other" when it joins it.
 func (b *mapper) byFolder(k string) (int, bool) {
 	for i, p := range b.m.Parts {
-		if p.Path == k || p.ID == "other" && b.other[k] {
+		if p.Path == k || p.ID == otherID && b.other[k] {
 			return i, true
 		}
 	}

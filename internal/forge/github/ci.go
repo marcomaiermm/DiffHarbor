@@ -11,47 +11,51 @@ import (
 	"strings"
 )
 
-// Checks reads sha's check runs and the commit statuses other CI posts. The runs need "Checks: read" in a token of its
-// own: the review's lacks it, and an App without it still reviews. Each run's workflow ("Actions: read") and the
-// statuses ("Commit statuses: read") come when the App has them, each in a token of its own, so one missing loses
-// only its part.
+// Checks reads sha's check runs and the commit statuses other CI posts, each in a token of its own: the review's has
+// neither permission, and an App without them still reviews. The runs need "Checks: read", their workflows "Actions:
+// read" (optional: the checks go without them), the statuses "Commit statuses: read". A part it can't read comes
+// back as the error, beside what it did read: the page says the list isn't whole.
 func (p *pr) Checks(sha string) ([]report.Check, error) {
-	token, err := Mint(p.e, map[string]string{"checks": "read"})
-	if err != nil {
-		return nil, fmt.Errorf("token with Checks: read (app permission): %w", err)
+	sha = url.PathEscape(sha)
+	var cs []report.Check
+	var errs []error
+	if token, err := Mint(p.e, map[string]string{"checks": "read"}); err != nil {
+		errs = append(errs, fmt.Errorf("token with Checks: read (app permission): %w", err))
+	} else {
+		actions, _ := Mint(p.e, map[string]string{"actions": "read"})
+		runs, err := checkRuns(p.api, sha, token, actions)
+		cs, errs = append(cs, runs...), append(errs, err)
 	}
-	actions, _ := Mint(p.e, map[string]string{"actions": "read"})
-	cs, err := checkRuns(p.api, url.PathEscape(sha), token, actions)
-	if err != nil {
-		return nil, err
+	if token, err := Mint(p.e, map[string]string{"statuses": "read"}); err != nil {
+		errs = append(errs, fmt.Errorf("token with Commit statuses: read (app permission): %w", err))
+	} else {
+		ss, err := commitStatuses(p.api, sha, token)
+		cs, errs = append(cs, ss...), append(errs, err)
 	}
-	if st, err := Mint(p.e, map[string]string{"statuses": "read"}); err == nil {
-		ss, err := commitStatuses(p.api, url.PathEscape(sha), st)
-		if err != nil {
-			return nil, err // a partial list would call a failing status nothing
-		}
-		cs = append(cs, ss...)
-	}
-	return cs, nil
+	return cs, errors.Join(errs...)
 }
 
 // commitStatuses is each context's latest status on sha, ours left out: CI that posts statuses, not check runs.
 func commitStatuses(api, sha, token string) ([]report.Check, error) {
-	var combined struct {
-		Statuses []struct {
-			Context   string `json:"context"`
-			State     string `json:"state"`
-			TargetURL string `json:"target_url"`
-		} `json:"statuses"`
+	// every status posted, newest first: the first of each context is its state now
+	ss, cut, err := paged[struct {
+		Context   string `json:"context"`
+		State     string `json:"state"`
+		TargetURL string `json:"target_url"`
+	}](api+"/commits/"+sha+"/statuses?per_page=100", token)
+	if err == nil && cut { // a partial list could miss a context's failure
+		err = errors.New("commit statuses: more than 30 pages")
 	}
-	if err := Call("GET", api+"/commits/"+sha+"/status?per_page=100", token, nil, &combined); err != nil {
+	if err != nil {
 		return nil, err
 	}
 	var cs []report.Check
-	for _, s := range combined.Statuses {
-		if s.Context == "diffharbor" {
+	seen := map[string]bool{}
+	for _, s := range ss {
+		if s.Context == "diffharbor" || seen[s.Context] {
 			continue
 		}
+		seen[s.Context] = true
 		c := report.Check{Name: s.Context, Status: "pending", URL: s.TargetURL}
 		switch s.State {
 		case "success":
