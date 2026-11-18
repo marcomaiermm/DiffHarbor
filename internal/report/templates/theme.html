@@ -27,6 +27,8 @@ asks for light; shadcn's tokens, which the diff, the popover and the sheets read
   --diff-bg: var(--surface); --diff-fg: var(--ink2); --diff-add: var(--add); --diff-del: var(--remove); --diff-link: #7dcfff;
   --diff-mod: rgb(122 162 247 / 0.13); --diff-mod-chg: rgb(122 162 247 / 0.32);
   --k-fn: #7aa2f7; --k-type: #bb9af7; --k-var: #e0af68;
+  /* color with meaning (decision 37): an item's kind, a file's kind; the syntax theme's hues, so code and page agree */
+  --c-diff: var(--k-type); --c-before: var(--k-var); --c-test: var(--diff-link); --c-code: var(--acc); --c-sql: var(--k-var);
   --diff-add-bg: rgb(158 206 106 / 0.14); --diff-del-bg: rgb(247 118 142 / 0.13);
   --diff-hunk: color-mix(in oklab, var(--diff-fg) 5%, var(--diff-bg));
   --diff-hover: color-mix(in oklab, var(--diff-fg) 12%, var(--diff-bg));

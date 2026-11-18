@@ -61,7 +61,7 @@ func evOf(e string) chip {
 // wordChip is the chip of a quote's source: the author's for the description, else its ticket's.
 func wordChip(in string) chip {
 	if in == "" || in == "description" {
-		return chip{"word", "The author says"}
+		return chip{"word", "Author"}
 	}
 	return chip{"tk", in + " says"}
 }
@@ -226,13 +226,13 @@ func (v *view) diffCard(i int, d review.Difference) *card {
 	k.Place, k.PlaceHref = v.placeOf(p, line)
 	k.Box = v.boxOf(p)
 	if len(d.Asks) > 0 {
-		b := cblock{Label: "The ticket asks", Chip: wordChip(cmp.Or(d.Ticket, d.Asks[0].In))}
+		b := cblock{Label: "Ticket", Chip: wordChip(cmp.Or(d.Ticket, d.Asks[0].In))}
 		for _, q := range d.Asks {
 			b.Lines = append(b.Lines, cline{Text: q.Text, Quote: true, Cite: cite(q)})
 		}
 		k.Blocks = append(k.Blocks, b)
 	}
-	does := cblock{Label: "The code does", Chip: chip{"shown", "Code at head"}}
+	does := cblock{Label: "Code", Chip: chip{"shown", "Code at head"}}
 	if v.files[p] != nil {
 		does.Chip = evDiff
 	}
@@ -380,7 +380,7 @@ func (v *view) beforeExtras() {
 				k.Blocks = append(k.Blocks, *b)
 			}
 			if len(order) > 0 {
-				k.Blocks = append(k.Blocks, quotes("The author says", order))
+				k.Blocks = append(k.Blocks, quotes("Author", order))
 				order = nil
 			}
 		case k.Box == "deploy:environment":
@@ -396,7 +396,7 @@ func (v *view) beforeExtras() {
 		case k.Box == "deploy:ci" && v.CI != nil && v.CI.Edited:
 			k.Title = "This PR edits the CI that judges it"
 			l := cline{Text: "`" + v.CI.Tests + "` runs the tests on a pull request, and this PR changes it."}
-			k.Blocks = append(k.Blocks, cblock{Label: "The checks", Chip: evBase, Lines: []cline{l}})
+			k.Blocks = append(k.Blocks, cblock{Label: "Checks", Chip: evBase, Lines: []cline{l}})
 			for _, c := range v.CI.Checks {
 				if c.URL != "" && (c.Path == ".github/workflows/"+v.CI.Tests || c.Path == v.CI.Tests) {
 					k.GH, k.GHText, k.GHPlace = c.URL, "Open the run on "+cmp.Or(v.Forge.Name, "GitHub"), c.URL
@@ -407,12 +407,12 @@ func (v *view) beforeExtras() {
 	}
 	if len(order) > 0 {
 		k := &card{ID: "order", Kind: "Before merging", Title: "The author names an order to merge and deploy in", Line: order[0], Chip: wordChip("")}
-		k.Blocks = []cblock{quotes("The author says", order)}
+		k.Blocks = []cblock{quotes("Author", order)}
 		p.Before = append(p.Before, k)
 	}
 	if s := v.Terms.Serves; len(s) > 0 {
 		k := &card{ID: "serves", Kind: "Before merging", Title: "What an outside service serves, in the author's words", Line: s[0], Chip: wordChip("")}
-		k.Blocks = []cblock{quotes("The author says", s)}
+		k.Blocks = []cblock{quotes("Author", s)}
 		p.Before = append(p.Before, k)
 	}
 }
@@ -559,7 +559,7 @@ func (v *view) stayCard() *card {
 	}
 	k.Line = plural(len(st), "file", "files") + ": " + join(what) + "."
 	k.Stats = plural(len(st), "file", "files") + " · " + plural(flags, "flag", "flags") + ": " + join(what)
-	tb := ttable{Label: "The files with the most flags", Chip: evDiff, Cols: []string{"File", "Flags"}, Rows: rows[:min(6, len(rows))]}
+	tb := ttable{Label: "Files with the most flags", Chip: evDiff, Cols: []string{"File", "Flags"}, Rows: rows[:min(6, len(rows))]}
 	if len(rows) > 6 {
 		tb.More = rows[6:]
 	}
@@ -636,7 +636,7 @@ func (v *view) kindBar() *kindsBar {
 			stay := n - k.Deleted
 			r.Text = strconv.Itoa(stay) + " stay and " + strconv.Itoa(k.Deleted) + " are deleted. The review read " + strconv.Itoa(k.Read) + " of the " + strconv.Itoa(stay) + "."
 			if len(v.Page.Tests.Cards) > 0 || k.Deleted > 0 {
-				r.Text += " Test changes has the deleted and weakened ones."
+				r.Text += " Tests lists the deleted and weakened ones."
 			}
 		case "tooling":
 			r.Text = "The review read " + strconv.Itoa(k.Read) + "."

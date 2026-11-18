@@ -1,0 +1,194 @@
+package report
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+	"testing"
+)
+
+const schemaBase = `CREATE TABLE users (
+  id bigserial PRIMARY KEY,
+  email text NOT NULL UNIQUE
+);
+CREATE TABLE orders (
+  id bigserial PRIMARY KEY,
+  user_id bigint REFERENCES users(id),
+  total numeric(10, 2),
+  note text, -- free text
+  legacy_code text
+);
+CREATE INDEX orders_note_idx ON orders (note);
+-- +goose Down
+DROP TABLE orders;
+`
+
+const schemaPR = `-- +goose Up
+ALTER TABLE orders ADD COLUMN status text NOT NULL DEFAULT 'open';
+ALTER TABLE orders ALTER COLUMN total TYPE bigint, ALTER COLUMN total SET NOT NULL;
+ALTER TABLE orders RENAME COLUMN note TO memo;
+ALTER TABLE "public"."orders" DROP COLUMN IF EXISTS legacy_code;
+CREATE TABLE refunds (
+  id bigserial PRIMARY KEY,
+  order_id bigint NOT NULL,
+  reason text DEFAULT 'a; b',
+  CONSTRAINT refunds_order_fk FOREIGN KEY (order_id) REFERENCES orders (id)
+);
+CREATE UNIQUE INDEX refunds_order_idx ON refunds (order_id);
+DROP INDEX orders_note_idx;
+DROP TABLE users;
+-- +goose Down
+DROP TABLE refunds;
+`
+
+// show is a table as one line per column and index: what the page shows of it.
+func show(ts []Table) string {
+	var b strings.Builder
+	for _, t := range ts {
+		fmt.Fprintf(&b, "%s %s base=%v %s:%d\n", t.Name, t.Kind, t.Base, t.Path, t.Line)
+		for _, c := range t.Cols {
+			fmt.Fprintf(&b, "  %s %q %s was=%q ref=%s %v @%d", c.Name, c.Type, c.State, c.Was, c.Ref, c.Notes, c.Line)
+			if c.OnDelete != "" || c.OnUpdate != "" {
+				fmt.Fprintf(&b, " delete=%s update=%s", c.OnDelete, c.OnUpdate)
+			}
+			if c.Guess {
+				b.WriteString(" by name")
+			}
+			if c.Part {
+				b.WriteString(" part")
+			}
+			b.WriteByte('\n')
+		}
+		for _, ix := range t.Indexes {
+			fmt.Fprintf(&b, "  index %s (%s) unique=%v %s @%d\n", ix.Name, ix.Cols, ix.Unique, ix.State, ix.Line)
+		}
+		if len(t.Joins) > 0 {
+			fmt.Fprintf(&b, "  joins: %s\n", strings.Join(t.Joins, ", "))
+		}
+		for _, r := range t.Risks {
+			fmt.Fprintf(&b, "  risk: %s\n", strings.ReplaceAll(r, "`", "'"))
+		}
+	}
+	return b.String()
+}
+
+func TestSchema(t *testing.T) {
+	const p = "db/migrations/0008_status.sql"
+	d := Data{Diff: newFile(p, schemaPR), Sources: map[string]string{p: schemaPR}}
+	base := func(names []string) sdb {
+		if !slices.Equal(names, []string{"orders", "refunds", "users"}) {
+			t.Errorf("base asked for %v", names)
+		}
+		db := sdb{}
+		db.read(schemaBase)
+		return db
+	}
+	want := `orders changed base=true db/migrations/0008_status.sql:2
+  id "bigserial"  was="" ref= [primary key] @0
+  user_id "bigint"  was="" ref=users.id [] @0
+  total "bigint" changed was="numeric(10, 2), nullable" ref= [not null] @3
+  memo "text" renamed was="note" ref= [] @4
+  legacy_code "text" dropped was="" ref= [] @5
+  status "text" new was="" ref= [not null default 'open'] @2
+  index orders_note_idx (note) unique=false dropped @13
+  risk: Setting 'total' NOT NULL fails while any row holds a null.
+refunds created base=false db/migrations/0008_status.sql:6
+  id "bigserial"  was="" ref= [primary key] @6
+  order_id "bigint"  was="" ref=orders.id [not null] @6
+  reason "text"  was="" ref= [default 'a; b'] @6
+  index refunds_order_idx (order_id) unique=true new @12
+users dropped base=true db/migrations/0008_status.sql:14
+  id "bigserial"  was="" ref= [primary key] @0
+  email "text"  was="" ref= [not null unique] @0
+  risk: 'orders.user_id' still references it.
+`
+	if got := show(schema(d, base)); got != want {
+		t.Errorf("schema:\n%s\nwant:\n%s", got, want)
+	}
+
+	// without the base: only what the PR's statements say
+	want = `orders changed base=false db/migrations/0008_status.sql:2
+  status "text" new was="" ref= [not null default 'open'] @2
+  total "bigint" changed was="" ref= [not null] @3
+  memo "" renamed was="note" ref= [] @4
+  legacy_code "" dropped was="" ref= [] @5
+refunds created base=false db/migrations/0008_status.sql:6
+  id "bigserial"  was="" ref= [primary key] @6
+  order_id "bigint"  was="" ref=orders.id [not null] @6
+  reason "text"  was="" ref= [default 'a; b'] @6
+  index refunds_order_idx (order_id) unique=true new @12
+users dropped base=false db/migrations/0008_status.sql:14
+`
+	if got := show(schema(d, nil)); got != want {
+		t.Errorf("schema without a base:\n%s\nwant:\n%s", got, want)
+	}
+
+	// MySQL's forms, and SQL that isn't a table's
+	const q = "db/migrations/0009_mysql.sql"
+	my := "ALTER TABLE `orders` MODIFY COLUMN `total` decimal(12,2) NOT NULL, CHANGE `note` `memo` varchar(255);\n" +
+		"CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN UPDATE orders SET x = 1; END; $$ LANGUAGE plpgsql;\nSELECT 1;\n"
+	d = Data{Diff: newFile(q, my), Sources: map[string]string{q: my}}
+	want = `orders changed base=true db/migrations/0009_mysql.sql:1
+  id "bigserial"  was="" ref= [primary key] @0
+  user_id "bigint"  was="" ref=users.id [] @0
+  total "decimal(12,2)" changed was="numeric(10, 2), nullable" ref= [not null] @1
+  memo "varchar(255)" renamed was="note" ref= [] @1
+  legacy_code "text"  was="" ref= [] @0
+  risk: Setting 'total' NOT NULL fails while any row holds a null.
+users context base=true :0
+  id "bigserial"  was="" ref= [primary key] @0
+`
+	if got := show(schema(d, func([]string) sdb { db := sdb{}; db.read(schemaBase); return db })); got != want {
+		t.Errorf("schema, MySQL:\n%s\nwant:\n%s", got, want)
+	}
+
+	// keys: their actions, what they reach outside the PR, a key by name only, and what the statements may break
+	const k = "db/migrations/0010_keys.sql"
+	keys := "ALTER TABLE orders ADD COLUMN created_by integer REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE;\n" +
+		"ALTER TABLE orders ADD COLUMN region_id bigint NOT NULL;\n" +
+		"DROP TABLE carts;\n" +
+		"CREATE TABLE user_regions (user_id bigint REFERENCES users (id), region_id bigint NOT NULL REFERENCES regions (id), PRIMARY KEY (user_id, region_id));\n"
+	other := "CREATE TABLE regions (id bigint PRIMARY KEY);\nCREATE TABLE cart_items (id bigint, cart_id bigint REFERENCES carts(id));\n"
+	asked := [][]string{}
+	d = Data{Diff: newFile(k, keys), Sources: map[string]string{k: keys}}
+	want = `orders changed base=true db/migrations/0010_keys.sql:1
+  id "bigserial"  was="" ref= [primary key] @0
+  user_id "bigint"  was="" ref=users.id [] @0
+  total "numeric(10, 2)"  was="" ref= [] @0
+  note "text"  was="" ref= [] @0
+  legacy_code "text"  was="" ref= [] @0
+  created_by "integer" new was="" ref=users.id [] @1 delete=set null update=cascade
+  region_id "bigint" new was="" ref=regions.id [not null] @2 by name
+  risk: 'created_by' is integer, 'users.id' is bigserial: the key compares across types.
+  risk: No index on 'created_by': Postgres doesn't create one for a foreign key.
+  risk: 'region_id' is NOT NULL with no default: adding it fails while 'orders' has rows.
+carts dropped base=false db/migrations/0010_keys.sql:3
+  risk: 'cart_items.cart_id' still references it.
+user_regions created base=false db/migrations/0010_keys.sql:4
+  user_id "bigint"  was="" ref=users.id [primary key] @4 part
+  region_id "bigint"  was="" ref=regions.id [primary key] @4 part
+  joins: users, regions
+  risk: No index on 'region_id': Postgres doesn't create one for a foreign key.
+users context base=true :0
+  id "bigserial"  was="" ref= [primary key] @0
+regions context base=true :0
+  id "bigint"  was="" ref= [primary key] @0
+cart_items context base=true :0
+  cart_id "bigint"  was="" ref=carts.id [] @0
+`
+	got := show(schema(d, func(names []string) sdb {
+		asked = append(asked, names)
+		db := sdb{}
+		db.read(schemaBase)
+		if len(asked) > 1 {
+			db.read(other)
+		}
+		return db
+	}))
+	if got != want {
+		t.Errorf("schema, keys:\n%s\nwant:\n%s", got, want)
+	}
+	if !slices.Equal(asked[len(asked)-1], []string{"region", "regiones", "regions"}) {
+		t.Errorf("second base asked for %v", asked)
+	}
+}

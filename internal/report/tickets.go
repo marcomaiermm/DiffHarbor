@@ -77,7 +77,7 @@ func SplitTickets(keys []string, commits []review.Commit, flow []review.Step) *S
 	return s
 }
 
-// tsec is The tickets (5.9): the intro lines, a card per ticket, the footer.
+// tsec is Tickets (5.9): the intro lines, a card per ticket, the footer.
 type tsec struct {
 	Intro  []mline
 	Follow string // the follow-ups the author names, plain
@@ -87,15 +87,41 @@ type tsec struct {
 	Shown  bool // any ticket named: the section and its rail row show
 }
 
-// tcard is a ticket card (component 11).
+// tcard is a ticket card (component 11): its head, then what it asks beside its properties, as a tracker's side
+// panel lists them.
 type tcard struct {
 	ID, Key, State, Due, Title, Stats, Diffs string
+	Icon, Cls                                string // the state's icon and color class: see stateIcon
+	URL                                      string // the ticket in its tracker
+	Blocks, BlockedBy                        []tref
 	Open                                     bool
 	Outcome                                  string
 	Answers                                  []answer
 	AnsChip                                  chip
 	Rows                                     []trow
 	Reason                                   string // the tracker didn't answer for it: why, in the page's words
+}
+
+// tref is a ticket a card's relations name: a link to its card and its state when the PR carries it, else its key.
+type tref struct {
+	Key, Title, Href, Icon, Cls string
+}
+
+// stateIcon is a ticket state's icon as trackers draw it, and its color class: "done", "prog" (started) or "off".
+// The tracker says only the state's name and whether it is done, so the rest reads the name.
+func stateIcon(state string, done bool) (icon, cls string) {
+	s := strings.ToLower(strings.TrimSpace(state))
+	switch {
+	case strings.Contains(s, "cancel") || strings.Contains(s, "duplicate"):
+		return "circle-x", "off"
+	case done:
+		return "circle-check", "done"
+	case s == "" || strings.Contains(s, "backlog") || strings.Contains(s, "triage"):
+		return "circle-dashed", "off"
+	case strings.Contains(s, "todo") || strings.Contains(s, "to do") || s == "open" || s == "new":
+		return "circle", "off"
+	}
+	return "contrast", "prog"
 }
 
 // answer is one of the four answers (component 12).
@@ -152,10 +178,30 @@ func (v *view) ticketsView() tsec {
 	for _, c := range v.Terms.Contracts {
 		contract[c.Ticket] = c
 	}
+	byKey := map[string]ticket.Ticket{}
 	for _, tk := range v.Tickets {
-		c := &tcard{ID: "ticket-" + slug(tk.Key), Key: tk.Key, State: tk.State, Title: tk.Title, Outcome: tk.Outcome}
+		byKey[tk.Key] = tk
+	}
+	refs := func(keys []string) []tref {
+		var rs []tref
+		for _, k := range keys {
+			r := tref{Key: k}
+			if o, ok := byKey[k]; ok {
+				r.Title, r.Href = o.Title, "#ticket-"+slug(k)
+				r.Icon, r.Cls = stateIcon(o.State, o.Done)
+			}
+			rs = append(rs, r)
+		}
+		return rs
+	}
+	for _, tk := range v.Tickets {
+		c := &tcard{
+			ID: "ticket-" + slug(tk.Key), Key: tk.Key, State: tk.State, Title: tk.Title, Outcome: tk.Outcome, URL: tk.URL,
+			Blocks: refs(tk.Blocks), BlockedBy: refs(tk.BlockedBy),
+		}
+		c.Icon, c.Cls = stateIcon(tk.State, tk.Done)
 		if !tk.Due.IsZero() {
-			c.Due = "due " + tk.Due.Format(time.DateOnly)
+			c.Due = "Due " + tk.Due.Format(time.DateOnly)
 		}
 		c.Stats = statsOf(tk.Key, len(tk.DoneWhen), true)
 		if n := diffs[tk.Key]; n > 0 {
@@ -168,11 +214,11 @@ func (v *view) ticketsView() tsec {
 	}
 	if len(v.Tickets) == 0 {
 		for _, k := range keys {
-			t.Cards = append(t.Cards, &tcard{ID: "ticket-" + slug(k), Key: k, Stats: statsOf(k, 0, false)})
+			t.Cards = append(t.Cards, &tcard{ID: "ticket-" + slug(k), Key: k, Stats: statsOf(k, 0, false), Icon: "circle-dashed", Cls: "off"})
 		}
 	}
 	for _, k := range slices.Sorted(maps.Keys(v.TicketErrs)) {
-		c := &tcard{ID: "ticket-" + slug(k), Key: k, Stats: statsOf(k, 0, false), Reason: readFailed(v.TicketErrs[k])}
+		c := &tcard{ID: "ticket-" + slug(k), Key: k, Stats: statsOf(k, 0, false), Reason: readFailed(v.TicketErrs[k]), Icon: "circle-dashed", Cls: "off"}
 		if i := slices.IndexFunc(t.Cards, func(x *tcard) bool { return x.Key == k }); i >= 0 {
 			t.Cards[i] = c
 		} else {

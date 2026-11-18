@@ -68,6 +68,8 @@
       for (const r of $$(".rrow").filter(r => r.getAttribute("href") === "#" + p.id)) mark(r, on); // by link: a page without a map has a Code block with no box
     }
     const all = !!$("#read") && done($("#read"));
+    const vw = $("[data-viewed]"); // Changes' status line counts the files viewed on this page
+    if (vw) { const fs = $$(".file", $("#read")); vw.textContent = fs.length ? ` · ${fs.filter(f => f.classList.contains("seen")).length} of ${fs.length} files viewed` : ""; }
     for (const r of $$('.rrow[href="#read"]')) mark(r, all);
     filter();
   };
@@ -214,6 +216,238 @@
       c.textContent = sel ? shown + " of " + c.dataset.n : c.dataset.n;
     }
   };
+  // three lines around a line of the diff on the page, the line marked: code shown where the reader is, no jump
+  const snippet = (path, line) => {
+    const file = path && line && document.getElementById(path); // a file the page doesn't show has none
+    const rows = file ? $$("tr.ctx, tr.add, tr.del", file) : [];
+    const at = rows.findIndex(x => !x.matches(".del") && x.cells[0].textContent === String(line));
+    if (at < 0) return null;
+    const d = document.createElement("div"), t = document.createElement("table"), tb = document.createElement("tbody");
+    d.className = "diff pvd";
+    d.setAttribute("role", "region");
+    d.setAttribute("aria-label", path + ":" + line);
+    t.dataset.path = path; // its colors and Split as the file's own diff: they read its path and header
+    const head = $("table[data-path]", file)?.tHead;
+    if (head) t.append(head.cloneNode(true));
+    for (const x of rows.slice(Math.max(0, at - 3), at + 4)) {
+      const c = x.cloneNode(true);
+      c.removeAttribute("id");
+      c.classList.toggle("at", x === rows[at]);
+      tb.append(c);
+    }
+    t.append(tb);
+    d.append(t);
+    requestAnimationFrame(() => window.watchDiff?.(d)); // once the caller placed it: colored, side by side when Split is on
+    return d;
+  };
+  // a call's line in How it connects opens its code under it; a line the diff doesn't show opens Every use
+  document.addEventListener("click", e => {
+    const b = e.target.closest(".cxl");
+    if (!b) return;
+    const row = b.closest(".cxc, .dbh, .dbir, tr"), next = row.nextElementSibling, open = b.getAttribute("aria-expanded") === "true";
+    if (next?.matches(".pvd, .pvr")) { next.hidden = open; b.setAttribute("aria-expanded", !open); return; }
+    const d = snippet(b.dataset.at, b.dataset.line);
+    if (!d) { const n = b.closest(".cxn"); if (n) $(".cn", n)?.click(); return; }
+    d.id = "pv-" + b.dataset.at + "~" + b.dataset.line;
+    b.setAttribute("aria-controls", d.id);
+    b.setAttribute("aria-expanded", true);
+    if (row.matches("tr")) { // a table's row: the code in a row of its own, across the table
+      const r = document.createElement("tr"), c = r.insertCell();
+      r.className = "pvr";
+      c.colSpan = row.cells.length;
+      c.append(d);
+      row.after(r);
+    } else row.after(d);
+  });
+  // the panel keeps the reader where they are (decision 38): a part it names selects that part here, an item's row
+  // opens what the item says under it, its code too. "Read {part}" is the one link that leaves for Changes
+  let pvN = 0;
+  const peekItem = r => {
+    const open = r.getAttribute("aria-expanded") === "true", pv = r.nextElementSibling?.matches(".selpv") && r.nextElementSibling;
+    r.setAttribute("aria-expanded", !open);
+    if (pv) { pv.hidden = open; return; }
+    const src = $(r.getAttribute("href"));
+    if (!src) return;
+    const x = ($(":scope > .icx", src) || src).cloneNode(true); // a gate has no body to open: it is its body
+    for (const el of $$("h3, .gk, [data-disc], [data-more-lines]", x)) el.remove();
+    for (const el of [x, ...$$("[id], [aria-controls], [aria-labelledby]", x)]) for (const a of ["id", "aria-controls", "aria-labelledby"]) el.removeAttribute(a);
+    const box = document.createElement("div"), go = document.createElement("a");
+    box.className = "selpv";
+    box.id = "selpv-" + ++pvN;
+    go.className = "lnk";
+    go.href = r.getAttribute("href");
+    go.textContent = "Open in " + (src.closest("section.sec")?.querySelector("h2")?.firstChild?.textContent.trim() || "the page");
+    box.append(...x.childNodes, go);
+    // no excerpt in the item: its line in the diff, so the code is there without leaving
+    const line = /:(\d+)\s*$/.exec($(".sp", r)?.textContent || "")?.[1];
+    const d = !$(".xcode", box) && src.dataset.paths && snippet(JSON.parse(src.dataset.paths)[0], line);
+    if (d) box.firstElementChild ? box.firstElementChild.after(d) : box.prepend(d);
+    r.setAttribute("aria-controls", box.id);
+    r.after(box);
+  };
+  // Database's items open the same way
+  document.addEventListener("click", e => { const r = e.target.closest(".dbits a.selrow"); if (r) { e.preventDefault(); peekItem(r); } });
+  // Database: each foreign key a line from its column to the one it references, lit while its row is (decision 42).
+  // On a wide screen with a mouse ELK lays the cards out, a port per column, as the step graphs do: the cards drag,
+  // the canvas pans, Ctrl+scroll zooms; elsewhere the cards wrap
+  const erd = $("[data-erd]");
+  if (erd) {
+    const stage = $(".dbst", erd), svg = $(".dbln", erd), cards = $$(".dbt", erd), tools = $(".graph-tools", erd), hint = $(".dbhint");
+    const pairs = new Map(), NS = "http://www.w3.org/2000/svg", roomy = matchMedia("(min-width: 768px) and (hover: hover)");
+    let k = 1, tx = 0, ty = 0, size = [0, 0], elk;
+    const laid = () => erd.classList.contains("laid");
+    const full = () => document.fullscreenElement === erd;
+    // a box in the stage's own units, whatever the zoom
+    const box = el => { const r = el.getBoundingClientRect(), o = stage.getBoundingClientRect(); return { l: (r.left - o.left) / k, r: (r.right - o.left) / k, t: (r.top - o.top) / k, y: (r.top + r.height / 2 - o.top) / k }; };
+    // the row a key references in its card, the card's head when it names no column
+    const target = (r, card) => $$("tr[data-col]", card).find(x => x.dataset.col === r.dataset.refCol) || $(".dbh", card);
+    const draw = () => {
+      svg.replaceChildren();
+      pairs.clear();
+      if (getComputedStyle(svg).display === "none") return;
+      for (const r of $$("tr[data-ref]", erd)) {
+        const card = document.getElementById(r.dataset.ref);
+        if (!card || !r.getClientRects().length) continue;
+        const to = target(r, card);
+        const ca = box(r.closest(".dbt")), cb = box(card), y1 = box(r).y, y2 = box(to).y;
+        // each end a straight stub that carries its marks, the curve between the stubs; one card above the other:
+        // round the nearer side
+        let x1, x2, s1, s2;
+        if (cb.l >= ca.r) [x1, x2, s1, s2] = [ca.r, cb.l, 1, -1];
+        else if (cb.r <= ca.l) [x1, x2, s1, s2] = [ca.l, cb.r, -1, 1];
+        else if (cb.l + cb.r < ca.l + ca.r) [x1, x2, s1, s2] = [ca.l, cb.l, -1, -1];
+        else [x1, x2, s1, s2] = [ca.r, cb.r, 1, 1];
+        const a1 = x1 + s1 * 24, a2 = x2 + s2 * 24;
+        const c = s1 !== s2 ? (a1 + a2) / 2 : s1 > 0 ? Math.max(a1, a2) + 16 : Math.min(a1, a2) - 16;
+        const p = document.createElementNS(NS, "path"), m = document.createElementNS(NS, "path"), marks = [];
+        p.setAttribute("d", `M${x1} ${y1}H${a1}C${c} ${y1} ${c} ${y2} ${a2} ${y2}H${x2}`);
+        // the ends, as crow's foot notation draws them: at the key's own end zero or many (the foot on the card), zero
+        // or one when the column is unique; at the row it references exactly one when the key is not null, else zero
+        // or one
+        const bar = (x, y) => `M${x} ${y - 6}V${y + 6}`;
+        const ring = (x, y) => { const e = document.createElementNS(NS, "circle"); e.setAttribute("cx", x); e.setAttribute("cy", y); e.setAttribute("r", 3.5); marks.push(e); };
+        const need = "need" in r.dataset;
+        if ("guess" in r.dataset) p.classList.add("guess");
+        else {
+          const key = "one" in r.dataset ? bar(x1 + s1 * 7, y1) : `M${x1} ${y1 - 6}L${x1 + s1 * 11} ${y1}L${x1} ${y1 + 6}`;
+          m.setAttribute("d", key + bar(x2 + s2 * 7, y2) + (need ? bar(x2 + s2 * 12, y2) : ""));
+          ring(x1 + s1 * 17, y1);
+          if (!need) ring(x2 + s2 * 15, y2);
+        }
+        svg.append(p, m, ...marks);
+        pairs.set(r, [p, m, ...marks, to]);
+      }
+    };
+    const light = r => { // two keys may share a target: what r lights, then everything else off
+      const on = new Set(pairs.get(r));
+      for (const xs of pairs.values()) for (const x of xs) x.classList.toggle(x.matches("tr, .dbh") ? "pk" : "on", on.has(x));
+    };
+    const show = () => { stage.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`; };
+    // all of it in view, but never below least: the first view stays readable, left-aligned, the rest a pan away
+    const fit = (least = 0.2) => {
+      const [w, h] = size;
+      k = Math.max(least, Math.min(1, erd.clientWidth / w, erd.clientHeight / h));
+      tx = Math.max(0, (erd.clientWidth - w * k) / 2);
+      ty = Math.max(0, (erd.clientHeight - h * k) / 2);
+      show();
+    };
+    const unlay = () => {
+      erd.classList.remove("laid");
+      erd.style.height = stage.style.cssText = "";
+      for (const c of cards) c.style.left = c.style.top = "";
+      k = 1;
+      tools.hidden = true;
+      if (hint) hint.hidden = true;
+    };
+    // ELK, layered left to right: a key's table before the one it references, each line between two columns' ports
+    const arrange = async () => {
+      elk ??= import("https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js/+esm").then(m => new m.default());
+      unlay();
+      const ports = new Map(), edges = [];
+      const port = (row, east) => {
+        const card = row.closest(".dbt"), id = `${card.id}/${row.dataset.col ?? ""}/${east ? "e" : "w"}`;
+        if (!ports.has(card.id)) ports.set(card.id, new Map());
+        ports.get(card.id).set(id, { id, x: east ? card.offsetWidth : 0, y: box(row).y - box(card).t, width: 1, height: 1, layoutOptions: { "elk.port.side": east ? "EAST" : "WEST" } });
+        return id;
+      };
+      for (const r of $$("tr[data-ref]", erd)) {
+        const card = document.getElementById(r.dataset.ref);
+        if (!card || card === r.closest(".dbt")) continue;
+        const to = target(r, card);
+        edges.push({ id: `k${edges.length}`, sources: [port(r, true)], targets: [port(to, false)] });
+      }
+      const g = await (await elk).layout({
+        id: "db",
+        layoutOptions: { "elk.algorithm": "layered", "elk.direction": "RIGHT", "elk.padding": "[top=24,left=24,bottom=24,right=24]", "elk.spacing.nodeNode": "28",
+          "elk.layered.spacing.nodeNodeBetweenLayers": "80", "elk.spacing.componentComponent": "40", "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES" },
+        children: cards.map(c => ({ id: c.id, width: c.offsetWidth, height: c.offsetHeight, layoutOptions: { "elk.portConstraints": "FIXED_POS" }, ports: [...(ports.get(c.id)?.values() ?? [])] })),
+        edges,
+      });
+      if (!roomy.matches) return;
+      for (const n of g.children) Object.assign(document.getElementById(n.id).style, { left: n.x + "px", top: n.y + "px" });
+      size = [g.width, g.height];
+      Object.assign(stage.style, { width: g.width + "px", height: g.height + "px" });
+      erd.classList.add("laid");
+      if (!full()) erd.style.height = Math.min(640, Math.max(240, g.height * Math.max(0.85, Math.min(1, erd.clientWidth / g.width)))) + "px";
+      tools.hidden = false;
+      if (hint) hint.hidden = false;
+      fit(0.85);
+      draw();
+    };
+    const lay = () => (roomy.matches ? arrange().catch(unlay) : unlay(), draw());
+    roomy.addEventListener("change", lay);
+    new IntersectionObserver((es, io) => { if (es[0].isIntersecting) { io.disconnect(); lay(); } }, { rootMargin: "400px" }).observe(erd);
+    // drag: a card by its head, else the canvas
+    erd.addEventListener("pointerdown", e => {
+      if (!laid() || e.button !== 0 || e.target.closest("button, a, .graph-tools, tbody, .pvd, .dbrk")) return;
+      const card = e.target.closest(".dbh")?.closest(".dbt");
+      if (e.target.closest(".dbt") && !card) return;
+      e.preventDefault();
+      erd.setPointerCapture(e.pointerId);
+      let x = e.clientX, y = e.clientY;
+      for (const c of cards) c.classList.toggle("dbup", c === card);
+      erd.classList.toggle("pan", !card);
+      const move = ev => {
+        const dx = ev.clientX - x, dy = ev.clientY - y;
+        x = ev.clientX;
+        y = ev.clientY;
+        if (card) { card.style.left = parseFloat(card.style.left) + dx / k + "px"; card.style.top = parseFloat(card.style.top) + dy / k + "px"; draw(); }
+        else { tx += dx; ty += dy; show(); }
+      };
+      erd.addEventListener("pointermove", move);
+      erd.addEventListener("pointerup", () => { erd.removeEventListener("pointermove", move); erd.classList.remove("pan"); }, { once: true });
+    });
+    // the wheel scrolls the page; with Ctrl or ⌘ (a trackpad's pinch too), or in full screen, it zooms at the pointer
+    erd.addEventListener("wheel", e => {
+      if (!laid() || (!e.ctrlKey && !e.metaKey && !full())) return;
+      e.preventDefault();
+      const o = erd.getBoundingClientRect(), px = e.clientX - o.left, py = e.clientY - o.top, z = Math.min(2, Math.max(0.2, k * Math.exp(-e.deltaY * 0.002)));
+      tx = px - (px - tx) * z / k;
+      ty = py - (py - ty) * z / k;
+      k = z;
+      show();
+    }, { passive: false });
+    // the keyboard reaches a card out of view: the canvas moves to it, the browser doesn't scroll the frame
+    erd.addEventListener("focusin", e => {
+      light(e.target.closest("tr[data-ref]"));
+      if (!laid()) return;
+      erd.scrollTop = erd.scrollLeft = 0;
+      const o = erd.getBoundingClientRect(), r = e.target.getBoundingClientRect();
+      if (r.left < o.left || r.right > o.right) tx += o.left + o.width / 2 - (r.left + r.right) / 2;
+      if (r.top < o.top || r.bottom > o.bottom) ty += o.top + o.height / 2 - (r.top + r.bottom) / 2;
+      show();
+    });
+    erd.addEventListener("pointerover", e => light(e.target.closest("tr[data-ref]")));
+    erd.addEventListener("pointerleave", () => light(null));
+    $("[data-act=fit]", erd).addEventListener("click", () => fit());
+    $("[data-act=layout]", erd).addEventListener("click", () => arrange().catch(unlay));
+    $("[data-act=full]", erd).addEventListener("click", () => full() ? document.exitFullscreen() : erd.requestFullscreen?.());
+    erd.addEventListener("fullscreenchange", () => setTimeout(fit, 100, 0.2)); // after the browser resized the frame
+    // a card that opens a statement grows: its lines follow
+    const ro = new ResizeObserver(draw);
+    ro.observe(erd);
+    for (const c of cards) ro.observe(c);
+  }
   if (map) {
     const tip = $("#mtip");
     // a row of the panel's How it connects and its box and line light each other
@@ -275,6 +509,17 @@
       b.tabIndex = -1;
       to.tabIndex = 0;
       to.focus();
+    });
+    map.addEventListener("click", e => {
+      const a = e.target.closest(".selp .hc a.lnk[href^='#']"), k = a && $(a.getAttribute("href"))?.dataset.box;
+      if (k && fig(k)) {
+        e.preventDefault();
+        select(k);
+        fig(k).focus({ preventScroll: true });
+        return;
+      }
+      const r = e.target.closest(".selp a.selrow[href^='#']");
+      if (r) { e.preventDefault(); peekItem(r); }
     });
     const more = $("[data-more-tables]", map);
     more?.addEventListener("click", () => { for (const b of $$("[data-more]", map)) b.hidden = false; more.parentElement.remove(); });
@@ -528,8 +773,9 @@
     if (b) return disclose(b, b.getAttribute("aria-expanded") !== "true");
     const rv = t.closest("[data-reveal]");
     if (rv) {
-      const rows = [rv.nextElementSibling, rv.parentElement.nextElementSibling, rv.parentElement.previousElementSibling].find(x => x?.matches("[data-more-rows]"));
-      if (rows) { rows.hidden = false; rv.remove(); }
+      const box = rv.closest("tbody") ?? rv;
+      const rows = [rv.nextElementSibling, rv.parentElement.nextElementSibling, rv.parentElement.previousElementSibling, box.previousElementSibling].find(x => x?.matches("[data-more-rows]"));
+      if (rows) { rows.hidden = false; box.remove(); }
       return;
     }
     const ml = t.closest("[data-more-lines]");
@@ -665,8 +911,6 @@
   addEventListener("keydown", e => {
     if (e.key === "Escape") {
       if (closeSheet()) return;
-      const dock = $("dialog[open]:not(:modal)");
-      if (dock) return dock.close();
       const open = pops.find(([, p]) => !document.getElementById(p).hidden);
       if (open) { closePops(); return document.getElementById(open[0]).focus(); }
       if (sel) select(null);

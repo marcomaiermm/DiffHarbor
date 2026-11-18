@@ -3,6 +3,7 @@
   <div class="file-head">
     <button type="button" class="file-toggle" aria-expanded="{{.Open}}" aria-controls="{{.Path}}~body">
     {{icon "chevron-down" "collapsible-chevron"}}
+    {{template "fic" .Path}}
     <span class="min-w-0 font-mono text-[13px] break-all"><span class="font-normal text-muted-foreground">{{dir .Path}}</span>{{base .Path}}</span>
     <span class="font-mono text-xs tabular-nums"><span class="text-diff-add">+{{.Add}}</span> <span class="text-diff-del">−{{.Del}}</span></span>
     {{if .New}}<span class="dchip" data-new>new</span>{{else if .Gone}}<span class="dchip" data-del>deleted</span>{{end}}

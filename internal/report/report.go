@@ -77,6 +77,7 @@ type Data struct {
 	Kinds       []FileKind        // What the review covered, files by kind (Static)
 	Env         map[string]EnvVar // Before you merge, Environment: what reads each variable at the head (Static); nil: not searched
 	Migrations  []Migration       // Before you merge, Order: the docs and tests that name each migration (Static)
+	Schema      []Table           // Changes, Database: the tables the PR's migrations create, change or drop (Static)
 	Excerpts    []Excerpt         // lines of unchanged files and of the base the page quotes, beside Sources (Static, Excerpts)
 	CI          *CI               // the forge's checks at SHA and the CI workflows on the base; nil when the forge reads none
 	Members     *Members          // who has access to the repo now; nil when the forge can't list them
@@ -177,6 +178,8 @@ var funcs = template.FuncMap{
 	"add":       func(a, b int) int { return a + b },
 	"icon":      icon,
 	"ico":       ico,
+	"kindlook":  kindLook,
+	"filelook":  fileLook,
 	"md":        md,
 	"wb":        func(s string) template.HTML { return template.HTML(wbr(s)) }, //nolint:gosec // wbr escapes
 	"ev":        func(kind, label string) chip { return chip{kind, label} },

@@ -43,6 +43,7 @@ type page struct {
 	Before     []*card // Before you merge, in order
 	Gap        *card   // the code the review didn't read
 	Parts      []*pblock
+	DB         *dbView // Changes, Database: the tables the migrations change
 	Others     *pblock // major findings in no part and no deploy box
 	Minors     []*card // minor findings in files outside every part
 	Open       int     // open items (5.3): Before, Read the change's, Test changes', the gap
@@ -54,8 +55,10 @@ type page struct {
 	Kinds      []kindRow // without Data.Kinds: the files outside the parts
 	Team       team
 	Rail       []railRow
-	Keys       string // the evidence key's shortcut line
-	given      int    // the files the review was given: the diff's, without lockfiles and generated ones
+	Keys       string            // the evidence key's shortcut line
+	Subs       map[string]string // each section's status line under its title, by the section's id: see subs
+	given      int               // the files the review was given: the diff's, without lockfiles and generated ones
+	unread     int               // of given, the files the review didn't read
 }
 
 // mstatus is the merge status panel (component 3): Kind "blocked", "waits", "open" or "none".
@@ -210,7 +213,82 @@ func (v *view) build() {
 	}
 	p.Covered = v.covered()
 	p.Team = v.team()
+	p.Subs = v.subs()
 	p.Rail = v.rail()
+}
+
+// subs is each section's status line under its title (decision 36): what the section holds beyond its count chip,
+// so it reads without opening it. A section whose body is one line already says it alone; Changes' viewed count is
+// the script's.
+func (v *view) subs() map[string]string {
+	p := &v.Page
+	s := map[string]string{}
+	if m := p.Map; m != nil {
+		n := map[string]int{}
+		for _, b := range append(append([]*mbox{}, m.Fig...), m.Alone...) {
+			n[b.Kind]++
+		}
+		ws := []string{plural(n["part"], "part", "parts")}
+		if k := n["system"]; k > 0 {
+			ws = append(ws, plural(k, "outside service", "outside services"))
+		}
+		if k := len(m.Writes) + len(m.Reads); k > 0 {
+			ws = append(ws, plural(k, "table", "tables"))
+		}
+		line := strings.Join(ws, ", ")
+		if m.OnMap > 0 {
+			line += " · " + plural(m.OnMap, "open item", "open items") + " on them"
+		}
+		s["map"] = line
+	}
+	if n := len(p.Before); n > 0 {
+		g := 0 // the gates: they wait on something outside the PR
+		for _, c := range p.Before {
+			if c.Gate {
+				g++
+			}
+		}
+		switch g {
+		case 0:
+			s["before"] = "Each one settles in the PR itself"
+		case n:
+			s["before"] = map[bool]string{true: "It waits", false: "All wait"}[n == 1] + " on something outside the PR"
+		default:
+			s["before"] = strconv.Itoa(g) + map[bool]string{true: " waits", false: " wait"}[g == 1] + " on something outside the PR, " + strconv.Itoa(n-g) + " settle in the PR itself"
+		}
+	}
+	s["read"] = plural(len(p.Parts), "part", "parts")
+	for _, k := range v.Kinds {
+		if k.Kind != "tests" {
+			continue
+		}
+		line := plural(len(k.Files), "test file", "test files") + " changed"
+		if k.Deleted > 0 {
+			line += ", " + strconv.Itoa(k.Deleted) + " deleted"
+		}
+		s["tests"] = line
+	}
+	if t := p.Tickets; t.Shown {
+		switch d := len(v.Terms.Differences); {
+		case len(v.Tickets) == 0:
+			s["tickets"] = "Named in commits, none read"
+		case d == 0:
+			s["tickets"] = "The code does what they ask"
+		default:
+			s["tickets"] = plural(d, "difference", "differences") + " from what they ask"
+		}
+	}
+	if g := p.given; g > 0 {
+		switch {
+		case p.unread == 0 && g == 1:
+			s["covered"] = "The review read the one file"
+		case p.unread == 0:
+			s["covered"] = "The review read all " + plural(g, "file", "files")
+		default:
+			s["covered"] = "The review read " + strconv.Itoa(g-p.unread) + " of " + plural(g, "file", "files")
+		}
+	}
+	return s
 }
 
 func (v *view) over() string {
@@ -393,7 +471,7 @@ func (v *view) status() mstatus {
 			total++
 		}
 	}
-	v.Page.given = total
+	v.Page.given, v.Page.unread = total, len(unread)
 	nr := stat{N: strconv.Itoa(len(unread)), Of: strconv.Itoa(total), Label: "files not read by the review", Href: "#covered"}
 	if len(unread) == 0 {
 		nr.Of, nr.Second = "", "Every file fit the review"
@@ -737,7 +815,7 @@ func (v *view) cards() {
 		for _, f := range o.Clash {
 			lines = append(lines, cline{Code: f, Href: v.fileHref(f)})
 		}
-		k.Blocks = []cblock{{Label: "The other PR", Chip: chip{"shown", "Open PRs"}, Lines: lines}}
+		k.Blocks = []cblock{{Label: "Other PR", Chip: chip{"shown", "Open PRs"}, Lines: lines}}
 		if o.URL != "" {
 			k.GH, k.GHText, k.GHPlace = o.URL, "Open "+cmp.Or(v.Forge.Ref, "#")+strconv.Itoa(o.Number)+" on "+cmp.Or(v.Forge.Name, "GitHub"), o.URL
 		}
@@ -754,7 +832,7 @@ func (v *view) cards() {
 			lines = append(lines, cline{Code: short(c.SHA), Text: c.Subject})
 		}
 		k.Line = plural(len(v.BaseMoved), "commit", "commits") + " on " + cmp.Or(v.PR.Base, "the base") + " change " + plural(len(files), "file", "files") + " this PR changes."
-		k.Blocks = []cblock{{Label: "The base branch", Chip: evGit, Lines: lines}}
+		k.Blocks = []cblock{{Label: "Base branch", Chip: evGit, Lines: lines}}
 		p.Before = append(p.Before, k)
 	}
 	v.beforeExtras()
@@ -805,6 +883,7 @@ func (v *view) cards() {
 		p.Gap = g
 	}
 	v.lead = append(v.lead, v.testCards()...)
+	p.DB = v.database()
 }
 
 // fileHref is a path's link into the page's diff, "" when the page doesn't show it.
@@ -842,7 +921,7 @@ func (v *view) riskCard(r risk, items []riskItem, box, title string) *card {
 		k.Title = d.Label + " drops " + plural(len(d.Drops), "table", "tables")
 		k.Line = "They run against live data: order them with the deploy and know the way back."
 	}
-	k.Blocks = []cblock{{Label: "The code does", Chip: evDiff, Lines: lines}}
+	k.Blocks = []cblock{{Label: "Code", Chip: evDiff, Lines: lines}}
 	if len(paths) == 1 {
 		for p := range paths {
 			k.Place, k.PlaceHref = p, v.fileHref(p)
@@ -1182,16 +1261,16 @@ func (v *view) team() team {
 // rail is the rail's rows (component 22): the sections, and a row per part with open items.
 func (v *view) rail() []railRow {
 	p := &v.Page
-	rs := []railRow{{Label: "The change", Href: "#top"}, {Label: "Before you merge", Href: "#before", N: len(p.Before)}}
-	rs = append(rs, railRow{Label: "Read the change", Href: "#read", N: p.ReadN()})
+	rs := []railRow{{Label: "Overview", Href: "#top"}, {Label: "Before you merge", Href: "#before", N: len(p.Before)}}
+	rs = append(rs, railRow{Label: "Changes", Href: "#read", N: p.ReadN()})
 	for _, b := range p.Parts {
 		if b.N > 0 {
 			rs = append(rs, railRow{Label: b.Label, Href: "#" + b.Anchor(), N: b.N, Sub: true, Box: b.Key})
 		}
 	}
-	rs = append(rs, railRow{Label: "Test changes", Href: "#tests", N: len(p.Tests.Cards)})
+	rs = append(rs, railRow{Label: "Tests", Href: "#tests", N: len(p.Tests.Cards)})
 	if p.Tickets.Shown {
-		rs = append(rs, railRow{Label: "The tickets", Href: "#tickets", N: len(p.Tickets.Cards)})
+		rs = append(rs, railRow{Label: "Tickets", Href: "#tickets", N: len(p.Tickets.Cards)})
 	}
-	return append(rs, railRow{Label: "What the review covered", Href: "#covered"}, railRow{Label: "Who changed this code", Href: "#team"})
+	return append(rs, railRow{Label: "Review scope", Href: "#covered"}, railRow{Label: "People", Href: "#team"})
 }

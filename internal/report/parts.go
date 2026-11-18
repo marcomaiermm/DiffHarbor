@@ -43,6 +43,99 @@ type connRow struct {
 	ID                                 string // the other part's
 	Box, Ln                            string // in a selection panel: the other end's box and the line between, lit with the row
 	Names, More, NoCall                []nameN
+	Flow                               []cflow // the first names told by their code; Names then holds the rest
+}
+
+// cflow is a name a connection calls, told by what its code says (decision 40): its declaration, the first sentence
+// of its doc, what the PR did to it, its heaviest finding, and where the calling part calls it, this PR's lines first.
+type cflow struct {
+	Name, Sig, Doc, State, Sev, SevText string
+	Path                                string // the declaration's file: the signature takes its language's colors
+	Sites                               []csite
+	More                                int // its other calls on this line, behind Every use
+}
+
+// csite is a place a connection's name is called: the declaration it sits in, the line, its place.
+type csite struct {
+	In, Text, Path, Place string
+	Line                  int
+}
+
+const maxFlow, maxSites = 2, 2
+
+// flows is the first maxFlow names of a connection told by their code: caller calls them, callee declares them. A
+// name the symbols don't hold stays a name.
+func (v *view) flows(caller, callee string, ns []nameN) (fs []cflow, rest []nameN) {
+	for i, n := range ns {
+		if i >= maxFlow {
+			return fs, append(rest, ns[i:]...)
+		}
+		s := v.symIn(n.Name, callee)
+		if s == nil {
+			rest = append(rest, n)
+			continue
+		}
+		f := cflow{Name: n.Name, Path: s.Path, Sig: firstLine(s.Sig), Doc: firstSentence(s.Doc), State: s.State, Sev: s.Sev}
+		f.SevText = map[string]string{"critical": "Critical", "major": "Major"}[s.Sev]
+		var added, other []csite
+		for _, r := range s.Refs {
+			if r.Test || r.Rel == "tie" {
+				continue
+			}
+			if pt := v.partOf(r.Path); pt == nil || pt.ID != caller {
+				continue
+			}
+			c := csite{In: r.In, Text: r.Text, Path: r.Path, Line: r.Line, Place: path.Base(r.Path) + ":" + strconv.Itoa(r.Line)}
+			if _, ok := v.newLines()[r.Path+":"+strconv.Itoa(r.Line)]; ok {
+				added = append(added, c)
+			} else {
+				other = append(other, c)
+			}
+		}
+		f.Sites = slices.Concat(added, other)
+		if len(f.Sites) > maxSites {
+			f.Sites = f.Sites[:maxSites]
+		}
+		f.More = max(0, n.N-len(f.Sites))
+		fs = append(fs, f)
+	}
+	return fs, rest
+}
+
+// symIn is the declaration of name in part pid, else the one declaration of that name.
+func (v *view) symIn(name, pid string) *Symbol {
+	ss := v.Symbols[name]
+	for i := range ss {
+		if pt := v.partOf(ss[i].Path); pt != nil && pt.ID == pid {
+			return &ss[i]
+		}
+	}
+	if len(ss) == 1 {
+		return &ss[0]
+	}
+	return nil
+}
+
+// firstLine is a declaration's first line, cut at 96 runes: a type's fields stay behind Every use.
+func firstLine(s string) string {
+	s, _, _ = strings.Cut(s, "\n")
+	s = strings.TrimSuffix(strings.TrimSpace(s), "{")
+	if r := []rune(s); len(r) > 96 {
+		return string(r[:95]) + "…"
+	}
+	return strings.TrimSpace(s)
+}
+
+// firstSentence is a doc comment's first sentence, cut at 160 runes.
+func firstSentence(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if i := strings.Index(s, ". "); i >= 0 {
+		s = s[:i+1]
+	}
+	if r := []rune(s); len(r) > 160 {
+		return string(r[:159]) + "…"
+	}
+	return s
 }
 
 // nameN is a name and how often it is used.
@@ -300,6 +393,15 @@ func (v *view) connects(b *pblock) {
 			calls, nocall = nocall, nil
 		}
 		r.Names, r.NoCall = calls, nocall
+		if n > 0 {
+			caller, callee := other, id // Called from, Named by: the other part uses this one's names
+			if dir == "Calls" || dir == "Names" {
+				caller, callee = id, other
+			}
+			if r.Flow, r.Names = v.flows(caller, callee, r.Names); len(r.Flow) > 0 {
+				r.Count = strings.TrimSuffix(r.Count, ":")
+			}
+		}
 		if len(r.Names) > maxConnNames {
 			r.Names, r.More = r.Names[:maxConnNames], r.Names[maxConnNames:]
 		}

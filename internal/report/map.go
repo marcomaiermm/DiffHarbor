@@ -900,7 +900,7 @@ func (b *mapper) storeMigrations(table func(name string) (int, bool)) {
 		path  string
 	}
 	kinds, lines := map[key]map[string]bool{}, map[key][]int{}
-	b.upLines(func(p string, no int, text string) {
+	upLines(b.d, func(p string, no int, text string) {
 		for _, st := range []struct {
 			re   *regexp.Regexp
 			kind string
@@ -1357,11 +1357,11 @@ const (
 	tableTime               = time.Minute
 )
 
-// upLines calls f with each line of the diff's SQL files that the PR adds and that runs on migrate, comments aside: a
-// goose file's Down part doesn't count. A file's text is its head's, the diff's lines without it.
-func (b *mapper) upLines(f func(p string, no int, text string)) {
-	diff.EachFile(b.d.Diff, func(p, fd string) {
-		if path.Ext(p) != ".sql" {
+// upLines calls f with each line of d's SQL files that the PR adds and that runs on migrate, comments aside: a
+// goose file's Down part and a .down.sql file don't count. A file's text is its head's, the diff's lines without it.
+func upLines(d Data, f func(p string, no int, text string)) {
+	diff.EachFile(d.Diff, func(p, fd string) {
+		if path.Ext(p) != ".sql" || strings.HasSuffix(p, ".down.sql") {
 			return
 		}
 		fl := parse(p, fd, "")
@@ -1375,15 +1375,15 @@ func (b *mapper) upLines(f func(p string, no int, text string)) {
 		for _, l := range fl.Lines {
 			if n, err := strconv.Atoi(l.No); err == nil && l.Class == "add" {
 				added[n] = true
-				if b.d.Sources[p] == "" {
+				if d.Sources[p] == "" {
 					lines = append(lines, ln{n, l.Text, true})
 				}
-			} else if err == nil && b.d.Sources[p] == "" {
+			} else if err == nil && d.Sources[p] == "" {
 				lines = append(lines, ln{n, l.Text, false})
 			}
 		}
-		for i, t := range strings.Split(b.d.Sources[p], "\n") {
-			if b.d.Sources[p] != "" {
+		for i, t := range strings.Split(d.Sources[p], "\n") {
+			if d.Sources[p] != "" {
 				lines = append(lines, ln{i + 1, t, added[i+1]})
 			}
 		}
@@ -1407,7 +1407,7 @@ func bareName(s string) string {
 func (b *mapper) drops() []MapTable {
 	var out []MapTable
 	seen := map[[2]string]bool{}
-	b.upLines(func(p string, no int, text string) {
+	upLines(b.d, func(p string, no int, text string) {
 		m := dropTable.FindStringSubmatch(text)
 		if m == nil {
 			return

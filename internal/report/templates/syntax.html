@@ -160,8 +160,6 @@ const paint = async table => {
   if (splitOn()) split(table);
 };
 
-{{template "usesjs" .}}
-
 // tokens of one line or a block in the code's colors, plain without Shiki
 const colored = async (text, path) => {
   await ready;
@@ -174,13 +172,16 @@ const colored = async (text, path) => {
   }
   return text.split("\n").map(content => [{ content }]);
 };
+
+{{template "usesjs" .}}
+
 // code lines outside the diff, the API's and the reach list's, colored like it once their box opens: a hundred
 // signatures colored at load hold the page up; a signature's name shows the card
 // a way's node that is a name alone, a handler passed on, is read as a call: it takes a function's color, the brackets cut off
 const upto = (ts, n) => { let at = 0; return ts.flatMap(t => { const x = t.content.slice(0, Math.max(0, n - at)); at += t.content.length; return x ? [{ ...t, content: x }] : []; }); };
 const tint = box => {
-  for (const c of box.querySelectorAll(".inv-lines code, .reach-item li > code, .asig, .ct-pill code")) {
-    const path = c.closest("[data-path]")?.dataset.path, node = c.matches(".ct-pill code") && !c.textContent.endsWith(")"), text = c.textContent;
+  for (const c of box.querySelectorAll(".inv-lines code, .reach-item li > code, .asig, .ct-pill code, .cxs .cn code, .cxl code, .dbg .dbty")) {
+    const path = c.closest("[data-at]")?.dataset.at ?? c.closest("[data-path]")?.dataset.path, node = c.matches(".ct-pill code") && !c.textContent.endsWith(")"), text = c.textContent;
     if (path && lang(path)) colored(node ? text + "()" : text, path).then(([ts = []]) => {
       if (node) ts = upto(ts, text.length);
       c.replaceChildren(...ts.map(t => { const s = el("span", "", t.content); if (t.color) s.style.color = t.color; return s; }));
@@ -193,6 +194,9 @@ for (const box of document.querySelectorAll("#explore details.box"))
   if (box.open) tint(box); // opened before the colors loaded
   else box.addEventListener("toggle", () => tint(box), { once: true });
 for (const w of document.querySelectorAll(".ctw")) if (!w.closest("details")) tint(w); // a step's way is always in view
+// How it connects and the tables take their colors as they come into view, the panel's copies when it shows them
+const inView = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { inView.unobserve(e.target); tint(e.target); } }, { rootMargin: "600px 0px" });
+for (const b of document.querySelectorAll(".cx, .dbt")) inView.observe(b);
 
 // JetBrains' side by side: old left, new right, between them a ribbon from the lines that went to those that came.
 // Lines keep one height, so a ribbon is drawn from line counts; a fold, a finding or a hunk's header spans both
@@ -236,7 +240,11 @@ const split = table => {
     box.append(seg, linear(table, rows));
     l = []; r = []; rows = []; blocks = [];
   };
-  const line = (row, no) => el("div", "sl", el("span", "no", no || ""), el("span", "code", ...clone(row.cells[2])));
+  const line = (row, no) => {
+    const n = el("div", "sl", el("span", "no", no || ""), el("span", "code", ...clone(row.cells[2])));
+    n.classList.toggle("at", row.classList.contains("at")); // a snippet's marked line
+    return n;
+  };
   for (const row of [...table.tBodies].flatMap(b => [...b.rows])) {
     const fold = row.closest("tbody.fold");
     if (row.matches("tr.fold-head")) {
@@ -308,7 +316,7 @@ const split = table => {
     keep = null;
   }
 };
-// whether Split shows is the stylesheet's to say (the width, the docked sheet): the jump asks it
+// whether Split shows is the stylesheet's to say (the width): the jump asks it
 window.inSplit = el => {
   const t = el.closest?.("table[data-path]");
   if (!t || !splitOn()) return null;
@@ -344,5 +352,7 @@ document.addEventListener("diff:rows", ({ detail: { table, rows } }) => {
   done.then(() => { if (splitOn()) split(table); });
 });
 document.querySelectorAll(".diff").forEach(d => seen.observe(d));
+// a diff the page adds later (a call's lines in How it connects): colored, and side by side when Split is on
+window.watchDiff = d => seen.observe(d);
 </script>
 {{end}}

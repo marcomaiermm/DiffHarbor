@@ -121,20 +121,12 @@
 .hunk-seen[aria-pressed="true"] { color: var(--verified); border-color: color-mix(in oklab, var(--verified) 45%, transparent); }
 /* JetBrains' side by side: old left, new right, a ribbon from what went to what came; blue changed, green added,
    gray removed. Lines keep one height, so a ribbon is drawn from line numbers. Only from 1,440, where a side is about
-   520 px (64 columns); narrower, the toggle is gone and the diff is unified.
-   It pauses (unified, the toggle still pressed) while the uses sheet is docked and a side would be under 520: below
-   2,144. This is the one rule; the line jump asks it. The split's lines are aria-hidden, a copy of the rows reads. */
+   520 px (64 columns); narrower, the toggle is gone and the diff is unified. This is the one rule; the line jump asks
+   it. The split's lines are aria-hidden, a copy of the rows reads. */
 .diff > .split { display: none; }
-.dvnote { display: none; font: 400 12px/1.4 var(--sans); color: var(--ink3); white-space: nowrap; }
 @media (min-width: 1440px) {
-  html[data-diff="split"]:not([data-dock]) .diff > .split { display: block; }
-  html[data-diff="split"]:not([data-dock]) .diff:has(> .split) > table { display: none; }
-  html[data-diff="split"][data-dock] .dvnote { display: inline; }
-}
-@media (min-width: 2144px) {
   html[data-diff="split"] .diff > .split { display: block; }
   html[data-diff="split"] .diff:has(> .split) > table { display: none; }
-  html[data-diff="split"] .dvnote { display: none; }
 }
 @media (max-width: 1439px) { .dview { display: none !important; } }
 .split { @apply font-mono text-[12.5px]; }
@@ -353,8 +345,6 @@ button.mrow{width:100%;border:0;background:transparent;text-align:left;cursor:po
 @media (max-width:1023px){:root{--bw:760px}}
 @media (min-width:1440px){:root{--bw:min(calc(100vw - 96px),1680px)}}
 /* from 1,920 the uses sheet docks at the right: the page makes room beside it */
-:root[data-dock]{--bw:min(calc(100vw - 44rem - 96px),1680px)}
-:root[data-dock]>body{padding-right:44rem}
 .blockw{max-width:calc(var(--bw) + 48px);margin:0 auto;padding:24px 24px 0}
 .lay{display:grid;grid-template-columns:232px minmax(0,760px);column-gap:32px;justify-content:center;max-width:calc(var(--bw) + 48px);margin:0 auto;align-items:start;padding:64px 24px 48px}
 .rail{position:sticky;top:80px;min-width:0}
@@ -372,6 +362,8 @@ button.mrow{width:100%;border:0;background:transparent;text-align:left;cursor:po
 .sec h2,.sec h1{scroll-margin-top:80px}
 .sh{display:flex;flex-wrap:wrap;align-items:center;gap:10px;font:600 20px/1.3 var(--sans);letter-spacing:-.02em;color:var(--inkhi)}
 .intro{margin-top:8px;color:var(--ink2);max-width:32em}
+/* a section's status line: what it holds, counted, under its title (decision 36) */
+.ssub{margin-top:4px;font:400 14px/1.5 var(--sans);color:var(--ink2);font-variant-numeric:tabular-nums}
 .sbody{margin-top:24px;display:flex;flex-direction:column;gap:16px;min-width:0}
 .sbody8{margin-top:24px;display:flex;flex-direction:column;gap:8px;min-width:0}
 .none{margin-top:24px;color:var(--ink2)}
@@ -471,16 +463,137 @@ button.mrow{width:100%;border:0;background:transparent;text-align:left;cursor:po
 .rdecl .rp{padding-left:16px}
 .cfoot{font-size:12px;line-height:1.5;color:var(--ink3)}
 .selp{margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
-/* from 1,600 the side of the figure holds the selection panel, then the legend as a list (decision 30); a selection
-   sits beside the lines that drew it. The rows under the figure stay under it: a taller side grows the last row */
+/* a selection's panel and an item opened in it come in where they are, nothing moves away (decision 38) */
+.selp:not([hidden]),.selpv:not([hidden]){animation:selin .18s cubic-bezier(.16,1,.3,1)}
+@keyframes selin{from{opacity:0;transform:translateY(4px)}}
+.selrow[aria-expanded="true"]{background:var(--hover)}
+.selpv{display:flex;flex-direction:column;gap:16px;margin:4px 0 12px;padding:16px;border:1px solid var(--line);border-radius:8px;background:var(--ground);min-width:0}
+.selpv>.lnk{align-self:flex-start;font-size:13px}
+/* a connection told by its code (decision 40): the call's declaration, its doc, where it is called */
+.cx{display:flex;flex-direction:column;gap:8px;min-width:0;margin-inline:-8px;padding:8px;border-radius:6px}
+.cx.pk{background:var(--hover)}
+.cxh{color:var(--ink)}
+.cxn{display:flex;flex-direction:column;gap:4px;min-width:0;padding-left:12px;border-left:1px solid var(--line2)}
+.cxs{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
+.cxs .cn code{font:500 12.5px/1.5 var(--mono);color:var(--inkhi);white-space:normal;overflow-wrap:anywhere}
+.cxd{font-size:13px;line-height:1.5;color:var(--ink2)}
+.cxc{display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:10px;align-items:center;min-height:32px;font-size:13px}
+.cxi{color:var(--ink3);white-space:nowrap}
+.cxi code{font:400 12px/1.5 var(--mono);color:var(--ink2)}
+.cxl{min-width:0;text-align:left;border-radius:4px;padding:2px 6px;margin-left:-6px}
+.cxl code{display:block;font:400 12.5px/1.5 var(--mono);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cxl:hover,.cxl[aria-expanded="true"]{background:var(--hover)}
+.cxc .sp{font:400 12px/1.5 var(--mono);color:var(--ink3);white-space:nowrap}
+.cxn>.pvd,.cxn>.cxc+.pvd{margin:4px 0}
+.cxm{font-size:13px;color:var(--ink2)}
+/* Changes, Database (decision 42): the migrations' tables as schema cards on one canvas, their keys drawn between */
+.dbs{display:flex;flex-direction:column;gap:12px;min-width:0}
+.dbs>.bh h3{display:flex;align-items:center;gap:8px;font:600 15px/1.4 var(--sans);color:var(--inkhi)}
+.dbs>.bh h3 svg{color:var(--k-var)}
+.dbc{position:relative;padding:20px;border:1px solid var(--line);border-radius:8px;background:var(--ground);min-width:0}
+.dbst{position:relative;display:flex;flex-wrap:wrap;align-items:flex-start;gap:24px 64px}
+.dbc.laid{padding:0;overflow:hidden;cursor:grab;touch-action:none;user-select:none}
+.dbc.laid.pan{cursor:grabbing}
+.dbc.laid .dbst{position:absolute;left:0;top:0;display:block;transform-origin:0 0}
+.dbc.laid .dbt{position:absolute;max-width:none}
+.dbc.laid .dbh{cursor:move}
+.dbc.laid .dbt.dbup{z-index:2}
+.dbc:fullscreen{height:100vh!important;border:0;border-radius:0}
+.dblg .dbhint b{font-weight:500;color:var(--ink2)}
+.dbln{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.dbln path{fill:none;stroke:var(--ink3);stroke-width:1.25}
+.dbln .guess{stroke-dasharray:2 4;stroke-linecap:round}
+.dbln circle{fill:var(--ground);stroke:var(--ink3);stroke-width:1.25}
+.dbln .on{stroke:var(--acc);stroke-width:1.75}
+.dbt{position:relative;z-index:1;display:flex;flex-direction:column;width:max-content;min-width:280px;max-width:100%;border:1px solid var(--line3);border-radius:8px;background:var(--surface);overflow:hidden;scroll-margin-top:80px}
+.dbh{display:flex;align-items:center;gap:8px;min-height:44px;padding:8px 14px;border-bottom:1px solid var(--line2);background:color-mix(in oklab,var(--ink) 3%,transparent)}
+.dbh>svg{flex:none;width:14px;height:14px;color:var(--ink3)}
+.dbh h4 code{font:600 13.5px/1.4 var(--mono);color:var(--inkhi)}
+.dbt[data-kind="dropped"] h4 code{color:var(--ink2);text-decoration:line-through}
+.dbt[data-kind="context"]{border-style:dashed;border-color:var(--line3);background:var(--ground)}
+.dbt[data-kind="context"] h4 code{font-weight:500;color:var(--ink2)}
+.dbt[data-kind="context"] .dbh{background:none}
+/* the risks and the notes above the rows wrap to the card: the columns set its width */
+.dbt .dbrk{display:grid;gap:8px;padding:12px 14px 14px;border-top:1px solid var(--line2);background:color-mix(in oklab,var(--major) 5%,transparent);font-size:12px;line-height:1.6;color:var(--ink2);contain:inline-size}
+.dbrk li{display:flex;gap:10px;align-items:flex-start}
+.dbrk svg{flex:none;width:13px;height:13px;margin-top:3px;color:var(--major)}
+.dbt .cd{padding:1px 4px;font-size:11.5px;line-height:1.5}
+.dbh .dbat{margin-left:auto;padding-left:20px;display:inline-flex;align-items:center;gap:6px;font:400 12px/1.5 var(--mono);color:var(--ink3);white-space:nowrap}
+.dbh .dbat:hover,.dbh .dbat[aria-expanded="true"]{color:var(--ink)}
+.dbh.pk{background:var(--hover)}
+.dbt>.pvd{margin:0;border-radius:0}
+.dbw{padding:10px 14px 0;font-size:12px;line-height:1.5;color:var(--ink3);contain:inline-size}
+.dbw+.dbw{padding-top:2px}
+.dbg{width:100%;border-collapse:collapse;margin-top:6px}
+.dbg>tbody>tr>*{padding:5px 14px;text-align:left;vertical-align:baseline;font-weight:400;white-space:nowrap}
+.dbg>tbody>tr+tr>*{border-top:1px solid color-mix(in oklab,var(--line2) 70%,transparent)}
+.dbg>tbody>tr>th{padding-left:8px}
+.dbg>tbody>tr>td{padding-left:28px;text-align:right;font-size:12px;color:var(--ink3);white-space:normal}
+.dbsg{display:inline-block;width:14px;font:500 12.5px/1 var(--mono);text-align:center}
+.dbk{display:inline-block;width:18px}
+.dbk svg{width:12px;height:12px;vertical-align:-1px;color:var(--k-var)}
+.dbg code{font:400 12.5px/1.6 var(--mono);color:var(--ink)}
+.dbg .dbty{margin-left:8px;font-size:11.5px;color:var(--ink3);text-transform:uppercase}
+.dbg td code{font-size:12px;color:var(--ink2)}
+.dbg td svg{display:inline-block;width:12px;height:12px;margin-right:2px;vertical-align:-1px;color:var(--ink3)}
+.dbg th .cxl{margin:-2px -4px;padding:2px 4px}
+.dbg th .cxl code{display:inline;overflow:visible}
+.dbg>tbody>tr[data-st="new"]{background:color-mix(in oklab,var(--diff-add) 10%,transparent)}
+.dbg>tbody>tr[data-st="changed"],.dbg>tbody>tr[data-st="renamed"]{background:color-mix(in oklab,var(--ring) 12%,transparent)}
+.dbg>tbody>tr[data-st="dropped"]{background:color-mix(in oklab,var(--diff-del) 10%,transparent)}
+.dbg>tbody>tr[data-st="new"] .dbsg{color:var(--diff-add)}
+.dbg>tbody>tr[data-st="changed"] .dbsg,.dbg>tbody>tr[data-st="renamed"] .dbsg{color:var(--ring)}
+.dbg>tbody>tr[data-st="dropped"] .dbsg{color:var(--diff-del)}
+.dbg>tbody>tr[data-st="dropped"] th code{color:var(--ink3);text-decoration:line-through}
+.dbg>tbody>tr.pk{background:var(--hover)}
+.dbt[data-kind="dropped"] .dbg>tbody>tr{background:none}
+.dbt[data-kind="dropped"] .dbg{opacity:.6}
+.dbg>tbody>.pvr>td{padding:4px 0;text-align:left}
+.dbg .dlink{font-size:12px}
+.dblg{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:12px;color:var(--ink3)}
+.dblg li{display:flex;align-items:center;gap:8px}
+.dblg i{width:10px;height:10px;border-radius:2px}
+.dblg .lg-fk{width:22px;height:0;border-top:1.25px solid var(--ink3);border-radius:0}
+.dblg .lg-guess{border-top-style:dotted}
+.dblg .lg-ctx{border:1px dashed var(--ink3)}
+.dblg .lg-mk{width:24px;height:12px;fill:none;stroke:var(--ink3);stroke-width:1.25}
+.dblg .lg-new{background:color-mix(in oklab,var(--diff-add) 45%,transparent)}
+.dblg .lg-chg{background:color-mix(in oklab,var(--ring) 50%,transparent)}
+.dblg .lg-del{background:color-mix(in oklab,var(--diff-del) 45%,transparent)}
+@media (max-width:767px){
+  .dbc{gap:12px;padding:8px}
+  .dbt{width:100%;min-width:0}
+  .dbh{flex-wrap:wrap;row-gap:2px}
+  .dbh .dbat{padding-left:0}
+  .dbg>tbody>tr:not(.pvr){display:grid;grid-template-columns:minmax(0,1fr)}
+  .dbg>tbody>tr>th{white-space:normal}
+  .dbg>tbody>tr>td{padding:0 12px 4px 38px;text-align:left}
+  .dbg>tbody>tr>td:empty{display:none}
+  .dbln,.dblg li:has(.lg-fk,.lg-mk){display:none}
+  .dbg{width:100%}
+}
+@media (max-width:767px){.cxc{grid-template-columns:minmax(0,1fr) auto;row-gap:2px}.cxc .cxl{grid-column:1/-1;grid-row:2}}
+.pvd{border:1px solid var(--line);border-radius:6px;overflow-x:auto;contain-intrinsic-size:none;content-visibility:visible}
+.pvd table{width:100%;border-collapse:collapse;font:400 12.5px/1.6 var(--mono)}
+.pvd td{padding:0 8px;white-space:pre;background:var(--row,transparent)}
+.pvd td:not(:last-child){width:1%;padding:0 4px 0 8px;text-align:right;color:var(--diff-dim)}
+.pvd tr.at td{box-shadow:inset 0 1px 0 var(--line3),inset 0 -1px 0 var(--line3)}
+.pvd tr.at td:not(:last-child){color:var(--inkhi)}
+.pvd .sl.at{box-shadow:inset 0 1px 0 var(--line3),inset 0 -1px 0 var(--line3)}
+.pvd .sl.at .no{color:var(--inkhi)}
+@media (prefers-reduced-motion:reduce){.selp:not([hidden]),.selpv:not([hidden]){animation:none}}
+.mselh{display:none}
+/* from 1,600 the side of the figure is the selection panel's alone, a hint while nothing is selected; the legend stays
+   put under the figure, a compact row, so a selection moves nothing (decision 34). The rows under the figure stay
+   under it: a taller panel grows the last row */
 @media (min-width:1600px){
-.mtop:has(.mscr){display:grid;grid-template-columns:minmax(0,max(var(--fw),560px)) minmax(360px,1fr);grid-template-rows:auto 1fr;column-gap:40px;align-items:start}
+.mtop:has(.mscr){display:grid;grid-template-columns:minmax(0,max(var(--fw),560px)) minmax(360px,1fr);grid-template-rows:auto auto 1fr;column-gap:40px;align-items:start}
 .mtop:has(.mscr)>.mscr{grid-area:1/1}
-.mtop:has(.mscr)>.mrest{grid-area:2/1}
-.mtop:has(.mscr)>.mside{grid-area:1/2/3/3;display:flex;flex-direction:column;gap:16px;padding-top:16px;min-width:0;max-width:720px}
-.mside .mleg{margin-top:0}
-.mtop:has(.mscr) .selp{order:-1;margin-top:0;padding:0 0 16px;border-top:0;border-bottom:1px solid var(--line)}
-.mtop:has(.mscr) .mkeys{flex-direction:column;align-items:flex-start}
+.mtop:has(.mscr)>.mside{display:contents}
+.mtop:has(.mscr) .mleg{grid-area:2/1}
+.mtop:has(.mscr)>.mrest{grid-area:3/1}
+.mtop:has(.mscr) :is(.selp,.mselh){grid-area:1/2/4/3;min-width:0;max-width:720px;margin-top:0;padding-top:16px;border-top:0}
+.pg:not([data-sel]) .mtop:has(.mscr) .mselh{display:block;font-size:13px;line-height:1.5;color:var(--ink3)}
 }
 .selh{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}
 .selh .sn1{font:600 13px/1.5 var(--sans);color:var(--inkhi)}
@@ -496,6 +609,20 @@ a.selrow:hover{background:var(--hover)}
 .selrow.tr code{font:400 12.5px/1.5 var(--mono);color:var(--ink)}
 .selh .snm{font:600 13px/1.5 var(--mono)}
 .selrow .sp{font:400 12px/1.5 var(--mono);color:var(--ink3)}
+/* the rows of a list share their columns: the places start on one line, their icons one above the other */
+@media (min-width:768px){
+.selrows{display:grid;grid-template-columns:112px minmax(0,1fr) auto;column-gap:12px}
+.selrows>*{grid-column:1/-1}
+.selrows>.selrow:not(.tr){grid-template-columns:subgrid}
+}
+/* a phone: kind, title, place, one under the other */
+@media (max-width:767px){
+.selrow{grid-template-columns:minmax(0,1fr);grid-template-areas:"k" "t" "p";row-gap:2px;padding-block:12px}
+.selrow .sk{grid-area:k}
+.selrow>span:nth-child(2){grid-area:t}
+.selrow .sp{grid-area:p;justify-self:start;min-width:0;margin-top:2px}
+.selrow .sp:empty{display:none}
+}
 .selsub{margin-top:16px;display:flex;flex-direction:column;gap:8px;font-size:13px;color:var(--ink2)}
 .selsub .bh .lbl{font-size:13px}
 .selsub ul{display:flex;flex-direction:column;gap:2px}
@@ -522,6 +649,13 @@ a.selrow:hover{background:var(--hover)}
 .icb[aria-expanded="true"] .il{display:none}
 .icm{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:2px;font-size:12px;line-height:1.5}
 .icm .knd{font-weight:500;color:var(--ink2)}
+/* color with meaning (decision 37): the kind's icon and words in its color; a file's icon in its kind's */
+.ik-crit{--kc:var(--critical)}.ik-major{--kc:var(--major)}.ik-diff{--kc:var(--c-diff)}.ik-before{--kc:var(--c-before)}.ik-test{--kc:var(--c-test)}
+/* a file's language (decision 41): the syntax theme's hues */
+.fk-blue{--kc:var(--acc)}.fk-cyan{--kc:var(--diff-link)}.fk-yellow{--kc:var(--k-var)}.fk-orange{--kc:var(--major)}.fk-red{--kc:var(--critical)}.fk-purple{--kc:var(--k-type)}.fk-green{--kc:var(--add)}.fk-mute{--kc:var(--ink3)}
+.knd[class*="ik-"],.gate .gk[class*="ik-"],.sk[class*="ik-"]{display:inline-flex;align-items:center;gap:6px;color:var(--kc,var(--ink2))}
+:is(.knd,.gk,.sk)>svg{flex:none;color:var(--kc,var(--ink3))}
+.fic{display:inline-flex;flex:none;justify-content:center;width:16px;vertical-align:-2px;margin-right:6px;color:var(--kc,var(--ink3))}
 .icm .pl{font:400 12px/1.5 var(--mono);color:var(--ink3);overflow-wrap:anywhere}
 .icx{padding:0 20px 20px;display:flex;flex-direction:column;gap:20px}
 .icx>p.body{max-width:32em}
@@ -653,8 +787,24 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 .tch .mt{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0}
 .tch .l1{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
 .tch .tt{font:600 15px/1.5 var(--sans);color:var(--inkhi)}
-.tch .tst{font-weight:400;font-size:13px;color:var(--ink2)}
-.tcb{padding:0 20px 20px;display:flex;flex-direction:column;gap:20px}
+.tcb{padding:0 20px 20px;display:grid;gap:20px}
+.tcm{display:flex;flex-direction:column;gap:20px;min-width:0}
+/* the card's properties, as a tracker's side panel lists them: a quiet label, then rows of icon and value */
+.tcr{display:flex;flex-direction:column;gap:16px;min-width:0;font:400 13px/1.5 var(--sans);color:var(--ink)}
+.tcl{margin-bottom:4px;font:500 12px/1.4 var(--sans);color:var(--ink3)}
+.tcp{display:flex;align-items:center;gap:8px;min-width:0;min-height:28px}
+.tcp>svg{flex:none;color:var(--ink3)}
+.tcp>a{display:flex;align-items:center;gap:8px;min-width:0;min-height:44px;margin-block:-8px;color:inherit;text-decoration:none}
+.tcp>a:hover .tct,.tcp>a:hover{color:var(--inkhi);text-decoration:underline}
+.tcp .k{flex:none;font:500 12px/1 var(--mono);color:var(--ink2)}
+.tct{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tcp.tst{color:var(--ink2)}
+.sti{display:inline-flex;flex:none;color:var(--ink3)}
+.sti.prog{color:var(--major)}
+.sti.done{color:var(--verified)}
+/* beside what it asks; a card that asks nothing lays its properties out in a row */
+@media (min-width:1024px){.tcb:has(>.tcm){grid-template-columns:minmax(0,1fr) 232px;align-items:start}.tcm+.tcr{padding-left:20px;border-left:1px solid var(--line)}}
+.tcb>.tcr:only-child{flex-flow:row wrap;column-gap:48px}
 .tk{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--line2);font:400 12px/1 var(--sans);color:var(--ink2);white-space:nowrap;vertical-align:top;flex:none}
 .tk .k{font:500 12px/1 var(--mono);color:var(--inkhi)}
 .fa{display:flex;flex-direction:column;gap:12px}
@@ -675,10 +825,10 @@ a.gh:hover{color:var(--inkhi);text-decoration-color:var(--ink2)}
 /* one hue in four steps, segments flush in a rounded track, as shadcn's stacked bars; the rows below name each */
 .lbar{display:flex;gap:2px;height:8px;border-radius:9999px;overflow:hidden}
 .lbar span{min-width:4px}
-.k-code{background:var(--primary)}
-.k-tests{background:color-mix(in oklab,var(--primary) 68%,var(--surface))}
-.k-tooling{background:color-mix(in oklab,var(--primary) 42%,var(--surface))}
-.k-gone{background:color-mix(in oklab,var(--primary) 22%,var(--surface))}
+.k-code{background:var(--c-code)}
+.k-tests{background:var(--c-test)}
+.k-tooling{background:var(--ink3)}
+.k-gone{background:var(--line3)}
 .krows{display:flex;flex-direction:column}
 .krow{display:grid;grid-template-columns:12px 168px 64px 128px minmax(0,1fr);column-gap:12px;row-gap:4px;align-items:baseline;padding:12px 0;border-top:1px solid var(--line);font-size:13px;color:var(--ink2)}
 .krow .sw{width:10px;height:10px;border-radius:2px;position:relative;top:1px}
@@ -963,7 +1113,7 @@ a.cs-r:hover{background:var(--hover)}
 .us-lh h3{font:600 13px/1.55 var(--sans);color:var(--ink)}
 .us-nt{font:400 12px/1.5 var(--sans);color:var(--ink3)}
 .us-dt{align-self:flex-start;min-height:44px}
-@media (prefers-reduced-motion:reduce){dialog.us,.us-v,.cs{animation:none}.pa-j1 svg{transition:none}}
+@media (prefers-reduced-motion:reduce){dialog.us,dialog.us::backdrop{transition:none}.us-v,.cs{animation:none}.pa-j1 svg{transition:none}}
 @media (max-width:767px){.pa{--g:20px;--rx:10px;--bi:12px}.pa-sd{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:8px;flex-basis:100%;min-width:0}.pa-pl{margin-left:0;white-space:normal;overflow-wrap:anywhere}.pa-sp.dk{display:none}.pa-sp.ph{display:block}.pa-j2{white-space:pre}.cs{--ci:14px}.cs-hd a{font-size:12px}.on>.cs-h>.cs-r .cs-t,.on>.cs-h>a.cs-r .cs-t{white-space:normal;overflow-wrap:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}.cs-cn{white-space:normal}.us-b{padding:0 16px 24px}.us-bn{display:none}}
 @media (max-width:359px){.pa-j2 i{display:none}.cs{--ci:12px}.cs-r,a.cs-r{grid-template-columns:16px minmax(0,1fr)}.cs-n{display:none}.cs-n2{display:inline}}
 /* the page's own: the card holds one .nc per declaration, the sheet is a modal dialog */
@@ -976,11 +1126,12 @@ a.cs-r:hover{background:var(--hover)}
 .nc-f kbd{margin-left:4px}
 .sig-more{margin-top:4px;font-size:13px}
 .xcode .gap .lnk{font:400 12px/22px var(--sans);color:var(--ink3)}
-dialog.us{position:fixed;inset:0 0 0 auto;margin:0;padding:0;width:min(44rem,100vw);height:100dvh;max-width:none;max-height:none;overflow:auto;overscroll-behavior:contain;background:var(--surface);color:var(--ink);border:0;border-left:1px solid var(--line2);animation:usin .16s ease-out}
-dialog.us:not(:modal){z-index:30}
-dialog.us::backdrop{background:color-mix(in srgb,var(--ground) 70%,transparent)}
-@keyframes usin{from{transform:translateX(100%)}}
-@media (max-width:1023px){dialog.us{inset:auto 0 0 0;width:100%;height:auto;max-height:85dvh;border-left:0;border-top:1px solid var(--line2);border-radius:12px 12px 0 0;animation-name:usup}@keyframes usup{from{transform:translateY(100%)}}.us-h{border-radius:12px 12px 0 0}}
+/* shadcn's Sheet (sheet.css) places it, slides it in and draws the backdrop; the page's own: its width, scroll and
+   surface. Ours is unlayered, so it beats the component layer: sizes go per side */
+dialog.us{overflow:auto;overscroll-behavior:contain;background:var(--surface);color:var(--ink);border-color:var(--line2)}
+dialog.us[data-side="right"]{width:min(44rem,100vw);height:100dvh}
+dialog.us[data-side="bottom"]{max-height:85dvh;border-radius:12px 12px 0 0}
+dialog.us[data-side="bottom"] .us-h{border-radius:12px 12px 0 0}
 .us-h .us-k:empty{display:none}
 .us-v{display:flex;flex-direction:column;gap:16px}
 .us-d>.nc-h{padding:0}

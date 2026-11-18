@@ -120,6 +120,29 @@ const marked = (text, name) => {
   if (!name) return [text];
   return text.split(new RegExp(`(?<![\\w$])(${esc(name)})(?![\\w$])`)).flatMap((p, i) => !p ? [] : i % 2 ? [el("mark", "cs-um", p)] : [p]);
 };
+// tintIn gives box's code its language's colors after it is drawn: each character the color of its token, the marks,
+// links and line numbers kept, a marked name in its mark's color; screen-reader words and numbers ("i", .vh, .cs-n2) aren't code
+const tintIn = async (box, path) => {
+  if (!lang(path)) return;
+  const walk = document.createTreeWalker(box, NodeFilter.SHOW_TEXT, { acceptNode: n => n.parentElement.closest(".vh, .cs-n2, i") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+  const nodes = [];
+  for (let n; (n = walk.nextNode());) nodes.push(n);
+  const text = nodes.map(n => n.data).join("");
+  const [ts = []] = await colored(text.replace(/[\u00a0\u200b]/g, " "), path); // same length: offsets hold
+  const color = [];
+  for (const t of ts) for (let i = 0; i < t.content.length; i++) color.push(t.color);
+  let at = 0;
+  for (const n of nodes) {
+    const runs = [];
+    for (let i = 0; i < n.data.length; i++) {
+      const c = color[at + i], last = runs.at(-1);
+      if (last && last.c === c) last.s += n.data[i]; else runs.push({ c, s: n.data[i] });
+    }
+    at += n.data.length;
+    // the use's name keeps its mark's color
+    if (runs.some(r => r.c) && !n.parentElement.closest("mark")) n.replaceWith(...runs.map(r => { if (!r.c) return r.s; const s = el("span", "", r.s); s.style.color = r.c; return s; }));
+  }
+};
 // a structure draws when it holds more than the declaration's own first line
 const drawable = sh => sh && sh.r.length > 1;
 let uid = 0;
@@ -157,14 +180,20 @@ const structure = (sh, name, decl) => {
       row = el("div", "cs-r cs-lv", el("span", "cs-g", pi("ellipsis-vertical")), el("span", "cs-t", `${r.n} levels`, " ", ...(r.m ? [link(sh.p, r.m[0], "cs-ml", `lines ${r.m[0]}–${r.m[1]}`)] : [])));
     } else if (use) {
       text.append(...marked(r.t, name), el("span", "cs-n2", ":" + r.l));
+      tintIn(text, sh.p);
       row = link(sh.p, r.l, "cs-r", el("span", "cs-g", ...(o.chain ? [] : [el("span", "cs-ud")])), text, el("span", "cs-n", String(r.l)));
       row.setAttribute("aria-label", `${r.t}, line ${r.l}, the use`);
     } else {
       text.append(r.t);
+      tintIn(text, sh.p);
       row = el("div", "cs-r", el("span", "cs-g", ...(o.chain || r.k === "link" ? [] : [glyph(r.k, decl, r.t)])), text, num(r.l));
     }
     const h = el("div", "cs-h", row);
-    if (r.c) h.append(el("p", "cs-cn", `At :${r.c.l}, ${r.c.n} comes from `, el("code", "", r.c.t)));
+    if (r.c) {
+      const c = el("code", "", r.c.t);
+      tintIn(c, sh.p);
+      h.append(el("p", "cs-cn", `At :${r.c.l}, ${r.c.n} comes from `, c));
+    }
     if (n.kids.length) h.append(el("i", `cs-dn${n.kids.some(on) ? " on" : ""}${use ? " u" : ""}`));
     li.append(h);
     if (n.kids.length) li.append(list(n.kids, r.k === "chain", "cs-u", r.t));
@@ -276,6 +305,7 @@ const line2 = j => {
   const m = j.mk && new RegExp(`(?<![\\w$])${esc(j.mk)}(?![\\w$])`).exec(j.x);
   if (m) s.append(el("span", "pa-ja", el("span", "", j.x.slice(0, m.index).replace(/ +$/, s => "\u00a0".repeat(s.length)))), el("span", "pa-jm", el("mark", "cs-um", j.mk)), el("span", "pa-jz", "​" + j.x.slice(m.index + j.mk.length)));
   else s.append(el("span", "pa-jz", j.x));
+  tintIn(s, j.p);
   return s;
 };
 let note = null; // the uses sheet's notes, while it draws
@@ -770,16 +800,15 @@ const showView = (e, top) => {
   title.focus();
 };
 // Every use: the sheet on this declaration, a fresh back stack
-const docked = matchMedia("(min-width: 1920px)");
+const narrow = matchMedia("(max-width: 1023px)");
 const uses = async (name, list, from) => {
   hide();
   opener = from || document.activeElement;
   stack = [];
   cur = await view(name, list);
-  if (!sheet.open) { // wide, it docks beside the page and the diff stays usable; html[data-dock] makes room for it
-    if (docked.matches) sheet.show();
-    else sheet.showModal();
-    document.documentElement.toggleAttribute("data-dock", docked.matches);
+  if (!sheet.open) { // shadcn's Sheet: over the page, from the right; on a phone from the bottom
+    sheet.dataset.side = narrow.matches ? "bottom" : "right";
+    sheet.showModal();
   }
   showView(cur, 0);
 };
@@ -798,7 +827,6 @@ back.addEventListener("click", () => {
   showView(p, p.top);
 });
 sheet.addEventListener("close", () => {
-  document.documentElement.removeAttribute("data-dock");
   if (!leaving) opener?.focus?.();
   leaving = false;
 });

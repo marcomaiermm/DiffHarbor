@@ -200,7 +200,7 @@ func TestIcons(t *testing.T) {
 		page = append(page, b...)
 	}
 	for _, m := range regexp.MustCompile(`\{\{icon? "([^"]+)"`).FindAllStringSubmatch(string(page), -1) {
-		if icons[m[1]] == "" {
+		if _, ok := icons[m[1]]; !ok {
 			t.Errorf("icon %q is not in icons", m[1])
 		}
 	}

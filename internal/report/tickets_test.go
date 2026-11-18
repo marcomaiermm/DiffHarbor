@@ -47,3 +47,24 @@ git checkout -q pr; git merge -q --no-ff side -m 'Merge ABC-2'`)
 		t.Fatal("no keys")
 	}
 }
+
+// a state's icon reads its name: canceled before done, started is anything not waiting
+func TestStateIcon(t *testing.T) {
+	for _, c := range []struct {
+		state     string
+		done      bool
+		icon, cls string
+	}{
+		{"In Progress", false, "contrast", "prog"},
+		{"In Review", false, "contrast", "prog"},
+		{"Done", true, "circle-check", "done"},
+		{"Canceled", true, "circle-x", "off"},
+		{"Todo", false, "circle", "off"},
+		{"Backlog", false, "circle-dashed", "off"},
+		{"", false, "circle-dashed", "off"},
+	} {
+		if icon, cls := stateIcon(c.state, c.done); icon != c.icon || cls != c.cls {
+			t.Errorf("%q: %s %s, want %s %s", c.state, icon, cls, c.icon, c.cls)
+		}
+	}
+}

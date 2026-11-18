@@ -36,7 +36,7 @@ func largeData() Data {
 		editFile("internal/catalog/catalog.go", []string{"func Lookup() {}"}, []string{"func Lookup(id string) Item { return Item{} }"}) +
 		editFile("internal/api/routes.go", []string{"// routes"}, []string{"func routes() { orders.Place(\"x\") }"}) +
 		editFile("internal/util/strings.go", []string{"func Trim() {}"}, []string{"func Trim(s string) string { return s }"}) +
-		newFile("db/migrations/0007_orders.sql", "CREATE TABLE orders (id text);\nDROP TABLE legacy_orders;\n") +
+		newFile("db/migrations/0007_orders.sql", largeMigration) +
 		editFile(".github/workflows/ci.yml", []string{"go: 1.24"}, []string{"go: 1.25"}) +
 		editFile("internal/orders/orders_test.go", []string{"func TestPlace() {}"}, []string{"func TestPlace(t *testing.T) {}"}) +
 		editFile("README.md", []string{"old"}, []string{"new"}) +
@@ -168,8 +168,39 @@ func largeData() Data {
 		Migrations: []Migration{{Path: "db/migrations/0007_orders.sql", Docs: []string{"README.md:1"}, Tests: []string{"internal/orders/orders_test.go:1"}}},
 	}
 	usesData(&d)
+	d.Schema = schema(d, func([]string) sdb { db := sdb{}; db.read(largeBase); return db })
 	return d
 }
+
+// largeMigration is the large page's migration: it creates orders, changes customers, drops legacy_orders.
+const largeMigration = "CREATE TABLE orders (id text);\nDROP TABLE legacy_orders;\n" +
+	"ALTER TABLE orders ADD COLUMN customer_id bigint NOT NULL REFERENCES customers (id);\n" +
+	"ALTER TABLE orders ADD COLUMN total_cents bigint NOT NULL DEFAULT 0;\n" +
+	"CREATE INDEX orders_customer_idx ON orders (customer_id);\n" +
+	"ALTER TABLE customers ADD COLUMN tier text NOT NULL DEFAULT 'basic';\n" +
+	"ALTER TABLE customers ALTER COLUMN email SET NOT NULL;\n" +
+	"ALTER TABLE customers RENAME COLUMN phone TO phone_number;\n" +
+	"ALTER TABLE customers DROP COLUMN fax;\n" +
+	"ALTER TABLE orders ADD COLUMN created_by integer REFERENCES users (id) ON DELETE SET NULL;\n" +
+	"ALTER TABLE orders ADD COLUMN region_id bigint;\n" +
+	"CREATE TABLE order_items (order_id text NOT NULL REFERENCES orders (id) ON DELETE CASCADE, product_id bigint NOT NULL REFERENCES products (id),\n" +
+	"  quantity integer NOT NULL DEFAULT 1, PRIMARY KEY (order_id, product_id));\n"
+
+// largeBase is the base's migrations the large page's tables come from.
+const largeBase = `CREATE TABLE customers (
+  id bigserial PRIMARY KEY,
+  email text,
+  name text NOT NULL,
+  phone text,
+  fax text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE legacy_orders (id bigserial PRIMARY KEY, customer_id bigint REFERENCES customers (id), total numeric(10, 2));
+CREATE TABLE invoices (id bigserial PRIMARY KEY, order_id bigint REFERENCES legacy_orders (id));
+CREATE TABLE users (id bigserial PRIMARY KEY, email text NOT NULL);
+CREATE TABLE regions (id bigint PRIMARY KEY, name text);
+CREATE TABLE products (id bigserial PRIMARY KEY, name text NOT NULL);
+`
 
 // prevData is the large PR's version before its last push: orders.go read otherwise, no difference yet, its findings one
 // line down.
@@ -272,7 +303,8 @@ func TestPageFixtures(t *testing.T) {
 		want []string
 	}{
 		{"large", largeData(), []string{
-			`<h2 id="h-map" tabindex="-1">The change, by part</h2>`, `data-box="part:internal/payments"`, `data-box="system:PAYMENTS_API_URL"`,
+			`<h3 id="h-db">`, `id="db-customers"`, `<span class="dchip" data-new>new table</span>`, "renamed from phone", `data-ref="db-customers" data-ref-col="id"`, `<div class="selrows dbits"><a class="selrow" href="#`, `<a class="lnk" href="#db-customers"><code translate="no">customers.id</code></a>`, "Written in orders, read in api.", `<span class="dchip" data-dash>outside this PR</span>`, `id="db-users"`, `data-ref="db-regions" data-ref-col="id" data-guess=""`, "by its name, no foreign key", "on delete set null", "Joins <code class=\"cd\" translate=\"no\">orders</code> and <code class=\"cd\" translate=\"no\">products</code>, many to many.", `data-ref="db-orders" data-ref-col="id" data-need=""`, "zero or many", "exactly one", "zero or one", `<ul class="dbrk" aria-label="Risks">`, `No index on <code class="cd" translate="no">created_by</code>`, `invoices<wbr>.order_id</code> still references it.`,
+			`<h2 id="h-map" tabindex="-1">Map</h2>`, `<p class="cxd">Charge sends a charge to the payment service.</p>`, `return payments.Charge(id)`, `data-box="part:internal/payments"`, `data-box="system:PAYMENTS_API_URL"`,
 			`<p class="mrl dp">Tables it writes</p>`, `<p class="mrl dp">Tables it only reads</p>`, `aria-label="items_view, a subquery`,
 			"A subquery the project declares. The scan doesn&#39;t follow it to the tables it reads.",
 			`<p class="mrl dp">Before merging</p>`, "Follow one path from", "Outside this PR, 4 places in code name 2 of the declarations it changes.",
@@ -285,7 +317,7 @@ func TestPageFixtures(t *testing.T) {
 			"Also waits for the payment service launch.", `id="the-payment-service-launch-gate"`,
 			"Clears when SHOP-12 is Done. DiffHarbor reads the tracker again on its next run: a run starts on a push, or when someone comments “@shop-review review” on the PR.",
 			"SHOP-12, “Charge orders before they save”, is In Progress, due 2026-11-21. Read 2026-11-14.",
-			`id="difference-1"`, "The ticket asks", "From SHOP-12, Done when 1", `<span class="ev">at abcdef0</span>`, "Open the run on GitHub",
+			`id="difference-1"`, "<p class=\"lbl\">Ticket</p>", "From SHOP-12, Done when 1", `<span class="ev">at abcdef0</span>`, "Open the run on GitHub",
 			"This PR carries 3 tickets. The tracker says SHOP-11 blocks SHOP-12.", "Split suggestions are off for this repo",
 			"Follow-ups the author names: SHOP-13 Todo", "Read from the tracker on 2026-11-14.", "The tracker didn&#39;t answer in time, so this ticket wasn&#39;t read.",
 			"4 commits · 3 files, 2 only its own · in 1 of 2 steps · 2 asks", "1 file carries commits of two or more tickets",
@@ -298,7 +330,7 @@ func TestPageFixtures(t *testing.T) {
 			`<script type="application/json" id="shapes">[{"p":"internal/api/routes.go","s":[1,1],"r":[{"k":"decl"`,
 			`<script type="application/json" id="nodes">[{"n":"routes","k":"decl"`, `"ju":{"r":"call","p":"web/form.ts","l":30}`, `"e":{"k":"cycle","t":"submit"}`,
 			`<ol class="pa" aria-label="Path from POST /orders to PAYMENTS_API_URL" data-items="[{&#34;t&#34;:&#34;s&#34;,&#34;n&#34;:&#34;/orders&#34;,&#34;k&#34;:&#34;route&#34;`,
-			`&#34;r&#34;:&#34;request&#34;`, `<dialog id="uses" class="us" aria-labelledby="uses-title">`, "SHOP-12 In Progress · 2 differences", `data-k="[&#34;finding\tinternal/orders/orders.go: A failed charge still saves the order&#34;]"`,
+			`&#34;r&#34;:&#34;request&#34;`, `<dialog id="uses" class="sheet us" data-side="right" aria-labelledby="uses-title">`, "SHOP-12 In Progress · 2 differences", `data-k="[&#34;finding\tinternal/orders/orders.go: A failed charge still saves the order&#34;]"`,
 		}},
 		{"tiny", tinyData(), []string{`id="read"`, "No open items", ">test run here<", `id="part-code"`}},
 		{"waits", waitsData(), []string{
