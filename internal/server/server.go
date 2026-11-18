@@ -146,7 +146,7 @@ func prKey(e *forge.Event) string { return fmt.Sprintf("%s#%d", repoOf(e), e.Pul
 type pool struct {
 	mu sync.Mutex
 	s  *scheduler
-	// The running jobs by repo and PR (prKey), at most one each: a repo's jobs run one at a time. Closing the PR stops its job, a newer
+	// The running jobs by repo and PR (prKey), at most one each: a PR's jobs run one at a time (scheduler). Closing the PR stops its job, a newer
 	// push stops its review: no tokens on a dead head. The context reaches every git, check and Pi call of the job.
 	running map[string]*task
 	run     func(context.Context, *forge.Event) error // runJob, a fake in tests

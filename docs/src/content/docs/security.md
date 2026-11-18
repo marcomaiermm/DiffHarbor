@@ -12,7 +12,7 @@ Within that:
 ## Keys stay with root
 
 - Root serves and holds the forge keys, the model keys and Pi's login.
-- git, checks and Pi run as a user of the repo's own (one uid per repo). They get none of the keys, except for the cases under [What the PR's code can reach](#what-the-prs-code-can-reach).
+- git, checks and Pi run as a user of the repo's own: one uid for its reviews, one for its answers to comments. They get none of the keys, except for the cases under [What the PR's code can reach](#what-the-prs-code-can-reach).
 - git fetches and Pi's model calls go through a proxy in the server on `127.0.0.1`. They use random tokens that the server revokes when the Pi run (git: the job) ends.
 - A token reaches only its provider's model API or its job's repo (fetches, no push). The proxy adds the key there.
 - `NPM_REGISTRIES` tokens work the same way: installs read through the proxy, GETs only, with tokens that end with the checks.
@@ -31,9 +31,9 @@ Within that:
 
 ## Jobs at once
 
-- A repo's jobs run one after another: they share its user, which could otherwise signal or read the other job's processes.
-- With [`MAX_JOBS`](../configuration/#storage-and-docker) above `1`, jobs of different repos run at the same time. Home, temp dir (`TMPDIR`), caches and uid stay per repo. Shared while they run:
-  - `/tmp`, `/var/tmp` and `/dev/shm`: a PR's code could leave a file for another repo's job.
+- A repo's reviews run one after another, and so do its answers: they share a user, which could otherwise signal or read the other job's processes. With [`MAX_JOBS`](../configuration/#storage-and-docker) above `1`, an answer can run beside a review of another PR of the same repo, each as its own user. Both run that repo's PR code.
+- With [`MAX_JOBS`](../configuration/#storage-and-docker) above `1`, jobs of different repos run at the same time, and a repo's answer beside its review. Home, temp dir (`TMPDIR`), caches and uid stay per repo and lane. Shared while they run, also between a repo's answer and its review:
+  - `/tmp`, `/var/tmp` and `/dev/shm`: a PR's code could leave a file for another job.
   - The loopback network, abstract unix sockets included: it could talk to a port or socket another job listens on.
   - The process list, arguments included. Tokens, prompts, rules and learnings stay out of it (git's token goes in a header from a file, npm's and the models' in the env, prompts in files and stdin), unless a repo's own scripts put them in a command's arguments. The changed files' paths, commit SHAs, test names and the bumped npm packages' names and versions are in it.
   - The container's memory, CPUs and processes: one PR's memory hog or fork bomb can starve the other jobs or get them killed. Raise `mem_limit`, `cpus` and `pids_limit` with `MAX_JOBS`.
