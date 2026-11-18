@@ -840,7 +840,8 @@ func (t *stab) alter(ws []string, line int, pr bool) {
 		if pr && c.from == "" && !strings.EqualFold(c.name, n.name) {
 			c.from = c.name
 		}
-		c.name, c.typ, c.def, c.notNull, c.pk, c.unique = n.name, n.typ, n.def, n.notNull, n.pk, n.unique
+		t.rename(c, n.name)
+		c.typ, c.def, c.notNull, c.pk, c.unique = n.typ, n.def, n.notNull, n.pk, n.unique
 	case "RENAME":
 		if len(ws) < 3 || !strings.EqualFold(ws[1], "TO") || strings.EqualFold(ws[0], "TO") {
 			return // RENAME TO: the table's own name, which the page doesn't follow
@@ -849,8 +850,21 @@ func (t *stab) alter(ws []string, line int, pr bool) {
 		if pr && c.from == "" {
 			c.from = c.name
 		}
-		c.name = bareName(ws[2])
+		t.rename(c, bareName(ws[2]))
 	}
+}
+
+// rename renames column c, in the constraints that name it too. The lists are replaced, not changed: a clone shares
+// them.
+func (t *stab) rename(c *scol, to string) {
+	for n, k := range t.named {
+		if i := slices.IndexFunc(k.cols, func(x string) bool { return strings.EqualFold(x, c.name) }); i >= 0 {
+			k.cols = slices.Clone(k.cols)
+			k.cols[i] = to
+			t.named[n] = k
+		}
+	}
+	c.name = to
 }
 
 // constraint reads a table constraint (PRIMARY KEY, UNIQUE, FOREIGN KEY) onto its columns; false: ws is a column.

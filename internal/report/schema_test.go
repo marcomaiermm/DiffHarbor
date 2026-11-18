@@ -270,23 +270,23 @@ users context base=true :0
   id "bigserial"  was="" ref= [primary key] @0
 `,
 	}, {
-		name: "constraints dropped by name, declared or default",
-		diff: newFile("db/migrations/0010_keys.sql", "ALTER TABLE orders DROP CONSTRAINT orders_user_id_fkey;\n"+
+		name: "constraints dropped by name, declared or default, after a rename",
+		diff: newFile("db/migrations/0010_keys.sql", "ALTER TABLE orders RENAME COLUMN user_id TO account_id;\nALTER TABLE orders DROP CONSTRAINT orders_user_id_fkey;\n"+
 			"ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;\nALTER TABLE refunds DROP CONSTRAINT refunds_order_fk;\n"),
 		base: "/* the schema\n   so far */\nCREATE TABLE refunds (\n  id bigserial,\n  order_id bigint,\n" +
 			"  CONSTRAINT refunds_order_fk FOREIGN KEY (order_id) REFERENCES orders (id)\n);\n" + schemaBase,
 		want: `orders changed base=true db/migrations/0010_keys.sql:1
   id "bigserial"  was="" ref= [primary key] @0
-  user_id "bigint" changed was="references users.id" ref=users.id [] @1 by name
+  account_id "bigint" renamed was="user_id" ref= [] @2
   total "numeric(10, 2)"  was="" ref= [] @0
   note "text"  was="" ref= [] @0
   legacy_code "text"  was="" ref= [] @0
-users changed base=true db/migrations/0010_keys.sql:2
+users changed base=true db/migrations/0010_keys.sql:3
   id "bigserial"  was="" ref= [primary key] @0
-  email "text" changed was="unique" ref= [not null] @2
-refunds changed base=true db/migrations/0010_keys.sql:3
+  email "text" changed was="unique" ref= [not null] @3
+refunds changed base=true db/migrations/0010_keys.sql:4
   id "bigserial"  was="" ref= [] @0
-  order_id "bigint" changed was="references orders.id" ref=orders.id [] @3 by name
+  order_id "bigint" changed was="references orders.id" ref=orders.id [] @4 by name
 `,
 	}, {
 		name: "an edited CREATE TABLE a later base migration altered",
