@@ -11,17 +11,61 @@ import (
 	"strings"
 )
 
-// Checks reads sha's check runs and the workflow runs they belong to. It needs "Checks: read" and "Actions: read",
-// in a token of its own: the review's has neither, and an App without them still reviews.
+// Checks reads sha's check runs and the commit statuses other CI posts. The runs need "Checks: read" in a token of its
+// own: the review's lacks it, and an App without it still reviews. Each run's workflow ("Actions: read") and the
+// statuses ("Commit statuses: read") come when the App has them, each in a token of its own, so one missing loses
+// only its part.
 func (p *pr) Checks(sha string) ([]report.Check, error) {
-	token, err := Mint(p.e, map[string]string{"checks": "read", "actions": "read"})
+	token, err := Mint(p.e, map[string]string{"checks": "read"})
 	if err != nil {
-		return nil, fmt.Errorf("token with Checks and Actions: read (app permission): %w", err)
+		return nil, fmt.Errorf("token with Checks: read (app permission): %w", err)
 	}
-	return checkRuns(p.api, url.PathEscape(sha), token)
+	actions, _ := Mint(p.e, map[string]string{"actions": "read"})
+	cs, err := checkRuns(p.api, url.PathEscape(sha), token, actions)
+	if err != nil {
+		return nil, err
+	}
+	if st, err := Mint(p.e, map[string]string{"statuses": "read"}); err == nil {
+		ss, err := commitStatuses(p.api, url.PathEscape(sha), st)
+		if err != nil {
+			return nil, err // a partial list would call a failing status nothing
+		}
+		cs = append(cs, ss...)
+	}
+	return cs, nil
 }
 
-func checkRuns(api, sha, token string) ([]report.Check, error) {
+// commitStatuses is each context's latest status on sha, ours left out: CI that posts statuses, not check runs.
+func commitStatuses(api, sha, token string) ([]report.Check, error) {
+	var combined struct {
+		Statuses []struct {
+			Context   string `json:"context"`
+			State     string `json:"state"`
+			TargetURL string `json:"target_url"`
+		} `json:"statuses"`
+	}
+	if err := Call("GET", api+"/commits/"+sha+"/status?per_page=100", token, nil, &combined); err != nil {
+		return nil, err
+	}
+	var cs []report.Check
+	for _, s := range combined.Statuses {
+		if s.Context == "diffharbor" {
+			continue
+		}
+		c := report.Check{Name: s.Context, Status: "pending", URL: s.TargetURL}
+		switch s.State {
+		case "success":
+			c.Status, c.Conclusion = "completed", "success"
+		case "failure", "error":
+			c.Status, c.Conclusion = "completed", "failure"
+		}
+		cs = append(cs, c)
+	}
+	return cs, nil
+}
+
+// checkRuns is sha's check runs, ours left out; with actions, a token that reads workflow runs, each with its workflow.
+func checkRuns(api, sha, token, actions string) ([]report.Check, error) {
 	var runs struct {
 		WorkflowRuns []struct {
 			Name       string `json:"name"`
@@ -29,8 +73,9 @@ func checkRuns(api, sha, token string) ([]report.Check, error) {
 			CheckSuite int64  `json:"check_suite_id"`
 		} `json:"workflow_runs"`
 	}
-	if err := Call("GET", api+"/actions/runs?per_page=100&head_sha="+sha, token, nil, &runs); err != nil {
-		return nil, err
+	if actions != "" {
+		// best effort: without them the checks go without their workflows
+		_ = Call("GET", api+"/actions/runs?per_page=100&head_sha="+sha, actions, nil, &runs)
 	}
 	// the first 100 runs: a check of a run past them goes without its workflow
 	wf := map[int64][2]string{} // check suite -> the workflow's name and file

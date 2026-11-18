@@ -85,6 +85,7 @@ type sdb map[string]*stab
 type sqlLine struct {
 	text string
 	line int
+	add  bool // the PR adds the line; a statement: some line of it
 }
 
 // schema is the tables the PR's migrations name (decision 42): the base's migrations that name them (base, nil for
@@ -98,15 +99,19 @@ func schema(d Data, base func(names []string) sdb) []Table {
 	first := map[string]site{}
 	var files []string
 	byFile := map[string][]sqlLine{}
-	upLines(d, func(p string, no int, text string) {
+	migrationLines(d, func(p string, no int, text string, add bool) {
 		if _, ok := byFile[p]; !ok {
 			files = append(files, p)
 		}
-		byFile[p] = append(byFile[p], sqlLine{text, no})
+		byFile[p] = append(byFile[p], sqlLine{text, no, add})
 	})
-	pr := map[string][]sqlLine{}
+	pr := map[string][]sqlLine{} // the statements the PR adds a line to, whole: a column added to a CREATE TABLE too
 	for _, p := range files {
-		pr[p] = statements(byFile[p])
+		for _, st := range statements(byFile[p]) {
+			if st.add {
+				pr[p] = append(pr[p], st)
+			}
+		}
 	}
 	touch := func(p string, line int) func(string) {
 		return func(name string) {
@@ -499,7 +504,7 @@ func (db sdb) read(text string) {
 		if downMark.MatchString(l) {
 			break
 		}
-		lines = append(lines, sqlLine{l, i + 1})
+		lines = append(lines, sqlLine{l, i + 1, false})
 	}
 	for _, st := range statements(lines) {
 		db.apply(st, false, func(string) {})
@@ -507,11 +512,11 @@ func (db sdb) read(text string) {
 }
 
 // statements joins lines into statements at the semicolons outside quotes and $$ bodies, comments cut; each starts at
-// the line of its first word.
+// the line of its first word, or of its first added one when the PR adds to it.
 func statements(lines []sqlLine) []sqlLine {
 	var out []sqlLine
 	var b strings.Builder
-	start, quote, dollar := 0, false, false
+	start, quote, dollar, add := 0, false, false, false
 	for _, l := range lines {
 		t := l.text
 		for i := 0; i < len(t); i++ {
@@ -540,9 +545,10 @@ func statements(lines []sqlLine) []sqlLine {
 				continue
 			case c == ';':
 				if s := strings.TrimSpace(b.String()); s != "" {
-					out = append(out, sqlLine{s, start})
+					out = append(out, sqlLine{s, start, add})
 				}
 				b.Reset()
+				add = false
 				continue
 			}
 			if b.Len() == 0 && (c == ' ' || c == '\t') {
@@ -551,6 +557,9 @@ func statements(lines []sqlLine) []sqlLine {
 			if b.Len() == 0 {
 				start = l.line
 			}
+			if l.add && !add {
+				add, start = true, l.line
+			}
 			b.WriteByte(c)
 		}
 		if b.Len() > 0 {
@@ -558,7 +567,7 @@ func statements(lines []sqlLine) []sqlLine {
 		}
 	}
 	if s := strings.TrimSpace(b.String()); s != "" {
-		out = append(out, sqlLine{s, start})
+		out = append(out, sqlLine{s, start, add})
 	}
 	return out
 }

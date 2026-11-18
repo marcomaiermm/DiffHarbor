@@ -53,7 +53,7 @@ const link = (path, line, cls, ...kids) => {
   a.title = path + ":" + line;
   if (rowOf(path, line)) a.href = "#" + path + ":" + line;
   else if (pop.dataset.blob) {
-    a.href = pop.dataset.blob + path + "#L" + line;
+    a.href = pop.dataset.blob + path.split("/").map(encodeURIComponent).join("/") + "#L" + line;
     a.target = "_blank";
     a.rel = "noopener";
     a.append(vh(" (opens in a new tab)"));

@@ -179,7 +179,7 @@ function draw(box) {
       { icon: "eye-off", label: "Hide", run: () => t.union(t.descendants()).style("display", "none") },
       hidden && { icon: "eye", label: "Show everything", run: showAll },
       null,
-      { icon: "arrow-up-right", label: "Open on " + pop.dataset.forge, run: () => tab(blob + d.path + (s ? "#L" + s.line : "")) },
+      { icon: "arrow-up-right", label: "Open on " + pop.dataset.forge, run: () => tab(blob + d.path.split("/").map(encodeURIComponent).join("/") + (s ? "#L" + s.line : "")) },
       { icon: "copy", label: d.name ? "Copy the name" : "Copy the path", run: () => navigator.clipboard?.writeText(d.name || d.path) },
     ]);
   };

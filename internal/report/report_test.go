@@ -983,6 +983,9 @@ func TestLinks(t *testing.T) {
 	if got := f.File("b.go", false); got != f.Blob+"b.go" {
 		t.Fatalf("file it doesn't: %s", got)
 	}
+	if got := f.Line("src/a#b?.go", 3, lines); got != f.Blob+"src/a%23b%3F.go#L3" {
+		t.Fatalf("a name with # and ?: %s", got)
+	}
 	if got := (Forge{Blob: f.Blob}).Line("a.go", 5, lines); got != f.Blob+"a.go#L5" { // GitLab
 		t.Fatalf("no files view: %s", got)
 	}

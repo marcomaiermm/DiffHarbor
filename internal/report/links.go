@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"diffharbor/internal/review"
 	"fmt"
+	"net/url"
 	"strconv"
+	"strings"
 )
 
 // ThreadKey names a finding for Data.Threads and forge.PR.Posted: where and what, as the model wrote it.
@@ -22,7 +24,16 @@ func (f Forge) File(path string, changed bool) string {
 	if f.Blob == "" {
 		return ""
 	}
-	return f.Blob + path
+	return f.Blob + escPath(path)
+}
+
+// escPath is a path for a URL, each segment escaped: a # or ? in a file's name doesn't end it.
+func escPath(path string) string {
+	segs := strings.Split(path, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	return strings.Join(segs, "/")
 }
 
 // Line links a line of path: in the files view when it is in one of the PR's hunks (lines is diff.NewLines of the
@@ -37,7 +48,7 @@ func (f Forge) Line(path string, line int, lines map[string]string) string {
 	if f.Blob == "" {
 		return ""
 	}
-	return f.Blob + path + "#L" + strconv.Itoa(line)
+	return f.Blob + escPath(path) + "#L" + strconv.Itoa(line)
 }
 
 // ThreadURL links the inline comment id, "" for none.

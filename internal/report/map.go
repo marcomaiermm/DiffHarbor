@@ -1360,6 +1360,16 @@ const (
 // upLines calls f with each line of d's SQL files that the PR adds and that runs on migrate, comments aside: a
 // goose file's Down part and a .down.sql file don't count. A file's text is its head's, the diff's lines without it.
 func upLines(d Data, f func(p string, no int, text string)) {
+	migrationLines(d, func(p string, no int, text string, add bool) {
+		if add && !strings.HasPrefix(strings.TrimSpace(text), "--") {
+			f(p, no, text)
+		}
+	})
+}
+
+// migrationLines calls f with each line of d's SQL files that runs on migrate, add when the PR adds it: what upLines
+// reads, with the unchanged lines around for a statement the PR edits.
+func migrationLines(d Data, f func(p string, no int, text string, add bool)) {
 	diff.EachFile(d.Diff, func(p, fd string) {
 		if path.Ext(p) != ".sql" || strings.HasSuffix(p, ".down.sql") {
 			return
@@ -1391,9 +1401,7 @@ func upLines(d Data, f func(p string, no int, text string)) {
 			if downMark.MatchString(l.text) {
 				break
 			}
-			if l.add && !strings.HasPrefix(strings.TrimSpace(l.text), "--") {
-				f(p, l.no, l.text)
-			}
+			f(p, l.no, l.text, l.add)
 		}
 	})
 }

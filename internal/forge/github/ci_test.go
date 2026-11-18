@@ -15,7 +15,8 @@ import (
 	"time"
 )
 
-// Two pages of check runs, each with its workflow from the runs of the same check suite; ours left out.
+// Two pages of check runs, each with its workflow from the runs of the same check suite, then each context's
+// commit status; ours left out of both.
 func TestChecks(t *testing.T) {
 	AppKey, _ = rsa.GenerateKey(rand.Reader, 2048)
 	var perms string
@@ -24,7 +25,7 @@ func TestChecks(t *testing.T) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/access_tokens"):
 			b, _ := io.ReadAll(r.Body)
-			perms = string(b)
+			perms += string(b)
 			fmt.Fprint(w, `{"token":"ci"}`)
 		case r.Header.Get("Authorization") != "Bearer ci":
 			w.WriteHeader(http.StatusUnauthorized)
@@ -33,6 +34,9 @@ func TestChecks(t *testing.T) {
 				t.Errorf("runs of %q", r.URL.RawQuery)
 			}
 			fmt.Fprint(w, `{"total_count":1,"workflow_runs":[{"name":"ci","path":".github/workflows/ci.yml@refs/heads/main","check_suite_id":7}]}`)
+		case r.URL.Path == "/repos/o/r/commits/abc/status":
+			fmt.Fprint(w, `{"state":"failure","statuses":[{"context":"legacy","state":"error","target_url":"https://legacy/1"},
+{"context":"diffharbor","state":"success"},{"context":"lint","state":"pending"}]}`)
 		case r.URL.Query().Get("page") == "":
 			w.Header().Set("Link", `<`+srv.URL+r.URL.Path+`?per_page=100&page=2>; rel="next"`)
 			fmt.Fprint(w, `{"total_count":3,"check_runs":[{"name":"test","status":"completed","conclusion":"failure","html_url":"https://gh/runs/1","check_suite":{"id":7}},
@@ -48,8 +52,11 @@ func TestChecks(t *testing.T) {
 	want := []report.Check{
 		{Name: "test", Status: "completed", Conclusion: "failure", Workflow: "ci", Path: ".github/workflows/ci.yml", URL: "https://gh/runs/1"},
 		{Name: "deploy", Status: "pending", URL: "https://ci/2"},
+		{Name: "legacy", Status: "completed", Conclusion: "failure", URL: "https://legacy/1"},
+		{Name: "lint", Status: "pending"},
 	}
-	if err != nil || !slices.Equal(got, want) || !strings.Contains(perms, `"checks":"read"`) || !strings.Contains(perms, `"actions":"read"`) {
+	if err != nil || !slices.Equal(got, want) || !strings.Contains(perms, `"checks":"read"`) || !strings.Contains(perms, `"actions":"read"`) ||
+		!strings.Contains(perms, `"statuses":"read"`) {
 		t.Fatalf("%v %v, perms %s", got, err, perms)
 	}
 }
@@ -67,8 +74,35 @@ func TestChecksNoPermission(t *testing.T) {
 	defer srv.Close()
 	APIURL = srv.URL
 	p := &pr{e: &forge.Event{}, api: "/repos/o/r", token: "t"}
-	if cs, err := p.Checks("abc"); err == nil || cs != nil || !strings.Contains(err.Error(), "Checks and Actions: read") {
+	if cs, err := p.Checks("abc"); err == nil || cs != nil || !strings.Contains(err.Error(), "Checks: read") {
 		t.Fatalf("%v %v", cs, err)
+	}
+}
+
+// An App with "Checks: read" alone: its check runs, without workflows; neither runs nor statuses read.
+func TestChecksOnly(t *testing.T) {
+	AppKey, _ = rsa.GenerateKey(rand.Reader, 2048)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/access_tokens"):
+			if b, _ := io.ReadAll(r.Body); !strings.Contains(string(b), `"checks"`) {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				fmt.Fprint(w, `{"message":"The permissions requested are not granted to this installation."}`)
+				return
+			}
+			fmt.Fprint(w, `{"token":"ci"}`)
+		case strings.HasSuffix(r.URL.Path, "/check-runs"):
+			fmt.Fprint(w, `{"total_count":1,"check_runs":[{"name":"test","status":"completed","conclusion":"success","check_suite":{"id":7}}]}`)
+		default:
+			t.Errorf("read %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	APIURL = srv.URL
+	p := &pr{e: &forge.Event{}, api: "/repos/o/r", token: "t"}
+	got, err := p.Checks("abc")
+	if want := []report.Check{{Name: "test", Status: "completed", Conclusion: "success"}}; err != nil || !slices.Equal(got, want) {
+		t.Fatalf("%v %v", got, err)
 	}
 }
 
@@ -84,7 +118,7 @@ func TestChecksTimeout(t *testing.T) {
 	defer srv.Close()
 	defer close(done)
 	APIURL = srv.URL
-	if _, err := checkRuns("/repos/o/r", "abc", "ci"); err == nil {
+	if _, err := checkRuns("/repos/o/r", "abc", "ci", "ci"); err == nil {
 		t.Fatal("no error")
 	}
 }

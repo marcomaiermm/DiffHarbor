@@ -191,4 +191,27 @@ cart_items context base=true :0
 	if !slices.Equal(asked[len(asked)-1], []string{"region", "regiones", "regions"}) {
 		t.Errorf("second base asked for %v", asked)
 	}
+
+	// a column added inside a CREATE TABLE the PR doesn't add: the statement whole, at the added line
+	const n = "db/schema.sql"
+	notes := "CREATE TABLE notes (\n  id bigserial PRIMARY KEY,\n  body text,\n  author_id bigint REFERENCES users (id)\n);\n"
+	edit := "diff --git a/" + n + " b/" + n + "\n--- a/" + n + "\n+++ b/" + n + "\n@@ -1,4 +1,5 @@\n CREATE TABLE notes (\n" +
+		"   id bigserial PRIMARY KEY,\n   body text,\n+  author_id bigint REFERENCES users (id)\n );\n"
+	d = Data{Diff: edit, Sources: map[string]string{n: notes}}
+	want = `notes changed base=true db/schema.sql:4
+  id "bigserial"  was="" ref= [primary key] @0
+  body "text"  was="" ref= [] @0
+  author_id "bigint" new was="" ref=users.id [] @4
+  risk: No index on 'author_id': Postgres doesn't create one for a foreign key.
+users context base=true :0
+  id "bigserial"  was="" ref= [primary key] @0
+`
+	got = show(schema(d, func([]string) sdb {
+		db := sdb{}
+		db.read("CREATE TABLE notes (\n  id bigserial PRIMARY KEY,\n  body text\n);\n" + schemaBase)
+		return db
+	}))
+	if got != want {
+		t.Errorf("schema, a column added inside a CREATE TABLE:\n%s\nwant:\n%s", got, want)
+	}
 }

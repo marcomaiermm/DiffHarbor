@@ -680,7 +680,7 @@ func (v view) place(p string, line int) ref {
 	if v.files[p] != nil {
 		r.Href = lineHref(p, line) // the script finds the line
 	} else if v.Forge.Blob != "" {
-		r.Href, r.Out = v.Forge.Blob+p+"#L"+strconv.Itoa(line), true
+		r.Href, r.Out = v.Forge.Blob+escPath(p)+"#L"+strconv.Itoa(line), true
 	}
 	return r
 }
