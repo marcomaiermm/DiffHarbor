@@ -285,6 +285,12 @@ func TestSettings(t *testing.T) {
 	}); !strings.Contains(got, "## docs/b.md\n\nB") {
 		t.Error("a long first rules file pushed the second out")
 	}
+	// without conventions too, and a short file's rest goes to the long one
+	if got := cfg.ReadRules(func(ns ...string) string {
+		return map[string]string{"docs/a.md": strings.Repeat("A", 30000), "docs/b.md": "B"}[ns[0]]
+	}); !strings.HasSuffix(got, "## docs/b.md\n\nB") || strings.Count(got, "A") < 7900 || len(got) > 8100 {
+		t.Errorf("shares without conventions: %d chars", len(got))
+	}
 	cfg, err = LoadSettings(`{"review_model":"openai/gpt-6.1-sol","verify_model":"anthropic/claude-haiku-4-5:low"}`)
 	if r, v := cfg.Models(); err != nil || r != "openai/gpt-6.1-sol" || v != "anthropic/claude-haiku-4-5:low" {
 		t.Errorf("models from review.json: %v %q %q", err, r, v)

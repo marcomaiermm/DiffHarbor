@@ -300,6 +300,7 @@ type Input struct {
 	Ticket      string            // ticket.Lookup(): the linked issue, "" = none
 	Docs        []Doc             // knowledge.Lookup(): reference docs, in prompt order; none = nil
 	Parts       []string          // diff.Filter: one review and one verify pass each
+	Deleted     []string          // the deleted files' paths, which Parts only name: a pass by path runs for them too
 	Trusted     string            // TrustedContext()
 	Checks      []checks.Script   // the repo's own check scripts
 	Registries  []checks.Registry // the npm registries the installs read from
@@ -322,7 +323,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	lvl := Level(whole, files)
 	rm, verify := in.Settings.Models()
 	lines := diff.Changed(whole)
-	fs := in.Settings.Finders(lines, append(diff.Deleted(whole), files...)) // a pass by path runs for a deleted file too
+	fs := in.Settings.Finders(lines, append(slices.Clone(in.Deleted), files...))
 	in.split = in.Settings.SuggestsSplit(whole)
 	models := make([]string, len(fs))
 	for k := range fs {

@@ -258,10 +258,11 @@ for (const file of program.getSourceFileNames()) {
       if (n.name) s = named(n, text(n.name), declKind(n), scope);
     } else if (isFn(n)) {
       const p = n.parent;
-      if (n.name) s = named(n, text(n.name), "function", scope);
+      // a variable's wrapped one is the variable's, whatever name the function has: routes are given the variable
+      if (inner(p) === n && is.isVariableDeclaration(p.parent) && is.isIdentifier(p.parent.name)) s = named(p.parent, p.parent.name.text, "function", scope);
+      else if (n.name) s = named(n, text(n.name), "function", scope);
       else if (is.isVariableDeclaration(p) && is.isIdentifier(p.name)) s = named(p, p.name.text, "function", scope);
       else if (is.isPropertyAssignment(p)) s = named(p, text(p.name), "function", scope);
-      else if (inner(p) === n && is.isVariableDeclaration(p.parent) && is.isIdentifier(p.parent.name)) s = named(p.parent, p.parent.name.text, "function", scope);
       else if (is.isCallExpression(p) && p.arguments.includes(n)) {
         // a wrapped one passed on, `get("/x", catchAsync(async …))`, is the outer call's
         const c = inner(p) === n && is.isCallExpression(p.parent) && p.parent.arguments.includes(p) ? p.parent : p;
