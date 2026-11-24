@@ -114,6 +114,10 @@ func TestVerdicts(t *testing.T) {
 		kept[0].Body != "old tabs until a reload\n\n_Verified:_ deploy.sh:14 rolls the backend out first" {
 		t.Fatalf("partial: %+v", kept)
 	}
+	design := []Comment{{Kind: "design", Body: "two things" + basedOn + "ui/tabs.tsx:40"}}
+	if kept, _, _, _ := verdicts(design, nil, `{"verdicts":[{"i":0,"keep":true,"only":"one thing"}]}`, nil); kept[0].Body != "one thing"+basedOn+"ui/tabs.tsx:40" {
+		t.Fatalf("partial design lost its citation: %+v", kept)
+	}
 	two := []Comment{{Severity: "major"}, {Severity: "minor"}}
 	if kept, _, _, _ := verdicts(two, nil, `{"verdicts":[{"i":0,"keep":true,"severity":"minor"},{"i":1,"keep":true,"severity":"critical"}]}`, nil); kept[0].Severity != "minor" || kept[1].Severity != "minor" {
 		t.Fatalf("severity: %+v", kept)

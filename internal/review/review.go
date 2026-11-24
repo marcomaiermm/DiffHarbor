@@ -808,6 +808,9 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string, again boo
 	return r, nil
 }
 
+// basedOn starts the line of a design finding's body that says what it cites.
+const basedOn = "\n\n_Based on:_ "
+
 // designed settles a pass's design findings: always minor, what they cite on a line of the body for the verifier
 // and the reader. One that cites nothing is an ordinary finding: the verifier wants its failing input. Those of a
 // file with review.json's design "off" go.
@@ -821,7 +824,7 @@ func designed(cs []Comment, cfg Settings) []Comment {
 			continue
 		}
 		c.Severity = "minor"
-		c.Body += "\n\n_Based on:_ " + cite
+		c.Body += basedOn + cite
 	}
 	return slices.DeleteFunc(cs, func(c Comment) bool { return c.Kind == "design" && cfg.at(c.Path).Design == "off" })
 }
@@ -902,7 +905,11 @@ func verdicts(cs []Comment, claimed []int, reply string, owns func(path string, 
 		c.Evidence, c.repro = cmp.Or(d.Evidence, "kept by the verifier"), d.Repro
 		if d.Only != "" { // the body says the defect once, as it holds; the fix was written for the whole finding
 			// ponytail: the title stays the finder's; a title field in the verdict if one misleads
-			c.Body = text.Truncate(strings.TrimSpace(d.Only), 2000)
+			based := "" // a design finding's citation is designed's line, not the verifier's to repeat
+			if i := strings.LastIndex(c.Body, basedOn); c.Kind == "design" && i >= 0 {
+				based = c.Body[i:]
+			}
+			c.Body = text.Truncate(strings.TrimSpace(d.Only), 2000) + based
 			c.Existing, c.Fix = "", ""
 		}
 		premise := text.OneLine(d.Premise, 200)
