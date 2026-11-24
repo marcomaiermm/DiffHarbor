@@ -67,3 +67,27 @@ func TestFreshMethodTests(t *testing.T) {
 		t.Errorf("tests %q: test_run calls A.run", s.Tests)
 	}
 }
+
+// A monorepo whose root has no tsconfig.json: the projects are those above the changed TS files; with one at the
+// root, that one alone.
+func TestTSRoots(t *testing.T) {
+	repo := t.TempDir()
+	for _, f := range []string{"apps/backend/tsconfig.json", "apps/frontend/tsconfig.json", "apps/backend/src/a.ts"} {
+		if err := os.MkdirAll(filepath.Join(repo, filepath.Dir(f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, f), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idx := &cgIndex{dbs: []cgDB{{Prefix: ""}}, paths: []string{"apps/backend/src/a.ts", "apps/backend/src/b.ts", "README.md", "apps/frontend/x.css"}}
+	if got := idx.tsRoots(repo); !slices.Equal(got, []string{"apps/backend/"}) {
+		t.Fatal(got)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "tsconfig.json"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := idx.tsRoots(repo); !slices.Equal(got, []string{""}) {
+		t.Fatal(got)
+	}
+}

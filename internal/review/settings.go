@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // Settings is a repo's review.json at the root, from the base branch. Unknown keys are ignored, so
@@ -585,6 +586,21 @@ func (cfg Settings) RulePaths() []string {
 	return []string{".review/rules.md"}
 }
 
+// shares cuts the texts to budget runes together, joined by blank lines, so a long one can't push the others out: the shortest first, each
+// to an equal share of what is left, so what a short one leaves goes to the longer ones.
+func shares(rs []string, budget int) {
+	order := make([]int, len(rs))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int { return len(rs[a]) - len(rs[b]) })
+	budget -= 2 * (len(rs) - 1) // the blank lines that join them
+	for k, i := range order {
+		rs[i] = text.Truncate(rs[i], budget/(len(order)-k))
+		budget -= utf8.RuneCountInString(rs[i])
+	}
+}
+
 // ReadRules reads the rules with read (the first of names that exists, "" if none): the rules files, several each
 // under its path, then the root's AGENTS.md or CLAUDE.md too. A rules file says what to report, the root's
 // conventions still hold. Only both are cut, each on its own, so long rules can't push the conventions out.
@@ -600,15 +616,12 @@ func (cfg Settings) ReadRules(read func(names ...string) string) string {
 		}
 		rs = append(rs, r)
 	}
+	if len(rs) > 1 && len(strings.Join(rs, "\n\n")) > 8000 { // also without conventions: the prompt's later cut would take the last files
+		shares(rs, 8000)
+	}
 	rules, conv := strings.Join(rs, "\n\n"), read("AGENTS.md", "CLAUDE.md")
 	if rules == "" || conv == "" || rules == conv {
 		return cmp.Or(rules, conv)
-	}
-	if len(rs) > 1 && len(rules) > 8000 { // ponytail: equal shares, so a long first file can't push the others out; hand a short file's rest to the others if that cuts too much
-		for i := range rs {
-			rs[i] = text.Truncate(rs[i], 8000/len(rs))
-		}
-		rules = strings.Join(rs, "\n\n")
 	}
 	return text.Truncate(rules, 8000) + "\n\n## Conventions (the repo root's AGENTS.md or CLAUDE.md)\n\n" + text.Truncate(conv, 4000)
 }

@@ -53,6 +53,7 @@ process.stdout.write(JSON.stringify(out));
 
 type cgIndex struct {
 	dbs   []cgDB
+	paths []string // the changed files, for tsRoots
 	Nodes []cgNode
 	Edges []cgEdge
 	calls map[declKey][]cgEdge // outside's call graph from the changed declarations, for the uses' ways down
@@ -84,7 +85,7 @@ func codegraph(sb *proc.Sandbox, repo string, wanted map[string]bool, paths []st
 	if len(dbs) == 0 {
 		return nil
 	}
-	idx := cgIndex{dbs: dbs}
+	idx := cgIndex{dbs: dbs, paths: paths}
 	names := slices.Collect(maps.Keys(wanted))
 	if !runNode(sb, cgQuery, map[string]any{"names": names, "dbs": dbs, "paths": paths}, &idx) {
 		return nil

@@ -260,3 +260,29 @@ func TestOutsideSameHelperTwice(t *testing.T) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
+
+// A handler in a wrapper, `catchAsync(async (req, res) => …)`: a variable's is a function the route handles and its
+// calls are its own; one passed inline is the route.
+func TestWrappedHandlerTS(t *testing.T) {
+	if _, err := os.Stat(filepath.Join(tsAPI, "dist", "api", "sync", "api.js")); err != nil {
+		t.Skip("no TypeScript 7.1 at DIFFHARBOR_TS")
+	}
+	repo, err := filepath.Abs("testdata/ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sb, _ := sandbox(t)
+	idx := &cgIndex{dbs: []cgDB{{Prefix: ""}}}
+	idx.tsEdges(sb, repo)
+	var got []string
+	for _, e := range idx.Edges {
+		if e.SPath == "src/chat.ts" {
+			got = append(got, fmt.Sprintf("%s %s:%d %s", e.Kind, e.SName, e.Line, e.TName))
+		}
+	}
+	for _, w := range []string{"handles get /chat/:id:6 getChatHandler", "passes get /chat/:id:6 getChatHandler", "calls getChatHandler:4 listOrders", "calls get /chat2:7 listOrders", "calls namedChatHandler:8 listOrders", "calls get /chat4:10 listOrders"} {
+		if !slices.Contains(got, w) {
+			t.Errorf("no %q in\n%s", w, strings.Join(got, "\n"))
+		}
+	}
+}

@@ -58,8 +58,9 @@ func Tree(ctx context.Context, sb *proc.Sandbox, cwd, title string, closed []Com
 			scripts = append(scripts, checks.Script{Name: p, File: f})
 		}
 	}
-	parts, _ := diff.Filter(diff.Unquote(string(out)), cwd, nil, cfg.Ignored, cfg.Parts(large))
-	return Analyze(ctx, Input{Agent: agent.Pi{}, Sandbox: sb, Title: title, Parts: parts, Trusted: TrustedContext(rules, "", ""), Checks: scripts, Closed: closed, Settings: cfg})
+	raw := diff.Unquote(string(out))
+	parts, _ := diff.Filter(raw, cwd, nil, cfg.Ignored, cfg.Parts(large))
+	return Analyze(ctx, Input{Agent: agent.Pi{}, Sandbox: sb, Title: title, Parts: parts, Deleted: diff.Deleted(raw), Trusted: TrustedContext(rules, "", ""), Checks: scripts, Closed: closed, Settings: cfg})
 }
 
 // Checkout fetches the PR head and base into sb's Repo with history but without old file contents (blob:none) for
