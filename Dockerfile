@@ -2,8 +2,8 @@ FROM golang:1.27-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d
 # Pinned so a release tag rebuilds the same checks.
 # actionlint and osv-scanner too: built here on current Go, not Alpine's stale builds.
 RUN CGO_ENABLED=0 go install honnef.co/go/tools/cmd/staticcheck@v0.8.2 && CGO_ENABLED=0 go install github.com/zricethezav/gitleaks/v8@v8.30.1 \
-    && CGO_ENABLED=0 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 && CGO_ENABLED=0 go install golang.org/x/tools/cmd/deadcode@v0.52.0 \
-    && CGO_ENABLED=0 go install golang.org/x/vuln/cmd/govulncheck@v1.9.0 && CGO_ENABLED=0 go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 \
+    && CGO_ENABLED=0 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 && CGO_ENABLED=0 go install golang.org/x/tools/cmd/deadcode@v0.53.0 \
+    && CGO_ENABLED=0 go install golang.org/x/vuln/cmd/govulncheck@v1.10.0 && CGO_ENABLED=0 go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 \
     && CGO_ENABLED=0 go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.7.1
 # Tests run as a user: as root the code drops its children to a repo's uid, which can't write root's temp dirs.
 RUN apk add --no-cache git && adduser -D -u 1000 node
@@ -24,11 +24,11 @@ RUN tailwindcss -i internal/report/styles.css -o /tmp/styles.css --minify && { c
 
 FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
 # fallow's musl binary needs a CPU with AVX2.
-RUN apk add --no-cache curl git ripgrep fd bash ast-grep shellcheck luacheck zizmor && npm install -g --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.5.2 \
-    squawk-cli@2.72.0 oxlint@1.93.0 oxlint-tsgolint@7.0.2007 fallow@3.42.0 corepack@0.36.0 && npm cache clean --force && corepack enable && mkdir -p /cache /data && chmod 755 /cache && chmod 700 /data
+RUN apk add --no-cache curl git ripgrep fd bash ast-grep shellcheck luacheck zizmor && npm install -g --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.6.0 \
+    squawk-cli@2.73.0 oxlint@1.94.0 oxlint-tsgolint@7.0.2008 fallow@3.45.0 corepack@0.36.0 && npm cache clean --force && corepack enable && mkdir -p /cache /data && chmod 755 /cache && chmod 700 /data
 # codegraph bundles a glibc Node; run its JS on Alpine's Node 26 instead (gcompat for the native kernel).
 # Its Node >=25 guard is for a turboshaft WASM bug; --liftoff-only never tiers up to turboshaft.
-RUN apk add --no-cache gcompat libgcc libstdc++ && npm install -g --ignore-scripts --no-audit --no-fund @colbymchenry/codegraph@1.6.2 && npm cache clean --force \
+RUN apk add --no-cache gcompat libgcc libstdc++ && npm install -g --ignore-scripts --no-audit --no-fund @colbymchenry/codegraph@1.6.4 && npm cache clean --force \
     && P=/usr/local/lib/node_modules/@colbymchenry/codegraph/node_modules/@colbymchenry/codegraph-linux-x64 && rm "$P/node" /usr/local/bin/codegraph \
     && printf '#!/bin/sh\nCODEGRAPH_ALLOW_UNSAFE_NODE=1 exec node --liftoff-only --disable-warning=ExperimentalWarning %s/lib/dist/bin/codegraph.js "$@"\n' "$P" > /usr/local/bin/codegraph \
     && chmod 755 /usr/local/bin/codegraph && DO_NOT_TRACK=1 codegraph version
