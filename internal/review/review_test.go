@@ -269,7 +269,7 @@ func TestSettings(t *testing.T) {
 		cfg.Finders(10, auth)[1].Focus != "security" {
 		t.Errorf("passes by path: %v %v", err, cfg.Finders(10, auth))
 	}
-	for _, bad := range []string{`{"passes":[{"focus":"data"},{}]}`, `{"passes":[{},{"focus":"vibes"}]}`, `{"passes":[{},{"paths":["a["]}]}`, `{"rules":["a","../b"]}`, `{"rules":["1","2","3","4","5","6","7","8","9"]}`} {
+	for _, bad := range []string{`{"passes":[{"focus":"data"},{}]}`, `{"passes":[{},{"focus":"vibes"}]}`, `{"passes":[{},{"paths":["a["]}]}`, `{"passes":[{},{"paths":[]}]}`, `{"rules":["a","../b"]}`, `{"rules":["1","2","3","4","5","6","7","8","9"]}`} {
 		if _, err := LoadSettings(bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
@@ -279,6 +279,11 @@ func TestSettings(t *testing.T) {
 		return map[string]string{"docs/a.md": "A", "docs/b.md": "B", "AGENTS.md": "C"}[ns[0]]
 	}); got != "## docs/a.md\n\nA\n\n## docs/b.md\n\nB\n\n## Conventions (the repo root's AGENTS.md or CLAUDE.md)\n\nC" {
 		t.Errorf("several rules files: %q", got)
+	}
+	if got := cfg.ReadRules(func(ns ...string) string {
+		return map[string]string{"docs/a.md": strings.Repeat("A", 9000), "docs/b.md": "B", "AGENTS.md": "C"}[ns[0]]
+	}); !strings.Contains(got, "## docs/b.md\n\nB") {
+		t.Error("a long first rules file pushed the second out")
 	}
 	cfg, err = LoadSettings(`{"review_model":"openai/gpt-6.1-sol","verify_model":"anthropic/claude-haiku-4-5:low"}`)
 	if r, v := cfg.Models(); err != nil || r != "openai/gpt-6.1-sol" || v != "anthropic/claude-haiku-4-5:low" {
@@ -539,6 +544,17 @@ func TestDesigned(t *testing.T) {
 	}
 	if !strings.Contains(findings(cs[:1], nil), " · design\n") {
 		t.Errorf("the verifier isn't told: %q", findings(cs[:1], nil))
+	}
+	// an uncited one is ordinary and survives design off; a cited nit is raised; the verifier can't lower or move one into an off file
+	if got := designed([]Comment{{Kind: "design", Path: "api/a.go"}, {Kind: "design", Cites: "x", Severity: "nit"}}, off); len(got) != 2 || got[0].Kind != "" || got[1].Severity != "minor" {
+		t.Errorf("uncited under off, cited nit: %+v", got)
+	}
+	moved, _, _, _ := verdicts([]Comment{{Kind: "design", Severity: "minor", Path: "lib/a.go"}}, nil, `{"verdicts":[{"i":0,"keep":true,"severity":"nit","path":"api/a.go"}]}`, nil)
+	if len(moved) != 1 || moved[0].Severity != "minor" || off.Keep(moved[0]) {
+		t.Errorf("lowered, or kept in an off file: %+v", moved)
+	}
+	if got := diff.Deleted("--- a/migrations/1.sql\n+++ /dev/null\n@@ -1 +0,0 @@\n-x\n--- a/b.go\n+++ b/b.go\n"); !slices.Equal(got, []string{"migrations/1.sql"}) {
+		t.Errorf("deleted: %v", got)
 	}
 	four := []Comment{{Kind: "design", Severity: "minor"}, {Kind: "design", Severity: "minor"}, {Kind: "design", Severity: "minor"}, {Severity: "minor"}}
 	if got := capped(four); len(got) != 3 || got[2].Kind != "" {

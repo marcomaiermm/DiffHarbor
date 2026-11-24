@@ -322,7 +322,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	lvl := Level(whole, files)
 	rm, verify := in.Settings.Models()
 	lines := diff.Changed(whole)
-	fs := in.Settings.Finders(lines, files)
+	fs := in.Settings.Finders(lines, append(diff.Deleted(whole), files...)) // a pass by path runs for a deleted file too
 	in.split = in.Settings.SuggestsSplit(whole)
 	models := make([]string, len(fs))
 	for k := range fs {
@@ -516,8 +516,6 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 			if more, err := reviewPass(ctx, pin, pass, "", f.Model, true); err != nil {
 				log.Printf("%s again: %v", pass, err) // the first look stands
 			} else {
-				// the second look is for missed defects: the pass's 2 design findings are the first look's
-				more.Comments = slices.DeleteFunc(more.Comments, func(c Comment) bool { return c.Kind == "design" })
 				for i := range more.Comments {
 					more.Comments[i].pass = 2*k + 1
 				}
@@ -800,15 +798,18 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string, again boo
 	if !ok {
 		return r, fmt.Errorf("review returned no JSON, ends with %q", text.Tail(out))
 	}
-	r.Comments = capped(designed(r.Comments, in.Settings))
+	r.Comments = designed(r.Comments, in.Settings)
+	if again { // the second look is for missed defects: the pass's 2 design findings are the first look's, and take no slot here
+		r.Comments = slices.DeleteFunc(r.Comments, func(c Comment) bool { return c.Kind == "design" })
+	}
+	r.Comments = capped(r.Comments)
 	return r, nil
 }
 
-// designed settles a pass's design findings: minor at most, what they cite on a line of the body for the verifier
+// designed settles a pass's design findings: always minor, what they cite on a line of the body for the verifier
 // and the reader. One that cites nothing is an ordinary finding: the verifier wants its failing input. Those of a
 // file with review.json's design "off" go.
 func designed(cs []Comment, cfg Settings) []Comment {
-	cs = slices.DeleteFunc(cs, func(c Comment) bool { return c.Kind == "design" && cfg.at(c.Path).Design == "off" })
 	for i := range cs {
 		c := &cs[i]
 		cite := text.OneLine(c.Cites, 200) // model output about untrusted code: one bounded line
@@ -817,12 +818,10 @@ func designed(cs []Comment, cfg Settings) []Comment {
 			c.Kind = ""
 			continue
 		}
-		if Rank(c.Severity) > Rank("minor") {
-			c.Severity = "minor"
-		}
+		c.Severity = "minor"
 		c.Body += "\n\n_Based on:_ " + cite
 	}
-	return cs
+	return slices.DeleteFunc(cs, func(c Comment) bool { return c.Kind == "design" && cfg.at(c.Path).Design == "off" })
 }
 
 // capped keeps the schema's limits per pass (Comment.pass): the 10 most severe findings, 2 design ones among them,
@@ -914,7 +913,7 @@ func verdicts(cs []Comment, claimed []int, reply string, owns func(path string, 
 		if d.Fix != nil && !*d.Fix {
 			c.Existing, c.Fix = "", ""
 		}
-		if Rank(d.Severity) > 0 && Rank(d.Severity) < Rank(c.Severity) { // it only lowers: the reviewer rated it already
+		if Rank(d.Severity) > 0 && Rank(d.Severity) < Rank(c.Severity) && c.Kind != "design" { // it only lowers: the reviewer rated it already; a design finding stays minor
 			c.Severity = d.Severity
 		}
 		if premise != "" && Rank(c.Severity) > Rank("minor") {

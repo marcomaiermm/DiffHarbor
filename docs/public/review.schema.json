@@ -64,7 +64,7 @@
           "again": { "type": "boolean", "description": "false: no second look." },
           "min_lines": { "type": "integer", "minimum": 0 },
           "max_lines": { "type": "integer", "minimum": 0, "description": "0: any." },
-          "paths": { "type": "array", "items": { "type": "string" }, "description": "Globs of changed files the pass runs for whatever the PR's size. Without min_lines and max_lines: only for those." },
+          "paths": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "Globs of changed files the pass runs for whatever the PR's size. Without min_lines and max_lines: only for those." },
           "focus": { "enum": ["security", "data", "contracts", "design"], "description": "What the pass looks for first. Unset: everything." }
         }
       },

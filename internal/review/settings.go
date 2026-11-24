@@ -476,7 +476,10 @@ func LoadSettings(s string) (Settings, error) {
 		if _, ok := Focuses[p.Focus]; p.Focus != "" && !ok {
 			return Settings{}, fmt.Errorf("passes %d: focus %q: want one of %s", k+1, p.Focus, strings.Join(slices.Sorted(maps.Keys(Focuses)), ", "))
 		}
-		if len(p.Paths) > 0 {
+		if p.Paths != nil {
+			if len(p.Paths) == 0 {
+				return Settings{}, fmt.Errorf("passes %d: paths: want at least one glob", k+1)
+			}
 			re, err := globRe(p.Paths...)
 			if err != nil {
 				return Settings{}, fmt.Errorf("passes %d: paths: %w", k+1, err)
@@ -601,6 +604,12 @@ func (cfg Settings) ReadRules(read func(names ...string) string) string {
 	if rules == "" || conv == "" || rules == conv {
 		return cmp.Or(rules, conv)
 	}
+	if len(rs) > 1 && len(rules) > 8000 { // ponytail: equal shares, so a long first file can't push the others out; hand a short file's rest to the others if that cuts too much
+		for i := range rs {
+			rs[i] = text.Truncate(rs[i], 8000/len(rs))
+		}
+		rules = strings.Join(rs, "\n\n")
+	}
 	return text.Truncate(rules, 8000) + "\n\n## Conventions (the repo root's AGENTS.md or CLAUDE.md)\n\n" + text.Truncate(conv, 4000)
 }
 
@@ -653,6 +662,9 @@ func (cfg Settings) Ignored(path string) bool {
 
 // Keep reports whether c reaches the min_severity for its file.
 func (cfg Settings) Keep(c Comment) bool {
+	if c.Kind == "design" && cfg.at(c.Path).Design == "off" { // the verifier may have moved it into such a file
+		return false
+	}
 	m, _ := cfg.At(c.Path)
 	return m == "" || Rank(c.Severity) >= Rank(m)
 }
