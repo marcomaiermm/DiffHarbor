@@ -361,7 +361,7 @@
     };
     // ELK, layered left to right: a key's table before the one it references, each line between two columns' ports
     const arrange = async () => {
-      elk ??= import("https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js/+esm").then(m => new m.default());
+      elk ??= import("https://cdn.jsdelivr.net/npm/elkjs@0.12.1/lib/elk.bundled.js/+esm").then(m => new m.default());
       unlay();
       const ports = new Map(), edges = [];
       const port = (row, east) => {
