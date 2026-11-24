@@ -25,7 +25,7 @@ RUN tailwindcss -i internal/report/styles.css -o /tmp/styles.css --minify && { c
 FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
 # fallow's musl binary needs a CPU with AVX2.
 RUN apk add --no-cache curl git ripgrep fd bash ast-grep shellcheck luacheck zizmor && npm install -g --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.6.0 \
-    squawk-cli@2.73.0 oxlint@1.94.0 oxlint-tsgolint@7.0.2008 fallow@3.45.0 corepack@0.36.0 && npm cache clean --force && corepack enable && mkdir -p /cache /data && chmod 755 /cache && chmod 700 /data
+    squawk-cli@2.74.0 oxlint@1.95.0 oxlint-tsgolint@7.0.2008 fallow@3.48.0 corepack@0.36.0 && npm cache clean --force && corepack enable && mkdir -p /cache /data && chmod 755 /cache && chmod 700 /data
 # codegraph bundles a glibc Node; run its JS on Alpine's Node 26 instead (gcompat for the native kernel).
 # Its Node >=25 guard is for a turboshaft WASM bug; --liftoff-only never tiers up to turboshaft.
 RUN apk add --no-cache gcompat libgcc libstdc++ && npm install -g --ignore-scripts --no-audit --no-fund @colbymchenry/codegraph@1.6.4 && npm cache clean --force \
