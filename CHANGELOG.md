@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.13.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.12.0...v0.13.0) (2026-11-24)
+
+
+### Features
+
+* **review:** allow_failure, on by default, posts a failed or blocked status as success ([#137](https://github.com/marcomaiermm/DiffHarbor/issues/137)) ([d770a32](https://github.com/marcomaiermm/DiffHarbor/commit/d770a3229d28f99097e84411ef3e7c835d954275))
+* **review:** design findings, passes by path; the report's checker runs in a monorepo's projects ([#135](https://github.com/marcomaiermm/DiffHarbor/issues/135)) ([6f91c73](https://github.com/marcomaiermm/DiffHarbor/commit/6f91c737cde58306791488c3e37af5712221d116))
+* **review:** design findings, several rules files, passes by path and focus ([#133](https://github.com/marcomaiermm/DiffHarbor/issues/133)) ([f2e7757](https://github.com/marcomaiermm/DiffHarbor/commit/f2e7757ada6d8c9ebf0af157dd70cab4d5320904))
+
+
+### Bug Fixes
+
+* **deps:** update all non-major dependencies ([#138](https://github.com/marcomaiermm/DiffHarbor/issues/138)) ([7bd3f9d](https://github.com/marcomaiermm/DiffHarbor/commit/7bd3f9d15ebf8119bc0bc913c60978162aa2ce55))
+* **review:** findings and walkthrough in plain words, a defect said once ([#136](https://github.com/marcomaiermm/DiffHarbor/issues/136)) ([bb10e89](https://github.com/marcomaiermm/DiffHarbor/commit/bb10e895940f3e7f74b4829798e36b5fb6a5b939))
+
 ## [0.12.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.11.0...v0.12.0) (2026-11-18)
 
 
