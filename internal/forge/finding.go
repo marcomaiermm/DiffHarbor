@@ -33,6 +33,9 @@ type Finding struct {
 // "" where none can go (the summary), placed or not. The suggestion stays unfolded: its button commits the fix.
 func Format(c Finding, suggestion string) string {
 	s := c.Body
+	if at := checked.FindStringIndex(s); at != nil { // the defect once: how the verifier confirmed it opens on a click
+		s = strings.TrimSpace(s[:at[0]] + "\n\n" + fold(checkedFold, strings.TrimSpace(s[at[0]:]), false, false))
+	}
 	if c.Title != "" {
 		s = "**" + c.Title + "**\n\n" + s
 	}
@@ -121,12 +124,21 @@ func ParseRun(body string) Run {
 // fold of the body's own stays in it.
 var appendix = regexp.MustCompile("\n\n(?:```+suggestion|<details>\n<summary>(?:Suggested fix|🤖 Prompt for AI Agents)</summary>)")
 
+// checked is where the verifier's lines start in a body: Format folds them, Parse unfolds them again.
+var checked = regexp.MustCompile(`(?:^|\n\n)_(?:Verified|Trigger):_ `)
+
+const checkedFold = "🔎 How this was checked"
+
+// checkedFolded is that fold as Format writes it, its body captured.
+var checkedFolded = regexp.MustCompile("(?s)" + strings.Replace(regexp.QuoteMeta(fold(checkedFold, "BODY", false, false)), "BODY", "(.*?)", 1))
+
 // Parse reads severity, title and the verifier's evidence back from a finding Format posted, without the fix and
 // the prompt Format added. A body Format did not write comes back as the body alone.
 func Parse(body string) review.Comment {
 	if at := appendix.FindStringIndex(body); at != nil {
 		body = body[:at[0]]
 	}
+	body = checkedFolded.ReplaceAllString(body, "$1")
 	c := review.Comment{Body: body}
 found:
 	for sev := range badge {

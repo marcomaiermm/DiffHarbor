@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -202,5 +203,22 @@ func TestVaulted(t *testing.T) {
 	want := fmt.Sprintf(`{"providers":{"anthropic":{"baseUrl":"%[1]s/anthropic","compat":{"supportsMidConvoEffort":false,"supportsMidConvoToolChanges":false}},"azure":{"baseUrl":"%[1]s/azure"}}}`, vault.URL())
 	if b, _ := os.ReadFile(f); string(b) != want || upstream("anthropic") != "https://llm.example.com/anthropic" {
 		t.Fatalf("models.json: %s, want %s", b, want)
+	}
+}
+
+func TestCalls(t *testing.T) {
+	sb := &proc.Sandbox{Dir: t.TempDir()}
+	session := `{"type":"message","message":{"role":"user","content":"hi"}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"x"},{"type":"toolCall","name":"grep","arguments":{"pattern":"groups","path":"internal"}},{"type":"toolCall","name":"read","arguments":{"path":"a.go","limit":5}}]}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","name":"read","arguments":{"path":"a.go"}}]}}
+`
+	if err := os.WriteFile(filepath.Join(sb.Dir, "chat.session"), []byte(session), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := Calls(t.Context(), sb, "chat"); !slices.Equal(got, []string{"grep groups internal", "read a.go"}) {
+		t.Errorf("calls: %q", got)
+	}
+	if got := Calls(t.Context(), sb, "none"); got != nil {
+		t.Errorf("no session: %q", got)
 	}
 }

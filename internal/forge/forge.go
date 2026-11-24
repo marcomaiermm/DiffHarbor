@@ -198,9 +198,37 @@ var reportSecret = regexp.MustCompile(`(?:/|%2[Ff])(?:[A-Z2-7]|%[0-9A-Fa-f]{2}){
 // Redact cuts report links' secrets from text for a prompt: they are the PR's readers', not the model's.
 func Redact(s string) string { return reportSecret.ReplaceAllString(s, "/…") }
 
+// Fold is a block that opens on a click, for a reply.
+func Fold(summary, body string, open bool) string { return fold(summary, body, open, false) }
+
+// Checked says which commit a reply checked: a push the forge hasn't taken into the PR yet reads as "not fixed"
+// otherwise. With calls, what the answer read and ran (agent.Calls), folded under it.
+func Checked(sha string, calls []string) string {
+	sha = sha[:min(7, len(sha))]
+	if len(calls) == 0 {
+		return "🔎 _Checked at " + sha + "._"
+	}
+	var b strings.Builder
+	for _, c := range calls[:min(len(calls), maxCalls)] { // model output about untrusted code: bounded, and it can't end the block
+		b.WriteString(strings.ReplaceAll(text.OneLine(c, 160), "`", "'") + "\n")
+	}
+	if len(calls) > maxCalls {
+		fmt.Fprintf(&b, "… %d more\n", len(calls)-maxCalls)
+	}
+	return fold(checkedAt+sha, "```text\n"+b.String()+"```", false, false)
+}
+
+const (
+	maxCalls  = 15
+	checkedAt = "🔎 Checked at "
+)
+
+// checkedCalls is Checked's fold: a later prompt needs the answer, not how it was found.
+var checkedCalls = regexp.MustCompile(`(?s)<details>\n<summary>` + checkedAt + `.*?</details>\s*`)
+
 // Clean drops our hidden markers and state from a comment before it goes into a prompt, and report links' secrets.
 func Clean(s string) string {
-	s = Redact(s)
+	s = checkedCalls.ReplaceAllString(Redact(s), "")
 	return text.Truncate(strings.TrimSpace(stateTag.ReplaceAllString(strings.NewReplacer(Mark, "", stickyMark, "").Replace(runTag.ReplaceAllString(s, "")), "")), 3000)
 }
 

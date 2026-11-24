@@ -613,7 +613,7 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 		if err := addLearning(key, fmt.Sprintf("- %s (@%s%s)", l, c.User.Login, where), time.Now()); err != nil {
 			return err
 		}
-		body = strings.TrimSpace(body + "\n\n📝 _Learning saved" + scope + ":_ " + l + "\n\n_Wrong or too broad? `@" + f.Bot() + " forget <part of it>` in a PR comment drops it._")
+		body = strings.TrimSpace(body + "\n\n---\n\n" + forge.Fold("📝 Learning saved"+scope, l+"\n\n_From @"+c.User.Login+where+". Wrong or too broad? `@"+f.Bot()+" forget <part of it>` in a PR comment drops it._", true))
 	}
 	resolve := a.Resolved && ours && !resolved && maintainer // a contributor's fix: the next review resolves it
 	if body == "" {
@@ -623,8 +623,12 @@ func Chat(ctx context.Context, f forge.Forge, mention *regexp.Regexp, e *forge.E
 			body += "\n\n✅ _Thread resolved._"
 		}
 		log.Println(e.Key(), "answered", c.User.Login)
-		// the commit the answer checked: a push the forge hasn't taken into the PR yet reads as "not fixed" otherwise
-		body += "\n\n🔎 _Checked at " + pr.Head.SHA[:min(7, len(pr.Head.SHA))] + "._"
+		// how it was checked folds above the answer, the bare commit line closes it
+		if ch := forge.Checked(pr.Head.SHA, agent.Calls(ctx, sb, "chat")); strings.HasPrefix(ch, "<details") {
+			body = ch + "\n\n" + body
+		} else {
+			body += "\n\n" + ch
+		}
 		// the answer first: a failed reply leaves the thread open, not resolved without a word
 		if err := p.Reply(body + "\n\n" + forge.Mark); err != nil {
 			return err

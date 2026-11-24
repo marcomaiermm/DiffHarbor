@@ -811,7 +811,7 @@ func TestStillOpen(t *testing.T) {
 		{"repeat of an open thread", []review.Comment{again}, nil, "🟡 3/5 · 1 major open"},
 		{"repeat on a resolved thread", []review.Comment{{Path: "b.go", Line: 5, Severity: "critical"}}, nil, "🟡 3/5 · 1 major open"},
 		{"new one posted", []review.Comment{{Path: "c.go", Line: 1, Severity: "major"}}, nil, "🔴 4/5 · 2 majors open"},
-		{"open one fixed", nil, []int{0}, "🟢 0/5"},
+		{"open one fixed", nil, []int{0}, "🟢 0/5 · nothing open"},
 	} {
 		r := review.Result{Comments: tc.cs, Fixed: tc.fix}
 		threads := []forge.Thread{major, resolved}
@@ -880,5 +880,18 @@ func TestGiveUp(t *testing.T) {
 	pr.now = "closed"
 	if err := GiveUp(giveForge{pr: pr}, e, 3); err != nil || len(pr.notes) != 0 {
 		t.Fatalf("closed PR: %v %q", err, pr.notes)
+	}
+}
+
+func TestPushed(t *testing.T) {
+	last := map[string]string{"a": "1", "b": "1", "c": "1", "d": "1", "e": "1"}
+	if got := pushed(last, map[string]string{"a": "1", "b": "2", "c": "1", "d": "1", "f": "1"}); len(got) != 2 || !got["b"] || !got["f"] {
+		t.Errorf("one of five gone: %v, want b and f", got)
+	}
+	if got := pushed(last, map[string]string{"a": "1", "b": "1", "c": "1"}); got != nil {
+		t.Errorf("two of five gone: %v, want a full review", got)
+	}
+	if got := pushed(last, last); got == nil || len(got) != 0 { // a rebase: nothing to review, not a full one
+		t.Errorf("unchanged: %v", got)
 	}
 }
