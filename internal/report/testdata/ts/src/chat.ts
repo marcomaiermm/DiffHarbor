@@ -7,3 +7,4 @@ r.get("/chat/:id", getChatHandler);
 r.get("/chat2", catchAsync(async (req: any, res: any) => { res.json(await listOrders()); }));
 export const namedChatHandler = catchAsync(async function handler(req: any, res: any) { res.json(await listOrders()); });
 r.get("/chat3", namedChatHandler);
+r.get("/chat4", catchAsync(async function handler(req: any, res: any) { res.json(await listOrders()); }));

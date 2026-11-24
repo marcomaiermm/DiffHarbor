@@ -258,15 +258,15 @@ for (const file of program.getSourceFileNames()) {
       if (n.name) s = named(n, text(n.name), declKind(n), scope);
     } else if (isFn(n)) {
       const p = n.parent;
-      // a variable's wrapped one is the variable's, whatever name the function has: routes are given the variable
-      if (inner(p) === n && is.isVariableDeclaration(p.parent) && is.isIdentifier(p.parent.name)) s = named(p.parent, p.parent.name.text, "function", scope);
-      else if (n.name) s = named(n, text(n.name), "function", scope);
+      // a wrapped one is the variable's or, passed on, `get("/x", catchAsync(async …))`, the outer call's, whatever
+      // name the function has: routes are given the variable
+      const w = inner(p) === n, on = w && is.isCallExpression(p.parent) && p.parent.arguments.includes(p);
+      if (w && is.isVariableDeclaration(p.parent) && is.isIdentifier(p.parent.name)) s = named(p.parent, p.parent.name.text, "function", scope);
+      else if (n.name && !on) s = named(n, text(n.name), "function", scope);
       else if (is.isVariableDeclaration(p) && is.isIdentifier(p.name)) s = named(p, p.name.text, "function", scope);
       else if (is.isPropertyAssignment(p)) s = named(p, text(p.name), "function", scope);
       else if (is.isCallExpression(p) && p.arguments.includes(n)) {
-        // a wrapped one passed on, `get("/x", catchAsync(async …))`, is the outer call's
-        const c = inner(p) === n && is.isCallExpression(p.parent) && p.parent.arguments.includes(p) ? p.parent : p;
-        s = { ...named(n, "", "route", scope), inline: true, call: c, input: inputOf(n) };
+        s = { ...named(n, "", "route", scope), inline: true, call: on ? p.parent : p, input: inputOf(n) };
         inlines.push(s);
       }
     }

@@ -280,7 +280,7 @@ func TestWrappedHandlerTS(t *testing.T) {
 			got = append(got, fmt.Sprintf("%s %s:%d %s", e.Kind, e.SName, e.Line, e.TName))
 		}
 	}
-	for _, w := range []string{"handles get /chat/:id:6 getChatHandler", "passes get /chat/:id:6 getChatHandler", "calls getChatHandler:4 listOrders", "calls get /chat2:7 listOrders", "calls namedChatHandler:8 listOrders"} {
+	for _, w := range []string{"handles get /chat/:id:6 getChatHandler", "passes get /chat/:id:6 getChatHandler", "calls getChatHandler:4 listOrders", "calls get /chat2:7 listOrders", "calls namedChatHandler:8 listOrders", "calls get /chat4:10 listOrders"} {
 		if !slices.Contains(got, w) {
 			t.Errorf("no %q in\n%s", w, strings.Join(got, "\n"))
 		}
