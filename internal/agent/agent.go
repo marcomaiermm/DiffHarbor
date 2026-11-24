@@ -453,6 +453,43 @@ func Passes(ctx context.Context, sb *proc.Sandbox) (ps []Pass, unread int) {
 	return ps, unread
 }
 
+// Calls is what the pass name of sb read and ran, from its session: a line a tool call, the tool and its command,
+// pattern and path. Static, so a reply can show how it was checked at no model cost. nil when the session is unread.
+func Calls(ctx context.Context, sb *proc.Sandbox, name string) (calls []string) {
+	data, err := sb.ReadFile(ctx, filepath.Join(sb.Dir, name+".session"))
+	if err != nil {
+		return nil
+	}
+	for l := range bytes.SplitSeq(data, []byte("\n")) {
+		var e struct {
+			Message struct {
+				Content []struct {
+					Type, Name string
+					Arguments  map[string]any
+				}
+			}
+		}
+		if json.Unmarshal(l, &e) != nil { // a user message's content is a string
+			continue
+		}
+		for _, c := range e.Message.Content {
+			if c.Type != "toolCall" {
+				continue
+			}
+			call := c.Name
+			for _, k := range []string{"command", "pattern", "path"} {
+				if v, ok := c.Arguments[k].(string); ok && v != "" {
+					call += " " + v
+				}
+			}
+			if !slices.Contains(calls, call) {
+				calls = append(calls, call)
+			}
+		}
+	}
+	return calls
+}
+
 // add sums q's counts into p.
 func (p *Pass) add(q Pass) {
 	p.Turns += q.Turns

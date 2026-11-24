@@ -541,3 +541,16 @@ func TestFormatChecked(t *testing.T) {
 		t.Errorf("no body: %q", c.Body)
 	}
 }
+
+func TestChecked(t *testing.T) {
+	if got := Checked("0123456789", nil); got != "🔎 _Checked at 0123456._" {
+		t.Errorf("no calls: %s", got)
+	}
+	got := Checked("0123456789", []string{"read a.go", "bash echo ```"})
+	if !strings.HasPrefix(got, "<details>\n<summary>🔎 Checked at 0123456</summary>") || !strings.Contains(got, "```text\nread a.go\nbash echo '''\n```") {
+		t.Errorf("calls: %s", got)
+	}
+	if c := Clean(got + "\n\nFixed."); c != "Fixed." { // a later prompt gets the answer only
+		t.Errorf("clean: %q", c)
+	}
+}
