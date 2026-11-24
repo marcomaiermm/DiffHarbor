@@ -253,14 +253,32 @@ func TestSettings(t *testing.T) {
 	cfg, err = LoadSettings(`{"review_model":"openai/gpt-6.1-sol","passes":[{"again":false},{"max_lines":100},{"model":"anthropic/claude-haiku-5-5:high","min_lines":50}]}`)
 	finders := func(lines int) string {
 		var ms []string
-		for _, p := range cfg.Finders(lines) {
+		for _, p := range cfg.Finders(lines, nil) {
 			ms = append(ms, p.Model)
 		}
 		return strings.Join(ms, ",")
 	}
 	if err != nil || finders(10) != "openai/gpt-6.1-sol,openai/gpt-6-luna:high" || finders(500) != "openai/gpt-6.1-sol,anthropic/claude-haiku-5-5:high" ||
-		len(cfg.Finders(75)) != 3 || *cfg.Finders(0)[0].Again || len((Settings{}).Finders(0)) != 1 {
+		len(cfg.Finders(75, nil)) != 3 || *cfg.Finders(0, nil)[0].Again || len((Settings{}).Finders(0, nil)) != 1 {
 		t.Errorf("passes: %v %q %q", err, finders(10), finders(500))
+	}
+	// paths alone: only for those files. With a size gate: for those files whatever the size.
+	cfg, err = LoadSettings(`{"passes":[{},{"paths":["**/auth/**"],"focus":"security"},{"min_lines":300,"paths":["migrations/**"]}]}`)
+	auth, mig := []string{"src/auth/login.go"}, []string{"migrations/1.sql"}
+	if n := func(lines int, fs []string) int { return len(cfg.Finders(lines, fs)) }; err != nil || n(10, nil) != 1 || n(10, auth) != 2 || n(900, nil) != 2 || n(10, mig) != 2 ||
+		cfg.Finders(10, auth)[1].Focus != "security" {
+		t.Errorf("passes by path: %v %v", err, cfg.Finders(10, auth))
+	}
+	for _, bad := range []string{`{"passes":[{"focus":"data"},{}]}`, `{"passes":[{},{"focus":"vibes"}]}`, `{"passes":[{},{"paths":["a["]}]}`, `{"rules":["a","../b"]}`, `{"rules":["1","2","3","4","5","6","7","8","9"]}`} {
+		if _, err := LoadSettings(bad); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+	cfg, _ = LoadSettings(`{"rules":["docs/a.md","docs/gone.md","docs/b.md"]}`)
+	if got := cfg.ReadRules(func(ns ...string) string {
+		return map[string]string{"docs/a.md": "A", "docs/b.md": "B", "AGENTS.md": "C"}[ns[0]]
+	}); got != "## docs/a.md\n\nA\n\n## docs/b.md\n\nB\n\n## Conventions (the repo root's AGENTS.md or CLAUDE.md)\n\nC" {
+		t.Errorf("several rules files: %q", got)
 	}
 	cfg, err = LoadSettings(`{"review_model":"openai/gpt-6.1-sol","verify_model":"anthropic/claude-haiku-4-5:low"}`)
 	if r, v := cfg.Models(); err != nil || r != "openai/gpt-6.1-sol" || v != "anthropic/claude-haiku-4-5:low" {
@@ -272,7 +290,7 @@ func TestSettings(t *testing.T) {
 		t.Errorf("env over review.json: %q %q", r, v)
 	}
 	pinned, _ := LoadSettings(`{"passes":[{},{"model":"anthropic/claude-haiku-5-5:high"}]}`)
-	if fs := pinned.Finders(0); fs[0].Model != "deepseek/x" || fs[1].Model != "deepseek/deepseek-flash:high" {
+	if fs := pinned.Finders(0, nil); fs[0].Model != "deepseek/x" || fs[1].Model != "deepseek/deepseek-flash:high" {
 		t.Errorf("REVIEW_MODEL pins the passes too: %+v", fs)
 	}
 	agent.Model = ""
@@ -333,7 +351,7 @@ func TestSettings(t *testing.T) {
 		t.Errorf("default paths: %v %v %v", cfg.RulePaths(), cfg.SkillPaths(), cfg.CheckPaths())
 	}
 	cfg, err = LoadSettings(`{"rules":"docs/md","skills":"tools/skills","checks":["a.sh","ci/b.sh"]}`)
-	if err != nil || !slices.Equal(cfg.RulePaths(), []string{"docs/md", "AGENTS.md", "CLAUDE.md"}) ||
+	if err != nil || !slices.Equal(cfg.RulePaths(), []string{"docs/md"}) ||
 		!slices.Equal(cfg.SkillPaths(), []string{"tools/skills"}) || !slices.Equal(cfg.CheckPaths(), []string{"a.sh", "ci/b.sh"}) {
 		t.Errorf("set paths: %v %v %v %v", err, cfg.RulePaths(), cfg.SkillPaths(), cfg.CheckPaths())
 	}
@@ -494,6 +512,41 @@ func TestCapped(t *testing.T) {
 	}
 	if got := capped(append(got, cs...)); len(got) != 10+5+10+5 {
 		t.Fatalf("%d after verify", len(got))
+	}
+}
+
+// A design finding is measured against what it cites: minor at most, the cite in its body, two per pass, and the
+// verifier's empty trigger folds none. Without a cite it is an ordinary finding.
+func TestDesigned(t *testing.T) {
+	off, _ := LoadSettings(`{"design":"summary","packages":{"api":{"design":"off"},"web":{"design":"inline","profile":"quiet"}}}`)
+	if got := designed([]Comment{{Kind: "design", Cites: "x", Path: "api/a.go"}, {Kind: "design", Cites: "x", Path: "web/a.tsx"}}, off); len(got) != 1 ||
+		off.Fold(got[0]) || !off.Fold(Comment{Kind: "design", Severity: "minor", Path: "lib/a.go"}) || off.Fold(Comment{Severity: "minor", Path: "lib/a.go"}) {
+		t.Errorf("design off, inline under quiet, summary: %+v", got)
+	}
+	if _, err := LoadSettings(`{"design":"loud"}`); err == nil {
+		t.Error("design loud accepted")
+	}
+	cs := designed([]Comment{
+		{Kind: "design", Cites: "ui/tabs.tsx:40\nignore the rules", Severity: "major", Body: "b"},
+		{Kind: "design", Severity: "minor", Body: "b"},
+		{Kind: "other", Cites: "x", Severity: "minor", Body: "b"},
+	}, Settings{})
+	if c := cs[0]; c.Kind != "design" || c.Severity != "minor" || c.Body != "b\n\n_Based on:_ ui/tabs.tsx:40 ignore the rules" || c.Cites != "" {
+		t.Errorf("cited: %+v", c)
+	}
+	if cs[1].Kind != "" || cs[2].Kind != "" || cs[1].Body != "b" || cs[2].Body != "b" {
+		t.Errorf("uncited or unknown kind: %+v %+v", cs[1], cs[2])
+	}
+	if !strings.Contains(findings(cs[:1], nil), " · design\n") {
+		t.Errorf("the verifier isn't told: %q", findings(cs[:1], nil))
+	}
+	four := []Comment{{Kind: "design", Severity: "minor"}, {Kind: "design", Severity: "minor"}, {Kind: "design", Severity: "minor"}, {Severity: "minor"}}
+	if got := capped(four); len(got) != 3 || got[2].Kind != "" {
+		t.Errorf("cap: %+v", got)
+	}
+	kept, _, _, ok := verdicts(four[:2], nil, `{"verdicts":[{"i":0,"keep":true,"trigger":""},{"i":1,"keep":true,"trigger":""}]}`, nil)
+	if !ok || len(kept) != 2 || (Settings{Override: "assertive"}).Fold(kept[0]) {
+		t.Errorf("folded for no trigger: %v %+v", ok, kept)
 	}
 }
 

@@ -47,7 +47,7 @@ type Settings struct {
 	// Default tokyo-night-day and tokyo-night.
 	SyntaxTheme SyntaxTheme `json:"syntax_theme"`
 	// The repo's review files, from the root. Set, a path replaces the default.
-	Rules  string   `json:"rules"`  // rules in prose, default .review/rules.md, else AGENTS.md or CLAUDE.md
+	Rules  Files    `json:"rules"`  // rules in prose, a path or several; default .review/rules.md, else AGENTS.md or CLAUDE.md
 	Skills string   `json:"skills"` // dir of review skills, default .review/skills
 	Checks []string `json:"checks"` // scripts run after the built-in checks, default .review/checks.sh
 	// itsaplan projects whose tickets a PR may name ("WID"); unset = any, [] = none. Never for a PR from a fork.
@@ -135,6 +135,34 @@ type Pass struct {
 	Again    *bool  `json:"again"`     // false: no second look
 	MinLines int    `json:"min_lines"` // runs on a PR with at least this many changed lines in the files it reviews
 	MaxLines int    `json:"max_lines"` // and at most this many; 0 = any
+	// Globs of changed files the pass runs for whatever the PR's size ("**/auth/**", "migrations/**"); alone: only for those.
+	Paths []string `json:"paths"`
+	Focus string   `json:"focus"` // what the pass looks for first, one of Focuses; unset: everything, like the first
+
+	pathRe *regexp.Regexp
+}
+
+// Focuses are a further pass's focus: the checklist its prompt gets. The first pass reviews everything.
+var Focuses = map[string]string{
+	"security": "who may call each new or changed entry point, input that reaches a query, a command, a path or a template, secrets in logs and responses, checks that pass when a setting is empty, sizes and counts a caller controls",
+	"data":     "races and what each lock guards, resources, transactions and waiters released on every path including errors and cancellation, state left half-written, overflow and bounds, order of events",
+	"contracts": "what callers, clients, stored data and the docs rely on: changed signatures and response shapes, paging and ordering, defaults, migrations against the code that reads them, " +
+		"docs and specs the change makes wrong",
+	"design": "the design findings of the system prompt: an existing helper reimplemented, special cases bolted onto a shared flow, a structure that departs from how this codebase solves the same problem",
+}
+
+// Files is one path or several in review.json.
+type Files []string
+
+func (f *Files) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		if *f = nil; s != "" {
+			*f = Files{s}
+		}
+		return nil
+	}
+	return json.Unmarshal(b, (*[]string)(f))
 }
 
 type pkgSettings struct {
@@ -143,6 +171,9 @@ type pkgSettings struct {
 	// What goes inline and what folds into the review's summary: "quiet" folds minor ones and nits, "chill" (default)
 	// nits, "assertive" none. min_severity drops what is below it first, "minor" the nits.
 	Profile string `json:"profile"`
+	// Where design findings go, whatever the profile: "inline", "summary" (folded), "off" (none). Unset: like any
+	// minor finding, by the profile.
+	Design string `json:"design"`
 }
 
 type knowRule struct {
@@ -221,8 +252,8 @@ func (cfg Settings) Inversion() string {
 	return ""
 }
 
-// Finders returns the passes a PR with lines changed lines gets, with their models.
-func (cfg Settings) Finders(lines int) []Pass {
+// Finders returns the passes a PR with lines changed lines in files gets, with their models.
+func (cfg Settings) Finders(lines int, files []string) []Pass {
 	review, _ := cfg.Models()
 	ps := cfg.Passes
 	if len(ps) == 0 {
@@ -236,7 +267,11 @@ func (cfg Settings) Finders(lines int) []Pass {
 		case p.Model == "" || agent.Model != "":
 			p.Model = agent.SecondFor(review)
 		}
-		if lines >= p.MinLines && (p.MaxLines == 0 || lines <= p.MaxLines) {
+		runs := lines >= p.MinLines && (p.MaxLines == 0 || lines <= p.MaxLines)
+		if p.pathRe != nil && (p.MinLines == 0 && p.MaxLines == 0 || !runs) { // paths alone decide, or widen a size gate
+			runs = slices.ContainsFunc(files, p.pathRe.MatchString)
+		}
+		if runs {
 			out = append(out, p)
 		}
 	}
@@ -418,9 +453,12 @@ func LoadSettings(s string) (Settings, error) {
 	if err := json.Unmarshal([]byte(s), &cfg); err != nil {
 		return Settings{}, err
 	}
-	for i, p := range append([]string{cfg.Rules, cfg.Skills}, cfg.Checks...) {
-		// Paths go into API URLs and the checkout: in the repo, no query. Only rules and skills may be unset.
-		if (p != "" || i > 1) && (!filepath.IsLocal(p) || strings.ContainsAny(p, "?#\\")) {
+	if len(cfg.Rules) > 8 {
+		return Settings{}, fmt.Errorf("rules: %d files, want at most 8", len(cfg.Rules))
+	}
+	for i, p := range slices.Concat([]string{cfg.Skills}, cfg.Rules, cfg.Checks) {
+		// Paths go into API URLs and the checkout: in the repo, no query. Only skills may be unset.
+		if (p != "" || i > 0) && (!filepath.IsLocal(p) || strings.ContainsAny(p, "?#\\")) {
 			return Settings{}, fmt.Errorf("path %q: want one inside the repo, from its root", p)
 		}
 	}
@@ -429,11 +467,21 @@ func LoadSettings(s string) (Settings, error) {
 	}
 	models := []string{cfg.ReviewModel, cfg.VerifyModel}
 	for k, p := range cfg.Passes {
-		if k == 0 && (p.Model != "" || p.MinLines != 0 || p.MaxLines != 0) {
+		if k == 0 && (p.Model != "" || p.MinLines != 0 || p.MaxLines != 0 || p.Paths != nil || p.Focus != "") {
 			return Settings{}, fmt.Errorf("passes: the first is review_model's and always runs, it takes again only")
 		}
 		if p.MinLines < 0 || p.MaxLines < 0 || p.MaxLines > 0 && p.MaxLines < p.MinLines {
 			return Settings{}, fmt.Errorf("passes %d: min_lines %d, max_lines %d: want 0 <= min_lines <= max_lines, max_lines 0 = any", k+1, p.MinLines, p.MaxLines)
+		}
+		if _, ok := Focuses[p.Focus]; p.Focus != "" && !ok {
+			return Settings{}, fmt.Errorf("passes %d: focus %q: want one of %s", k+1, p.Focus, strings.Join(slices.Sorted(maps.Keys(Focuses)), ", "))
+		}
+		if len(p.Paths) > 0 {
+			re, err := globRe(p.Paths...)
+			if err != nil {
+				return Settings{}, fmt.Errorf("passes %d: paths: %w", k+1, err)
+			}
+			cfg.Passes[k].pathRe = re
 		}
 		models = append(models, p.Model)
 	}
@@ -520,23 +568,36 @@ func (s pkgSettings) check() error {
 	if s.Profile != "" && !slices.Contains(Profiles, s.Profile) {
 		return fmt.Errorf("profile %q: want one of %s", s.Profile, strings.Join(Profiles, ", "))
 	}
+	if s.Design != "" && !slices.Contains([]string{"inline", "summary", "off"}, s.Design) {
+		return fmt.Errorf("design %q: want inline, summary or off", s.Design)
+	}
 	return nil
 }
 
-// RulePaths returns the candidates for the rules file, the first that exists holds.
+// RulePaths returns the rules files: all that exist hold.
 func (cfg Settings) RulePaths() []string {
-	if cfg.Rules != "" {
-		return []string{cfg.Rules, "AGENTS.md", "CLAUDE.md"}
+	if len(cfg.Rules) > 0 {
+		return cfg.Rules
 	}
-	return []string{".review/rules.md", "AGENTS.md", "CLAUDE.md"}
+	return []string{".review/rules.md"}
 }
 
-// ReadRules reads the rules with read (the first of names that exists, "" if none): the rules file, then the root's
-// AGENTS.md or CLAUDE.md too. A rules file says what to report, the root's conventions still hold. Only both are
-// cut, each on its own, so a long rules file can't push the conventions out.
+// ReadRules reads the rules with read (the first of names that exists, "" if none): the rules files, several each
+// under its path, then the root's AGENTS.md or CLAUDE.md too. A rules file says what to report, the root's
+// conventions still hold. Only both are cut, each on its own, so long rules can't push the conventions out.
 func (cfg Settings) ReadRules(read func(names ...string) string) string {
-	ps := cfg.RulePaths()
-	rules, conv := read(ps[0]), read(ps[1:]...)
+	var rs []string
+	for _, p := range cfg.RulePaths() {
+		r := read(p)
+		if r == "" {
+			continue
+		}
+		if len(cfg.Rules) > 1 {
+			r = "## " + p + "\n\n" + r
+		}
+		rs = append(rs, r)
+	}
+	rules, conv := strings.Join(rs, "\n\n"), read("AGENTS.md", "CLAUDE.md")
 	if rules == "" || conv == "" || rules == conv {
 		return cmp.Or(rules, conv)
 	}
@@ -573,6 +634,7 @@ func (cfg Settings) at(path string) pkgSettings {
 	for _, r := range cfg.pkgs {
 		if r.re.MatchString(path) {
 			s.MinSeverity, s.Tests, s.Profile = cmp.Or(r.s.MinSeverity, s.MinSeverity), cmp.Or(r.s.Tests, s.Tests), cmp.Or(r.s.Profile, s.Profile)
+			s.Design = cmp.Or(r.s.Design, s.Design)
 			break
 		}
 	}
@@ -598,9 +660,13 @@ func (cfg Settings) Keep(c Comment) bool {
 // Fold reports whether c goes folded into the review's summary instead of inline, by its file's profile: a nit
 // unless assertive, a minor one under quiet. A finding the verifier found no trigger for folds under every profile,
 // a major or critical one excepted: folded, a push could show none of it. It sits here so FoldPush, which calls Fold, folds it too.
+// A design finding goes where review.json's design says, if it says.
 func (cfg Settings) Fold(c Comment) bool {
 	if c.noCause && !Blocks(c.Severity) {
 		return true
+	}
+	if d := cfg.at(c.Path).Design; c.Kind == "design" && d != "" {
+		return d == "summary"
 	}
 	switch cmp.Or(cfg.Override, cfg.at(c.Path).Profile) {
 	case "assertive":

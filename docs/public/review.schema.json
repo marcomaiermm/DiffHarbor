@@ -10,6 +10,10 @@
       "enum": ["quiet", "chill", "assertive"],
       "description": "What goes inline, the rest folds into the review's summary. quiet: critical and major; chill (default): minor too; assertive: nits too. A PR's \"review: <profile>\" line or `@bot review <profile>` overrides it."
     },
+    "design": {
+      "enum": ["inline", "summary", "off"],
+      "description": "Where design findings go, whatever the profile. inline: as threads; summary: folded into the review's summary; off: none. Unset: like any minor finding, by the profile."
+    },
     "model": {
       "type": "string",
       "pattern": "^\\w[\\w.-]*/[\\w.:/@-]+$",
@@ -25,6 +29,7 @@
       "properties": {
         "min_severity": { "$ref": "#/definitions/severity" },
         "profile": { "$ref": "#/definitions/profile" },
+        "design": { "$ref": "#/definitions/design" },
         "tests": { "type": "boolean" }
       }
     }
@@ -37,6 +42,7 @@
     },
     "min_severity": { "$ref": "#/definitions/severity" },
     "profile": { "$ref": "#/definitions/profile" },
+    "design": { "$ref": "#/definitions/design" },
     "tests": { "type": "boolean", "description": "Run the tests of changed packages. Unset: only when no CI workflow does." },
     "packages": {
       "type": "object",
@@ -57,7 +63,9 @@
           "model": { "$ref": "#/definitions/model" },
           "again": { "type": "boolean", "description": "false: no second look." },
           "min_lines": { "type": "integer", "minimum": 0 },
-          "max_lines": { "type": "integer", "minimum": 0, "description": "0: any." }
+          "max_lines": { "type": "integer", "minimum": 0, "description": "0: any." },
+          "paths": { "type": "array", "items": { "type": "string" }, "description": "Globs of changed files the pass runs for whatever the PR's size. Without min_lines and max_lines: only for those." },
+          "focus": { "enum": ["security", "data", "contracts", "design"], "description": "What the pass looks for first. Unset: everything." }
         }
       },
       "description": "Finders per part, each with its second look. The first is review_model's and takes again only; a further one without model takes the provider's second model."
@@ -101,7 +109,7 @@
       },
       "description": "What reviews and the chat follow of the saved learnings. Only hides, deletes nothing."
     },
-    "rules": { "$ref": "#/definitions/repoPath" },
+    "rules": { "anyOf": [{ "$ref": "#/definitions/repoPath" }, { "type": "array", "maxItems": 8, "items": { "$ref": "#/definitions/repoPath" } }], "description": "The rules file, or several: all go into the prompt." },
     "skills": { "$ref": "#/definitions/repoPath" },
     "checks": { "type": "array", "items": { "$ref": "#/definitions/repoPath" } },
     "install_scripts": { "type": "boolean", "description": "Run lifecycle scripts (postinstall, native builds) in the checks' installs. Default false." },

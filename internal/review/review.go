@@ -36,6 +36,7 @@ const finding = `{"path":"<file>","line":<line in new file>,"severity":"critical
 "title":"<what goes wrong, naming the code, at most 10 words, e.g. ` + "`itemDbFetch` waits without a timeout" + `>",
 "body":"<markdown, 2 sentences: the failing input or sequence and what follows; then the fix, with a short snippet unless fix carries it>",
 "existing":"<only if the whole fix edits a few adjacent lines here: those lines, copied exactly from the new file>","fix":"<their replacement, same indentation>",
+"kind":"<design, only for a design finding>","cites":"<only with it: path:line of the code in this repo it is measured against, or the rule's words>",
 "again":<only if this change brings back an earlier finding listed as fixed: its number>}]}
 At most 10 findings that aren't nits, plus at most 5 nits, [] if none.`
 
@@ -91,8 +92,11 @@ Reference docs in the prompt describe intended behaviour and may be outdated: if
 Against changed docs and API specs: every claim they make about the code (fields, nulls, status codes, when a value is set) must hold there;
 command examples must work pasted as written, a code block top to bottom.
 Project rule violations: cite the rule.
-Maintainability, minor, high-conviction only, max 2: reimplements an existing helper (find it), special-case branches bolted onto a shared flow,
-a file pushed past 1000 lines, a clearly simpler structure that deletes code.
+Design, "kind" "design", minor, high-conviction only, max 2: reimplements an existing helper (find it), special-case branches bolted onto a shared flow,
+a file pushed past 1000 lines, a clearly simpler structure that deletes code, a structure that departs from how this codebase already solves the same
+problem (a component's API, a layer or module boundary, where state lives), a project rule or skill on structure.
+"cites" is what it is measured against: the helper, the code that already does it the intended way, the rule, or for a simpler structure the code
+it replaces. Nothing to cite: no finding. The body says what to change it to, a sketch if the fix is more than a few adjacent lines.
 Nits, after the defects and never instead of one, severity "nit": naming, readability, a dead branch, a needless step, an idiom of
 this codebase the change ignores; not what a formatter or linter in the checks already reports, not taste.
 A rule about how an external service, library or platform behaves that neither the repo nor a reference doc shows: a minor finding that names the rule as unconfirmed, no fix.
@@ -109,6 +113,9 @@ Drop a repeat with the earlier one's number as evidence. Before any other drop, 
 A premise outside the diff (callers, config, deploy order) is checked like the code. A claim about how an external service, library or platform behaves that neither the repo (vendored code, types, schemas) nor a reference doc below shows: put it in "premise"; empty if none. If only part of a finding holds, keep it, put that part in "only" and the line that rules out the rest in evidence.
 A finding without a concrete failing input or sequence is speculative: drop it. A nit needs none: keep it if the code shows it
 and this codebase or common practice backs it; drop taste.
+A finding marked design claims no defect and needs none either: open what its "Based on" line cites and keep it only if that exists, does what the
+finding says and the change duplicates or departs from it; a simpler structure only if it keeps the behaviour and deletes code. Drop taste and a
+general practice this codebase does not follow itself. Its "trigger" is empty.
 For a kept non-nit, "trigger" names what reaches that input in this codebase today (caller, request, job, config, data source; untrusted input counts); empty if nothing does.
 A finding that cites a reference doc (given below it, may be outdated) stands only if the change makes that doc's claim false.
 A kept finding with a suggested fix: fix=false if applying it as written would not fix it or break something.
@@ -149,6 +156,10 @@ type Comment struct {
 	// suggestion. Quoted code instead of line numbers: models miscount lines.
 	Existing string `json:"existing,omitempty"`
 	Fix      string `json:"fix,omitempty"`
+	// Kind "design" is a finding on structure, no defect: the verifier holds it to what Cites names, not to a failing
+	// input. designed moves Cites into the body.
+	Kind  string `json:"kind,omitempty"`
+	Cites string `json:"cites,omitempty"`
 	// Evidence is the verifier's reason to keep it, empty when no verify pass confirmed it. Not read from the
 	// review model's JSON: it must not vouch for itself.
 	Evidence string     `json:"-"`
@@ -311,7 +322,7 @@ func Analyze(ctx context.Context, in Input) (Result, string, error) {
 	lvl := Level(whole, files)
 	rm, verify := in.Settings.Models()
 	lines := diff.Changed(whole)
-	fs := in.Settings.Finders(lines)
+	fs := in.Settings.Finders(lines, files)
 	in.split = in.Settings.SuggestsSplit(whole)
 	models := make([]string, len(fs))
 	for k := range fs {
@@ -489,7 +500,11 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 			if k > 0 { // another model, the files the other way round: other defects. Its findings only.
 				pin.Guide, pin.other, pass, pd = false, true, fmt.Sprintf("review%s.%d", name, k+1), diff.Reverse(d)
 			}
-			rs[k], errs[k] = reviewPass(ctx, pin, pass, prompt(pd), f.Model, false)
+			pp := prompt(pd)
+			if f.Focus != "" { // in the prompt: the system prompt stays the repo's, cached across passes
+				pp += "\n## Focus\n\nAnother pass reviews this diff as a whole. Look first for: " + Focuses[f.Focus] + ". Trace each to the end before the next. Other defects you come across count too.\n"
+			}
+			rs[k], errs[k] = reviewPass(ctx, pin, pass, pp, f.Model, false)
 			for i := range rs[k].Comments {
 				rs[k].Comments[i].pass = 2 * k
 			}
@@ -501,6 +516,8 @@ func runPart(ctx context.Context, in Input, name string, prompt func(d string) s
 			if more, err := reviewPass(ctx, pin, pass, "", f.Model, true); err != nil {
 				log.Printf("%s again: %v", pass, err) // the first look stands
 			} else {
+				// the second look is for missed defects: the pass's 2 design findings are the first look's
+				more.Comments = slices.DeleteFunc(more.Comments, func(c Comment) bool { return c.Kind == "design" })
 				for i := range more.Comments {
 					more.Comments[i].pass = 2*k + 1
 				}
@@ -783,16 +800,42 @@ func reviewPass(ctx context.Context, in Input, name, prompt, m string, again boo
 	if !ok {
 		return r, fmt.Errorf("review returned no JSON, ends with %q", text.Tail(out))
 	}
-	r.Comments = capped(r.Comments)
+	r.Comments = capped(designed(r.Comments, in.Settings))
 	return r, nil
 }
 
-// capped keeps the schema's limits per pass (Comment.pass): the 10 most severe findings and 5 nits, so nits never
-// push out a defect. After the verifier, also for the ones it lowered to nits.
+// designed settles a pass's design findings: minor at most, what they cite on a line of the body for the verifier
+// and the reader. One that cites nothing is an ordinary finding: the verifier wants its failing input. Those of a
+// file with review.json's design "off" go.
+func designed(cs []Comment, cfg Settings) []Comment {
+	cs = slices.DeleteFunc(cs, func(c Comment) bool { return c.Kind == "design" && cfg.at(c.Path).Design == "off" })
+	for i := range cs {
+		c := &cs[i]
+		cite := text.OneLine(c.Cites, 200) // model output about untrusted code: one bounded line
+		c.Cites = ""
+		if c.Kind != "design" || cite == "" {
+			c.Kind = ""
+			continue
+		}
+		if Rank(c.Severity) > Rank("minor") {
+			c.Severity = "minor"
+		}
+		c.Body += "\n\n_Based on:_ " + cite
+	}
+	return cs
+}
+
+// capped keeps the schema's limits per pass (Comment.pass): the 10 most severe findings, 2 design ones among them,
+// and 5 nits, so nits never push out a defect. After the verifier, also for the ones it lowered to nits.
 func capped(cs []Comment) []Comment {
 	slices.SortStableFunc(cs, bySeverity)
-	n, nits := map[int]int{}, map[int]int{}
+	n, nits, designs := map[int]int{}, map[int]int{}, map[int]int{}
 	return slices.DeleteFunc(cs, func(c Comment) bool {
+		if c.Kind == "design" { // before the others' counts: a dropped one takes no slot
+			if designs[c.pass]++; designs[c.pass] > 2 {
+				return true
+			}
+		}
 		if c.Severity == "nit" {
 			nits[c.pass]++
 			return nits[c.pass] > 5
@@ -884,7 +927,7 @@ func verdicts(cs []Comment, claimed []int, reply string, owns func(path string, 
 		if trigger != "" {
 			c.Body += "\n\n_Trigger:_ " + trigger
 		}
-		c.noCause = answered && trigger == "" && c.Severity != "nit"
+		c.noCause = answered && trigger == "" && c.Severity != "nit" && c.Kind != "design" // neither claims a defect
 		kept = append(kept, c)
 	}
 	for i := range cs { // a finding without a verdict was never checked: repair, else post unverified
@@ -927,6 +970,9 @@ func findings(cs []Comment, ids []int) string {
 		head := fmt.Sprintf("%s:%d", c.Path, c.Line)
 		if c.Title != "" {
 			head += " · " + c.Severity + " · " + c.Title
+		}
+		if c.Kind != "" {
+			head += " · " + c.Kind
 		}
 		fmt.Fprintf(&b, "### %d · %s\n\n%s\n\n", i, head, c.Body)
 		if c.Existing != "" && c.Fix != "" {
