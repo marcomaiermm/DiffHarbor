@@ -452,10 +452,12 @@ func (idx *cgIndex) read(sb *proc.Sandbox, root *os.Root, order []*useGroup) {
 		Ways bool   `json:"ways"`
 	}
 	gos := map[string]*goFile{}
-	ts := map[string][]int{} // an index's prefix: its groups, by place in order
+	ts := map[string][]int{} // a TS project's prefix: its groups, by place in order
+	var roots []string
 	tsOK := false
 	if _, err := os.Stat(filepath.Join(tsAPI, "dist", "api", "sync", "api.js")); err == nil {
 		tsOK = true
+		roots = idx.tsRoots(sb.Repo())
 	}
 	ways := func(i int) bool { return i < 2*maxShapes && order[i].rank < 5 }
 	for i, g := range order {
@@ -476,21 +478,18 @@ func (idx *cgIndex) read(sb *proc.Sandbox, root *os.Root, order []*useGroup) {
 			}
 		case jsExt[ext] && tsOK:
 			best := -1
-			for j, d := range idx.dbs {
-				if strings.HasPrefix(g.Path, d.Prefix) && (best < 0 || len(d.Prefix) > len(idx.dbs[best].Prefix)) {
+			for j, r := range roots {
+				if strings.HasPrefix(g.Path, r) && (best < 0 || len(r) > len(roots[best])) {
 					best = j
 				}
 			}
 			if best >= 0 {
-				ts[idx.dbs[best].Prefix] = append(ts[idx.dbs[best].Prefix], i)
+				ts[roots[best]] = append(ts[roots[best]], i)
 			}
 		}
 	}
 	for prefix, is := range ts {
 		dir := filepath.Join(sb.Repo(), filepath.FromSlash(prefix))
-		if _, err := os.Stat(filepath.Join(dir, "tsconfig.json")); err != nil {
-			continue
-		}
 		items := make([]item, len(is))
 		for j, i := range is {
 			g := order[i]

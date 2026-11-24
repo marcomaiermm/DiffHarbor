@@ -82,7 +82,7 @@ const declOf = (s, h, path) => {
   const n = h.resolve(project), sf = n && n.getSourceFile();
   if (!n) return null;
   const fn = is.isFunctionDeclaration(n) || is.isMethodDeclaration(n) || is.isClassDeclaration(n) ||
-    (is.isVariableDeclaration(n) && n.initializer && (is.isArrowFunction(n.initializer) || is.isFunctionExpression(n.initializer))) ||
+    (is.isVariableDeclaration(n) && n.initializer && (is.isArrowFunction(n.initializer) || is.isFunctionExpression(n.initializer) || !!inner(n.initializer))) ||
     (is.isPropertyAssignment(n) && (is.isArrowFunction(n.initializer) || is.isFunctionExpression(n.initializer)));
   const up = k => { let p = n; for (let i = 0; i < k && p; i++) p = p.parent; return !!p && is.isSourceFile(p) };
   const top = up(1) || up(3); // a store: the module's, not a parameter
@@ -103,6 +103,8 @@ function declKind(n) {
   return "function";
 }
 const isFn = n => n && (is.isArrowFunction(n) || is.isFunctionExpression(n));
+// inner is the function a wrapper is given, `catchAsync(async (req, res) => …)`: a named call's first argument
+const inner = x => (x && is.isCallExpression(x) && is.isIdentifier(x.expression) && isFn(x.arguments[0]) ? x.arguments[0] : null);
 
 const out = [], seen = new Set();
 const emit = (kind, s, line, t, url, via) => {
@@ -121,8 +123,9 @@ const ifaceOf = n => {
   if (is.isInterfaceDeclaration(p)) return text(p.name);
   return is.isTypeLiteralNode(p) && is.isTypeAliasDeclaration(p.parent) ? text(p.parent.name) : "";
 };
-// fnOf is the function a declaration of the project holds: its own, a variable's or a property's arrow; null none
-const fnOf = d => (is.isFunctionDeclaration(d.node) || is.isMethodDeclaration(d.node) ? d.node : isFn(d.node.initializer) ? d.node.initializer : null);
+// fnOf is the function a declaration of the project holds: its own, a variable's or a property's arrow, the one a
+// variable's wrapper is given; null none
+const fnOf = d => (is.isFunctionDeclaration(d.node) || is.isMethodDeclaration(d.node) ? d.node : isFn(d.node.initializer) ? d.node.initializer : inner(d.node.initializer));
 const isUrl = s => /^https?:\/\//.test(s);
 const envObj = s => s === "process.env" || s === "import.meta.env";
 const isStr = x => is.isStringLiteral(x) || is.isNoSubstitutionTemplateLiteral(x) || is.isTemplateExpression(x);
@@ -258,8 +261,11 @@ for (const file of program.getSourceFileNames()) {
       if (n.name) s = named(n, text(n.name), "function", scope);
       else if (is.isVariableDeclaration(p) && is.isIdentifier(p.name)) s = named(p, p.name.text, "function", scope);
       else if (is.isPropertyAssignment(p)) s = named(p, text(p.name), "function", scope);
+      else if (inner(p) === n && is.isVariableDeclaration(p.parent) && is.isIdentifier(p.parent.name)) s = named(p.parent, p.parent.name.text, "function", scope);
       else if (is.isCallExpression(p) && p.arguments.includes(n)) {
-        s = { ...named(n, "", "route", scope), inline: true, call: p, input: inputOf(n) };
+        // a wrapped one passed on, `get("/x", catchAsync(async …))`, is the outer call's
+        const c = inner(p) === n && is.isCallExpression(p.parent) && p.parent.arguments.includes(p) ? p.parent : p;
+        s = { ...named(n, "", "route", scope), inline: true, call: c, input: inputOf(n) };
         inlines.push(s);
       }
     }
