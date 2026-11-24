@@ -196,7 +196,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	if strings.TrimSpace(d) == "" {
 		log.Println(key, "nothing to review")
 		desc = "Nothing to review"
-		s.State = s.State.Update(review.Result{}, sha, prFiles, false)
+		s.State = s.State.Update(review.Result{}, sha, prFiles, only == nil)
 		s.State.Patches = reviewedPatches(s.State.Patches, patches, nil)
 		s.Write("", footer(fmt.Sprintf("Reviewed up to `%s` · nothing to review", sha[:7])))
 		return nil

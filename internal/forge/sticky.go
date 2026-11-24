@@ -274,7 +274,7 @@ func (st State) groups(code []string) string {
 			if p := strings.Split(f, "/"); len(p) > 2 { // with its folder: two review.go in one PR are common
 				f = strings.Join(p[len(p)-2:], "/")
 			}
-			out = append(out, "`"+f+"`")
+			out = append(out, "`"+strings.ReplaceAll(f, "|", `\|`)+"`")
 		}
 		if len(fs) > 5 {
 			out = append(out, "…")

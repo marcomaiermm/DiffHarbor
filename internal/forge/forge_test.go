@@ -519,6 +519,9 @@ func TestGroups(t *testing.T) {
 	if body := st.render("", "", "", nil); !strings.Contains(body, want+"\n\n<details>\n<summary><strong>File by file</strong></summary>") || !strings.Contains(body, "| `c.go` | C \\| c |") {
 		t.Errorf("render: %s", body)
 	}
+	if got := st.groups([]string{"a|b.go", "p/x/a.go"}); !strings.Contains(got, "| Other | `a\\|b.go` |") {
+		t.Errorf("pipe in a name: %s", got)
+	}
 	st.Flow = st.Flow[:1] // one step and nothing else to say: the plain table
 	if got := st.groups([]string{"p/x/a.go"}); got != "" {
 		t.Errorf("one row: %q", got)
