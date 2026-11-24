@@ -69,6 +69,9 @@ type Settings struct {
 	// How GitLab gets the findings: "review" as one review, one email; "discussions" an email each. Unset: the
 	// server's GITLAB_FINDINGS.
 	GitLabFindings string `json:"gitlab_findings"`
+	// Unset or true: where the diffharbor status would fail (a failed review, a conflict, failing tests) it posts
+	// success, its description unchanged, so it never fails a pipeline; false: it fails.
+	AllowFailure *bool `json:"allow_failure"`
 	// What reviews and chats of this repo follow of the learnings.
 	Learnings Learnings `json:"learnings"`
 
@@ -85,6 +88,9 @@ type SyntaxTheme struct {
 	Light string `json:"light"`
 	Dark  string `json:"dark"`
 }
+
+// AllowsFailure reports whether a failed or blocked review posts its status as success: allow_failure, unset true.
+func (cfg Settings) AllowsFailure() bool { return cfg.AllowFailure == nil || *cfg.AllowFailure }
 
 // Learnings is review.json's learnings, applied when they are read: a lower max hides the oldest, it deletes nothing.
 type Learnings struct {

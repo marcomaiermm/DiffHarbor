@@ -103,8 +103,8 @@ func TestReviewDraftOptIn(t *testing.T) {
 	if err := Review(t.Context(), f, e, ""); err != nil || pr.status != "" {
 		t.Fatalf("push before asking: %v %q", err, pr.status)
 	}
-	e.Action = "manual" // fails past the gate: the event has no repository id
-	if err := Review(t.Context(), f, e, ""); err == nil || pr.status != "error Review failed" {
+	e.Action = "manual" // fails past the gate: the event has no repository id, green under allow_failure's default
+	if err := Review(t.Context(), f, e, ""); err == nil || pr.status != "success Review failed" {
 		t.Fatalf("asked: %v %q", err, pr.status)
 	}
 	e.Action, e.PullRequest.Head.SHA = "synchronize", strings.Repeat("b", 40)
@@ -118,15 +118,40 @@ type panicForge struct{ skipForge }
 
 func (panicForge) Instance() string { panic("boom") }
 
-// A bug in a review fails it, a red status rather than a green one, and the server's other jobs run on.
+// A bug in a review fails it, a red status rather than a green one unless allow_failure (the default), and the
+// server's other jobs run on.
 func TestReviewPanicFails(t *testing.T) {
-	pr := &skipPR{cfg: `{}`}
-	e := &forge.Event{Action: "opened"}
-	e.Repository.ID, e.Repository.DefaultBranch = 1, "main"
-	e.PullRequest.State, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", strings.Repeat("a", 40), "main"
-	err := Review(t.Context(), panicForge{skipForge{pr: pr}}, e, "")
-	if err == nil || !strings.HasPrefix(err.Error(), "panic: boom") || pr.status != "error Review failed" {
-		t.Fatalf("%v %q", err, pr.status)
+	for cfg, want := range map[string]string{`{"allow_failure":false}`: "error Review failed", `{}`: "success Review failed"} {
+		pr := &skipPR{cfg: cfg}
+		e := &forge.Event{Action: "opened"}
+		e.Repository.ID, e.Repository.DefaultBranch = 1, "main"
+		e.PullRequest.State, e.PullRequest.Head.SHA, e.PullRequest.Base.Ref = "open", strings.Repeat("a", 40), "main"
+		err := Review(t.Context(), panicForge{skipForge{pr: pr}}, e, "")
+		if err == nil || !strings.HasPrefix(err.Error(), "panic: boom") || pr.status != want {
+			t.Fatalf("%s: %v %q", cfg, err, pr.status)
+		}
+	}
+}
+
+// allow_failure: a blocked PR and a failed review post success with their description; pending and success stay.
+func TestAllowFailure(t *testing.T) {
+	for _, c := range []struct{ cfg, state, desc, want string }{
+		{`{"allow_failure":true}`, "failure", "Blocked · conflict with main", "success Blocked · conflict with main"},
+		{`{"allow_failure":true}`, "failure", "Blocked · 2 tests failed", "success Blocked · 2 tests failed"},
+		{`{}`, "error", "Review failed", "success Review failed"},
+		{`{}`, "pending", "Review in progress", "pending Review in progress"},
+		{`{"allow_failure":false}`, "failure", "Blocked · conflict with main", "failure Blocked · conflict with main"},
+		{`{"allow_failure":false}`, "error", "Review failed", "error Review failed"},
+	} {
+		cfg, err := review.LoadSettings(c.cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pr := &skipPR{}
+		allowFailure(pr, cfg).Status("sha", c.state, c.desc)
+		if pr.status != c.want {
+			t.Errorf("%s %s: %q, want %q", c.cfg, c.state, pr.status, c.want)
+		}
 	}
 }
 
@@ -841,7 +866,7 @@ func TestGiveUp(t *testing.T) {
 	e.PullRequest.Head.SHA = a
 	pr := &givePR{skipPR: &skipPR{}, e: e, head: a, now: "open"}
 	if err := GiveUp(giveForge{pr: pr}, e, 3); err != nil || len(pr.notes) != 1 || !strings.Contains(pr.notes[0], "Review of `aaaaaaa` not retried") ||
-		pr.status != "error Review failed: the server stopped during it" {
+		pr.status != "success Review failed: the server stopped during it" { // allow_failure's default
 		t.Fatalf("%v %q %q", err, pr.notes, pr.status)
 	}
 	pr.noteErr = errors.New("forge down")

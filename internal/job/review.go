@@ -64,6 +64,7 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	profile = cmp.Or(profile, bodyProfile(pr.Body))
 	cfg.Override = profile
 	p.Configure(cfg)
+	p = allowFailure(p, cfg)
 	// A draft's push reads the walkthrough only under opt_in, for whether someone asked.
 	if pr.Draft && !cfg.ReviewsDraft(manual, cfg.Drafts == "opt_in") {
 		if manual { // drafts: off, asked anyway: say why nothing comes
@@ -440,6 +441,25 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	return nil
 }
 
+// greenPR is a PR whose failed statuses post as success, their description unchanged: review.json's allow_failure.
+// GitLab counts the status as a job of the pipeline, and neither forge's status takes an allow_failure of its own.
+type greenPR struct{ forge.PR }
+
+func (p greenPR) Status(sha, state, desc string) {
+	if state == "failure" || state == "error" {
+		state = "success"
+	}
+	p.PR.Status(sha, state, desc)
+}
+
+// allowFailure wraps p in greenPR when cfg allows failure.
+func allowFailure(p forge.PR, cfg review.Settings) forge.PR {
+	if cfg.AllowsFailure() {
+		return greenPR{p}
+	}
+	return p
+}
+
 // ErrMoved is GiveUp's for a PR whose head isn't the queued one any more: the runs that stopped were on another.
 var ErrMoved = errors.New("the head moved")
 
@@ -462,6 +482,8 @@ func GiveUp(f forge.Forge, e *forge.Event, tries int) error {
 		return err
 	}
 	sha := e.PullRequest.Head.SHA
+	cfg, _ := review.LoadSettings(p.File(e.PullRequest.Base.SHA, "review.json")) // broken: the defaults
+	p = allowFailure(p, cfg)
 	err = s.Post(fmt.Sprintf("⚠️ Review of `%s` not retried: the server stopped during each of its last %d tries, "+
 		"maybe the PR's tests or checks ran out of memory. Comment `@%s review` to try again.", sha[:min(len(sha), 7)], tries, f.Bot()), "")
 	p.Status(sha, "error", "Review failed: the server stopped during it") // logs its own failure, as every Status
