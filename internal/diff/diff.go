@@ -30,16 +30,17 @@ var (
 	// Fill order for the budget: code, then tests, data and bulk code (stylesheets, notebooks, translations,
 	// seeds), docs. #490: one 38k-char doc took most of it; on #34 a 48k-char stylesheet took a part while code was
 	// left out.
-	bulkFile  = regexp.MustCompile(`\.(css|scss|sass|less|styl|ipynb|po|pot)$|(^|/)seeds?/|(^|/)seed[^/]*\.sql$`)
-	testFile  = regexp.MustCompile(`(^|/)(tests?|__tests__|e2e|testdata|fixtures|__fixtures__)/|[._-](test|spec)\.[a-z]+$|_test\.go$|(^|/)test_[^/]+\.py$`)
-	dataFile  = regexp.MustCompile(`\.(json|ya?ml|toml|csv|xml)$`)
-	docFile   = regexp.MustCompile(`(?i)\.(md|mdx|rst|txt|adoc)$|(^|/)docs?/`)
-	specFile  = regexp.MustCompile(`(?i)(openapi|swagger)[^/]*\.(ya?ml|json)$`)
-	fileStart = regexp.MustCompile(`(?m)^diff --git `)
-	newPath   = regexp.MustCompile(`(?m)^\+\+\+ b/(.+)$`)
-	deleted   = regexp.MustCompile(`(?m)^--- a/(.+)\n\+\+\+ /dev/null$`)
-	hunkStart = regexp.MustCompile(`\+(\d+)`)
-	hunkHead  = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*\n?)`)
+	bulkFile    = regexp.MustCompile(`\.(css|scss|sass|less|styl|ipynb|po|pot)$|(^|/)seeds?/|(^|/)seed[^/]*\.sql$`)
+	testFile    = regexp.MustCompile(`(^|/)(tests?|__tests__|e2e|testdata|fixtures|__fixtures__)/|[._-](test|spec)\.[a-z]+$|_test\.go$|(^|/)test_[^/]+\.py$`)
+	dataFile    = regexp.MustCompile(`\.(json|ya?ml|toml|csv|xml)$`)
+	docFile     = regexp.MustCompile(`(?i)\.(md|mdx|rst|txt|adoc)$|(^|/)docs?/`)
+	specFile    = regexp.MustCompile(`(?i)(openapi|swagger)[^/]*\.(ya?ml|json)$`)
+	fileStart   = regexp.MustCompile(`(?m)^diff --git `)
+	newPath     = regexp.MustCompile(`(?m)^\+\+\+ b/(.+)$`)
+	deletedPath = regexp.MustCompile(`(?m)^--- a/(.+)\n\+\+\+ /dev/null$`)
+	deleted     = regexp.MustCompile(`(?m)^--- a/(.+)\n\+\+\+ /dev/null$`)
+	hunkStart   = regexp.MustCompile(`\+(\d+)`)
+	hunkHead    = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*\n?)`)
 )
 
 // EachFile calls fn with each file's new path and its part of the diff. Deletions have no new path.
@@ -346,6 +347,15 @@ func Paths(diff string) []string {
 			seen[m[1]] = true
 			p = append(p, m[1])
 		}
+	}
+	return p
+}
+
+// Deleted lists the paths of the deleted files (not of binary ones, whose diff names no old path).
+func Deleted(diff string) []string {
+	var p []string
+	for _, m := range deletedPath.FindAllStringSubmatch(diff, -1) {
+		p = append(p, m[1])
 	}
 	return p
 }

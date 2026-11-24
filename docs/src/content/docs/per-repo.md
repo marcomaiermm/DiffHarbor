@@ -61,7 +61,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `drafts` | `manual` (default): a draft PR gets a review on `@<bot> review`, then once marked ready. `opt_in`: once someone asked with `@<bot> review`, every later push of the draft gets one too, like any PR. `off`: never, and `@<bot> review` says so. |
 | `learnings` | `max`: how many of the newest learnings of the repo and of the owner a review and the chat follow, each. `0` is none, at most 100, default 30. `max_age_days`: older ones are left out. Default: any age. A learning saved before dates were kept never ages. Both only hide, nothing is deleted. `outcomes`: when a PR closes, a finding a maintainer declined (👎 by someone who can push, a resolve alone says nothing) is kept as a declined finding, and so is one a maintainer's reply decided as intended, unlikely or wrong. Those are apart from the learnings, the newest 20 per repo, shown to reviews (`max_age_days` applies, `max` does not, except that `0` hides them too). `false` only counts them. Default `true`. |
 | `gitlab_findings` | `review`: the findings and the answers to fixed threads are one review, one email, after the summary as a note of its own (in the review GitLab would make it a thread to resolve). A suggestion GitLab can't place goes into the summary as code. `discussions`: each on its own, an email each. A refused suggestion is retried as plain code on its line. Default: the server's `GITLAB_FINDINGS`. |
-| `rules`, `skills`, `checks` | Other paths for the files above. |
+| `rules`, `skills`, `checks` | Other paths for the files above. `rules` takes a list too, up to 8 files, e.g. `["docs/conventions.md", "CONTRIBUTING.md"]`: all go into the prompt, about 8000 characters together. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part. The longest glob wins. |
 
@@ -83,6 +83,7 @@ Reviews report defects (critical, major, minor) and nits. The profile decides wh
 - **Inline** means on a diff line. A finding outside the diff goes into the summary whatever the profile.
 - **Folded** findings stay in the summary, and the prompt for AI agents still has them. They have no thread: a later review of the file may report one again, and an incremental review that finds only folded ones posts nothing.
 - **`min_severity`** drops findings before any of this, `minor` the nits.
+- **`design`** places the [design findings](../how-it-works/#verification) whatever the profile: `inline`, `summary` or `off`. Unset, they go like any minor finding. Per package too. On a push `inline` still folds unless the profile is `assertive`.
 
 Folded under every profile:
 
@@ -155,8 +156,11 @@ Each pass is a finder with tools, followed by its second look. One verify pass c
 | `model` | Unset: the second model of the review model's provider, e.g. `openai/gpt-6-luna:high`. A server that sets `REVIEW_MODEL` sets this one too. |
 | `again` | `false`: no second look. |
 | `min_lines`, `max_lines` | Run only on PRs with that many changed lines in the reviewed files. |
+| `paths` | Globs of changed files the pass runs for, e.g. `["**/auth/**", "migrations/**"]`. With a size too, the pass runs when either holds. |
+| `focus` | What the pass looks for first: `security`, `data` (races, resources, state), `contracts` (callers, API shapes, docs) or `design`. Unset: everything. |
 
 - The first entry is the review model's and always runs. It takes `again` only.
+- A pass for big PRs and risky paths: `{"min_lines": 400, "paths": ["**/auth/**"]}`.
 - A further pass reads the files in reverse order.
 - The verify pass drops a finding that another pass reported too.
 

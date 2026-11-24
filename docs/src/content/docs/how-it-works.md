@@ -39,6 +39,13 @@ Your own go in [`.review/checks.sh`](../per-repo/).
 - A defect with no trigger folds into the summary under every profile, unless it is major or critical.
 - A verify pass that gives no such answer folds nothing.
 
+**Design findings.** Up to 2 per pass, always minor: a helper built a second time, a simpler structure that deletes code, a structure that departs from how the repo already solves the same problem, a rule or [skill](../per-repo/) on structure.
+
+- Each names what it is measured against under _Based on_: the code that already does it, or the rule. One that cites nothing is treated like any other finding.
+- The verifier opens that code and keeps the finding only if the change duplicates or departs from it. It needs no failing case and no trigger.
+- [`design`](../per-repo/#review-profiles) in `review.json` puts them inline, into the summary or turns them off.
+- What counts as good structure for your stack goes in `.review/rules.md` or a skill: the review has no opinions of its own on it.
+
 **Proof test.** The test the review names as proof of the change runs against the base versions of the PR's code files. If it still passes there, it doesn't prove the change, and the test gets a minor finding of its own: "Test passes without the change". Not run when [`tests`](../per-repo/#reviewjson-reference) is `false`.
 
 **Repro.** For up to 3 major or critical findings per review the verifier writes a minimal test that fails if the finding is right. It runs once, one at a time, in the sandbox and is deleted after. Only where the repo's tests run, see [`tests`](../per-repo/#reviewjson-reference).
