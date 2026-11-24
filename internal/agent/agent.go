@@ -460,6 +460,7 @@ func Calls(ctx context.Context, sb *proc.Sandbox, name string) (calls []string) 
 	if err != nil {
 		return nil
 	}
+	seen := map[string]bool{}
 	for l := range bytes.SplitSeq(data, []byte("\n")) {
 		var e struct {
 			Message struct {
@@ -482,7 +483,8 @@ func Calls(ctx context.Context, sb *proc.Sandbox, name string) (calls []string) 
 					call += " " + v
 				}
 			}
-			if !slices.Contains(calls, call) {
+			if !seen[call] { // a map: PR code can write the session, and a long one must not cost n² on the worker
+				seen[call] = true
 				calls = append(calls, call)
 			}
 		}
