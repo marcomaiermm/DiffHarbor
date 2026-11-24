@@ -150,13 +150,13 @@ func Risked(cs []review.Comment, failing int) Risk {
 	return r
 }
 
-// String is the score with its band's colour, 🟢 0-1, 🟡 2-3, 🔴 4-5, and what is open.
+// String is the score with its band's colour, 🟢 0-1, 🟡 2-3, 🔴 4-5, and what is open, "nothing" said too.
 func (r Risk) String() string {
 	s := fmt.Sprintf("%s %d/5", []string{"🟢", "🟡", "🔴"}[min(max(r.Score, 0), 5)/2], r.Score)
-	if r.Why != "" {
-		s += " · " + r.Why + " open"
+	if r.Why == "" {
+		return s + " · nothing open"
 	}
-	return s
+	return s + " · " + r.Why + " open"
 }
 
 // shown is the list items a walkthrough section shows; the report has all.
@@ -214,6 +214,9 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 			if len(code) > shown {
 				t += fmt.Sprintf("\n\n… %d more files", len(code)-shown)
 			}
+			if g := st.groups(code); g != "" { // the steps first, the files one by one a fold deeper
+				t = g + "\n\n" + fold("<strong>File by file</strong>", t, false, false)
+			}
 			w.WriteString(fold("📂 <strong>Changes: "+text.Count(len(code), "file")+"</strong>", t, false, false) + "\n\n")
 		}
 		if tests := kinds["test"]; len(tests) > 0 || len(o.Added) > 0 {
@@ -259,6 +262,49 @@ func (st State) render(banner, ask, footer string, o *diff.Outline) string {
 	j, _ := json.Marshal(st) //nolint:gosec // the report's secret is for who reads the PR, as this comment
 	b.WriteString("<!-- diffharbor:state " + base64.StdEncoding.EncodeToString(j) + " -->")
 	return b.String()
+}
+
+// groups is the changed code files by the reading order's steps, one row a step: its files and why they belong
+// together; files in no step share a last row. "" without two rows: nothing to group.
+func (st State) groups(code []string) string {
+	cell := func(s string) string { return strings.ReplaceAll(text.OneLine(s, 200), "|", `\|`) }
+	names := func(fs []string) string {
+		var out []string
+		for _, f := range fs[:min(len(fs), 5)] {
+			if p := strings.Split(f, "/"); len(p) > 2 { // with its folder: two review.go in one PR are common
+				f = strings.Join(p[len(p)-2:], "/")
+			}
+			out = append(out, "`"+f+"`")
+		}
+		if len(fs) > 5 {
+			out = append(out, "…")
+		}
+		return strings.Join(out, ", ")
+	}
+	rest := slices.Clone(code)
+	var rows []string
+	for _, step := range st.Flow {
+		var fs []string
+		for _, f := range step.Files {
+			if i := slices.Index(rest, f); i >= 0 { // still in the PR, and in no earlier step
+				fs, rest = append(fs, f), slices.Delete(rest, i, i+1)
+			}
+		}
+		if len(fs) > 0 {
+			rows = append(rows, fmt.Sprintf("| %s | %s | %s |", cell(step.Title), names(fs), cell(step.Why)))
+		}
+	}
+	if len(rest) > 0 && len(rows) > 0 {
+		why := ""
+		if len(rest) == 1 {
+			why = st.Files[rest[0]]
+		}
+		rows = append(rows, fmt.Sprintf("| Other | %s | %s |", names(rest), cell(why)))
+	}
+	if len(rows) < 2 {
+		return ""
+	}
+	return "| Step | Files | Why |\n|---|---|---|\n" + strings.Join(rows, "\n")
 }
 
 // list is up to shown items as a markdown list, then how many more.

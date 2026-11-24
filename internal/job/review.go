@@ -34,6 +34,29 @@ import (
 	"unicode/utf8"
 )
 
+// pushed is the files a push changed since the last review, by their patch ids; nil when the PR lost a quarter of
+// its files or more (its base took them, or the push dropped them): summary, diagram and effort describe a PR that
+// is gone, so the review is a full one.
+// ponytail: a quarter by file count; by changed lines if a few large files leaving goes unseen.
+func pushed(last, now map[string]string) map[string]bool {
+	gone := 0
+	for f := range last {
+		if _, ok := now[f]; !ok {
+			gone++
+		}
+	}
+	if gone > 0 && gone*4 >= len(last) {
+		return nil
+	}
+	only := map[string]bool{}
+	for f, id := range now {
+		if last[f] != id {
+			only[f] = true
+		}
+	}
+	return only
+}
+
 // posts reports whether a review posts one: a full review always, so the bot shows up under Reviewers, an
 // incremental one only with a finding that isn't folded and that Split on the diff's lines keeps. Folded ones have no
 // thread to hold them: alone they would come back on every push.
@@ -158,13 +181,9 @@ func Review(ctx context.Context, f forge.Forge, e *forge.Event, profile string) 
 	patches := diff.PatchIDs(raw)
 	var only map[string]bool
 	if e.Action == "synchronize" && s.State.Patches != nil {
-		only = map[string]bool{}
-		for f, id := range patches {
-			if s.State.Patches[f] != id {
-				only[f] = true
-			}
+		if only = pushed(s.State.Patches, patches); only != nil {
+			sp.Kind = "incremental"
 		}
-		sp.Kind = "incremental"
 	}
 	outline := diff.Analyze(raw)
 	s.Outline = &outline

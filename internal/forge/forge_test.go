@@ -418,7 +418,7 @@ func TestRisked(t *testing.T) {
 		failing int
 		want    string
 	}{
-		{"nothing", nil, 0, "🟢 0/5"},
+		{"nothing", nil, 0, "🟢 0/5 · nothing open"},
 		{"nits and folded", []review.Comment{c("nit", false), c("minor", true), c("major", true)}, 0, "🟢 1/5 · 3 nits open"},
 		{"unknown severity is a minor", []review.Comment{c("", false)}, 0, "🟡 2/5 · 1 minor open"},
 		{"unknown severity is a minor too", []review.Comment{c("high", false)}, 0, "🟡 2/5 · 1 minor open"},
@@ -503,5 +503,38 @@ func TestSendRetries(t *testing.T) {
 	}
 	if !errors.Is(err, context.DeadlineExceeded) || calls != 1 {
 		t.Fatalf("stopped while waiting: %v after %d calls", err, calls)
+	}
+}
+
+func TestGroups(t *testing.T) {
+	st := State{SHA: "a", Files: map[string]string{"p/x/a.go": "A", "p/x/b.go": "B", "c.go": "C | c"}, Flow: []review.Step{
+		{Title: "`a.go`: entry", Why: "reads | writes", Files: []string{"p/x/a.go", "gone.go"}},
+		{Title: "left the PR", Files: []string{"gone.go"}},
+		{Title: "`b.go`: store", Why: "keeps it", Files: []string{"p/x/b.go", "p/x/a.go"}},
+	}}
+	want := "| Step | Files | Why |\n|---|---|---|\n| `a.go`: entry | `x/a.go` | reads \\| writes |\n| `b.go`: store | `x/b.go` | keeps it |\n| Other | `c.go` | C \\| c |"
+	if got := st.groups([]string{"c.go", "p/x/a.go", "p/x/b.go"}); got != want {
+		t.Errorf("groups:\n%s\nwant\n%s", got, want)
+	}
+	if body := st.render("", "", "", nil); !strings.Contains(body, want+"\n\n<details>\n<summary><strong>File by file</strong></summary>") || !strings.Contains(body, "| `c.go` | C \\| c |") {
+		t.Errorf("render: %s", body)
+	}
+	st.Flow = st.Flow[:1] // one step and nothing else to say: the plain table
+	if got := st.groups([]string{"p/x/a.go"}); got != "" {
+		t.Errorf("one row: %q", got)
+	}
+}
+
+func TestFormatChecked(t *testing.T) {
+	body := "It breaks.\n\nChange it.\n\n_Unverified premise:_ p\n\n" + review.Verified + "seen at a.go:1\n\n_Trigger:_ POST /x"
+	got := Format(Finding{Comment: review.Comment{Severity: "minor", Title: "T", Body: body}}, "")
+	if !strings.Contains(got, "Change it.\n\n_Unverified premise:_ p\n\n<details>\n<summary>"+checkedFold+"</summary>") {
+		t.Errorf("format: %s", got)
+	}
+	if c := Parse(got); c.Body != body || c.Evidence != "seen at a.go:1" || c.Title != "T" {
+		t.Errorf("parse: %+v", c)
+	}
+	if c := Parse(Format(Finding{Comment: review.Comment{Severity: "minor", Body: review.Verified + "e"}}, "")); c.Body != review.Verified+"e" {
+		t.Errorf("no body: %q", c.Body)
 	}
 }
