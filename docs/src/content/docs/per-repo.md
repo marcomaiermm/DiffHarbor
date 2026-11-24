@@ -34,6 +34,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
   "drafts": "manual",
   "learnings": {"max": 30, "max_age_days": 180, "outcomes": true},
   "gitlab_findings": "review",
+  "allow_failure": true,
   "checks": [".review/checks.sh"],
   "packages": {
     "apps/web": {"min_severity": "major", "profile": "quiet"},
@@ -61,6 +62,7 @@ Everything lives under `.review/`. `review.json` can change the paths.
 | `drafts` | `manual` (default): a draft PR gets a review on `@<bot> review`, then once marked ready. `opt_in`: once someone asked with `@<bot> review`, every later push of the draft gets one too, like any PR. `off`: never, and `@<bot> review` says so. |
 | `learnings` | `max`: how many of the newest learnings of the repo and of the owner a review and the chat follow, each. `0` is none, at most 100, default 30. `max_age_days`: older ones are left out. Default: any age. A learning saved before dates were kept never ages. Both only hide, nothing is deleted. `outcomes`: when a PR closes, a finding a maintainer declined (👎 by someone who can push, a resolve alone says nothing) is kept as a declined finding, and so is one a maintainer's reply decided as intended, unlikely or wrong. Those are apart from the learnings, the newest 20 per repo, shown to reviews (`max_age_days` applies, `max` does not, except that `0` hides them too). `false` only counts them. Default `true`. |
 | `gitlab_findings` | `review`: the findings and the answers to fixed threads are one review, one email, after the summary as a note of its own (in the review GitLab would make it a thread to resolve). A suggestion GitLab can't place goes into the summary as code. `discussions`: each on its own, an email each. A refused suggestion is retried as plain code on its line. Default: the server's `GITLAB_FINDINGS`. |
+| `allow_failure` | `true` (default): where the `diffharbor` commit status would fail (a failed or stopped review, a conflict with the base branch, tests or a build that failed) it posts success, its text unchanged, such as "Blocked · conflict with main" or "Review failed". GitLab counts the status as a job of the pipeline, so it never turns a pipeline red. `false`: it fails. Both forges. |
 | `rules`, `skills`, `checks` | Other paths for the files above. `rules` takes a list too, up to 8 files, e.g. `["docs/conventions.md", "CONTRIBUTING.md"]`: all go into the prompt, about 8000 characters together. |
 | `syntax_theme` | The report's code colors: `{"light": "…", "dark": "…"}`, [Shiki theme](https://shiki.style/themes) names. |
 | `packages` | Overrides per monorepo part. The longest glob wins. |
@@ -105,7 +107,7 @@ Below the walkthrough, its comment shows a score from 0 to 5, computed from what
 | 5 | any critical | red |
 
 - Findings from earlier reviews that are still open count by their severity, a minor if unknown.
-- The `diffharbor` commit status adds the score when the text fits GitHub's 140 characters. A PR that gets a report page takes the page's merge status instead: failure only when a failed run or a conflict blocks the merge, otherwise success, with the short form, such as "Waits · 3 open items", as its text. Files a review part failed to read are the gap in the review there, an open item, not a failure.
+- The `diffharbor` commit status adds the score when the text fits GitHub's 140 characters. A PR that gets a report page takes the page's merge status instead: failure only when a failed run or a conflict blocks the merge (success under `allow_failure`, the default), otherwise success, with the short form, such as "Waits · 3 open items", as its text. Files a review part failed to read are the gap in the review there, an open item, not a failure.
 
 ### Who sets the profile
 
