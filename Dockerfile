@@ -1,10 +1,14 @@
 FROM golang:1.27-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS build
 # Pinned so a release tag rebuilds the same checks.
 # actionlint and osv-scanner too: built here on current Go, not Alpine's stale builds.
-RUN CGO_ENABLED=0 go install honnef.co/go/tools/cmd/staticcheck@v0.8.2 && CGO_ENABLED=0 go install github.com/zricethezav/gitleaks/v8@v8.30.1 \
+RUN CGO_ENABLED=0 go install honnef.co/go/tools/cmd/staticcheck@v0.8.2 \
     && CGO_ENABLED=0 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 && CGO_ENABLED=0 go install golang.org/x/tools/cmd/deadcode@v0.53.0 \
     && CGO_ENABLED=0 go install golang.org/x/vuln/cmd/govulncheck@v1.10.0 && CGO_ENABLED=0 go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 \
     && CGO_ENABLED=0 go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.7.1
+# gitleaks' release pins decompressors with known CVEs (x/crypto too): built in a throwaway module with them bumped.
+RUN mkdir /tmp/gl && cd /tmp/gl && go mod init gl && go get github.com/zricethezav/gitleaks/v8@v8.30.1 golang.org/x/crypto@v0.59.0 \
+    github.com/klauspost/compress@v1.20.5 github.com/andybalholm/brotli@v1.3.0 github.com/ulikunitz/xz@v0.5.17 github.com/nwaples/rardecode/v2@v2.4.6 \
+    && CGO_ENABLED=0 go build -trimpath -o /go/bin/gitleaks github.com/zricethezav/gitleaks/v8 && rm -rf /tmp/gl
 # Tests run as a user: as root the code drops its children to a repo's uid, which can't write root's temp dirs.
 RUN apk add --no-cache git && adduser -D -u 1000 node
 # Tailwind's standalone CLI (go:generate's): the build checks styles.gen.css, start compiles TEMPLATE_DIR's classes.
@@ -23,8 +27,8 @@ RUN tailwindcss -i internal/report/styles.css -o /tmp/styles.css --minify && { c
     && go vet ./... && go test ./... && govulncheck ./... && CGO_ENABLED=0 go build -trimpath -ldflags="-s -X main.version=$VERSION" -o /home/node/diffharbor ./cmd/diffharbor
 
 FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
-# fallow's musl binary needs a CPU with AVX2.
-RUN apk add --no-cache curl git ripgrep fd bash ast-grep shellcheck luacheck zizmor && npm install -g --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.6.0 \
+# fallow's musl binary needs a CPU with AVX2. apk upgrade: the node image lags Alpine's security fixes (zlib, openssl).
+RUN apk upgrade --no-cache && apk add --no-cache curl git ripgrep fd bash ast-grep shellcheck luacheck zizmor && npm install -g --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.6.0 \
     squawk-cli@2.74.0 oxlint@1.95.0 oxlint-tsgolint@7.0.2008 fallow@3.48.0 corepack@0.36.0 && npm cache clean --force && corepack enable && mkdir -p /cache /data && chmod 755 /cache && chmod 700 /data
 # codegraph bundles a glibc Node; run its JS on Alpine's Node 26 instead (gcompat for the native kernel).
 # Its Node >=25 guard is for a turboshaft WASM bug; --liftoff-only never tiers up to turboshaft.
