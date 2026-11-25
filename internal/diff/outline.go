@@ -53,9 +53,11 @@ var (
 // Kind sorts a path into code, test, data or doc.
 func Kind(path string) string {
 	switch {
+	case ciFile.MatchString(path): // before the test and doc rules: integration-test.yml, docs/action.yml
+		return "code"
 	case docFile.MatchString(path):
 		return "doc"
-	case dataFile.MatchString(path) && !ciFile.MatchString(path):
+	case dataFile.MatchString(path):
 		return "data"
 	case testFile.MatchString(path):
 		return "test"

@@ -125,7 +125,8 @@ new file mode 100644
 func TestKindCIFiles(t *testing.T) {
 	for p, want := range map[string]string{
 		".github/workflows/release.yml": "code", ".gitea/workflows/ci.yaml": "code", ".gitlab-ci.yml": "code",
-		"actions/setup/action.yml": "code", "renovate.json": "data", "config/app.yml": "data", "workflows/notes.yml": "data",
+		"actions/setup/action.yml": "code", ".github/workflows/integration-test.yml": "code", "docs/action.yml": "code",
+		"renovate.json": "data", "config/app.yml": "data", "workflows/notes.yml": "data",
 	} {
 		if got := Kind(p); got != want {
 			t.Errorf("Kind(%q) = %q, want %q", p, got, want)
