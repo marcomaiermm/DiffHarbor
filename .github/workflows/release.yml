@@ -12,8 +12,10 @@ on:
 
 permissions: {}
 
+# Per event: the weekly rebuild must not replace a pending push to main, whose release-please run it skips.
+# ponytail: a rebuild and a push can then race on :edge; the next push or week sets it right.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
