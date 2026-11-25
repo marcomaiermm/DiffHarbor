@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.1](https://github.com/marcomaiermm/DiffHarbor/compare/v0.13.0...v0.13.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **diff:** a CI workflow counts as code, not data ([#141](https://github.com/marcomaiermm/DiffHarbor/issues/141)) ([5517045](https://github.com/marcomaiermm/DiffHarbor/commit/55170455e7f8511b64503ee7125b88b82e9d61f7))
+* **image:** clear the image's critical CVEs and keep Alpine's fixes coming ([#140](https://github.com/marcomaiermm/DiffHarbor/issues/140)) ([82ec321](https://github.com/marcomaiermm/DiffHarbor/commit/82ec3219d750f88cda9e0cb444d77e795682c12e))
+
 ## [0.13.0](https://github.com/marcomaiermm/DiffHarbor/compare/v0.12.0...v0.13.0) (2026-11-24)
 
 
