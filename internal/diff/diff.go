@@ -33,6 +33,7 @@ var (
 	bulkFile    = regexp.MustCompile(`\.(css|scss|sass|less|styl|ipynb|po|pot)$|(^|/)seeds?/|(^|/)seed[^/]*\.sql$`)
 	testFile    = regexp.MustCompile(`(^|/)(tests?|__tests__|e2e|testdata|fixtures|__fixtures__)/|[._-](test|spec)\.[a-z]+$|_test\.go$|(^|/)test_[^/]+\.py$`)
 	dataFile    = regexp.MustCompile(`\.(json|ya?ml|toml|csv|xml)$`)
+	ciFile      = regexp.MustCompile(`(^|/)\.(github|gitea|forgejo)/workflows/[^/]+\.ya?ml$|(^|/)action\.ya?ml$|(^|/)\.gitlab-ci\.ya?ml$`) // YAML that runs, with the repo's secrets: code, not data
 	docFile     = regexp.MustCompile(`(?i)\.(md|mdx|rst|txt|adoc)$|(^|/)docs?/`)
 	specFile    = regexp.MustCompile(`(?i)(openapi|swagger)[^/]*\.(ya?ml|json)$`)
 	fileStart   = regexp.MustCompile(`(?m)^diff --git `)
