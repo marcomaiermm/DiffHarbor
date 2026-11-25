@@ -19,6 +19,14 @@
     },
     {
       "customType": "regex",
+      "description": "go get module@vX in the Dockerfile: gitleaks and the deps it's built with bumped",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStringsStrategy": "recursive",
+      "matchStrings": ["go get [^&]+", "(?<depName>[a-z0-9.-]+\\.[a-z]+/[^@\\s\\\\]+)@(?<currentValue>v[^\\s\\\\]+)"],
+      "datasourceTemplate": "go"
+    },
+    {
+      "customType": "regex",
       "description": "npm install -g / pi install npm: pkg@X.Y.Z in the Dockerfile",
       "managerFilePatterns": ["/^Dockerfile$/"],
       "matchStrings": ["(?<depName>@?[a-z0-9][a-z0-9._-]*(?:/[a-z0-9._-]+)?)@(?<currentValue>\\d+\\.\\d+\\.\\d+)\\b"],

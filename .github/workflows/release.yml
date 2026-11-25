@@ -2,10 +2,13 @@ name: Release
 
 # main -> image :edge. Merging release-please's PR -> tag, GitHub release, image :X.Y.Z, :X.Y, :latest.
 # A pushed tag vX.Y.Z-rc.N -> prerelease and image :X.Y.Z-rc.N only.
+# Weekly: :edge rebuilt uncached, so the Dockerfile's apk upgrade picks up Alpine's security fixes without a merge.
 on:
   push:
     branches: [main]
     tags: ['v*-rc.*']
+  schedule:
+    - cron: '0 4 * * 1'
 
 permissions: {}
 
@@ -15,7 +18,7 @@ concurrency:
 
 jobs:
   release:
-    if: github.ref_type == 'branch'
+    if: github.event_name == 'push' && github.ref_type == 'branch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -83,6 +86,7 @@ jobs:
           build-args: VERSION=${{ steps.meta.outputs.version == 'edge' && format('edge-{0}', github.sha) || steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          no-cache: ${{ github.event_name == 'schedule' }}
       # `gh attestation verify oci://ghcr.io/OWNER/diffharbor:TAG --owner OWNER` checks the image came from this workflow.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
