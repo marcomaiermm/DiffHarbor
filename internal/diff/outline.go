@@ -55,7 +55,7 @@ func Kind(path string) string {
 	switch {
 	case docFile.MatchString(path):
 		return "doc"
-	case dataFile.MatchString(path):
+	case dataFile.MatchString(path) && !ciFile.MatchString(path):
 		return "data"
 	case testFile.MatchString(path):
 		return "test"
